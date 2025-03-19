@@ -233,5 +233,5 @@ if __name__ == '__main__':
     TISSUE_PERCENTAGE=str(os.getenv('TISSUE_PERCENTAGE'))
     IMAGE_READER_PATH=str(os.getenv('IMAGE_READER_PATH'))
     PYTHON_PATH=str(os.getenv('PYTHON_PATH'))
-    LOADCASES=True # True to add cases
+    LOADCASES=False # True to add cases
     mainProcess()

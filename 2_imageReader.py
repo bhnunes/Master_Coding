@@ -84,7 +84,7 @@ def create_mask_for_window(window_x, window_y, window_size, annotations_cancer):
             if intersection.is_empty:
                 continue  # Skip if the intersection is empty
 
-            if intersection.type == 'MultiPolygon':
+            if intersection.geom_type == 'MultiPolygon':
                 for p in intersection.geoms:
                     coords = np.array(p.exterior.coords)
                     # Convert global coordinates to local window coordinates
@@ -93,7 +93,7 @@ def create_mask_for_window(window_x, window_y, window_size, annotations_cancer):
                     # Ensure coordinates are within the window bounds and are integers
                     coords = np.round(np.clip(coords, 0, window_size - 1)).astype(np.int32)
                     cv2.fillPoly(mask, [coords], 1)  # Fill with 1 for cancer
-            elif intersection.type == 'Polygon':
+            elif intersection.geom_type == 'Polygon':
                 coords = np.array(intersection.exterior.coords)
                 # Convert global coordinates to local window coordinates
                 coords[:, 0] -= window_x
