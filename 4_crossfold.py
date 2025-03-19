@@ -67,6 +67,18 @@ def create_cross_val_splits(df, n_splits=10, random_state=42):
             'val_df': val_df,
             'test_df': test_df
         })
+
+    # --- Add the Data Leakage Check HERE ---
+    for fold, split_data in enumerate(splits):
+        train_patients = set(split_data['train_df']['patient_id'])
+        val_patients = set(split_data['val_df']['patient_id'])
+        test_patients = set(split_data['test_df']['patient_id'])
+
+        assert len(train_patients.intersection(val_patients)) == 0, f"Data leakage in fold {fold} (train/val)"
+        assert len(train_patients.intersection(test_patients)) == 0, f"Data leakage in fold {fold} (train/test)"
+        assert len(val_patients.intersection(test_patients)) == 0, f"Data leakage in fold {fold} (val/test)"
+
+
     return splits
 
 

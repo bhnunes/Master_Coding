@@ -10,12 +10,12 @@ import argparse
 from dotenv import load_dotenv
 import json
 import warnings
+from openslide import OpenSlide  # No need for conditional import anymore
 import xml.etree.ElementTree as ET
-
 
 load_dotenv(override=True)
 
-# Constants from environment variables
+# Constants (same as before)
 WINDOW_SIZE = int(os.getenv('WINDOW_SIZE'))
 STRIDE = int(os.getenv('STRIDE'))
 MATCH_PERCENTAGE = float(os.getenv('MATCH_PERCENTAGE'))
@@ -24,16 +24,14 @@ OPENSLIDE_PATH = os.getenv('OPENSLIDE_PATH')
 
 if hasattr(os, 'add_dll_directory'):
     with os.add_dll_directory(OPENSLIDE_PATH):
-        #import openslide
         from openslide import OpenSlide
 else:
-    #import openslide
     from openslide import OpenSlide
 
-# Pre-calculate kernel for tissue percentage calculation
+# Pre-calculate kernel
 KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
 
-
+# --- (updateMax function - same as before) ---
 def updateMax(Xmax, Xmin, Ymax, Ymin, x, y):
     Xmax = max(Xmax, x)
     Xmin = min(Xmin, x)
@@ -41,7 +39,7 @@ def updateMax(Xmax, Xmin, Ymax, Ymin, x, y):
     Ymin = min(Ymin, y)
     return Xmax, Xmin, Ymax, Ymin
 
-
+# --- (calculateTissuePercentage - same as before) ---
 def calculateTissuePercentage(window_np):
     img_bgr = cv2.cvtColor(window_np, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
@@ -53,7 +51,7 @@ def calculateTissuePercentage(window_np):
     tile_area = window_np.shape[0] * window_np.shape[1]
     return (tissue_area / tile_area) >= TISSUE_PERCENTAGE
 
-
+# --- (generate_window_coordinates - same as before) ---
 def generate_window_coordinates(image_width, image_height, window_size, stride, Xmax, Xmin, Ymax, Ymin):
     x_indices = np.arange(0, image_width - window_size + 1, stride)
     y_indices = np.arange(0, image_height - window_size + 1, stride)
@@ -69,7 +67,7 @@ def generate_window_coordinates(image_width, image_height, window_size, stride, 
 
     return windows.tolist()
 
-
+# --- (create_mask_for_window - same as before) ---
 def create_mask_for_window(window_x, window_y, window_size, annotations_cancer):
     """Creates a binary mask for a given window based on cancer annotations."""
     mask = np.zeros((window_size, window_size), dtype=np.uint8)
@@ -103,24 +101,37 @@ def create_mask_for_window(window_x, window_y, window_size, annotations_cancer):
                 # Ensure coordinates are within the window bounds and are integers
                 coords = np.round(np.clip(coords, 0, window_size - 1)).astype(np.int32)
                 cv2.fillPoly(mask, [coords], 1)
-            # else:  # Handle other geometry types if needed (e.g., LineString, Point)
-               # print('Intersection is not a polygon:', intersection.type)
+
     return mask
 
-
 def process_window(args):
-    path_Image, path_cancer_folder, path_not_cancer_folder, path_mask_folder, patient, x, y, window_size, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE = args
+    path_Image, path_cancer_folder, path_not_cancer_folder, path_mask_folder, patient, x, y, window_size, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE, best_level = args # Added best_level
 
     try:
         slide = OpenSlide(path_Image)
-        window = slide.read_region((x, y), 0, (window_size, window_size)).convert("RGB")
+        # Read the region at the determined best level
+        window = slide.read_region((x, y), best_level, (window_size, window_size)).convert("RGB")
         window_np = np.array(window)
+
+        # Downscale the coordinates if necessary
+        if best_level != 0:
+            downsample_factor = slide.level_downsamples[best_level]
+            x = int(x / downsample_factor)
+            y = int(y / downsample_factor)
+            # Adjust annotations (important for mask creation)
+            annotations_cancer_downsampled = [
+                [(int(px / downsample_factor), int(py / downsample_factor)) for px, py in annotation]
+                for annotation in annotations_cancer
+            ]
+        else:
+             annotations_cancer_downsampled = annotations_cancer
+
+
         slide.close()
 
-        # --- Mask Creation ---
-        mask = create_mask_for_window(x, y, window_size, annotations_cancer)
-        is_cancer_patch = np.sum(mask) > 0 # Check if *any* part of the window is cancer.
-
+        # --- Mask Creation (using downsampled coordinates) ---
+        mask = create_mask_for_window(x, y, window_size, annotations_cancer_downsampled) #pass the downsampled coordinates
+        is_cancer_patch = np.sum(mask) > 0
 
         if calculateTissuePercentage(window_np):
             patch_image = Image.fromarray(window_np)
@@ -131,29 +142,31 @@ def process_window(args):
             if is_cancer_patch:
                 file_path = f"CANCER_PATIENT_{patient}_{random_number}_{timestamp}.png"
                 patch_image.save(os.path.join(path_cancer_folder, file_path))
-                mask_image = Image.fromarray(mask * 255)  # Save as grayscale image (0 and 255)
-                mask_image.save(os.path.join(path_mask_folder, file_path)) #same name of the image file
+                mask_image = Image.fromarray(mask * 255)
+                mask_image.save(os.path.join(path_mask_folder, file_path))
             else:
-                #It only saves if there is tissue AND if does not pass the cancer test
                 file_path = f"NOT_CANCER_PATIENT_{patient}_{random_number}_{timestamp}.png"
                 patch_image.save(os.path.join(path_not_cancer_folder, file_path))
-                # We still save a mask of all zeros for non-cancer patches:
-                mask_image = Image.fromarray(mask * 255)  # This will be all zeros.
-                mask_image.save(os.path.join(path_mask_folder, file_path))#same name of the image file
+                mask_image = Image.fromarray(mask * 255)
+                mask_image.save(os.path.join(path_mask_folder, file_path))
+
             return True, None
 
         return True, None  # Tissue percentage not met
     except Exception as e:
         return False, str(e)
 
-    
 def createWindows(path_Image, cancer_color, not_cancer_color):
-    # --- (Same as before, but now returns annotations_cancer) ---
     Xmax, Xmin, Ymax, Ymin = 0, float('inf'), 0, float('inf')
 
     path_Annotation = path_Image.replace('.svs', '.xml', 1)
     slide = OpenSlide(path_Image)
     image_width, image_height = slide.dimensions
+    # Determine the best level (highest resolution)
+    best_level = 0
+    for level in range(1, slide.level_count):
+        if slide.level_dimensions[level][0] > slide.level_dimensions[best_level][0]:
+            best_level = level
     slide.close()
 
     annotations_tree = ET.parse(path_Annotation)
@@ -187,9 +200,8 @@ def createWindows(path_Image, cancer_color, not_cancer_color):
                 annotations_not_cancer.append(temp)
 
     windows = generate_window_coordinates(image_width, image_height, WINDOW_SIZE, STRIDE, Xmax, Xmin, Ymax, Ymin)
-    return windows, annotations_not_cancer, annotations_cancer
+    return windows, annotations_not_cancer, annotations_cancer, best_level # Return best_level
 
-     
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
     try:
@@ -197,7 +209,7 @@ if __name__ == '__main__':
         parser.add_argument('--path_Image', type=str, help='Path to the image file')
         parser.add_argument('--path_cancer_folder', type=str, help='Path to the cancer folder')
         parser.add_argument('--path_not_cancer_folder', type=str, help='Path to the not cancer folder')
-        parser.add_argument('--path_mask_folder', type=str, help='Path to the mask folder')  # NEW
+        parser.add_argument('--path_mask_folder', type=str, help='Path to the mask folder')
         parser.add_argument('--cancer_color', type=str, help='Color code for cancer')
         parser.add_argument('--not_cancer_color', type=str, help='Color code for not cancer')
         parser.add_argument('--patient', type=str, help='Patient ID')
@@ -206,21 +218,20 @@ if __name__ == '__main__':
         path_Image = args.path_Image
         path_cancer_folder = args.path_cancer_folder
         path_not_cancer_folder = args.path_not_cancer_folder
-        path_mask_folder = args.path_mask_folder  # NEW
+        path_mask_folder = args.path_mask_folder
         cancer_color = args.cancer_color
         not_cancer_color = args.not_cancer_color
         patient = args.patient
 
-        # Ensure the mask folder exists
-        os.makedirs(path_mask_folder, exist_ok=True)  # NEW
+        os.makedirs(path_mask_folder, exist_ok=True)
 
-        windows, annotations_not_cancer, annotations_cancer = createWindows(path_Image, cancer_color, not_cancer_color)
+        windows, annotations_not_cancer, annotations_cancer, best_level = createWindows(path_Image, cancer_color, not_cancer_color) # Get best_level
 
-        # Prepare arguments for parallel processing, including path_mask_folder
+        # Pass best_level to process_window
         args_list = [(path_Image, path_cancer_folder, path_not_cancer_folder, path_mask_folder, patient, x, y,
-                 WINDOW_SIZE, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE) for x, y, _, _ in
-                windows]
-      
+                      WINDOW_SIZE, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE, best_level) for x, y, _, _ in
+                     windows]
+
         with Pool(processes=os.cpu_count()) as pool:
             results = pool.map(process_window, args_list)
 
