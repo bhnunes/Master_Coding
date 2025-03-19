@@ -116,13 +116,14 @@ def updateCase(id, counter_cancer, counter_not_cancer, execution_time, status, c
     finally:
         conn.close()
 
-def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_folder, cancer_color, not_cancer_color, patient):
+def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_folder, path_mask_folder, cancer_color, not_cancer_color, patient): #added the mask folder
     command = [
         PYTHON_PATH,
         IMAGE_READER_PATH,
         '--path_Image', path_Image,
         '--path_cancer_folder', path_cancer_folder,
         '--path_not_cancer_folder', path_not_cancer_folder,
+        '--path_mask_folder', path_mask_folder,  # Add the new argument
         '--cancer_color', cancer_color,
         '--not_cancer_color', not_cancer_color,
         '--patient', patient
@@ -181,17 +182,25 @@ def mainProcess():
                 path_Image_current=data[0]['FILEPATH']
                 path_cancer_folder_current=PATH_CANCER_FOLDER
                 path_not_cancer_folder_current=PATH_NOT_CANCER_FOLDER
+                path_mask_folder_current = PATH_MASK_FOLDER # Added mask folder
                 cancer_color_current=data[0]['CANCER_COLOR']
                 not_cancer_color_current=data[0]['NOT_CANCER_COLOR']
                 patient_current=data[0]['PATIENT']
                 start_time = time.time()
-                status, comments = run_image_reader_script(
-                path_Image=path_Image_current,
-                path_cancer_folder=path_cancer_folder_current,
-                path_not_cancer_folder=path_not_cancer_folder_current,
-                cancer_color=cancer_color_current,
-                not_cancer_color=not_cancer_color_current,
-                patient=patient_current)
+                try: #added try...except block to catch the RuntimeError and call updateCase with a "FAILED"
+                    status, comments = run_image_reader_script(
+                    path_Image=path_Image_current,
+                    path_cancer_folder=path_cancer_folder_current,
+                    path_not_cancer_folder=path_not_cancer_folder_current,
+                    path_mask_folder=path_mask_folder_current, #added mask folder
+                    cancer_color=cancer_color_current,
+                    not_cancer_color=not_cancer_color_current,
+                    patient=patient_current)
+                except RuntimeError as e:
+                    status = 'FAILED'
+                    comments = str(e)
+                    updateCase(id_cur, 0, 0, 0, status, comments, WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
+                    continue  # Go to the next case
                 end_time = time.time()
                 execution_time = (end_time - start_time)/60
                 count_cancer=countTotal(start_time, end_time,PATH_CANCER_FOLDER )
@@ -206,6 +215,7 @@ if __name__ == '__main__':
     global IMAGESPATH
     global PATH_CANCER_FOLDER
     global PATH_NOT_CANCER_FOLDER
+    global PATH_MASK_FOLDER #created the mask folder
     global WINDOW_SIZE
     global STRIDE
     global MATCH_PERCENTAGE
@@ -216,11 +226,14 @@ if __name__ == '__main__':
     IMAGESPATH=os.getenv('IMAGESPATH')
     PATH_CANCER_FOLDER=os.getenv('PATH_CANCER_FOLDER')
     PATH_NOT_CANCER_FOLDER=os.getenv('PATH_NOT_CANCER_FOLDER')
+    PATH_MASK_FOLDER = os.getenv('PATH_MASK_FOLDER') #created mask folder
     WINDOW_SIZE=os.getenv('WINDOW_SIZE')
     STRIDE=os.getenv('STRIDE')
     MATCH_PERCENTAGE=str(os.getenv('MATCH_PERCENTAGE'))
     TISSUE_PERCENTAGE=str(os.getenv('TISSUE_PERCENTAGE'))
     IMAGE_READER_PATH=str(os.getenv('IMAGE_READER_PATH'))
     PYTHON_PATH=str(os.getenv('PYTHON_PATH'))
-    LOADCASES=False
+    LOADCASES=False # True to add cases
+    # Add PATH_MASK_FOLDER to your .env file:
+    # PATH_MASK_FOLDER=D://Usuario//Desktop//Base_de_dados//MASTER//MASK
     mainProcess()
