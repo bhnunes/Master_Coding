@@ -105,7 +105,7 @@ def create_mask_for_window(window_x, window_y, window_size, annotations_cancer):
     return mask
 
 def process_window(args):
-    path_Image, path_cancer_folder, path_not_cancer_folder, path_mask_folder, patient, x, y, window_size, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE, best_level = args # Added best_level
+    path_Image, path_cancer_folder, path_not_cancer_folder, path_cancer_mask_folder, path_not_cancer_mask_folder, patient, x, y, window_size, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE, best_level = args #added mask folders
 
     try:
         slide = OpenSlide(path_Image)
@@ -143,19 +143,19 @@ def process_window(args):
                 file_path = f"CANCER_PATIENT_{patient}_{random_number}_{timestamp}.png"
                 patch_image.save(os.path.join(path_cancer_folder, file_path))
                 mask_image = Image.fromarray(mask * 255)
-                mask_image.save(os.path.join(path_mask_folder, file_path))
+                mask_image.save(os.path.join(path_cancer_mask_folder, file_path))  # Save to cancer mask folder
             else:
                 file_path = f"NOT_CANCER_PATIENT_{patient}_{random_number}_{timestamp}.png"
                 patch_image.save(os.path.join(path_not_cancer_folder, file_path))
                 mask_image = Image.fromarray(mask * 255)
-                mask_image.save(os.path.join(path_mask_folder, file_path))
+                mask_image.save(os.path.join(path_not_cancer_mask_folder, file_path))  # Save to not cancer mask folder
 
             return True, None
 
         return True, None  # Tissue percentage not met
     except Exception as e:
         return False, str(e)
-
+    
 def createWindows(path_Image, cancer_color, not_cancer_color):
     Xmax, Xmin, Ymax, Ymin = 0, float('inf'), 0, float('inf')
 
@@ -206,29 +206,33 @@ if __name__ == '__main__':
     warnings.filterwarnings("ignore")
     try:
         parser = argparse.ArgumentParser(description='Process images')
-        parser.add_argument('--path_Image', type=str, help='Path to the image file')
-        parser.add_argument('--path_cancer_folder', type=str, help='Path to the cancer folder')
-        parser.add_argument('--path_not_cancer_folder', type=str, help='Path to the not cancer folder')
-        parser.add_argument('--path_mask_folder', type=str, help='Path to the mask folder')
-        parser.add_argument('--cancer_color', type=str, help='Color code for cancer')
-        parser.add_argument('--not_cancer_color', type=str, help='Color code for not cancer')
-        parser.add_argument('--patient', type=str, help='Patient ID')
+        parser.add_argument('--path_Image', type=str)
+        parser.add_argument('--path_cancer_folder', type=str)
+        parser.add_argument('--path_not_cancer_folder', type=str)
+        parser.add_argument('--path_cancer_mask_folder', type=str)  # NEW
+        parser.add_argument('--path_not_cancer_mask_folder', type=str)  # NEW
+        parser.add_argument('--cancer_color', type=str)
+        parser.add_argument('--not_cancer_color', type=str)
+        parser.add_argument('--patient', type=str)
         args = parser.parse_args()
 
         path_Image = args.path_Image
         path_cancer_folder = args.path_cancer_folder
         path_not_cancer_folder = args.path_not_cancer_folder
-        path_mask_folder = args.path_mask_folder
+        path_cancer_mask_folder = args.path_cancer_mask_folder  # NEW
+        path_not_cancer_mask_folder = args.path_not_cancer_mask_folder  # NEW
         cancer_color = args.cancer_color
         not_cancer_color = args.not_cancer_color
         patient = args.patient
 
-        os.makedirs(path_mask_folder, exist_ok=True)
+        # Ensure mask folders exist
+        os.makedirs(path_cancer_mask_folder, exist_ok=True)  # NEW
+        os.makedirs(path_not_cancer_mask_folder, exist_ok=True)  # NEW
 
-        windows, annotations_not_cancer, annotations_cancer, best_level = createWindows(path_Image, cancer_color, not_cancer_color) # Get best_level
+        windows, annotations_not_cancer, annotations_cancer, best_level = createWindows(path_Image, cancer_color, not_cancer_color)
 
-        # Pass best_level to process_window
-        args_list = [(path_Image, path_cancer_folder, path_not_cancer_folder, path_mask_folder, patient, x, y,
+        # Pass separate mask folders to process_window
+        args_list = [(path_Image, path_cancer_folder, path_not_cancer_folder, path_cancer_mask_folder, path_not_cancer_mask_folder, patient, x, y,
                       WINDOW_SIZE, annotations_cancer, annotations_not_cancer, MATCH_PERCENTAGE, best_level) for x, y, _, _ in
                      windows]
 
