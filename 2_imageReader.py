@@ -10,7 +10,7 @@ import argparse
 from dotenv import load_dotenv
 import json
 import warnings
-from openslide import OpenSlide  # No need for conditional import anymore
+#from openslide import OpenSlide  # No need for conditional import anymore
 import xml.etree.ElementTree as ET
 
 load_dotenv(override=True)
