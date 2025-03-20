@@ -5,25 +5,34 @@ from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 from PIL import Image
 import shutil
 import re
-from joblib import Parallel, delayed  # For parallel processing
-import concurrent.futures  # Another option for parallel processing (using ProcessPoolExecutor)
-from functools import partial  # For passing arguments to parallelized functions
+import concurrent.futures
+from functools import partial
 
-
-# --- 1. Data Loading and Preparation (Same as before) ---
+# --- 1. Data Loading and Preparation (Modified) ---
 
 def load_data(data_dir):
-    """Loads image data, parses filenames, and returns a DataFrame."""
+    """Loads image and mask data, parses filenames, and returns a DataFrame."""
     data = []
-    for label_name in os.listdir(data_dir):
-        label_dir = os.path.join(data_dir, label_name)
-        if not os.path.isdir(label_dir):
+    for label_name in ["CANCER", "NOT_CANCER"]:  # Iterate directly over label names
+        image_dir = os.path.join(data_dir, label_name)
+        mask_dir = os.path.join(data_dir, f"{label_name}_MASK")
+
+        if not os.path.isdir(image_dir) or not os.path.isdir(mask_dir):
+            print(f"Warning: Image or mask directory not found for {label_name}, skipping.")
             continue
 
         label = 1 if label_name == "CANCER" else 0
 
-        for image_name in os.listdir(label_dir):
-            image_path = os.path.join(label_dir, image_name)
+        for image_name in os.listdir(image_dir):
+            # --- CRITICAL: Check for corresponding mask ---
+            mask_name = image_name  # Mask name is the *same* as image name
+            mask_name=mask_name.replace("adj_","")
+            image_path = os.path.join(image_dir, image_name)
+            mask_path = os.path.join(mask_dir, mask_name)
+
+            if not os.path.exists(mask_path):
+                print(f"Warning: Mask not found for {image_name}, skipping.")
+                continue
 
             match = re.search(r'PATIENT_(\d+)_', image_name)
             if match:
@@ -35,15 +44,15 @@ def load_data(data_dir):
             data.append({
                 'patient_id': patient_id,
                 'image_path': image_path,
+                'mask_path': mask_path,  # Store mask path
                 'label': label
             })
 
     return pd.DataFrame(data)
 
+# --- 2. Cross-Validation Splitting (Same as before, with data leakage check) ---
 
-# --- 2. Cross-Validation Splitting (Same as before) ---
-
-def create_cross_val_splits(df, n_splits=10, random_state=42):
+def create_cross_val_splits(df, n_splits=2, random_state=42):
     """Creates Group K-Fold cross-validation splits, handling stratification."""
     sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     splits = []
@@ -55,9 +64,9 @@ def create_cross_val_splits(df, n_splits=10, random_state=42):
         groups_inner = train_val_df['patient_id'].to_numpy()
         y_inner = train_val_df['label'].to_numpy()
         train_val_df = train_val_df.reset_index()
-        
+
         inner_split = list(group_kfold_inner.split(train_val_df, y_inner, groups_inner))
-        train_idx, val_idx = inner_split[0]
+        train_idx, val_idx = inner_split[0]  # Use only the first inner split
 
         train_df = train_val_df.iloc[train_idx]
         val_df = train_val_df.iloc[val_idx]
@@ -68,7 +77,7 @@ def create_cross_val_splits(df, n_splits=10, random_state=42):
             'test_df': test_df
         })
 
-    # --- Add the Data Leakage Check HERE ---
+    # Data Leakage Check
     for fold, split_data in enumerate(splits):
         train_patients = set(split_data['train_df']['patient_id'])
         val_patients = set(split_data['val_df']['patient_id'])
@@ -77,61 +86,51 @@ def create_cross_val_splits(df, n_splits=10, random_state=42):
         assert len(train_patients.intersection(val_patients)) == 0, f"Data leakage in fold {fold} (train/val)"
         assert len(train_patients.intersection(test_patients)) == 0, f"Data leakage in fold {fold} (train/test)"
         assert len(val_patients.intersection(test_patients)) == 0, f"Data leakage in fold {fold} (val/test)"
-
-
     return splits
 
+# --- 3. Optimized Augmentation Function (Modified) ---
 
-# --- 3. Optimized Augmentation Function (Parallel Processing) ---
-
-def augment_single_image(image_path, output_dir):
-    """Augments a single image and saves all versions."""
+def augment_single_image_and_mask(image_path, mask_path, output_image_dir, output_mask_dir):
+    """Augments a single image and its corresponding mask, saving all versions."""
     try:
         img = Image.open(image_path)
+        mask = Image.open(mask_path)
     except (FileNotFoundError, IOError):
-        print(f"Skipping image (cannot open): {image_path}")
-        return  # Return early if the image can't be opened
+        print(f"Skipping image/mask (cannot open): {image_path}, {mask_path}")
+        return
 
     base_filename = os.path.basename(image_path).split('.')[0]
 
     augmentations = {
-        'original': img,
-        'rotated_90': img.rotate(90, expand=True),
-        'rotated_180': img.rotate(180, expand=True),
-        'rotated_270': img.rotate(270, expand=True),
-        'flipped_horizontal': img.transpose(Image.FLIP_LEFT_RIGHT),
-        'flipped_vertical': img.transpose(Image.FLIP_TOP_BOTTOM),
+        'original': (img, mask),
+        'rotated_90': (img.rotate(90, expand=True), mask.rotate(90, expand=True)),
+        'rotated_180': (img.rotate(180, expand=True), mask.rotate(180, expand=True)),
+        'rotated_270': (img.rotate(270, expand=True), mask.rotate(270, expand=True)),
+        'flipped_horizontal': (img.transpose(Image.FLIP_LEFT_RIGHT), mask.transpose(Image.FLIP_LEFT_RIGHT)),
+        'flipped_vertical': (img.transpose(Image.FLIP_TOP_BOTTOM), mask.transpose(Image.FLIP_TOP_BOTTOM)),
     }
 
-    for aug_name, augmented_img in augmentations.items():
-        output_filename = f"{base_filename}_{aug_name}.png"
-        augmented_img.save(os.path.join(output_dir, output_filename))
+    for aug_name, (augmented_img, augmented_mask) in augmentations.items():
+        output_image_filename = f"{base_filename}_{aug_name}.png"
+        output_mask_filename = f"{base_filename}_{aug_name}.png"  # Same name for mask
+        augmented_img.save(os.path.join(output_image_dir, output_image_filename))
+        augmented_mask.save(os.path.join(output_mask_dir, output_mask_filename))
 
+def augment_images_and_masks_parallel(image_paths, mask_paths, output_image_dir, output_mask_dir, num_workers=None):
+    """Applies augmentations in parallel using ProcessPoolExecutor."""
+    os.makedirs(output_image_dir, exist_ok=True)
+    os.makedirs(output_mask_dir, exist_ok=True)
 
-
-def augment_images_parallel(image_paths, output_dir, num_workers=None):
-    """
-    Applies augmentations in parallel using ProcessPoolExecutor.
-
-    Args:
-        image_paths: List of image paths.
-        output_dir: Output directory.
-        num_workers: Number of worker processes.  If None, uses the number of CPU cores.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Use ProcessPoolExecutor for true parallelism (handles GIL limitations of Python)
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        # Use functools.partial to pass the output_dir to the augment_single_image function
-        partial_func = partial(augment_single_image, output_dir=output_dir)
-        executor.map(partial_func, image_paths)
+        partial_func = partial(augment_single_image_and_mask,
+                               output_image_dir=output_image_dir,
+                               output_mask_dir=output_mask_dir)
+        executor.map(partial_func, image_paths, mask_paths)  # Pass both image and mask paths
 
-
-# --- 4. Main Execution (Parallel Augmentation) ---
-
+# --- 4. Main Execution (Modified) ---
 if __name__ == '__main__':
-    data_directory = 'path/to/your/data'  # REPLACE
-    output_base_dir = 'path/to/output/cross_val_splits'  # REPLACE
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED'  # Use raw string or double backslashes
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\cross_val_splits'
 
     data_df = load_data(data_directory)
     cross_val_splits = create_cross_val_splits(data_df)
@@ -142,44 +141,61 @@ if __name__ == '__main__':
         val_df = split_data['val_df']
         test_df = split_data['test_df']
 
-        fold_output_dir = os.path.join(output_base_dir, f"fold_{fold + 1}")
+        fold_output_dir = os.path.join(output_base_dir, f"dataset_{fold + 1}")  # Use "dataset_" prefix
         os.makedirs(fold_output_dir, exist_ok=True)
 
-        for split_name, split_df in zip(['train', 'val', 'test'], [train_df, val_df, test_df]):
+        for split_name, split_df in zip(['TRAIN', 'VALIDATION', 'TEST'], [train_df, val_df, test_df]):  # Uppercase
             split_dir = os.path.join(fold_output_dir, split_name)
             os.makedirs(split_dir, exist_ok=True)
 
             for label in [0, 1]:
-                label_name = 'cancer' if label == 1 else 'no_cancer'
-                label_dir = os.path.join(split_dir, label_name)
-                os.makedirs(label_dir, exist_ok=True)
+                label_name = 'CANCER' if label == 1 else 'NOT_CANCER'  # Uppercase
+                image_dest_dir = os.path.join(split_dir, label_name)
+                mask_dest_dir = os.path.join(split_dir, f"{label_name}_MASK")  # Create mask directory
+                os.makedirs(image_dest_dir, exist_ok=True)
+                os.makedirs(mask_dest_dir, exist_ok=True)  # Create mask directory
 
             for _, row in split_df.iterrows():
                 image_path = row['image_path']
+                mask_path = row['mask_path']  # Get mask path
                 label = row['label']
-                label_name = 'cancer' if label == 1 else 'no_cancer'
+                label_name = 'CANCER' if label == 1 else 'NOT_CANCER'
 
-                dest_dir = os.path.join(fold_output_dir, split_name, label_name)
-                dest_path = os.path.join(dest_dir, os.path.basename(image_path))
+                image_dest_dir = os.path.join(fold_output_dir, split_name, label_name)
+                mask_dest_dir = os.path.join(fold_output_dir, split_name, f"{label_name}_MASK") # Get mask folder
+                image_dest_path = os.path.join(image_dest_dir, os.path.basename(image_path))
+                mask_dest_path = os.path.join(mask_dest_dir, os.path.basename(mask_path))  # Mask destination
+
                 try:
-                    shutil.copy(image_path, dest_path)
+                    shutil.copy(image_path, image_dest_path)
+                    shutil.copy(mask_path, mask_dest_path)  # Copy mask
                 except FileNotFoundError:
-                    print(f"Warning: Source image not found: {image_path}")
+                    print(f"Warning: Source image/mask not found: {image_path} or {mask_path}")
                     continue
 
-        # Parallel Augmentation (for the training set)
-        train_cancer_paths = train_df[train_df['label'] == 1]['image_path'].tolist()
-        train_no_cancer_paths = train_df[train_df['label'] == 0]['image_path'].tolist()
+        # --- Parallel Augmentation (for the training set, including masks) ---
+        train_cancer_df = train_df[train_df['label'] == 1]
+        train_no_cancer_df = train_df[train_df['label'] == 0]
 
-        train_cancer_output_dir = os.path.join(fold_output_dir, "train", "cancer")
-        train_no_cancer_output_dir = os.path.join(fold_output_dir, "train", "no_cancer")
-        
-        # Use a reasonable number of workers.  os.cpu_count() is a good default.
+        train_cancer_image_paths = train_cancer_df['image_path'].tolist()
+        train_cancer_mask_paths = train_cancer_df['mask_path'].tolist()  # Get mask paths
+
+        train_no_cancer_image_paths = train_no_cancer_df['image_path'].tolist()
+        train_no_cancer_mask_paths = train_no_cancer_df['mask_path'].tolist() # Get mask paths
+
+        train_cancer_output_image_dir = os.path.join(fold_output_dir, "TRAIN", "CANCER")
+        train_cancer_output_mask_dir = os.path.join(fold_output_dir, "TRAIN", "CANCER_MASK")  # Output mask dir
+
+        train_no_cancer_output_image_dir = os.path.join(fold_output_dir, "TRAIN", "NOT_CANCER")
+        train_no_cancer_output_mask_dir = os.path.join(fold_output_dir, "TRAIN", "NOT_CANCER_MASK")  # Output mask dir
+
         num_workers = os.cpu_count()
-        print(f"Augmenting cancer images with {num_workers} workers...")
-        augment_images_parallel(train_cancer_paths, train_cancer_output_dir, num_workers=num_workers)
-        print(f"Augmenting non-cancer images with {num_workers} workers...")
-        augment_images_parallel(train_no_cancer_paths, train_no_cancer_output_dir, num_workers=num_workers)
-        
-
+        print(f"Augmenting cancer images and masks with {num_workers} workers...")
+        augment_images_and_masks_parallel(train_cancer_image_paths, train_cancer_mask_paths,
+                                          train_cancer_output_image_dir, train_cancer_output_mask_dir,
+                                          num_workers=num_workers)
+        print(f"Augmenting non-cancer images and masks with {num_workers} workers...")
+        augment_images_and_masks_parallel(train_no_cancer_image_paths, train_no_cancer_mask_paths,
+                                         train_no_cancer_output_image_dir, train_no_cancer_output_mask_dir,
+                                         num_workers=num_workers)
     print("Cross-validation splits created and augmented (in parallel).")
