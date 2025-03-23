@@ -26,7 +26,6 @@ def load_data(data_dir):
         for image_name in os.listdir(image_dir):
             # --- CRITICAL: Check for corresponding mask ---
             mask_name = image_name  # Mask name is the *same* as image name
-            mask_name=mask_name.replace("adj_","")
             image_path = os.path.join(image_dir, image_name)
             mask_path = os.path.join(mask_dir, mask_name)
 
@@ -102,7 +101,7 @@ def augment_single_image_and_mask(image_path, mask_path, output_image_dir, outpu
     base_filename = os.path.basename(image_path).split('.')[0]
 
     augmentations = {
-        'original': (img, mask),
+        # 'original': (img, mask),
         'rotated_90': (img.rotate(90, expand=True), mask.rotate(90, expand=True)),
         'rotated_180': (img.rotate(180, expand=True), mask.rotate(180, expand=True)),
         'rotated_270': (img.rotate(270, expand=True), mask.rotate(270, expand=True)),
