@@ -184,8 +184,8 @@ def calculate_average_template_stats(template_dir):
 def process_image(img_filename, input_dir, output_dir, template_mean, template_std):
     """Applies Reinhard normalization to a single image."""
     input_path = os.path.join(input_dir, img_filename)
-    # Create output filename (e.g., adj_CANCER_PATIENT_...)
-    output_filename = f"adj_{img_filename}"
+    # Create output filename (e.g., CANCER_PATIENT_...)
+    output_filename = f"{img_filename}"
     output_path = os.path.join(output_dir, output_filename)
 
     try:
