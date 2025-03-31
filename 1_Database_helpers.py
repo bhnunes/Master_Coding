@@ -200,16 +200,15 @@ def mainProcess():
                     )
                 except RuntimeError as e:
                     status = 'FAILED'
-                    comments = str(e)
-                    updateCase(id_cur, 0, 0, 0, status, comments, WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
-                    continue  # Go to the next case
+                    updateCase(id_cur, 0, 0, 0, status, str(comments[-250:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
+                    continue 
 
 
                 end_time = time.time()
                 execution_time = (end_time - start_time)/60
                 count_cancer=countTotal(start_time, end_time,PATH_CANCER_FOLDER )
                 count_not_cancer=countTotal(start_time, end_time,PATH_NOT_CANCER_FOLDER)
-                updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, comments,WINDOW_SIZE,STRIDE,TISSUE_PERCENTAGE,MATCH_PERCENTAGE)
+                updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-250:]),WINDOW_SIZE,STRIDE,TISSUE_PERCENTAGE,MATCH_PERCENTAGE)
                 totalCases=totalCases-1
                 print("There are "+str(totalCases)+" images to be processed yet")
 
