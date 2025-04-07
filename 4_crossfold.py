@@ -2,27 +2,27 @@ import os
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
-from PIL import Image, UnidentifiedImageError # Added UnidentifiedImageError
+# from PIL import Image, UnidentifiedImageError # PIL no longer strictly needed if using cv2 consistently
 import shutil
 import re
 import concurrent.futures
-from functools import partial
+# from functools import partial # No longer needed for partial
 from tqdm import tqdm
 import random
 import math
-import cv2 # Needed for GaussianBlur backend and image loading in albumentations
+import cv2 # Needed for GaussianBlur backend and image loading/saving
 
 # --- Install and Import Albumentations ---
 try:
     import albumentations as A
-    from albumentations.pytorch import ToTensorV2 # Optional, if using PyTorch later
+    # from albumentations.pytorch import ToTensorV2 # Optional, if using PyTorch later
 except ImportError:
     print("Albumentations library not found. Please install it: pip install -U albumentations")
     exit()
 
 
 # --- 1. Data Loading and Preparation (Robust) ---
-
+# (Keep load_data function as is)
 def load_data(data_dir):
     """Loads image and mask data, parses filenames, and returns a DataFrame."""
     print(f"Loading data from: {data_dir}")
@@ -90,103 +90,83 @@ def load_data(data_dir):
     print(f"Class distribution:\n{df['label'].value_counts()}")
     return df
 
-# --- 2. Cross-Validation Splitting (Keep as is, it's good) ---
 
-def create_cross_val_splits(df, n_splits=5, random_state=42): # Increased default splits to 5
+# --- 2. Cross-Validation Splitting ---
+# (Keep create_cross_val_splits function as is)
+def create_cross_val_splits(df, n_splits=5, random_state=42):
     """Creates Stratified Group K-Fold cross-validation splits."""
     print(f"\nCreating {n_splits} stratified group K-Fold splits...")
-    # Ensure label is integer type
     df['label'] = df['label'].astype(int)
-
-    # Outer split: StratifiedGroupKFold for Trainval/Test separation by patient
     sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     splits = []
-
-    # Check if there are enough groups (patients) for each class for the number of splits
     min_groups = df.groupby('label')['patient_id'].nunique().min()
     if min_groups < n_splits:
-         print(f"\nWarning: The least populated class has only {min_groups} unique patients, which is less than n_splits={n_splits}. "
-               f"StratifiedGroupKFold might fail or produce invalid splits. Consider reducing n_splits or check data.")
-         # Optionally, raise an error here if strict adherence is needed.
-         raise ValueError(f"Cannot perform {n_splits}-fold stratified group split. Minimum patients per class ({min_groups}) is too low.")
-
+         raise ValueError(f"Cannot perform {n_splits}-fold stratified group split. The least populated class has only {min_groups} unique patients. Minimum required: {n_splits}.")
 
     fold_indices = list(sgkf.split(df, df['label'], df['patient_id']))
-
-    # Inner split: GroupKFold for Train/Validation separation by patient within Trainval
-    # We'll do 5 folds internally, but only use the first for train/val split as before
-    inner_n_splits = 5
-    if inner_n_splits > n_splits : # Heuristic: ensure inner split is feasible
-         inner_n_splits = max(2, n_splits) # Adjust inner splits if outer splits are very few
+    inner_n_splits = max(2, min(5, df['patient_id'].nunique())) # Adjust inner dynamically
 
     group_kfold_inner = GroupKFold(n_splits=inner_n_splits)
 
     for i, (train_val_idx, test_idx) in enumerate(fold_indices):
-        train_val_df = df.iloc[train_val_idx].copy() # Use copy to avoid SettingWithCopyWarning
+        train_val_df = df.iloc[train_val_idx].copy()
         test_df = df.iloc[test_idx].copy()
-
-        # Perform inner split on train_val_df
         groups_inner = train_val_df['patient_id']
-        y_inner = train_val_df['label'] # Stratification isn't directly possible with GroupKFold, but outer split helps
 
-        # Need to check if train_val_df is large enough for inner split
-        if len(train_val_df) < inner_n_splits or train_val_df['patient_id'].nunique() < inner_n_splits:
-             print(f"Warning: Fold {i+1} - Train+Val set is too small or has too few patients for inner {inner_n_splits}-fold split. Adjusting inner split.")
-             # Fallback: Maybe split 80/20 randomly but respecting groups if possible, or just use the first split of a smaller k
-             temp_inner_splits = max(2, min(inner_n_splits, train_val_df['patient_id'].nunique()))
-             group_kfold_inner_adj = GroupKFold(n_splits=temp_inner_splits)
+        # Adjust inner split size if needed
+        current_inner_n_splits = inner_n_splits
+        if len(train_val_df) < current_inner_n_splits or train_val_df['patient_id'].nunique() < current_inner_n_splits:
+             print(f"Warning: Fold {i+1} - Adjusting inner KFold splits due to small train+val size.")
+             current_inner_n_splits = max(2, min(inner_n_splits, train_val_df['patient_id'].nunique(), len(train_val_df)))
+             group_kfold_inner_adj = GroupKFold(n_splits=current_inner_n_splits)
              inner_split_generator = group_kfold_inner_adj.split(train_val_df, groups=groups_inner)
         else:
-             inner_split_generator = group_kfold_inner.split(train_val_df, groups=groups_inner)
+             inner_split_generator = group_kfold_inner.split(train_val_df, groups=groups_inner) # Use original if possible
 
-        # Get the first train/validation split from the inner generator
         try:
              train_idx_local, val_idx_local = next(inner_split_generator)
-             # Convert local indices back to original DataFrame indices if needed, but iloc works on position
              train_df = train_val_df.iloc[train_idx_local]
              val_df = train_val_df.iloc[val_idx_local]
         except StopIteration:
              print(f"Error: Could not generate inner split for Fold {i+1}. Skipping fold.")
-             continue # Skip this fold if inner split fails
+             continue
 
         splits.append({
-            'train_df': train_df.reset_index(drop=True), # Reset index for consistency
+            'train_df': train_df.reset_index(drop=True),
             'val_df': val_df.reset_index(drop=True),
             'test_df': test_df.reset_index(drop=True)
         })
         print(f"  Fold {i+1}: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
-    # --- Final Leakage Check ---
     print("\nVerifying patient separation across final splits...")
     for fold, split_data in enumerate(splits):
         train_patients = set(split_data['train_df']['patient_id'])
         val_patients = set(split_data['val_df']['patient_id'])
         test_patients = set(split_data['test_df']['patient_id'])
-
         assert len(train_patients.intersection(val_patients)) == 0, f"FATAL: Patient leakage detected in Fold {fold+1} (train/val overlap)"
         assert len(train_patients.intersection(test_patients)) == 0, f"FATAL: Patient leakage detected in Fold {fold+1} (train/test overlap)"
         assert len(val_patients.intersection(test_patients)) == 0, f"FATAL: Patient leakage detected in Fold {fold+1} (val/test overlap)"
     print("Patient separation verified.")
     return splits
 
-# --- 3. File Operations & Verification ---
 
+# --- 3. File Operations & Verification ---
+# (Keep copy_files_for_split function as is)
 def copy_files_for_split(split_df, fold_output_dir, split_name):
     """Copies original images and masks for a given split (train/val/test)."""
     print(f"  Copying original files for {split_name}...")
     split_dir = os.path.join(fold_output_dir, split_name)
-    os.makedirs(split_dir, exist_ok=True) # Directories should be created before calling
+    # Directories should be created before calling this function in the main loop
 
     copy_tasks = []
     for _, row in split_df.iterrows():
         label_name = 'CANCER' if row['label'] == 1 else 'NOT_CANCER'
         image_dest_dir = os.path.join(split_dir, label_name)
         mask_dest_dir = os.path.join(split_dir, f"{label_name}_MASK")
-        # Directories for labels created in the main loop
 
         image_src_path = row['image_path']
         mask_src_path = row['mask_path']
-        base_filename = row['filename'] # Use stored filename
+        base_filename = row['filename']
 
         image_dest_path = os.path.join(image_dest_dir, base_filename)
         mask_dest_path = os.path.join(mask_dest_dir, base_filename)
@@ -194,142 +174,133 @@ def copy_files_for_split(split_df, fold_output_dir, split_name):
         copy_tasks.append((image_src_path, image_dest_path))
         copy_tasks.append((mask_src_path, mask_dest_path))
 
-    # --- Parallel Copying ---
     errors = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()*2) as executor: # I/O bound -> ThreadPool
-        future_to_task = {executor.submit(shutil.copy2, src, dst): (src, dst) for src, dst in copy_tasks} # copy2 preserves metadata
+    # Use more threads for I/O bound tasks like copying
+    num_copy_workers = min(32, (os.cpu_count() or 1) + 4) # Common heuristic for ThreadPool
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_copy_workers) as executor:
+        future_to_task = {executor.submit(shutil.copy2, src, dst): (src, dst) for src, dst in copy_tasks}
         for future in tqdm(concurrent.futures.as_completed(future_to_task), total=len(copy_tasks), desc=f"  Copying {split_name}"):
             src, dst = future_to_task[future]
             try:
-                future.result() # Raise exception if copying failed
+                future.result()
             except Exception as exc:
                 errors.append(f"Failed to copy {src} to {dst}: {exc}")
 
     if errors:
         print(f"\n  --- Errors during copying for {split_name} ---")
-        for error in errors:
-            print(f"    {error}")
+        for error in errors[:10]: print(f"    {error}") # Print first few errors
+        if len(errors) > 10: print(f"    ... ({len(errors)-10} more errors)")
         print(f"  --- End of Copying Errors ---")
-        # Decide if errors are fatal - maybe raise an exception?
         raise RuntimeError(f"Errors occurred during file copying for {split_name}. Check logs.")
+
 
 def verify_split_integrity(fold_output_dir, split_name, original_df):
     """Performs checks on a created split directory (patient leakage, counts, file existence)."""
     print(f"  Verifying integrity of {split_name} split...")
     split_dir = os.path.join(fold_output_dir, split_name)
-    is_train = (split_name == 'TRAIN') # Augmentation check only for train
+    is_train = (split_name == 'TRAIN')
 
     all_files_ok = True
     present_patients = set()
     error_messages = []
+    # Updated regex for single augmentation code: _aug_XX_N.png
+    aug_pattern_verify = re.compile(r'_aug_([A-Z]{2})_\d+\.png$')
 
     for label_name in ["CANCER", "NOT_CANCER"]:
         image_dir = os.path.join(split_dir, label_name)
         mask_dir = os.path.join(split_dir, f"{label_name}_MASK")
 
         if not os.path.isdir(image_dir) or not os.path.isdir(mask_dir):
-            # This shouldn't happen if creation was successful, but check anyway
              error_messages.append(f"Missing directory: {image_dir} or {mask_dir}")
              all_files_ok = False
-             continue # Cannot proceed with checks for this label
+             continue
 
         image_files = {f for f in os.listdir(image_dir) if f.lower().endswith('.png')}
         mask_files = {f for f in os.listdir(mask_dir) if f.lower().endswith('.png')}
 
-        # --- Check 1: Image and Mask Counts ---
         if len(image_files) != len(mask_files):
             error_messages.append(f"{label_name}: Image count ({len(image_files)}) != Mask count ({len(mask_files)})")
             all_files_ok = False
 
-        # --- Check 2: File Pairing ---
         missing_masks = image_files - mask_files
         missing_images = mask_files - image_files
-
         if missing_masks:
-            error_messages.append(f"{label_name}: Images missing corresponding masks (first 5): {list(missing_masks)[:5]}")
+            error_messages.append(f"{label_name}: Images missing masks (e.g., {list(missing_masks)[:3]})")
             all_files_ok = False
         if missing_images:
-            error_messages.append(f"{label_name}: Masks missing corresponding images (first 5): {list(missing_images)[:5]}")
+            error_messages.append(f"{label_name}: Masks missing images (e.g., {list(missing_images)[:3]})")
             all_files_ok = False
 
-        # --- Check 3: Extract Patient IDs from this split ---
-        # Also check for unexpected augmented files in val/test
+        # Check patient IDs and augmentation presence
         for img_file in image_files:
-             match = re.search(r'PATIENT_(\d+)_', img_file)
-             if match:
-                 present_patients.add(int(match.group(1)))
+             match_patient = re.search(r'PATIENT_(\d+)_', img_file)
+             if match_patient:
+                 present_patients.add(int(match_patient.group(1)))
              else:
-                 # This check might be too strict if augmented filenames don't preserve ID pattern
-                 # Consider adjusting if augmentation filenames change drastically
-                 # If it's an augmented file, the original filename should be part of it usually
-                 is_augmented = '_aug_' in img_file # Simple check based on planned naming
+                 # Only flag non-parsing if it's NOT an augmented file
+                 is_augmented = bool(aug_pattern_verify.search(img_file))
                  if not is_augmented:
                       error_messages.append(f"{label_name}: Cannot parse patient ID from non-augmented file: {img_file}")
-                      all_files_ok = False # Decide if this is fatal
+                      all_files_ok = False
 
              # Check for augmented files in Val/Test
-             if not is_train and '_aug_' in img_file:
-                  error_messages.append(f"FATAL: Augmented file '{img_file}' found in {split_name}/{label_name}! Data leakage!")
+             if not is_train and aug_pattern_verify.search(img_file):
+                  error_messages.append(f"FATAL LEAKAGE: Augmented file '{img_file}' found in {split_name}/{label_name}!")
                   all_files_ok = False # This IS fatal
 
-    # --- Check 4: Compare Patient IDs with original DataFrame split ---
-    # This requires passing the corresponding original df slice
+    # Compare Patient IDs with original DataFrame split
     original_patient_ids = set(original_df['patient_id'])
     if present_patients != original_patient_ids:
-         # This check might fail if some files failed to copy.
-         # Let's report the difference.
-         if len(present_patients) != len(original_patient_ids): # Only check count differences due to potential copy errors
-              error_messages.append(f"Patient ID mismatch: Expected {len(original_patient_ids)} unique patients based on DataFrame, found {len(present_patients)} unique patients in copied files.")
-              all_files_ok = False # Might be due to copy errors noted above
+         # Report difference only if counts mismatch, allowing for potential copy errors of *some* files
+         if len(present_patients) != len(original_patient_ids):
+              error_messages.append(f"Patient ID count mismatch: Expected {len(original_patient_ids)} unique patients (from DF), found {len(present_patients)} (in files). Possible copy issue or parsing error.")
+              # Decide if this is fatal - depends on tolerance for copy errors
+              all_files_ok = False # Let's consider it an error for now
 
     if not all_files_ok:
         print(f"  --- Verification FAILED for {split_name} ---")
-        for msg in error_messages:
-            print(f"    - {msg}")
+        for msg in error_messages: print(f"    - {msg}")
         print(f"  --- End Verification Errors ---")
-        # Optionally raise an error
         raise ValueError(f"Integrity check failed for {split_name} in fold {os.path.basename(fold_output_dir)}")
-        #return False
     else:
         print(f"  Verification PASSED for {split_name}.")
         return True
 
 
-# --- 4. Augmentation (Using Albumentations) ---
+# --- 4. Augmentation (Using Albumentations - Single Random Transform) ---
 
-# Define the augmentation pipeline (can be adjusted)
-# Values from the paper: brightness, contrast, saturation, hue = 64/255, 0.75, 1.0 (implied?), 0.04 ?
-# Max delta for saturation/hue seems low in paper. Let's use reasonable values.
-# Brightness max_delta=64/255 ~= 0.25
-# Contrast factor range: 1 +/- 0.75 -> (0.25, 1.75) ? Paper text is ambiguous. Let's use a smaller range.
-# Saturation: paper says 0.25 delta? Seems very high. Let's assume it meant factor like contrast.
-# Hue: paper says 0.04 delta? Hue delta is usually integer 0-180. Let's use a reasonable hue shift limit.
+# Define the INDIVIDUAL transformations, each with p=1.0 (always apply if chosen)
+# Keep parameters as before, or adjust if needed for the specific transform
+INDIVIDUAL_TRANSFORMS = [
+    (A.HorizontalFlip(p=1.0), "HP"),
+    (A.VerticalFlip(p=1.0), "VF"),
+    (A.RandomRotate90(p=1.0), "RF"),
+    (A.GaussianBlur(blur_limit=(3, 7), p=1.0), "GB"),
+    (A.ColorJitter(
+        brightness=0.25,
+        contrast=0.3,
+        saturation=0.3,
+        hue=0.04 * 180, # Use degrees for OpenCV backend
+        p=1.0 # Apply jitter parameters if this transform is chosen
+    ), "CJ")
+    # Add more individual transforms here if desired, e.g.:
+    # (A.ShiftScaleRotate(shift_limit=0.06, scale_limit=0.1, rotate_limit=15, p=1.0), "SSR"),
+    # (A.ElasticTransform(p=1.0, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03), "ET")
+]
 
-# Adjusted based on common practices and trying to interpret paper:
-transform = A.Compose([
-    A.HorizontalFlip(p=0.5),
-    A.VerticalFlip(p=0.5),
-    A.RandomRotate90(p=0.5),
-    # GaussianBlur might make masks less sharp, apply carefully or skip for masks?
-    # Albumentations applies blur only to image by default if mask is uint8.
-    A.GaussianBlur(blur_limit=(3, 7), p=0.3), # Apply blur less often
-    A.ColorJitter(
-        brightness=0.25, # Max delta 64/255
-        contrast=0.3,    # Factor range (0.7, 1.3) - More conservative than paper interpretation
-        saturation=0.3,  # Factor range (0.7, 1.3) - More conservative
-        hue=0.04 * 180,  # Shift limit +/- 7 degrees approx. Max delta 0.04 * 180
-        p=0.7 # Apply color jitter frequently
-    ),
-    # Can add more: ElasticTransform, GridDistortion, ShiftScaleRotate etc.
-])
+print(f"Defined {len(INDIVIDUAL_TRANSFORMS)} individual augmentations for random selection:")
+for _, code in INDIVIDUAL_TRANSFORMS:
+    print(f"  - {code}")
 
 def augment_and_save(image_path, mask_path, output_image_dir, output_mask_dir, num_augmentations):
-    """Applies augmentations N times to a single image/mask pair and saves."""
+    """
+    Applies ONE randomly selected augmentation N times to a single image/mask pair
+    and saves using filenames indicating the single applied transform.
+    """
     try:
-        # Load image and mask using OpenCV (required by Albumentations)
-        # Ensure loading in the correct color order (BGR for OpenCV)
-        image = cv2.imread(image_path, cv2.IMREAD_COLOR) # Loads BGR
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) # Load mask as grayscale
+        # Load original image and mask ONCE using OpenCV
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
 
         if image is None:
             raise IOError(f"Could not read image file: {image_path}")
@@ -338,47 +309,51 @@ def augment_and_save(image_path, mask_path, output_image_dir, output_mask_dir, n
 
         base_filename = os.path.splitext(os.path.basename(image_path))[0]
 
+        # Generate N augmented versions, each with ONE random transform applied
         for i in range(num_augmentations):
-            augmented = transform(image=image, mask=mask)
-            augmented_img = augmented['image'] # This is BGR
-            augmented_mask = augmented['mask'] # This is Grayscale
+            # *** Randomly select ONE transform for this iteration ***
+            chosen_transform, chosen_code = random.choice(INDIVIDUAL_TRANSFORMS)
 
-            # Define output filenames
-            output_image_filename = f"{base_filename}_aug_{i+1}.png"
-            output_mask_filename = f"{base_filename}_aug_{i+1}.png" # Same name for mask
+            # Apply the single chosen transform
+            augmented = chosen_transform(image=image.copy(), mask=mask.copy()) # Apply to copies
+            augmented_img = augmented['image']
+            augmented_mask = augmented['mask']
 
-            # Save using OpenCV
-            cv2.imwrite(os.path.join(output_image_dir, output_image_filename), augmented_img)
-            cv2.imwrite(os.path.join(output_mask_dir, output_mask_filename), augmented_mask)
+            # Define output filenames indicating the SINGLE applied transform code
+            # Format: basename_aug_CODE_N.png
+            output_image_filename = f"{base_filename}_aug_{chosen_code}_{i+1}.png"
+            output_mask_filename = f"{base_filename}_aug_{chosen_code}_{i+1}.png" # Use same name format
 
-        return True, None # Indicate success
+            # Save the result of this single transformation
+            img_save_path = os.path.join(output_image_dir, output_image_filename)
+            mask_save_path = os.path.join(output_mask_dir, output_mask_filename)
+
+            cv2.imwrite(img_save_path, augmented_img)
+            # Ensure mask is saved correctly (consider checking dtype if issues arise)
+            cv2.imwrite(mask_save_path, augmented_mask)
+
+        return True, None # Indicate success for the original image pair
 
     except Exception as e:
-        error_msg = f"Failed augmenting {os.path.basename(image_path)}: {type(e).__name__}: {e}"
-        # print(error_msg) # Can be noisy in parallel
+        # Capture more specific errors if possible
+        error_msg = f"Failed augmenting {os.path.basename(image_path)} (iter {i+1 if 'i' in locals() else 'N/A'}, transform {chosen_code if 'chosen_code' in locals() else 'N/A'}): {type(e).__name__}: {e}"
         return False, error_msg # Indicate failure and provide message
 
 
 def augment_and_balance_train_set(fold_output_dir, num_workers=None):
-    """Balances the training set by augmenting the minority class."""
-    print("  Augmenting and balancing TRAIN set...")
+    """Balances the training set by augmenting the minority class using single random transforms."""
+    print("  Augmenting and balancing TRAIN set (using single random transform per generated image)...")
     train_dir = os.path.join(fold_output_dir, "TRAIN")
     cancer_img_dir = os.path.join(train_dir, "CANCER")
     cancer_mask_dir = os.path.join(train_dir, "CANCER_MASK")
     nocancer_img_dir = os.path.join(train_dir, "NOT_CANCER")
-    nocancer_mask_dir = os.path.join(train_dir, "NOT_CANCER_MASK") # Mask dir needed for paths
+    nocancer_mask_dir = os.path.join(train_dir, "NOT_CANCER_MASK")
 
-    # --- Count original files (ignore potential previous augmentations) ---
-    # cancer_files = {f for f in os.listdir(cancer_img_dir) if f.lower().endswith('.png') and '_aug_' not in f}
-    # nocancer_files = {f for f in os.listdir(nocancer_img_dir) if f.lower().endswith('.png') and '_aug_' not in f}
+    # Updated regex for single augmentation code: _aug_XX_N.png
+    aug_pattern_balance = re.compile(r'_aug_([A-Z]{2})_\d+\.png$')
 
-    # Safer: List all pngs and filter based on whether corresponding non-aug file exists
-    all_cancer_imgs = {f for f in os.listdir(cancer_img_dir) if f.lower().endswith('.png')}
-    all_nocancer_imgs = {f for f in os.listdir(nocancer_img_dir) if f.lower().endswith('.png')}
-
-    # Identify original files (those without _aug_ suffix assuming our naming convention)
-    original_cancer_files = {f for f in all_cancer_imgs if '_aug_' not in f}
-    original_nocancer_files = {f for f in all_nocancer_imgs if '_aug_' not in f}
+    original_cancer_files = {f for f in os.listdir(cancer_img_dir) if f.lower().endswith('.png') and not aug_pattern_balance.search(f)}
+    original_nocancer_files = {f for f in os.listdir(nocancer_img_dir) if f.lower().endswith('.png') and not aug_pattern_balance.search(f)}
 
     n_cancer = len(original_cancer_files)
     n_nocancer = len(original_nocancer_files)
@@ -386,139 +361,122 @@ def augment_and_balance_train_set(fold_output_dir, num_workers=None):
     print(f"    Original counts: Cancer={n_cancer}, Not_Cancer={n_nocancer}")
 
     if n_cancer == n_nocancer:
-        print("    Classes are already balanced. No augmentation needed for balancing.")
-        return True # Indicate success
-    if n_cancer == 0 and n_nocancer > 0:
-        print("    Warning: No original cancer images found in training set. Cannot balance.")
-        return True # Nothing to do, but not failure state?
-    if n_nocancer == 0 and n_cancer > 0:
-         print("    Warning: No original non-cancer images found in training set. Skipping balancing (or adjust logic if needed).")
-         return True
+        print("    Classes are already balanced. No augmentation needed.")
+        return True
+    if n_minority := min(n_cancer, n_nocancer) == 0:
+        print(f"    Warning: Minority class ({'CANCER' if n_cancer == 0 else 'NOT_CANCER'}) has 0 samples. Cannot balance.")
+        return True # Nothing to augment
 
-
-    # --- Determine which class needs augmentation ---
+    # Determine minority/majority
     if n_cancer < n_nocancer:
-        minority_img_dir = cancer_img_dir
-        minority_mask_dir = cancer_mask_dir
-        minority_files = original_cancer_files
-        n_minority = n_cancer
-        n_majority = n_nocancer
+        minority_img_dir, minority_mask_dir = cancer_img_dir, cancer_mask_dir
+        minority_files, n_minority, n_majority = original_cancer_files, n_cancer, n_nocancer
         print(f"    Target: Augmenting CANCER class.")
-    else: # n_nocancer < n_cancer
-        minority_img_dir = nocancer_img_dir
-        minority_mask_dir = os.path.join(train_dir, "NOT_CANCER_MASK") # Define mask dir here
-        minority_files = original_nocancer_files
-        n_minority = n_nocancer
-        n_majority = n_cancer
+    else:
+        minority_img_dir, minority_mask_dir = nocancer_img_dir, nocancer_mask_dir
+        minority_files, n_minority, n_majority = original_nocancer_files, n_nocancer, n_cancer
         print(f"    Target: Augmenting NOT_CANCER class.")
 
-
-    # --- Calculate needed augmentations ---
+    # Calculate needed augmentations
     needed_total_augmentations = n_majority - n_minority
-    # Ensure n_minority is not zero before division
-    if n_minority > 0:
-         augmentations_per_sample = math.ceil(needed_total_augmentations / n_minority)
-    else:
-         # This case should be caught earlier, but defensively:
-         print("    Error: Minority class count is zero, cannot proceed with augmentation calculation.")
-         return False # Indicate failure
-
+    # This is the number of times we need to call augment_and_save *per original minority image* on average
+    augmentations_per_original_sample = math.ceil(needed_total_augmentations / n_minority)
 
     print(f"    Need {needed_total_augmentations} additional samples for minority class.")
-    print(f"    Applying approx. {augmentations_per_sample} augmentations per original minority sample.")
+    print(f"    Applying {augmentations_per_original_sample} randomly chosen single augmentations per original minority sample.")
 
-    # --- Prepare tasks for parallel execution ---
+    # Prepare tasks for parallel execution
     augmentation_tasks = []
     for filename in minority_files:
         image_path = os.path.join(minority_img_dir, filename)
         mask_path = os.path.join(minority_mask_dir, filename) # Assume same name for mask
         if os.path.exists(image_path) and os.path.exists(mask_path):
-            augmentation_tasks.append((image_path, mask_path, minority_img_dir, minority_mask_dir, augmentations_per_sample))
+            # Pass only the number of augmentations needed per original file
+            augmentation_tasks.append((image_path, mask_path, minority_img_dir, minority_mask_dir, augmentations_per_original_sample))
         else:
             print(f"    Warning: Skipping augmentation for {filename} - image or mask file missing.")
-
 
     if not augmentation_tasks:
          print("    No valid image/mask pairs found for minority class augmentation.")
          return True # Not an error if no files exist
 
-
     # --- Execute Augmentation in Parallel ---
     errors = []
-    print(f"    Starting parallel augmentation for {len(augmentation_tasks)} files...")
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        # Create partial function - NOTE: Cannot directly pass 'transform' if it's complex and not pickleable
-        # In this case, A.Compose should be pickleable. If not, define transform inside worker.
-        # partial_func = partial(augment_and_save, num_augmentations=augmentations_per_sample) # Simplified if all args passed in task tuple
-
-        # Map tasks to the executor
+    print(f"    Starting parallel augmentation for {len(augmentation_tasks)} original files...")
+    # Use ProcessPoolExecutor for CPU-bound augmentation tasks
+    actual_num_workers = os.cpu_count() if num_workers is None else num_workers
+    print(f"    Using {actual_num_workers} worker processes.")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=actual_num_workers) as executor:
+        # No need for partial, just submit the task tuple
         future_to_task = {executor.submit(augment_and_save, *task): task for task in augmentation_tasks}
 
         for future in tqdm(concurrent.futures.as_completed(future_to_task), total=len(augmentation_tasks), desc="    Augmenting Minority"):
-            task_info = future_to_task[future] # Get original task args if needed
+            task_info = future_to_task[future]
             try:
                 success, msg = future.result()
                 if not success:
                     errors.append(msg)
             except Exception as exc:
                 img_p = task_info[0] # Get image path from task tuple
-                errors.append(f"Exception during augmentation for {os.path.basename(img_p)}: {exc}")
-
+                errors.append(f"Exception during augmentation task for {os.path.basename(img_p)}: {exc}")
 
     # --- Report Augmentation Summary ---
-    final_minority_count = len([f for f in os.listdir(minority_img_dir) if f.lower().endswith('.png')])
+    final_minority_images = {f for f in os.listdir(minority_img_dir) if f.lower().endswith('.png')}
+    final_minority_count = len(final_minority_images)
     print(f"    Augmentation finished. Final minority class count: {final_minority_count}")
 
     if errors:
         print(f"  --- Errors during Augmentation ---")
-        # Print only a few errors to avoid flooding console
         for i, error in enumerate(errors):
-            if i < 10: # Print first 10 errors
-                 print(f"    - {error}")
-            elif i == 10:
-                 print(f"    ... (omitting {len(errors)-10} more errors)")
-                 break
+            if i < 10: print(f"    - {error}")
+            elif i == 10: print(f"    ... (omitting {len(errors)-10} more errors)")
+            break
         print(f"  --- End Augmentation Errors ---")
         # return False # Decide if augmentation errors are fatal
 
-    # Optional: Add a downsampling step if augmentation produces slightly MORE than needed
-    final_minority_files = {f for f in os.listdir(minority_img_dir) if f.lower().endswith('.png')}
-    current_minority_count = len(final_minority_files)
-    if current_minority_count > n_majority:
-        num_to_delete = current_minority_count - n_majority
+    # Optional: Downsampling to exact count (more precise now)
+    if final_minority_count > n_majority:
+        num_to_delete = final_minority_count - n_majority
         print(f"    Downsampling: Augmentation created {num_to_delete} extra samples. Randomly deleting...")
-        # Only delete *augmented* files to preserve originals
-        augmented_files_to_consider = {f for f in final_minority_files if '_aug_' in f}
+        # Only delete *augmented* files
+        augmented_files_to_consider = {f for f in final_minority_images if aug_pattern_balance.search(f)}
+
         if len(augmented_files_to_consider) >= num_to_delete:
+             # Convert set to list for random.sample
              files_to_delete = random.sample(list(augmented_files_to_consider), num_to_delete)
+             delete_errors = 0
              for filename in files_to_delete:
                  try:
                      os.remove(os.path.join(minority_img_dir, filename))
                      os.remove(os.path.join(minority_mask_dir, filename)) # Delete corresponding mask
                  except OSError as e:
                      print(f"    Warning: Failed to delete extra augmented file {filename}: {e}")
-             print(f"    Downsampling complete. Final count should be {n_majority}.")
+                     delete_errors += 1
+             print(f"    Downsampling complete. Aiming for {n_majority} samples. {delete_errors} errors during deletion.")
         else:
-             print(f"    Warning: Not enough augmented files ({len(augmented_files_to_consider)}) to delete {num_to_delete}. Count might be slightly off.")
-
+             # This case is less likely with ceil but possible if many originals failed processing
+             print(f"    Warning: Not enough augmented files ({len(augmented_files_to_consider)}) to delete {num_to_delete}. Final count might be slightly off.")
 
     print("  Train set balancing and augmentation complete.")
+    # You can add a final count verification here if needed
+    final_count_after_downsample = len([f for f in os.listdir(minority_img_dir) if f.lower().endswith('.png')])
+    print(f"    Final minority count after potential downsampling: {final_count_after_downsample} (Majority count: {n_majority})")
     return True
 
 
 # --- 5. Main Execution ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED' # Input dir with CANCER, NOT_CANCER, CANCER_MASK, NOT_CANCER_MASK
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\cross_val_splits_balanced' # Output for folds
-    N_SPLITS = 5 # Number of folds (e.g., 5)
-    RANDOM_STATE = 42 # For reproducibility
-    NUM_WORKERS = os.cpu_count() # Use all available CPU cores for parallel tasks
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\cross_val_splits_balanced_single_aug'
+    N_SPLITS = 5
+    RANDOM_STATE = 42
+    # Adjust workers based on CPU capability; augmentation is CPU-bound
+    NUM_WORKERS = max(1, (os.cpu_count() or 1) - 1) # Leave one core free
 
     # --- Prepare Output Directory ---
     if os.path.exists(output_base_dir):
         print(f"Output directory '{output_base_dir}' already exists.")
-        # Decide action: remove it, ask user, or add timestamp?
         user_input = input("  -> Delete existing directory and proceed? (yes/no): ").strip().lower()
         if user_input == 'yes':
             try:
@@ -543,17 +501,25 @@ if __name__ == '__main__':
     except ValueError as e:
         print(f"Error loading data: {e}")
         exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred during data loading: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
 
 
     # --- Create Splits ---
     try:
         cross_val_splits = create_cross_val_splits(data_df, n_splits=N_SPLITS, random_state=RANDOM_STATE)
-    except Exception as e:
+    except ValueError as e:
         print(f"Error creating cross-validation splits: {e}")
-        # Add more specific error handling if StratifiedGroupKFold fails due to class imbalance
-        if "received fewer than" in str(e) or "n_splits=" in str(e):
-             print("  This might be due to having too few patients in one class for the requested number of splits.")
-             print(f"  Try reducing N_SPLITS (currently {N_SPLITS}).")
+        if "Cannot perform" in str(e) or "less than n_splits" in str(e) or "Minimum required" in str(e):
+             print(f"  Try reducing N_SPLITS (currently {N_SPLITS}) or ensure sufficient patients per class.")
+        exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred during cross-validation split creation: {e}")
+        import traceback
+        traceback.print_exc()
         exit(1)
 
 
@@ -568,7 +534,7 @@ if __name__ == '__main__':
         fold_num = fold_idx + 1
         print(f"\n--- Processing Fold {fold_num}/{len(cross_val_splits)} ---")
         fold_output_dir = os.path.join(output_base_dir, f"fold_{fold_num}")
-        os.makedirs(fold_output_dir, exist_ok=True)
+        # Base fold dir created implicitly by makedirs below if needed
 
         train_df = split_data['train_df']
         val_df = split_data['val_df']
@@ -577,64 +543,86 @@ if __name__ == '__main__':
         fold_successful = True
 
         # --- Create Subdirectories and Copy Files ---
+        print(f"Fold {fold_num}: Setting up directories and copying original files...")
         for split_name, split_df_current in zip(['TRAIN', 'VALIDATION', 'TEST'], [train_df, val_df, test_df]):
             split_dir = os.path.join(fold_output_dir, split_name)
-            os.makedirs(split_dir, exist_ok=True)
-            # Create label subdirs
-            for label_name in ['CANCER', 'NOT_CANCER']:
-                 os.makedirs(os.path.join(split_dir, label_name), exist_ok=True)
-                 os.makedirs(os.path.join(split_dir, f"{label_name}_MASK"), exist_ok=True)
+            # Create directories including label subdirs *before* copying
+            try:
+                os.makedirs(os.path.join(split_dir, 'CANCER'), exist_ok=True)
+                os.makedirs(os.path.join(split_dir, 'CANCER_MASK'), exist_ok=True)
+                os.makedirs(os.path.join(split_dir, 'NOT_CANCER'), exist_ok=True)
+                os.makedirs(os.path.join(split_dir, 'NOT_CANCER_MASK'), exist_ok=True)
+            except OSError as e:
+                print(f"  ERROR creating directories for {split_name} in Fold {fold_num}: {e}")
+                fold_successful = False
+                break # Cannot proceed with this fold
+
+            if not fold_successful: break
 
             try:
                 copy_files_for_split(split_df_current, fold_output_dir, split_name)
             except Exception as e:
-                 print(f"  ERROR during file copying for {split_name}: {e}")
+                 print(f"  ERROR during file copying for {split_name} in Fold {fold_num}: {e}")
                  fold_successful = False
                  break # Stop processing this fold if copying fails
 
         if not fold_successful:
              all_folds_successful = False
-             print(f"--- Skipping further processing for Fold {fold_num} due to errors. ---")
+             print(f"--- Skipping further processing for Fold {fold_num} due to setup/copying errors. ---")
+             # Optional: Clean up partially created fold directory
+             # shutil.rmtree(fold_output_dir, ignore_errors=True)
              continue # Move to the next fold
 
         # --- Augment and Balance TRAINING Set ---
+        print(f"\nFold {fold_num}: Augmenting and balancing training set...")
         try:
             balance_success = augment_and_balance_train_set(fold_output_dir, num_workers=NUM_WORKERS)
             if not balance_success:
-                 print(f"  Warning: Augmentation/Balancing reported issues for Fold {fold_num}.")
-                 # Decide if this should be fatal
-                 fold_successful = False
+                 print(f"  Warning: Augmentation/Balancing function reported potential issues for Fold {fold_num}, but proceeding.")
+                 # Decide if this should stop the fold processing
+                 # fold_successful = False # Or just log it
         except Exception as e:
-            print(f"  ERROR during augmentation/balancing for Fold {fold_num}: {e}")
+            print(f"  FATAL ERROR during augmentation/balancing for Fold {fold_num}: {e}")
             import traceback
-            traceback.print_exc() # Print full traceback for debugging
+            traceback.print_exc()
             fold_successful = False
 
 
         # --- Final Verification for the Fold ---
-        print(f"\n--- Final Verification for Fold {fold_num} ---")
-        verification_passed = True
-        for split_name, split_df_current in zip(['TRAIN', 'VALIDATION', 'TEST'], [train_df, val_df, test_df]):
-            if not verify_split_integrity(fold_output_dir, split_name, split_df_current):
-                verification_passed = False
-                fold_successful = False # Mark fold as failed if verification fails
+        if fold_successful: # Only verify if previous steps seemed okay
+            print(f"\n--- Final Verification for Fold {fold_num} ---")
+            verification_passed = True
+            for split_name, split_df_current in zip(['TRAIN', 'VALIDATION', 'TEST'], [train_df, val_df, test_df]):
+                try:
+                    if not verify_split_integrity(fold_output_dir, split_name, split_df_current):
+                        verification_passed = False
+                        fold_successful = False # Mark fold as failed if verification fails
+                except Exception as e:
+                     print(f"  ERROR during verification for {split_name} in Fold {fold_num}: {e}")
+                     import traceback
+                     traceback.print_exc()
+                     verification_passed = False
+                     fold_successful = False # Treat verification error as fold failure
 
-
-        if fold_successful and verification_passed:
-             print(f"--- Fold {fold_num} completed successfully. ---")
+            if fold_successful and verification_passed:
+                 print(f"--- Fold {fold_num} completed successfully. ---")
+            else:
+                 all_folds_successful = False
+                 print(f"--- Fold {fold_num} completed with VERIFICATION ERRORS or previous errors. ---")
         else:
              all_folds_successful = False
-             print(f"--- Fold {fold_num} completed with ERRORS. Please review logs/output. ---")
+             print(f"--- Fold {fold_num} failed before final verification stage. ---")
 
 
     # --- Final Summary ---
     print("\n--- Overall Process Summary ---")
     if all_folds_successful:
         print("All folds processed and verified successfully!")
-        print(f"Balanced cross-validation splits are located in: {output_base_dir}")
+        print("Each augmented image in the TRAIN sets was generated using exactly ONE randomly selected transformation.")
+        print(f"Output location: {output_base_dir}")
     else:
         print("Processing completed, but ERRORS occurred in one or more folds.")
         print("Please review the output messages and logs above to identify issues.")
-        print(f"Output directory: {output_base_dir}")
+        print(f"Output directory (may contain partial or erroneous data): {output_base_dir}")
 
     print("--- Script Finished ---")
