@@ -6,6 +6,7 @@ import subprocess
 import time
 import json
 from datetime import datetime
+import sys
 
 
 def open_conn():
@@ -168,6 +169,8 @@ def countTotal(start_time, end_time, folder):
 def mainProcess():
     if LOADCASES==True:
         AddNewCases()
+        print('New images added to the database. Update the colors and re-run the process')
+        sys.exit(0)
     else:
         stop=False
         totalCases=len(getTotalCases())
