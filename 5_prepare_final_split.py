@@ -410,9 +410,9 @@ def augment_and_balance_train_set(train_output_dir, num_workers=None): # Takes T
 # --- 5. Main Execution (Modified for Single Split) ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Desktop\Base_de_dados\TEST_ADJUSTED'
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED'
     # Output base directory for the single split
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\FINAL_SPLIT_DATA'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\MASTER\FINAL_SPLIT_DATA'
     TRAIN_SIZE = 0.8 # 80% for training
     RANDOM_STATE = 42
     NUM_WORKERS = max(1, (os.cpu_count() or 1) - 1)

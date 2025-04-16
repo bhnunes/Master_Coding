@@ -1,9 +1,0 @@
-2025-04-15 21:15:22,902 - INFO - --- Starting Normalization Stat Calculation ---
-2025-04-15 21:15:22,902 - INFO - Template Directory: D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED\Slice_Template
-2025-04-15 21:15:22,902 - INFO - Output Stats File: D:\Usuario\Desktop\Master_Coding\Master_Coding\Slice_Template\normalization_stats.npz
-2025-04-15 21:15:22,902 - INFO - Calculating average stats from 30 templates in D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED\Slice_Template...
-2025-04-15 21:15:23,688 - INFO - Successfully processed 30 templates, skipped 0.
-2025-04-15 21:15:23,725 - INFO - Average Mean (LAB): [163.30755275 145.80896511 114.97137742]
-2025-04-15 21:15:23,725 - INFO - Average Std Dev (LAB): [39.97606116  6.19778534  5.84228439]
-2025-04-15 21:15:23,747 - INFO - Successfully saved normalization statistics to: D:\Usuario\Desktop\Master_Coding\Master_Coding\Slice_Template\normalization_stats.npz
-2025-04-15 21:15:23,747 - INFO - --- Stat Calculation Finished Successfully ---

@@ -71,8 +71,8 @@ def normalize_new_data(input_image_dir, output_image_dir, stats_file_path):
 
 
 # --- Example Usage ---
-hold_out_test_dir = r'D:\Usuario\Desktop\Base_de_dados\TEST_OPT\NOT_CANCER'
-normalized_hold_out_test_dir = r'D:\Usuario\Desktop\Base_de_dados\TEST_OPT\NOT_CANCER_NORM'
+hold_out_test_dir = r'D:\Usuario\Desktop\Base_de_dados\TEST\NOT_CANCER'
+normalized_hold_out_test_dir = r'D:\Usuario\Desktop\Base_de_dados\TEST\NOT_CANCER_NORM'
 stats_file = r'D:\Usuario\Desktop\Master_Coding\Master_Coding\Slice_Template\normalization_stats.npz' # The file saved previously
 
 normalize_new_data(hold_out_test_dir, normalized_hold_out_test_dir, stats_file)
