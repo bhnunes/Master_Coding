@@ -178,6 +178,17 @@ def calculate_average_template_stats(template_dir):
 
     print(f"Average template stats calculated from {processed_count} valid templates.")
     logging.info(f"Average template stats calculated from {processed_count} valid templates.")
+
+    stats_file = os.path.join(OUTPUT_BASE_DIR, 'normalization_stats.npz') # Define path
+    try:
+        np.savez(stats_file, template_mean=avg_mean, template_std=avg_std)
+        print(f"Saved normalization statistics to: {stats_file}")
+        logging.info(f"Saved normalization statistics to: {stats_file}")
+    except Exception as e:
+        print(f"Error saving normalization stats: {e}", file=sys.stderr)
+        logging.error(f"Error saving normalization stats: {e}")
+    # --- End Modification ---
+
     return avg_mean, avg_std
 
 

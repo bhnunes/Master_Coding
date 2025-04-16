@@ -275,14 +275,14 @@ INDIVIDUAL_TRANSFORMS = [
     (A.HorizontalFlip(p=1.0), "HP"),
     (A.VerticalFlip(p=1.0), "VF"),
     (A.RandomRotate90(p=1.0), "RF"),
-    # (A.GaussianBlur(blur_limit=(3, 7), p=1.0), "GB"),
-    # (A.ColorJitter(
-    #     brightness=0.25,
-    #     contrast=0.3,
-    #     saturation=0.3,
-    #     hue=0.04 * 180, # Use degrees for OpenCV backend
-    #     p=1.0 # Apply jitter parameters if this transform is chosen
-    # ), "CJ")
+    (A.GaussianBlur(blur_limit=(3, 7), p=1.0), "GB"),
+    (A.ColorJitter(
+        brightness=0.25,
+        contrast=0.3,
+        saturation=0.3,
+        hue=0.04 * 180, # Use degrees for OpenCV backend
+        p=1.0 # Apply jitter parameters if this transform is chosen
+    ), "CJ")
     # Add more individual transforms here if desired, e.g.:
     # (A.ShiftScaleRotate(shift_limit=0.06, scale_limit=0.1, rotate_limit=15, p=1.0), "SSR"),
     # (A.ElasticTransform(p=1.0, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03), "ET")

@@ -188,8 +188,18 @@ def process_window(args):
         save_path_mask = None
         final_mask_to_save = None # This will be the mask corresponding to the patch label
 
-        # Check Cancer first (adjust priority if needed)
-        if cancer_overlap_ratio >= match_percentage_req:
+        # Determine if the patch meets the threshold criteria for each class
+        meets_cancer_threshold = cancer_overlap_ratio >= match_percentage_req
+        meets_non_cancer_threshold = non_cancer_overlap_ratio >= match_percentage_req
+
+        # NEW CHECK: If it meets BOTH thresholds, it's ambiguous - discard it.
+        if meets_cancer_threshold and meets_non_cancer_threshold:
+            # Optional: Log this occurrence if you want to track ambiguous patches
+            print(f"Info: Patch at ({x_int}, {y_int}) discarded due to overlapping Cancer ({cancer_overlap_ratio:.2f}) and Non-Cancer ({non_cancer_overlap_ratio:.2f}) annotations.", file=sys.stderr)
+            patch_saved = False # Ensure it's not saved
+
+        # If it meets ONLY the Cancer threshold:
+        elif meets_cancer_threshold:
             # Qualifies as Cancer Patch
             save_folder_img = path_cancer_folder
             save_folder_mask = path_cancer_mask_folder
@@ -197,25 +207,18 @@ def process_window(args):
             final_mask_to_save = cancer_mask_patch # Mask shows cancer pixels
             patch_saved = True
 
-        # Check Non-Cancer ONLY if not already classified as Cancer
-        elif non_cancer_overlap_ratio >= match_percentage_req:
-            # Check if this area also significantly overlaps with CANCER annotations
-            # This prevents saving a patch as 'non-cancer' if it's in a region labelled both ways,
-            # unless the non-cancer overlap is high AND cancer overlap is low.
-            # You might adjust this logic based on pathologist guidance.
-            # Simple approach: if non-cancer matches, but cancer *also* significantly overlaps, maybe skip or flag?
-            # Current logic: If it passes non-cancer threshold and NOT cancer threshold, save as non-cancer.
-            if cancer_overlap_ratio < match_percentage_req: # Explicitly check it didn't meet cancer criteria
-                save_folder_img = path_not_cancer_folder
-                save_folder_mask = path_not_cancer_mask_folder
-                label = "NOT_CANCER"
-                final_mask_to_save = np.zeros(mask_shape, dtype=np.uint8) # Mask is all zeros for non-cancer class
-                patch_saved = True
-            else:
-                print(f"Warning: Patch at ({x_int}, {y_int}) overlaps with both cancer and non-cancer annotations. Skipping.", file=sys.stderr)
-                patch_saved = False # Don't save if it overlaps both
+        # If it meets ONLY the Non-Cancer threshold:
+        elif meets_non_cancer_threshold:
+            # Qualifies as Non-Cancer Patch
+            save_folder_img = path_not_cancer_folder
+            save_folder_mask = path_not_cancer_mask_folder
+            label = "NOT_CANCER"
+            final_mask_to_save = np.zeros(mask_shape, dtype=np.uint8) # Mask is all zeros for non-cancer class
+            patch_saved = True
 
-        # --- Save if qualified ---
+        # Otherwise (meets neither threshold), patch_saved remains False
+
+        # --- Save if qualified (and not ambiguous) ---
         if patch_saved:
             now = datetime.now()
             timestamp = now.strftime('%Y%m%d_%H%M%S_%f') # ISO-like, more sortable, includes microseconds
