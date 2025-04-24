@@ -467,8 +467,8 @@ def augment_and_balance_train_set(fold_output_dir, num_workers=None):
 # --- 5. Main Execution ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_ADJUSTED'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\cross_val_splits_balanced_geometric_aug'
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\COMBINED_DATA\MASTER_ADJUSTED'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\COMBINED_DATA\MASTER_ADJUSTED\cross_val_splits_balanced_geometric_aug'
     N_SPLITS = 5
     RANDOM_STATE = 42
     # Adjust workers based on CPU capability; augmentation is CPU-bound
