@@ -13,8 +13,8 @@ import sys # For printing to stderr
 
 # --- Configuration ---
 # Base directories (Adjust as needed)
-INPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\COMBINED_DATA\MASTER"
-OUTPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\COMBINED_DATA\MASTER_ADJUSTED"
+INPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\ABLATION\MATCH_PERCENTAGE_VAR\SAMPLES_100_MATCH"
+OUTPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\ABLATION\MATCH_PERCENTAGE_VAR\ADJUSTED_SAMPLES_100_MATCH"
 
 # Subdirectories for data and templates
 CANCER_INPUT_DIR = os.path.join(INPUT_BASE_DIR, "CANCER")

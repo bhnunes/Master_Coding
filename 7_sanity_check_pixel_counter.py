@@ -131,8 +131,8 @@ def analyze_mask_pixels(folder_paths, expected_values=[0, 1, 2]):
 
 # --- Configuration ---
 # <<< --- IMPORTANT: CHANGE THESE PATHS --- >>>
-folder1_mask_path = r'D:\Usuario\Desktop\Base_de_dados\FINAL_SPLIT_DATA\TRAIN\CANCER_MASK'
-folder2_mask_path = r'D:\Usuario\Desktop\Base_de_dados\FINAL_SPLIT_DATA\TRAIN\NOT_CANCER_MASK'
+folder1_mask_path = r'D:\Usuario\Downloads\MASTER_SET_ZIP_1\TRAIN\CANCER_MASK'
+folder2_mask_path = r'D:\Usuario\Downloads\MASTER_SET_ZIP_1\TRAIN\NOT_CANCER_MASK'
 # <<< --- END OF PATHS TO CHANGE --- >>>
 
 # Define the pixel values you expect and want to count specifically
