@@ -266,12 +266,32 @@ def extract_patches_for_slide(path_Image, target_level, window_size, stride,
                     continue
             
             if len(temp_poly_level0) >= 3:
-                all_polygons_level0.append(temp_poly_level0)
-                if is_cancer:
-                    annotations_cancer_level0.append(temp_poly_level0)
-                else:
-                    # Todos os outros (N, T, A, BG, etc.) são não-câncer
-                    annotations_not_cancer_level0.append(temp_poly_level0)
+                # =================== NOVA LÓGICA DE CORREÇÃO AQUI ===================
+                try:
+                    polygon = Polygon(temp_poly_level0)
+                    # Se o polígono não for válido, tente corrigi-lo
+                    if not polygon.is_valid:
+                        polygon = polygon.buffer(0)
+                    
+                    # Se após a correção ele se tornou inválido, vazio ou não é mais um polígono, descarte-o
+                    if not polygon.is_valid or polygon.is_empty or polygon.geom_type != 'Polygon':
+                        print(f"Warning: Skipping invalid or empty geometry in {os.path.basename(path_Annotation)} after buffer(0) fix.", file=sys.stderr)
+                        continue # Pula para a próxima anotação
+
+                    # Extrai as coordenadas do polígono corrigido
+                    corrected_coords = list(polygon.exterior.coords)
+
+                    all_polygons_level0.append(corrected_coords)
+                    if is_cancer:
+                        annotations_cancer_level0.append(corrected_coords)
+                    else:
+                        annotations_not_cancer_level0.append(corrected_coords)
+
+                except Exception as e:
+                    # Se a criação do polígono falhar mesmo antes da verificação, ignore-o
+                    print(f"Warning: Could not create polygon from annotation in {os.path.basename(path_Annotation)}. Skipping. Error: {e}", file=sys.stderr)
+                    continue
+                # =================== FIM DA NOVA LÓGICA DE CORREÇÃO ===================
         
         # --- A LÓGICA A SEGUIR PERMANECE A MESMA DO FRAMEWORK ORIGINAL ---
         # Ela é robusta o suficiente para funcionar com as listas de polígonos que acabamos de gerar.
