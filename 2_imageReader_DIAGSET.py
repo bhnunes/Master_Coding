@@ -3,39 +3,28 @@ import cv2
 import os
 from PIL import Image
 from shapely.geometry import Polygon, Point, MultiPolygon
+from shapely.ops import unary_union # Importação necessária
 from shapely.prepared import prep
 from datetime import datetime
 from multiprocessing import Pool
 import random
 import argparse
-from dotenv import load_dotenv
 import json
 import warnings
 import xml.etree.ElementTree as ET
 import sys
 
-load_dotenv(override=True)
-
 # --- Configuration from .env ---
-WINDOW_SIZE = int(os.getenv('WINDOW_SIZE', 224))
-STRIDE = int(os.getenv('STRIDE', WINDOW_SIZE // 2))
-MATCH_PERCENTAGE = float(os.getenv('MATCH_PERCENTAGE', 0.9))
-TISSUE_PERCENTAGE = float(os.getenv('TISSUE_PERCENTAGE', 0.9))
-OPENSLIDE_PATH = os.getenv('OPENSLIDE_PATH')
-TARGET_LEVEL = int(os.getenv('TARGET_LEVEL', 0))
+WINDOW_SIZE = int(224)
+STRIDE = int(WINDOW_SIZE // 2)
+MATCH_PERCENTAGE = float(0.9)
+TISSUE_PERCENTAGE = float(0.3)
+#OPENSLIDE_PATH = os.getenv('OPENSLIDE_PATH')
+TARGET_LEVEL = int(0)
 NUM_WORKERS = os.cpu_count()
 
-# --- OpenSlide Initialization ---
-try:
-    if hasattr(os, 'add_dll_directory') and OPENSLIDE_PATH and os.path.isdir(OPENSLIDE_PATH):
-        with os.add_dll_directory(OPENSLIDE_PATH):
-            import openslide
-    else:
-        import openslide
-except ImportError as e:
-    print(f"Error importing OpenSlide: {e}", file=sys.stderr)
-    print("Ensure OpenSlide C library is installed and OPENSLIDE_PATH is correctly set in .env if on Windows.", file=sys.stderr)
-    exit(1)
+import openslide
+
 from openslide import OpenSlide
 
 # --- Constants ---
@@ -183,159 +172,149 @@ def process_window(args):
         error_message = f"Error processing window at ({x},{y}): {e.__class__.__name__}: {e}"
         return False, error_message
 
-# --- Main Processing Function ---
+# --- Função Principal de Processamento (com a lógica revisada) ---
 def extract_patches_for_slide(path_Image, target_level, window_size, stride,
                              tissue_percentage_req, match_percentage_req,
                              path_cancer_folder, path_not_cancer_folder,
                              path_cancer_mask_folder, path_not_cancer_mask_folder,
                              cancer_color, not_cancer_color, patient):
-    """
-    MODIFICADO: Carrega anotações .ndpa, converte coordenadas de nm para pixels,
-    classifica polígonos com base no <title> e então executa o pipeline de patching.
-    """
     slide = None
-    annotations_cancer_level0 = []
-    annotations_not_cancer_level0 = []
     
-    # MODIFICAÇÃO: Define as labels de câncer para o DiagSet-A
+    # Define as listas de permissão para os títulos das anotações
     cancer_labels = {'R1', 'R2', 'R3', 'R4', 'R5'}
+    non_cancer_labels = {'BG', 'T', 'N', 'A'}
+    
+    raw_cancer_polygons = []
+    raw_non_cancer_polygons = []
 
     try:
-        # MODIFICAÇÃO: O caminho da anotação agora é .ndpi.ndpa
         path_Annotation = path_Image + '.ndpa'
-        path_Annotation = path_Annotation.replace('/IMAGES/', '/ANNOTATIONS/')
         if not os.path.exists(path_Annotation):
              raise FileNotFoundError(f"Annotation file not found: {path_Annotation}")
 
         slide = OpenSlide(path_Image)
+        # --- Lógica de conversão de coordenadas (sem alterações) ---
         target_width, target_height = slide.level_dimensions[target_level]
-
-        # MODIFICAÇÃO CRÍTICA: Obter metadados para conversão de coordenadas
-        # OpenSlide armazena o offset em nanômetros.
         try:
             offset_x_nm = int(slide.properties.get('hamamatsu.XOffsetFromSlideCentre'))
             offset_y_nm = int(slide.properties.get('hamamatsu.YOffsetFromSlideCentre'))
         except (TypeError, ValueError):
-            raise ValueError("Could not read Hamamatsu offset properties from .ndpi file.")
-
-        # OpenSlide armazena Microns Per Pixel (MPP). Precisamos de nanômetros por pixel.
+            raise ValueError("Could not read Hamamatsu offset properties.")
         mpp_x = float(slide.properties.get(openslide.PROPERTY_NAME_MPP_X))
         mpp_y = float(slide.properties.get(openslide.PROPERTY_NAME_MPP_Y))
         nm_per_pixel_x = mpp_x * 1000
         nm_per_pixel_y = mpp_y * 1000
-
-        # As coordenadas no .ndpa são relativas ao centro, enquanto em OpenSlide são relativas ao canto superior esquerdo.
-        # A conversão é: pixel = (coord_nm - offset_centro_nm) / nm_por_pixel + (dimensão_total_pixels / 2)
         slide_width_level0, slide_height_level0 = slide.level_dimensions[0]
         
-        # --- MODIFICAÇÃO: Parsing da estrutura XML do .ndpa ---
+        # --- Parsing do XML e coleta de polígonos brutos ---
         annotations_tree = ET.parse(path_Annotation)
         root = annotations_tree.getroot()
-        all_polygons_level0 = []
 
         for view in root.findall('ndpviewstate'):
             title_element = view.find('title')
-            if title_element is None:
-                continue
+            # Validação da label (título)
+            if title_element is None or title_element.text is None: continue
+            label = title_element.text.strip()
+            if not label: continue
             
-            # MODIFICAÇÃO: Lógica de Classificação para DiagSet-A baseada no <title>
-            label = title_element.text
             is_cancer = label in cancer_labels
+            is_non_cancer = label in non_cancer_labels
             
-            # Encontra a anotação dentro do ndpviewstate
+            if not is_cancer and not is_non_cancer: continue
+            
             annotation = view.find('annotation')
-            if annotation is None:
-                continue
-
+            if annotation is None: continue
             pointlist = annotation.find('pointlist')
-            if pointlist is None:
-                continue
+            if pointlist is None: continue
 
             temp_poly_level0 = []
             for point in pointlist.findall('point'):
                 try:
-                    x_nm = float(point.find('x').text)
-                    y_nm = float(point.find('y').text)
-
-                    # MODIFICAÇÃO CRÍTICA: Conversão de Coordenadas (nm para pixels no nível 0)
+                    x_nm = float(point.find('x').text); y_nm = float(point.find('y').text)
                     x_pixel = ((x_nm - offset_x_nm) / nm_per_pixel_x) + (slide_width_level0 / 2)
                     y_pixel = ((y_nm - offset_y_nm) / nm_per_pixel_y) + (slide_height_level0 / 2)
-                    
                     temp_poly_level0.append((x_pixel, y_pixel))
-                except (ValueError, TypeError, AttributeError):
-                    continue
+                except (ValueError, TypeError, AttributeError): continue
             
             if len(temp_poly_level0) >= 3:
-                # =================== NOVA LÓGICA DE CORREÇÃO AQUI ===================
                 try:
                     polygon = Polygon(temp_poly_level0)
-                    # Se o polígono não for válido, tente corrigi-lo
-                    if not polygon.is_valid:
-                        polygon = polygon.buffer(0)
-                    
-                    # Se após a correção ele se tornou inválido, vazio ou não é mais um polígono, descarte-o
-                    if not polygon.is_valid or polygon.is_empty or polygon.geom_type != 'Polygon':
-                        print(f"Warning: Skipping invalid or empty geometry in {os.path.basename(path_Annotation)} after buffer(0) fix.", file=sys.stderr)
-                        continue # Pula para a próxima anotação
+                    if not polygon.is_valid: polygon = polygon.buffer(0)
+                    if not polygon.is_valid or polygon.is_empty: continue
+                    if is_cancer: raw_cancer_polygons.append(polygon)
+                    else: raw_non_cancer_polygons.append(polygon)
+                except Exception: continue
 
-                    # Extrai as coordenadas do polígono corrigido
-                    corrected_coords = list(polygon.exterior.coords)
-
-                    all_polygons_level0.append(corrected_coords)
-                    if is_cancer:
-                        annotations_cancer_level0.append(corrected_coords)
-                    else:
-                        annotations_not_cancer_level0.append(corrected_coords)
-
-                except Exception as e:
-                    # Se a criação do polígono falhar mesmo antes da verificação, ignore-o
-                    print(f"Warning: Could not create polygon from annotation in {os.path.basename(path_Annotation)}. Skipping. Error: {e}", file=sys.stderr)
-                    continue
-                # =================== FIM DA NOVA LÓGICA DE CORREÇÃO ===================
+        # =================== NOVA ETAPA: RESOLVER SOBREPOSIÇÕES AMBÍGUAS ===================
+        print(f"Found {len(raw_cancer_polygons)} raw cancer and {len(raw_non_cancer_polygons)} raw non-cancer annotations. Resolving ambiguous overlaps...")
         
-        # --- A LÓGICA A SEGUIR PERMANECE A MESMA DO FRAMEWORK ORIGINAL ---
-        # Ela é robusta o suficiente para funcionar com as listas de polígonos que acabamos de gerar.
+        # 1. Unifica todas as anotações de cada classe
+        cancer_area = unary_union(raw_cancer_polygons) if raw_cancer_polygons else Polygon()
+        non_cancer_area = unary_union(raw_non_cancer_polygons) if raw_non_cancer_polygons else Polygon()
+        
+        # 2. Identifica a zona de conflito (interseção)
+        if cancer_area.is_valid and non_cancer_area.is_valid:
+            ambiguous_area = cancer_area.intersection(non_cancer_area)
+        else:
+            ambiguous_area = Polygon() # Se alguma área for inválida, não há interseção a calcular
+
+        # 3. Subtrai a zona de conflito de AMBAS as áreas
+        clean_cancer_area = cancer_area.difference(ambiguous_area)
+        clean_non_cancer_area = non_cancer_area.difference(ambiguous_area)
+        
+        # 4. Converte as geometrias limpas de volta para listas de coordenadas
+        all_polygons_level0 = []
+        annotations_cancer_level0 = []
+        if not clean_cancer_area.is_empty:
+            geoms = clean_cancer_area.geoms if clean_cancer_area.geom_type == 'MultiPolygon' else [clean_cancer_area]
+            for p in geoms:
+                if p.geom_type == 'Polygon':
+                    coords = list(p.exterior.coords)
+                    annotations_cancer_level0.append(coords)
+                    all_polygons_level0.append(coords)
+
+        annotations_not_cancer_level0 = []
+        if not clean_non_cancer_area.is_empty:
+            geoms = clean_non_cancer_area.geoms if clean_non_cancer_area.geom_type == 'MultiPolygon' else [clean_non_cancer_area]
+            for p in geoms:
+                if p.geom_type == 'Polygon':
+                    coords = list(p.exterior.coords)
+                    annotations_not_cancer_level0.append(coords)
+                    all_polygons_level0.append(coords)
+        
+        print(f"Overlap resolution complete. Processing with {len(annotations_cancer_level0)} cancer and {len(annotations_not_cancer_level0)} final clean regions.")
+        # =================================================================================
 
         if not all_polygons_level0:
-             print(f"Warning: No valid annotations found for slide {path_Image}.", file=sys.stderr)
-             slide.close()
-             return
+             print(f"Warning: No valid and non-overlapping annotations left to process for slide {path_Image}.", file=sys.stderr)
+             slide.close(); return
 
+        # --- O RESTANTE DO CÓDIGO PERMANECE IDÊNTICO, USANDO AS LISTAS LIMPAS ---
         print(f"Pre-filtering candidate windows for {path_Image}...", file=sys.stderr)
         scale_factor = slide.level_downsamples[target_level]
         shapely_polygons_target_level = []
         for poly_level0 in all_polygons_level0:
             try:
                 scaled_coords = [(x / scale_factor, y / scale_factor) for x, y in poly_level0]
-                if len(scaled_coords) >= 3:
-                     shapely_polygons_target_level.append(Polygon(scaled_coords))
-            except Exception as e:
-                continue
-        if not shapely_polygons_target_level:
-            slide.close()
-            return
+                if len(scaled_coords) >= 3: shapely_polygons_target_level.append(Polygon(scaled_coords))
+            except Exception: continue
+        if not shapely_polygons_target_level: slide.close(); return
 
         combined_annotations = MultiPolygon(shapely_polygons_target_level)
         prepared_annotations = prep(combined_annotations)
         x_coords = np.arange(0, target_width - window_size + 1, stride)
         y_coords = np.arange(0, target_height - window_size + 1, stride)
-        filtered_windows_coords = []
-        for x in x_coords:
-            for y in y_coords:
-                if prepared_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW)):
-                    filtered_windows_coords.append((int(x), int(y)))
+        filtered_windows_coords = [(int(x), int(y)) for x in x_coords for y in y_coords if prepared_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW))]
         
         num_candidates = len(filtered_windows_coords)
-        if num_candidates == 0:
-            slide.close()
-            return
+        if num_candidates == 0: slide.close(); return
         
         args_list = [(path_Image, target_level, window_size, stride,
                       tissue_percentage_req, match_percentage_req,
                       path_cancer_folder, path_not_cancer_folder,
                       path_cancer_mask_folder, path_not_cancer_mask_folder,
                       patient, x, y,
-                      annotations_cancer_level0, annotations_not_cancer_level0)
+                      annotations_cancer_level0, annotations_not_cancer_level0) # Passando as listas limpas
                      for x, y in filtered_windows_coords]
 
         print(f"Processing {num_candidates} filtered windows for {path_Image} using {NUM_WORKERS} workers...", file=sys.stderr)
@@ -343,9 +322,7 @@ def extract_patches_for_slide(path_Image, target_level, window_size, stride,
             results = pool.map(process_window, args_list)
 
         errors = [msg for success, msg in results if not success]
-        if errors:
-            error_summary = f"Errors occurred during parallel processing for {path_Image}: " + "; ".join(set(errors))
-            raise Exception(error_summary)
+        if errors: raise Exception(f"Errors during parallel processing: {'; '.join(set(errors))}")
 
         print(f"Finished processing {path_Image}.", file=sys.stderr)
     except Exception as e:
@@ -353,8 +330,7 @@ def extract_patches_for_slide(path_Image, target_level, window_size, stride,
     finally:
         if slide:
             try: slide.close()
-            except Exception as close_exc: pass
-
+            except Exception: pass
 # --- Main Execution Block (sem alterações) ---
 if __name__ == '__main__':
     warnings.filterwarnings("ignore", category=UserWarning, module='PIL')

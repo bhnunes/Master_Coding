@@ -467,10 +467,10 @@ def augment_and_balance_train_set(fold_output_dir, num_workers=None):
 # --- 5. Main Execution ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Desktop\Base_de_dados\ABLATION\MATCH_PERCENTAGE_VAR\ADJUSTED_SAMPLES_60_MATCH'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\ABLATION\MATCH_PERCENTAGE_VAR\ADJUSTED_SAMPLES_60_MATCH\cross_val_splits_balanced_geometric_aug'
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\ABLATION\ADJUSTED_ENTROPY'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\ABLATION\ADJUSTED_ENTROPY\cross_val_splits_balanced_geometric_aug'
     N_SPLITS = 5
-    RANDOM_STATE = 42
+    RANDOM_STATE = 45
     # Adjust workers based on CPU capability; augmentation is CPU-bound
     NUM_WORKERS = max(1, (os.cpu_count() or 1) - 1) # Leave one core free
 

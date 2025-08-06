@@ -1,20 +1,19 @@
 import numpy as np
 import cv2
 import os
-import random
-from PIL import Image, UnidentifiedImageError
+import shutil
+from collections import defaultdict
 from joblib import Parallel, delayed
 import logging
-import re  # For parsing patient IDs
-import shutil # For copying files
-from collections import defaultdict # For grouping files by patient
-import sys # For printing to stderr
+import re
+import sys
+from PIL import Image, UnidentifiedImageError
 
 
 # --- Configuration ---
 # Base directories (Adjust as needed)
-INPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\ABLATION\MATCH_PERCENTAGE_VAR\SAMPLES_100_MATCH"
-OUTPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\ABLATION\MATCH_PERCENTAGE_VAR\ADJUSTED_SAMPLES_100_MATCH"
+INPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER"
+OUTPUT_BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\ABLATION\ADJUSTED_ENTROPY"
 
 # Subdirectories for data and templates
 CANCER_INPUT_DIR = os.path.join(INPUT_BASE_DIR, "CANCER")
@@ -36,87 +35,110 @@ logging.basicConfig(
 
 # --- Functions ---
 
-def create_template_directory(source_dirs, template_dir):
+# =================== NOVA FUNÇÃO AUXILIAR ===================
+def calculate_image_entropy(image_path):
     """
-    Creates the template directory by selecting one random image per patient
-    from the combined source directories.
+    Calcula a entropia de Shannon para um dado arquivo de imagem.
+    Uma entropia mais alta indica mais 'informação' ou 'complexidade' na imagem.
 
     Args:
-        source_dirs (list): List of paths to source directories (e.g., [CANCER_DIR, NOT_CANCER_DIR]).
-        template_dir (str): Path to the target template directory.
+        image_path (str): O caminho para o arquivo de imagem.
+
+    Returns:
+        float: O valor da entropia, ou 0.0 se a imagem não puder ser lida.
+    """
+    try:
+        # Carrega a imagem em escala de cinza, que é suficiente para a entropia
+        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            # Ocorreu um erro ao carregar a imagem
+            return 0.0
+
+        # Calcula o histograma
+        hist = cv2.calcHist([img], [0], None, [256], [0, 256])
+        if hist.sum() == 0:
+            return 0.0
+            
+        # Normaliza o histograma para obter probabilidades
+        prob_dist = hist / hist.sum()
+        
+        # Calcula a entropia usando a fórmula de Shannon
+        # Filtra probabilidades nulas para evitar erros de log(0)
+        entropy = -np.sum(prob_dist[prob_dist > 0] * np.log2(prob_dist[prob_dist > 0]))
+        
+        return entropy
+    except Exception as e:
+        # Registra um aviso se uma imagem individual falhar
+        logging.warning(f"Could not calculate entropy for {image_path}: {e}")
+        return 0.0
+# =============================================================
+
+def create_template_directory(source_dirs, template_dir):
+    """
+    MODIFICADO: Cria o diretório de templates selecionando a imagem de MAIOR ENTROPIA
+    por paciente das pastas de origem combinadas.
     """
     print(f"Creating template directory: {template_dir}")
     logging.info(f"Starting template directory creation. Target: {template_dir}")
 
     patient_files = defaultdict(list)
-    patient_id_pattern = re.compile(r"PATIENT_(\d+)_") # Regex to find PATIENT_ID_
+    patient_id_pattern = re.compile(r"PATIENT_(\d+)_")
 
-    # 1. Gather all image files grouped by patient ID
     print("Scanning source directories for patient images...")
     for source_dir in source_dirs:
         if not os.path.isdir(source_dir):
             print(f"Warning: Source directory not found: {source_dir}. Skipping.", file=sys.stderr)
-            logging.warning(f"Source directory not found during template creation: {source_dir}")
             continue
-
         print(f"  Scanning: {source_dir}")
         for filename in os.listdir(source_dir):
             if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 match = patient_id_pattern.search(filename)
                 if match:
                     patient_id = match.group(1)
-                    full_path = os.path.join(source_dir, filename)
-                    patient_files[patient_id].append(full_path)
-                # else: Optional: log files that don't match the pattern
+                    patient_files[patient_id].append(os.path.join(source_dir, filename))
 
     if not patient_files:
-        message = "No patient images found matching the pattern in source directories. Cannot create templates."
-        print(f"Error: {message}", file=sys.stderr)
-        logging.error(message)
-        raise ValueError(message)
+        raise ValueError("No patient images found. Cannot create templates.")
 
     print(f"Found images for {len(patient_files)} unique patients.")
 
-    # 2. Clear existing template directory (optional, but recommended for consistency)
     if os.path.exists(template_dir):
         print(f"Clearing existing template directory: {template_dir}")
-        try:
-            shutil.rmtree(template_dir)
-        except OSError as e:
-            message = f"Error clearing existing template directory: {e}. Check permissions or if files are in use."
-            print(f"Error: {message}", file=sys.stderr)
-            logging.error(message)
-            raise OSError(message)
+        shutil.rmtree(template_dir)
+    os.makedirs(template_dir)
 
-    # 3. Create the template directory
-    try:
-        os.makedirs(template_dir)
-    except OSError as e:
-         message = f"Error creating template directory: {e}"
-         print(f"Error: {message}", file=sys.stderr)
-         logging.error(message)
-         raise OSError(message)
-
-
-    # 4. Select one random image per patient and copy to template directory
-    print("Selecting and copying one random image per patient...")
+    print("Selecting template with max entropy for each patient and copying...")
     templates_copied_count = 0
+    
+    # =================== LÓGICA DE SELEÇÃO REATORADA ===================
     for patient_id, file_list in patient_files.items():
-        if file_list:
-            selected_file = random.choice(file_list)
+        if not file_list:
+            continue
+
+        best_file = None
+        max_entropy = -1.0 # Inicia com um valor negativo
+
+        # Itera por todos os arquivos do paciente para encontrar o de maior entropia
+        for file_path in file_list:
+            entropy = calculate_image_entropy(file_path)
+            if entropy > max_entropy:
+                max_entropy = entropy
+                best_file = file_path
+        
+        # Copia o melhor arquivo encontrado para o diretório de templates
+        if best_file:
             try:
-                # Copy file, preserving metadata (like modification time)
-                shutil.copy2(selected_file, template_dir)
+                shutil.copy2(best_file, template_dir)
                 templates_copied_count += 1
+                # Log informativo opcional
+                # print(f"  Patient {patient_id}: Selected '{os.path.basename(best_file)}' (Entropy: {max_entropy:.2f})")
             except Exception as e:
-                print(f"Warning: Could not copy file {selected_file} for patient {patient_id}: {e}", file=sys.stderr)
-                logging.warning(f"Could not copy template file {selected_file} for patient {patient_id}: {e}")
+                print(f"Warning: Could not copy file {best_file} for patient {patient_id}: {e}", file=sys.stderr)
+                logging.warning(f"Could not copy template file {best_file} for patient {patient_id}: {e}")
+    # =================================================================
 
     if templates_copied_count == 0:
-         message = "Failed to copy any template files. Please check permissions and file paths."
-         print(f"Error: {message}", file=sys.stderr)
-         logging.error(message)
-         raise RuntimeError(message)
+         raise RuntimeError("Failed to copy any template files.")
 
     print(f"Successfully copied {templates_copied_count} template images (one per patient) to {template_dir}")
     logging.info(f"Successfully copied {templates_copied_count} template images.")

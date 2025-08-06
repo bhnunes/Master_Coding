@@ -1,5 +1,4 @@
 import pymysql
-from dotenv import load_dotenv
 import os
 import re
 import subprocess
@@ -7,6 +6,8 @@ import time
 import json
 from datetime import datetime
 import sys
+import argparse
+import shutil
 
 
 def open_conn():
@@ -14,13 +15,13 @@ def open_conn():
         charset="utf8mb4",
         connect_timeout=30,
         cursorclass=pymysql.cursors.DictCursor,
-        db=os.getenv('MYSQL_DB'),
-        host=os.getenv('MYSQL_HOST'),
-        password=os.getenv('MYSQL_PASSWORD'),
-        read_timeout=30,
-        port=3306,
-        user=os.getenv('MYSQL_USER'),
-        write_timeout=30,
+        db="defaultdb",
+        host="mysql-1ced8c6-bruno-bc2b.b.aivencloud.com",
+        password="AVNS_0fHWcE7eJC6LeXyJFHB",
+        read_timeout=60,
+        port=11025,
+        user="avnadmin",
+        write_timeout=60,
     )
     return conn
 
@@ -176,51 +177,119 @@ def mainProcess():
         print('New images added to the database. Update the colors and re-run the process')
         sys.exit(0)
     else:
+        # --- NOVOS CAMINHOS LOCAIS (TEMPORÁRIOS) ---
+        LOCAL_WSI_DIR = '/content/temp_wsi'
+        LOCAL_PATCHES_CANCER_DIR = '/content/temp_patches/cancer'
+        LOCAL_MASKS_CANCER_DIR = '/content/temp_patches/cancer_mask'
+        LOCAL_PATCHES_NOTCANCER_DIR = '/content/temp_patches/not_cancer'
+        LOCAL_MASKS_NOTCANCER_DIR = '/content/temp_patches/not_cancer_mask'
+        
+        # Cria os diretórios locais uma vez
+        os.makedirs(LOCAL_WSI_DIR, exist_ok=True)
+        os.makedirs(LOCAL_PATCHES_CANCER_DIR, exist_ok=True)
+        os.makedirs(LOCAL_MASKS_CANCER_DIR, exist_ok=True)
+        os.makedirs(LOCAL_PATCHES_NOTCANCER_DIR, exist_ok=True)
+        os.makedirs(LOCAL_MASKS_NOTCANCER_DIR, exist_ok=True)
+
         stop=False
         totalCases=len(getTotalCases())
         while stop==False:
             data=getCaseToProcess()
             if len(data)==0:
                 stop=True
-            else:
-                id_cur=data[0]['ID']
-                path_Image_current=data[0]['FILEPATH']
-                path_cancer_folder_current=PATH_CANCER_FOLDER
-                path_not_cancer_folder_current=PATH_NOT_CANCER_FOLDER
-                path_cancer_mask_folder_current = PATH_CANCER_MASK_FOLDER  # Use separate mask folders
-                path_not_cancer_mask_folder_current = PATH_NOT_CANCER_MASK_FOLDER
-                cancer_color_current=data[0]['CANCER_COLOR']
-                not_cancer_color_current=data[0]['NOT_CANCER_COLOR']
-                patient_current=data[0]['PATIENT']
+                continue
+
+            # Obtém os caminhos do Google Drive a partir do banco de dados
+            id_cur=data[0]['ID']
+            drive_wsi_path = data[0]['FILEPATH']
+            
+            # Paths permanentes no Drive para onde os patches serão movidos
+            drive_cancer_patch_path = PATH_CANCER_FOLDER
+            drive_not_cancer_patch_path = PATH_NOT_CANCER_FOLDER
+            drive_cancer_mask_path = PATH_CANCER_MASK_FOLDER
+            drive_not_cancer_mask_path = PATH_NOT_CANCER_MASK_FOLDER
+            
+            # Parâmetros
+            cancer_color_current=data[0]['CANCER_COLOR']
+            not_cancer_color_current=data[0]['NOT_CANCER_COLOR']
+            patient_current=data[0]['PATIENT']
+
+            local_wsi_filepath = '' # Para uso no bloco finally
+            
+            try:
+                # --- ETAPA 1: COPIAR ARQUIVOS PARA O AMBIENTE LOCAL ---
+                print(f"Copying {os.path.basename(drive_wsi_path)} to local runtime...")
+                local_wsi_filepath = os.path.join(LOCAL_WSI_DIR, os.path.basename(drive_wsi_path))
+                shutil.copy(drive_wsi_path, local_wsi_filepath)
+
+                drive_ndpa_path = drive_wsi_path + '.ndpa'
+                drive_ndpa_path = drive_ndpa_path.replace('/IMAGES/', '/ANNOTATIONS/')
+                local_ndpa_filepath = local_wsi_filepath + '.ndpa'
+                if os.path.exists(drive_ndpa_path):
+                    shutil.copy(drive_ndpa_path, local_ndpa_filepath)
+                
+                print("Copy complete. Starting processing...")
                 start_time = time.time()
-
-                try:
-                    status, comments = run_image_reader_script( # Pass mask folders
-                        path_Image=path_Image_current,
-                        path_cancer_folder=path_cancer_folder_current,
-                        path_not_cancer_folder=path_not_cancer_folder_current,
-                        path_cancer_mask_folder=path_cancer_mask_folder_current,
-                        path_not_cancer_mask_folder=path_not_cancer_mask_folder_current,
-                        cancer_color=cancer_color_current,
-                        not_cancer_color=not_cancer_color_current,
-                        patient=patient_current
-                    )
-                except RuntimeError as e:
-                    status = 'FAILED'
-                    updateCase(id_cur, 0, 0, 0, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
-                    continue 
-
+                
+                # --- ETAPA 2: EXECUTAR O PROCESSAMENTO USANDO OS CAMINHOS LOCAIS ---
+                status, comments = run_image_reader_script(
+                    path_Image=local_wsi_filepath, # <<< USA CAMINHO LOCAL
+                    path_cancer_folder=LOCAL_PATCHES_CANCER_DIR, # <<< USA CAMINHO LOCAL
+                    path_not_cancer_folder=LOCAL_PATCHES_NOTCANCER_DIR, # <<< USA CAMINHO LOCAL
+                    path_cancer_mask_folder=LOCAL_MASKS_CANCER_DIR, # <<< USA CAMINHO LOCAL
+                    path_not_cancer_mask_folder=LOCAL_MASKS_NOTCANCER_DIR, # <<< USA CAMINHO LOCAL
+                    cancer_color=cancer_color_current,
+                    not_cancer_color=not_cancer_color_current,
+                    patient=patient_current
+                )
 
                 end_time = time.time()
                 execution_time = (end_time - start_time)/60
-                count_cancer=countTotal(start_time, end_time,PATH_CANCER_FOLDER )
-                count_not_cancer=countTotal(start_time, end_time,PATH_NOT_CANCER_FOLDER)
+                
+                # Contagem dos patches gerados LOCALMENTE
+                count_cancer = len(os.listdir(LOCAL_PATCHES_CANCER_DIR))
+                count_not_cancer = len(os.listdir(LOCAL_PATCHES_NOTCANCER_DIR))
+                
+                # Atualiza o banco de dados com o resultado
                 updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-240:]),WINDOW_SIZE,STRIDE,TISSUE_PERCENTAGE,MATCH_PERCENTAGE)
+                
+                # --- ETAPA 3: MOVER OS PATCHES GERADOS DE VOLTA PARA O GOOGLE DRIVE ---
+                print(f"Moving {count_cancer} cancer patches and {count_not_cancer} non-cancer patches to Google Drive...")
+                for f in os.listdir(LOCAL_PATCHES_CANCER_DIR):
+                    shutil.move(os.path.join(LOCAL_PATCHES_CANCER_DIR, f), os.path.join(drive_cancer_patch_path, f))
+                for f in os.listdir(LOCAL_PATCHES_NOTCANCER_DIR):
+                    shutil.move(os.path.join(LOCAL_PATCHES_NOTCANCER_DIR, f), os.path.join(drive_not_cancer_patch_path, f))
+                for f in os.listdir(LOCAL_MASKS_CANCER_DIR):
+                    shutil.move(os.path.join(LOCAL_MASKS_CANCER_DIR, f), os.path.join(drive_cancer_mask_path, f))
+                for f in os.listdir(LOCAL_MASKS_NOTCANCER_DIR):
+                    shutil.move(os.path.join(LOCAL_MASKS_NOTCANCER_DIR, f), os.path.join(drive_not_cancer_mask_path, f))
+
                 totalCases=totalCases-1
-                print("There are "+str(totalCases)+" images to be processed yet")
+                print(f"Move complete. {totalCases} images remaining.")
+
+            except Exception as e:
+                # Se ocorrer um erro, registra e continua para a próxima imagem
+                status = 'FAILED_IN_PIPELINE'
+                comments = f"Error in mainProcess loop: {e}"
+                updateCase(id_cur, 0, 0, 0, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
+                continue
+            
+            finally:
+                # --- ETAPA 4: LIMPEZA DO AMBIENTE LOCAL (CRUCIAL!) ---
+                # Garante que os arquivos locais sejam limpos, mesmo se ocorrer um erro.
+                print("Cleaning up local runtime environment...")
+                if os.path.exists(local_wsi_filepath):
+                    os.remove(local_wsi_filepath)
+                if os.path.exists(local_wsi_filepath + '.ndpa'):
+                    os.remove(local_wsi_filepath + '.ndpa')
+                
+                # Esvazia os diretórios de patches para a próxima iteração
+                for d in [LOCAL_PATCHES_CANCER_DIR, LOCAL_MASKS_CANCER_DIR, LOCAL_PATCHES_NOTCANCER_DIR, LOCAL_MASKS_NOTCANCER_DIR]:
+                    for f in os.listdir(d):
+                        os.remove(os.path.join(d, f))
+                print("Cleanup complete.")
 
 if __name__ == '__main__':
-    load_dotenv(override=True)
     global IMAGESPATH
     global PATH_CANCER_FOLDER
     global PATH_NOT_CANCER_FOLDER
@@ -234,17 +303,22 @@ if __name__ == '__main__':
     global IMAGE_READER_PATH
     global PYTHON_PATH
 
-    IMAGESPATH = os.getenv('IMAGESPATH')
-    PATH_CANCER_FOLDER = os.getenv('PATH_CANCER_FOLDER')
-    PATH_NOT_CANCER_FOLDER = os.getenv('PATH_NOT_CANCER_FOLDER')
-    PATH_CANCER_MASK_FOLDER = os.getenv('PATH_CANCER_MASK_FOLDER')  # From .env
-    PATH_NOT_CANCER_MASK_FOLDER = os.getenv('PATH_NOT_CANCER_MASK_FOLDER')  # From .env
-    WINDOW_SIZE = os.getenv('WINDOW_SIZE')
-    STRIDE = os.getenv('STRIDE')
-    MATCH_PERCENTAGE = str(os.getenv('MATCH_PERCENTAGE'))
-    TISSUE_PERCENTAGE = str(os.getenv('TISSUE_PERCENTAGE'))
-    IMAGE_READER_PATH = str(os.getenv('IMAGE_READER_PATH'))
-    PYTHON_PATH = str(os.getenv('PYTHON_PATH'))
-    LOADCASES = False # True to add cases
+    parser = argparse.ArgumentParser(description='Extract patches and masks from WSI based on annotations.')
+    parser.add_argument('--loadcases', action='store_true', help='Load cases')
+
+    args = parser.parse_args()
+
+    IMAGESPATH = "/content/drive/MyDrive/DOWNLOADS_DIAGSET/IMAGES"
+    PATH_CANCER_FOLDER = "/content/drive/MyDrive/DOWNLOADS_DIAGSET/PATCHES/CANCER"
+    PATH_NOT_CANCER_FOLDER = "/content/drive/MyDrive/DOWNLOADS_DIAGSET/PATCHES/NOT_CANCER"
+    PATH_CANCER_MASK_FOLDER = "/content/drive/MyDrive/DOWNLOADS_DIAGSET/PATCHES/CANCER_MASK"
+    PATH_NOT_CANCER_MASK_FOLDER = "/content/drive/MyDrive/DOWNLOADS_DIAGSET/PATCHES/NOT_CANCER_MASK"
+    WINDOW_SIZE = "224"
+    STRIDE = "112"
+    MATCH_PERCENTAGE = "0.9"
+    TISSUE_PERCENTAGE = "0.3"
+    IMAGE_READER_PATH = "/content/2_imageReader.py"
+    PYTHON_PATH = "/usr/bin/python3"
+    LOADCASES = args.loadcases
 
     mainProcess()
