@@ -1,0 +1,11 @@
+:: 1) Make a temporary empty folder
+mkdir C:\_empty
+
+:: 2) Mirror it over the target (deletes everything inside target)
+robocopy C:\_empty "D:\hugefolder" /MIR /MT:32 /R:0 /W:0
+
+:: 3) Remove the (now empty) target folder itself
+rmdir /s /q "D:\hugefolder"
+
+:: 4) Clean up temp
+rmdir C:\_empty

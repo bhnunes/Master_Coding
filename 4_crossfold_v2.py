@@ -291,10 +291,12 @@ print(f"Defined {len(INDIVIDUAL_TRANSFORMS)} individual augmentations for random
 for _, code in INDIVIDUAL_TRANSFORMS:
     print(f"  - {code}")
 
+# --- MODIFIED FUNCTION ---
 def augment_and_save(image_path, mask_path, output_image_dir, output_mask_dir, num_augmentations):
     """
-    Applies ONE randomly selected augmentation N times to a single image/mask pair
-    and saves using filenames indicating the single applied transform.
+    Applies transformations from a predefined list in a CYCLIC (round-robin) manner N times
+    to a single image/mask pair and saves using filenames indicating the applied transform.
+    This approach is fully deterministic and ensures a balanced distribution of augmentations.
     """
     try:
         # Load original image and mask ONCE using OpenCV
@@ -307,37 +309,41 @@ def augment_and_save(image_path, mask_path, output_image_dir, output_mask_dir, n
             raise IOError(f"Could not read mask file: {mask_path}")
 
         base_filename = os.path.splitext(os.path.basename(image_path))[0]
+        num_defined_transforms = len(INDIVIDUAL_TRANSFORMS)
 
-        # Generate N augmented versions, each with ONE random transform applied
+        # Generate N augmented versions using a cyclic approach
         for i in range(num_augmentations):
-            # *** Randomly select ONE transform for this iteration ***
-            chosen_transform, chosen_code = random.choice(INDIVIDUAL_TRANSFORMS)
+            # *** Select transform deterministically using the modulo operator ***
+            transform_index = i % num_defined_transforms
+            chosen_transform, chosen_code = INDIVIDUAL_TRANSFORMS[transform_index]
 
-            # Apply the single chosen transform
-            augmented = chosen_transform(image=image.copy(), mask=mask.copy()) # Apply to copies
+            # Apply the selected transform
+            # Using .copy() is crucial as some albumentations transforms can modify arrays in-place
+            augmented = chosen_transform(image=image.copy(), mask=mask.copy())
             augmented_img = augmented['image']
             augmented_mask = augmented['mask']
 
-            # Define output filenames indicating the SINGLE applied transform code
+            # Define output filenames indicating the applied transform code and iteration
             # Format: basename_aug_CODE_N.png
             output_image_filename = f"{base_filename}_aug_{chosen_code}_{i+1}.png"
-            output_mask_filename = f"{base_filename}_aug_{chosen_code}_{i+1}.png" # Use same name format
+            output_mask_filename = f"{base_filename}_aug_{chosen_code}_{i+1}.png"
 
-            # Save the result of this single transformation
+            # Save the result of this transformation
             img_save_path = os.path.join(output_image_dir, output_image_filename)
             mask_save_path = os.path.join(output_mask_dir, output_mask_filename)
 
+            # Use OpenCV to save, which is generally faster for numpy arrays
             cv2.imwrite(img_save_path, augmented_img)
-            # Ensure mask is saved correctly (consider checking dtype if issues arise)
             cv2.imwrite(mask_save_path, augmented_mask)
 
         return True, None # Indicate success for the original image pair
 
     except Exception as e:
-        # Capture more specific errors if possible
-        error_msg = f"Failed augmenting {os.path.basename(image_path)} (iter {i+1 if 'i' in locals() else 'N/A'}, transform {chosen_code if 'chosen_code' in locals() else 'N/A'}): {type(e).__name__}: {e}"
+        # Capture more specific errors
+        # 'i' and 'chosen_code' will be defined unless num_augmentations is 0
+        iteration_info = f"iter {i+1}, transform {chosen_code}" if 'i' in locals() and 'chosen_code' in locals() else "setup"
+        error_msg = f"Failed augmenting {os.path.basename(image_path)} ({iteration_info}): {type(e).__name__}: {e}"
         return False, error_msg # Indicate failure and provide message
-
 
 def augment_and_balance_train_set(fold_output_dir, num_workers=None):
     """Balances the training set by augmenting the minority class using single random transforms."""
@@ -466,8 +472,8 @@ def augment_and_balance_train_set(fold_output_dir, num_workers=None):
 # --- 5. Main Execution ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Downloads\unzipped_master\TIATOOLBOX_NORMALIZED\Ruifrok'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NORMALIZATION_SETS\RUIFROK\cross_val_splits_balanced_geometric_aug'
+    data_directory = r'D:\Usuario\Downloads\unzipped_master'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED\cross_val_splits_balanced_geometric_aug'
     N_SPLITS = 5
     RANDOM_STATE = 45
     # Adjust workers based on CPU capability; augmentation is CPU-bound

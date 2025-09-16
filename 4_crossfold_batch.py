@@ -462,12 +462,10 @@ def augment_and_balance_train_set(fold_output_dir, num_workers=None):
     print(f"    Final minority count after potential downsampling: {final_count_after_downsample} (Majority count: {n_majority})")
     return True
 
-
-# --- 5. Main Execution ---
-if __name__ == '__main__':
+def iterate(input):
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Downloads\unzipped_master\TIATOOLBOX_NORMALIZED\Ruifrok'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NORMALIZATION_SETS\RUIFROK\cross_val_splits_balanced_geometric_aug'
+    data_directory = f'D:\\Usuario\\Downloads\\unzipped_master\\TIATOOLBOX_NORMALIZED\\{input}'
+    output_base_dir = f'D:\\Usuario\\Desktop\\Base_de_dados\\NORMALIZATION_SETS\\{input}\\cross_val_splits_balanced_geometric_aug'
     N_SPLITS = 5
     RANDOM_STATE = 45
     # Adjust workers based on CPU capability; augmentation is CPU-bound
@@ -488,10 +486,10 @@ if __name__ == '__main__':
             print("Exiting.")
             exit(0)
     try:
-         os.makedirs(output_base_dir, exist_ok=True)
+        os.makedirs(output_base_dir, exist_ok=True)
     except OSError as e:
-         print(f"Error creating base output directory {output_base_dir}: {e}")
-         exit(1)
+        print(f"Error creating base output directory {output_base_dir}: {e}")
+        exit(1)
 
 
     # --- Load Data ---
@@ -513,7 +511,7 @@ if __name__ == '__main__':
     except ValueError as e:
         print(f"Error creating cross-validation splits: {e}")
         if "Cannot perform" in str(e) or "less than n_splits" in str(e) or "Minimum required" in str(e):
-             print(f"  Try reducing N_SPLITS (currently {N_SPLITS}) or ensure sufficient patients per class.")
+            print(f"  Try reducing N_SPLITS (currently {N_SPLITS}) or ensure sufficient patients per class.")
         exit(1)
     except Exception as e:
         print(f"An unexpected error occurred during cross-validation split creation: {e}")
@@ -561,25 +559,25 @@ if __name__ == '__main__':
             try:
                 copy_files_for_split(split_df_current, fold_output_dir, split_name)
             except Exception as e:
-                 print(f"  ERROR during file copying for {split_name} in Fold {fold_num}: {e}")
-                 fold_successful = False
-                 break # Stop processing this fold if copying fails
+                print(f"  ERROR during file copying for {split_name} in Fold {fold_num}: {e}")
+                fold_successful = False
+                break # Stop processing this fold if copying fails
 
         if not fold_successful:
-             all_folds_successful = False
-             print(f"--- Skipping further processing for Fold {fold_num} due to setup/copying errors. ---")
-             # Optional: Clean up partially created fold directory
-             # shutil.rmtree(fold_output_dir, ignore_errors=True)
-             continue # Move to the next fold
+            all_folds_successful = False
+            print(f"--- Skipping further processing for Fold {fold_num} due to setup/copying errors. ---")
+            # Optional: Clean up partially created fold directory
+            # shutil.rmtree(fold_output_dir, ignore_errors=True)
+            continue # Move to the next fold
 
         # --- Augment and Balance TRAINING Set ---
         print(f"\nFold {fold_num}: Augmenting and balancing training set...")
         try:
             balance_success = augment_and_balance_train_set(fold_output_dir, num_workers=NUM_WORKERS)
             if not balance_success:
-                 print(f"  Warning: Augmentation/Balancing function reported potential issues for Fold {fold_num}, but proceeding.")
-                 # Decide if this should stop the fold processing
-                 # fold_successful = False # Or just log it
+                print(f"  Warning: Augmentation/Balancing function reported potential issues for Fold {fold_num}, but proceeding.")
+                # Decide if this should stop the fold processing
+                # fold_successful = False # Or just log it
         except Exception as e:
             print(f"  FATAL ERROR during augmentation/balancing for Fold {fold_num}: {e}")
             import traceback
@@ -597,20 +595,20 @@ if __name__ == '__main__':
                         verification_passed = False
                         fold_successful = False # Mark fold as failed if verification fails
                 except Exception as e:
-                     print(f"  ERROR during verification for {split_name} in Fold {fold_num}: {e}")
-                     import traceback
-                     traceback.print_exc()
-                     verification_passed = False
-                     fold_successful = False # Treat verification error as fold failure
+                    print(f"  ERROR during verification for {split_name} in Fold {fold_num}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    verification_passed = False
+                    fold_successful = False # Treat verification error as fold failure
 
             if fold_successful and verification_passed:
-                 print(f"--- Fold {fold_num} completed successfully. ---")
+                print(f"--- Fold {fold_num} completed successfully. ---")
             else:
-                 all_folds_successful = False
-                 print(f"--- Fold {fold_num} completed with VERIFICATION ERRORS or previous errors. ---")
+                all_folds_successful = False
+                print(f"--- Fold {fold_num} completed with VERIFICATION ERRORS or previous errors. ---")
         else:
-             all_folds_successful = False
-             print(f"--- Fold {fold_num} failed before final verification stage. ---")
+            all_folds_successful = False
+            print(f"--- Fold {fold_num} failed before final verification stage. ---")
 
 
     # --- Final Summary ---
@@ -625,3 +623,12 @@ if __name__ == '__main__':
         print(f"Output directory (may contain partial or erroneous data): {output_base_dir}")
 
     print("--- Script Finished ---")
+
+# --- 5. Main Execution ---
+if __name__ == '__main__':
+    names=['Macenko', 'Reinhard', 'Vahadane', 'Ruifrok']
+    for name in names:
+        print(f"Processing dataset: {name}")
+        iterate(name)
+        print(f"Finished processing dataset: {name}\n")
+
