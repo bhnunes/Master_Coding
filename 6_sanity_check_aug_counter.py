@@ -160,7 +160,7 @@ def analyze_filenames_for_detailed_aug(folder_path, expected_aug_types, aug_mark
 
 # --- Configuration ---
 # <<< --- IMPORTANT: CHANGE THIS PATH --- >>>
-target_folder = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED\cross_val_splits_balanced_geometric_aug\fold_2\TRAIN\NOT_CANCER'
+target_folder = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED\cross_val_splits_balanced_geometric_aug\fold_1\TRAIN\NOT_CANCER'
 # <<< --- END OF PATH TO CHANGE --- >>>
 
 # Define the exact strings that identify augmentation types after "_aug_"

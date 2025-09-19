@@ -409,9 +409,9 @@ if __name__ == '__main__':
     # --- Configuration ---
     # This `data_directory` should point to the output of your normalization pipeline
     # e.g., r'D:\Usuario\Desktop\Base_de_dados\ABLATION\TIATOOLBOX_NORMALIZED\Ruifrok'
-    data_directory = r'D:\Usuario\Downloads\unzipped_master' # Example, adjust as needed
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED\cross_val_splits_balanced_geometric_aug' # Example, adjust as needed
-    N_SPLITS = 2
+    data_directory = r'D:\Usuario\Downloads\unzipped_master\TIATOOLBOX_NORMALIZED\Ruifrok' # Example, adjust as needed
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NORMALIZED\RUIFROK\cross_val_splits_balanced_geometric_aug' # Example, adjust as needed
+    N_SPLITS = 5
     RANDOM_STATE = 45 # This RANDOM_STATE affects cross-validation splits, not augmentation selection anymore.
     NUM_WORKERS = max(1, (os.cpu_count() or 1) - 1) # Adjust workers based on CPU capability; augmentation is CPU-bound
 
