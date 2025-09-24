@@ -117,7 +117,7 @@ def updateCase(id, counter_cancer, counter_not_cancer, execution_time, status, c
     finally:
         conn.close()
 
-def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_folder, path_cancer_mask_folder, path_not_cancer_mask_folder, cancer_color, not_cancer_color, patient, path_artifacts_geojson): # Added path_artifacts_geojson
+def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_folder, path_cancer_mask_folder, path_not_cancer_mask_folder, cancer_color, not_cancer_color, patient, path_artifacts_geojson=None):
     command = [
         PYTHON_PATH,
         IMAGE_READER_PATH,
@@ -128,35 +128,34 @@ def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_fold
         '--path_not_cancer_mask_folder', path_not_cancer_mask_folder,
         '--cancer_color', cancer_color,
         '--not_cancer_color', not_cancer_color,
-        '--patient', patient,
-        # Add the new argument to the command
-        '--path_artifacts_geojson', path_artifacts_geojson
+        '--patient', patient
     ]
 
-    # The rest of the function is unchanged
+    # **MODIFIED**: Conditionally add the artifact geojson path argument
+    if path_artifacts_geojson and os.path.exists(path_artifacts_geojson):
+        command.extend(['--path_artifacts_geojson', path_artifacts_geojson])
+
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Error running {IMAGE_READER_PATH}: {result.stderr}")
+
     output_json = result.stdout
     parsed_output = json.loads(output_json)
     status = parsed_output.get("status")
     comments = parsed_output.get("comments")
+
     return status, comments
 
 
 def count_png_files_in_range(start_time, end_time, folder_path):
-    # Convert timestamps to datetime objects
     start_datetime = datetime.fromtimestamp(int(start_time))
     end_datetime = datetime.fromtimestamp(int(end_time))
-
     png_count = 0
     for root, _, files in os.walk(folder_path):
         for file in files:
             if file.endswith('.png'):
                 file_path = os.path.join(root, file)
-                # Get the creation time of the file
                 creation_time = datetime.fromtimestamp(os.path.getctime(file_path))
-                # Check if the file was created within the specified range
                 if start_datetime <= creation_time <= end_datetime:
                     png_count += 1
     return png_count
@@ -164,87 +163,84 @@ def count_png_files_in_range(start_time, end_time, folder_path):
 
 def countTotal(start_time, end_time, folder):
     count = count_png_files_in_range(start_time, end_time, folder)
-    return count 
+    return count
 
 
 def mainProcess():
-    if LOADCASES==True:
+    if LOADCASES:
         AddNewCases()
         print('New images added to the database. Update the colors and re-run the process')
         sys.exit(0)
-    else:
-        stop=False
-        totalCases=len(getTotalCases())
-        while stop==False:
-            data=getCaseToProcess()
-            if len(data)==0:
-                stop=True
-            else:
-                id_cur=data[0]['ID']
-                path_Image_current=data[0]['FILEPATH']
-                path_cancer_folder_current=PATH_CANCER_FOLDER
-                path_not_cancer_folder_current=PATH_NOT_CANCER_FOLDER
-                path_cancer_mask_folder_current = PATH_CANCER_MASK_FOLDER  # Use separate mask folders
-                path_not_cancer_mask_folder_current = PATH_NOT_CANCER_MASK_FOLDER
-                cancer_color_current=data[0]['CANCER_COLOR']
-                not_cancer_color_current=data[0]['NOT_CANCER_COLOR']
-                patient_current=data[0]['PATIENT']
-                start_time = time.time()
 
-                path_artifacts_geojson_current = path_Image_current.replace('.svs', '.geojson')
+    stop = False
+    totalCases = len(getTotalCases())
+    while not stop:
+        data = getCaseToProcess()
+        if not data:
+            stop = True
+        else:
+            case_data = data[0]
+            id_cur = case_data['ID']
+            path_Image_current = case_data['FILEPATH']
+            patient_current = case_data['PATIENT']
+            cancer_color_current = case_data['CANCER_COLOR']
+            not_cancer_color_current = case_data['NOT_CANCER_COLOR']
+            start_time = time.time()
 
-                try:
-                    status, comments = run_image_reader_script( # Pass mask folders
-                        path_Image=path_Image_current,
-                        path_cancer_folder=path_cancer_folder_current,
-                        path_not_cancer_folder=path_not_cancer_folder_current,
-                        path_cancer_mask_folder=path_cancer_mask_folder_current,
-                        path_not_cancer_mask_folder=path_not_cancer_mask_folder_current,
-                        cancer_color=cancer_color_current,
-                        not_cancer_color=not_cancer_color_current,
-                        patient=patient_current,
-                        path_artifacts_geojson=path_artifacts_geojson_current
-                    )
-                except RuntimeError as e:
-                    status = 'FAILED'
-                    updateCase(id_cur, 0, 0, 0, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
-                    continue 
+            # **MODIFIED**: Logic to handle the artifact feature flag
+            path_artifacts_geojson_current = None
+            if USE_ADVANCED_ARTIFACT_FILTERING:
+                # Assumes geojson has the same base name as svs and is in the same directory
+                geojson_path = os.path.splitext(path_Image_current)[0] + '.geojson'
+                if os.path.exists(geojson_path):
+                    path_artifacts_geojson_current = geojson_path
+                else:
+                    print(f"Warning: Artifact filtering is ON, but GeoJSON not found for {path_Image_current}. Proceeding without artifact check for this slide.")
 
+            try:
+                status, comments = run_image_reader_script(
+                    path_Image=path_Image_current,
+                    path_cancer_folder=PATH_CANCER_FOLDER,
+                    path_not_cancer_folder=PATH_NOT_CANCER_FOLDER,
+                    path_cancer_mask_folder=PATH_CANCER_MASK_FOLDER,
+                    path_not_cancer_mask_folder=PATH_NOT_CANCER_MASK_FOLDER,
+                    cancer_color=cancer_color_current,
+                    not_cancer_color=not_cancer_color_current,
+                    patient=patient_current,
+                    path_artifacts_geojson=path_artifacts_geojson_current
+                )
+            except RuntimeError as e:
+                status = 'FAILED'
+                comments = str(e)
+                updateCase(id_cur, 0, 0, 0, status, comments[-240:], WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
+                continue
 
-                end_time = time.time()
-                execution_time = (end_time - start_time)/60
-                count_cancer=countTotal(start_time, end_time,PATH_CANCER_FOLDER )
-                count_not_cancer=countTotal(start_time, end_time,PATH_NOT_CANCER_FOLDER)
-                updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-240:]),WINDOW_SIZE,STRIDE,TISSUE_PERCENTAGE,MATCH_PERCENTAGE)
-                totalCases=totalCases-1
-                print("There are "+str(totalCases)+" images to be processed yet")
+            end_time = time.time()
+            execution_time = (end_time - start_time) / 60
+            count_cancer = countTotal(start_time, end_time, PATH_CANCER_FOLDER)
+            count_not_cancer = countTotal(start_time, end_time, PATH_NOT_CANCER_FOLDER)
+            updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
+            totalCases -= 1
+            print(f"There are {totalCases} images to be processed yet")
+
 
 if __name__ == '__main__':
     load_dotenv(override=True)
-    global IMAGESPATH
-    global PATH_CANCER_FOLDER
-    global PATH_NOT_CANCER_FOLDER
-    global PATH_CANCER_MASK_FOLDER  # Separate mask folders
-    global PATH_NOT_CANCER_MASK_FOLDER
-    global WINDOW_SIZE
-    global STRIDE
-    global MATCH_PERCENTAGE
-    global TISSUE_PERCENTAGE
-    global LOADCASES
-    global IMAGE_READER_PATH
-    global PYTHON_PATH
-
+    
     IMAGESPATH = os.getenv('IMAGESPATH')
     PATH_CANCER_FOLDER = os.getenv('PATH_CANCER_FOLDER')
     PATH_NOT_CANCER_FOLDER = os.getenv('PATH_NOT_CANCER_FOLDER')
-    PATH_CANCER_MASK_FOLDER = os.getenv('PATH_CANCER_MASK_FOLDER')  # From .env
-    PATH_NOT_CANCER_MASK_FOLDER = os.getenv('PATH_NOT_CANCER_MASK_FOLDER')  # From .env
+    PATH_CANCER_MASK_FOLDER = os.getenv('PATH_CANCER_MASK_FOLDER')
+    PATH_NOT_CANCER_MASK_FOLDER = os.getenv('PATH_NOT_CANCER_MASK_FOLDER')
     WINDOW_SIZE = os.getenv('WINDOW_SIZE')
     STRIDE = os.getenv('STRIDE')
     MATCH_PERCENTAGE = str(os.getenv('MATCH_PERCENTAGE'))
     TISSUE_PERCENTAGE = str(os.getenv('TISSUE_PERCENTAGE'))
     IMAGE_READER_PATH = str(os.getenv('IMAGE_READER_PATH'))
     PYTHON_PATH = str(os.getenv('PYTHON_PATH'))
-    LOADCASES = False # True to add cases
+    LOADCASES = os.getenv('LOADCASES', 'False').lower() in ('true', '1', 't')
 
+    # **NEW**: Read artifact filtering configuration from .env
+    USE_ADVANCED_ARTIFACT_FILTERING = os.getenv('USE_ADVANCED_ARTIFACT_FILTERING', 'False').lower() in ('true', '1', 't')
+    
     mainProcess()

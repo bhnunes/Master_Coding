@@ -1,0 +1,14 @@
+pymysql
+python-dotenv
+numpy
+opencv-python
+Pillow
+shapely
+openslide-python
+joblib
+tiatoolbox
+pandas
+scikit-learn
+tqdm
+albumentations
+pyyaml

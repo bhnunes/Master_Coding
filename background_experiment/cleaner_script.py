@@ -140,8 +140,8 @@ def filter_images(patches_dir, masks_dir, output_dir):
 
 if __name__ == "__main__":
     
-    PATCHES_DIR = r"D:\Usuario\Downloads\MASTER_SET_ZIP_5\TRAIN\CANCER"
-    MASKS_DIR = r"D:\Usuario\Downloads\MASTER_SET_ZIP_5\TRAIN\CANCER_MASK"
-    OUTPUT_DIR = r"D:\Usuario\Downloads\MASTER_SET_ZIP_5\TRAIN\REJECTED"
+    PATCHES_DIR = r"D:\Usuario\Downloads\unzipped_master\CANCER"
+    MASKS_DIR = r"D:\Usuario\Downloads\unzipped_master\CANCER_MASK"
+    OUTPUT_DIR = r"D:\Usuario\Downloads\unzipped_master\REJECTED"
 
     filter_images(PATCHES_DIR, MASKS_DIR, OUTPUT_DIR)

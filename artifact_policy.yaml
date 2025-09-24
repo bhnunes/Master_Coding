@@ -1,0 +1,12 @@
+# artifact_policy.yaml
+# Policy for rejecting patches based on artifact coverage.
+# If an artifact's area covers a fraction of the patch greater than the specified
+# threshold, the patch will be DROPPED.
+
+DROP_THRESH:
+  # GrandQC Classification Name: Threshold (a fraction from 0.0 to 1.0)
+  "Fold": 0.15
+  "Darkspot & Foreign Object": 0.15
+  "PenMarking": 0.12
+  "Edge & Air Bubble": 0.30
+  "OOF": 0.40
