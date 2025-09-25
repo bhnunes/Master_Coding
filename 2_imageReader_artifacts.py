@@ -66,6 +66,7 @@ HALF_WINDOW = WINDOW_SIZE // 2
 
 # --- Helper Functions ---
 def check_tissue_percentage_robust(patch_np, required_percentage):
+    # This function is unchanged
     if patch_np is None or patch_np.size == 0: return False
     patch_hsv = cv2.cvtColor(patch_np, cv2.COLOR_RGB2HSV)
     _, tissue_mask = cv2.threshold(patch_hsv[:, :, 1], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -74,6 +75,7 @@ def check_tissue_percentage_robust(patch_np, required_percentage):
     return (np.count_nonzero(tissue_mask) / PATCH_AREA) >= required_percentage
 
 def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
+    # This function is unchanged
     mask = np.zeros(mask_shape, dtype=np.uint8)
     patch_x_l0, patch_y_l0 = patch_coords[0] * scale_factor, patch_coords[1] * scale_factor
     win_poly_l0 = Polygon([(patch_x_l0, patch_y_l0), (patch_x_l0 + mask_shape[1]*scale_factor, patch_y_l0), (patch_x_l0 + mask_shape[1]*scale_factor, patch_y_l0 + mask_shape[0]*scale_factor), (patch_x_l0, patch_y_l0 + mask_shape[0]*scale_factor)])
@@ -100,6 +102,9 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     return mask
 
 def process_window(args):
+    """
+    **MODIFIED**: Returns a descriptive status string for accurate counting.
+    """
     (path_Image, target_level, window_size,
      tissue_percentage_req, match_percentage_req,
      path_cancer_folder, path_not_cancer_folder,
@@ -117,40 +122,32 @@ def process_window(args):
             scale_factor = slide.level_downsamples[target_level]
             patch_polygon = Polygon([(x, y), (x + window_size, y), (x + window_size, y + window_size), (x, y + window_size)])
             
-            # **MODIFIED**: This block now performs the correct two-step check
             should_drop = False
             for cls, polygons_l0 in artifact_polygons_by_class_level0.items():
                 if not polygons_l0: continue
-                
                 threshold = artifact_policy['DROP_THRESH'].get(cls)
                 if threshold is None: continue
-                
                 scaled_polys = [Polygon([(px/scale_factor, py/scale_factor) for px, py in p]) for p in polygons_l0 if len(p) >= 3]
                 if not scaled_polys: continue
-
                 unprepared_geom = MultiPolygon(scaled_polys)
                 prepared_geom = prep(unprepared_geom)
-                
-                # Step 1: Fast boolean check
                 if prepared_geom.intersects(patch_polygon):
-                    # Step 2: Slower, but accurate area calculation
                     intersection = unprepared_geom.intersection(patch_polygon)
                     coverage = intersection.area / PATCH_AREA
                     if coverage > threshold:
                         logging.info(f"Patch at {patch_coords} DROPPED. Reason: {cls} coverage ({coverage:.2f}) > threshold ({threshold}).")
                         should_drop = True
-                        break # Exit the loop as we've already decided to drop it
-            
+                        break
             if should_drop:
                 slide.close()
-                return True, None
+                return "SKIPPED", None # Return status for counting
 
         patch_pil = slide.read_region(patch_coords, target_level, (window_size, window_size)).convert("RGB")
         patch_np = np.array(patch_pil)
 
         if not check_tissue_percentage_robust(patch_np, tissue_percentage_req):
             slide.close()
-            return True, None
+            return "SKIPPED", None # Return status for counting
 
         scale_factor = slide.level_downsamples[target_level]
         cancer_mask = polygons_to_mask((window_size, window_size), annotations_cancer_level0, scale_factor, patch_coords)
@@ -171,14 +168,20 @@ def process_window(args):
             file_basename = f"{label}_PATIENT_{patient}_{x_int}_{y_int}_{random.randint(1000,9999)}_{timestamp}.png"
             patch_pil.save(os.path.join(save_folder_img, file_basename))
             Image.fromarray(final_mask * 255).save(os.path.join(save_folder_mask, file_basename))
+            slide.close()
+            # **MODIFIED**: Return specific status on success
+            return f"SAVED_{label}", None
         
         slide.close()
-        return True, None
+        return "SKIPPED", None # Return status for counting
     except Exception:
         if slide: slide.close()
         return False, traceback.format_exc()
 
 def extract_patches_for_slide(path_Image, **kwargs):
+    """
+    **MODIFIED**: This function now returns the final patch counts.
+    """
     slide = None
     try:
         slide_basename = os.path.basename(path_Image)
@@ -187,7 +190,6 @@ def extract_patches_for_slide(path_Image, **kwargs):
         scale_factor = slide.level_downsamples[kwargs['target_level']]
         target_width, target_height = slide.level_dimensions[kwargs['target_level']]
 
-        # **MODIFIED**: Only pass raw coordinates to the worker
         artifact_polygons_by_class_level0 = {}
         if USE_ADVANCED_ARTIFACT_FILTERING and kwargs.get('path_artifacts_geojson') and ARTIFACT_POLICY:
             with open(kwargs['path_artifacts_geojson'], 'r') as f:
@@ -216,7 +218,7 @@ def extract_patches_for_slide(path_Image, **kwargs):
                         else: annotations_not_cancer_level0.append(verts)
         if not all_polygons_level0:
             logging.warning(f"No valid annotations for slide {slide_basename}")
-            slide.close(); return
+            slide.close(); return 0, 0
 
         scaled_polys = [Polygon([(x/scale_factor, y/scale_factor) for x, y in p]) for p in all_polygons_level0]
         combined_annotations = prep(MultiPolygon(scaled_polys))
@@ -226,7 +228,7 @@ def extract_patches_for_slide(path_Image, **kwargs):
         
         logging.info(f"Found {len(filtered_coords)} candidate windows.")
         if not filtered_coords:
-            slide.close(); return
+            slide.close(); return 0, 0
 
         args_list = [(path_Image, kwargs['target_level'], kwargs['window_size'], kwargs['tissue_percentage_req'], kwargs['match_percentage_req'],
                       kwargs['path_cancer_folder'], kwargs['path_not_cancer_folder'], kwargs['path_cancer_mask_folder'], kwargs['path_not_cancer_mask_folder'],
@@ -238,7 +240,18 @@ def extract_patches_for_slide(path_Image, **kwargs):
         with Pool(processes=NUM_WORKERS) as pool:
             results = pool.map(process_window, args_list)
 
-        errors = [msg for success, msg in results if not success and msg]
+        # **MODIFIED**: Tally the results from the workers
+        cancer_patches_created = 0
+        not_cancer_patches_created = 0
+        errors = []
+        for status, msg in results:
+            if status == "SAVED_CANCER":
+                cancer_patches_created += 1
+            elif status == "SAVED_NOT_CANCER":
+                not_cancer_patches_created += 1
+            elif status is False:
+                errors.append(msg)
+        
         if errors:
             logging.error(f"Encountered {len(errors)} errors during worker processing.")
             logging.error("--- BEGIN FIRST WORKER TRACEBACK ---")
@@ -247,6 +260,8 @@ def extract_patches_for_slide(path_Image, **kwargs):
             raise Exception("Errors occurred in workers. See log for full traceback.")
         
         logging.info(f"--- Finished processing slide: {slide_basename} ---")
+        # **MODIFIED**: Return the final counts
+        return cancer_patches_created, not_cancer_patches_created
 
     finally:
         if slide: slide.close()
@@ -258,6 +273,7 @@ if __name__ == '__main__':
     warnings.filterwarnings("ignore", category=FutureWarning)
 
     parser = argparse.ArgumentParser()
+    # [Argument parsing is unchanged]
     parser.add_argument('--path_Image', type=str, required=True)
     parser.add_argument('--path_cancer_folder', type=str, required=True)
     parser.add_argument('--path_not_cancer_folder', type=str, required=True)
@@ -269,12 +285,14 @@ if __name__ == '__main__':
     parser.add_argument('--path_artifacts_geojson', type=str, required=False, default=None)
     
     status, comments = 'UNKNOWN', ''
+    cancer_count, not_cancer_count = 0, 0
     args = None
     try:
         args = parser.parse_args()
         logging.info(f"Script started for image: {os.path.basename(args.path_Image)}")
         
-        extract_patches_for_slide(
+        # **MODIFIED**: Capture the counts returned from the main function
+        cancer_count, not_cancer_count = extract_patches_for_slide(
             path_Image=args.path_Image,
             target_level=TARGET_LEVEL,
             window_size=WINDOW_SIZE,
@@ -299,4 +317,10 @@ if __name__ == '__main__':
         logging.exception(f"Critical failure while processing {img_path}")
         comments = f"Error processing {img_path}: {e}"
     finally:
-        print(json.dumps({"status": status, "comments": comments}))
+        # **MODIFIED**: Include the precise counts in the final JSON output
+        print(json.dumps({
+            "status": status,
+            "comments": comments,
+            "cancer_patches_created": cancer_count,
+            "not_cancer_patches_created": not_cancer_count
+        }))
