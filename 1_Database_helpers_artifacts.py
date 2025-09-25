@@ -146,7 +146,6 @@ def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_fold
         raise RuntimeError(f"Error running {IMAGE_READER_PATH}: {result.stderr}")
 
     output_json = result.stdout
-    import ipdb; ipdb.set_trace()
     parsed_output = json.loads(output_json)
     status = parsed_output.get("status")
     comments = parsed_output.get("comments")
