@@ -7,6 +7,7 @@ import time
 import json
 from datetime import datetime
 import sys
+from tqdm import tqdm # **NEW**: Import tqdm
 
 def createfolders():
     os.makedirs(PATH_CANCER_FOLDER, exist_ok=True)
@@ -29,6 +30,7 @@ def open_conn():
     )
     return conn
 
+# [getFolder, createFolderEntry, extract_patient, find_svs_files, AddNewCases remain unchanged]
 def getFolder(path):
     try:
         conn=open_conn()
@@ -73,24 +75,15 @@ def find_svs_files(directory):
 
 def AddNewCases():
     svs_files, patients=find_svs_files(IMAGESPATH)
-    for image, patient in zip(svs_files, patients):
+    print("Searching for new cases to add...")
+    # **MODIFIED**: Use tqdm for adding new cases as well
+    for image, patient in tqdm(zip(svs_files, patients), desc="Adding new cases"):
         data=getFolder(image)
         if len(data)==0:
             createFolderEntry(image, patient)
 
-def getCaseToProcess():
-    try:
-        conn=open_conn()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM `image_folder_control` WHERE `STATUS` = 'TO BE PROCESSED' LIMIT 1")
-        data = cursor.fetchall()
-        return data
-    except Exception as e:
-        raise ValueError('Could not execute function getFolder - Error '+str(e))
-    finally:
-        conn.close()
-
-def getTotalCases():
+# **MODIFIED**: This function is now renamed to reflect it gets all cases
+def getCasesToProcess():
     try:
         conn=open_conn()
         cursor = conn.cursor()
@@ -98,7 +91,7 @@ def getTotalCases():
         data = cursor.fetchall()
         return data
     except Exception as e:
-        raise ValueError('Could not execute function getFolder - Error '+str(e))
+        raise ValueError('Could not execute function getCasesToProcess - Error '+str(e))
     finally:
         conn.close()
 
@@ -109,7 +102,7 @@ def updateCase(id, counter_cancer, counter_not_cancer, execution_time, status, c
         cursor.execute("UPDATE `image_folder_control` SET `CANCER_QTD`=%s,`NON_CANCER_QTD`=%s,`PROCESSINGTIME_MINUTES`=%s,`COMMENTS`=%s,`STATUS`=%s,`WINDOW_SIZE`=%s,`STRIDE`=%s, `MATCH_PERCENTAGE`=%s, `TISSUE_PERCENTAGE`=%s  WHERE `ID` = %s",(counter_cancer,counter_not_cancer,execution_time,comments,status,window_size,stride,matchPercentage,tissuePercentage,id))
         conn.commit()
     except Exception as e:
-        raise ValueError('Could not execute function getFolder - Error '+str(e))
+        raise ValueError('Could not execute function updateCase - Error '+str(e))
     finally:
         conn.close()
 
@@ -146,53 +139,64 @@ def mainProcess():
     createfolders()
     if LOADCASES:
         AddNewCases()
-        print('New images added to the database. Update the colors and re-run the process')
+        print('New images added to the database. Ready to process.')
         sys.exit(0)
 
-    totalCases = len(getTotalCases())
-    while totalCases > 0:
-        data = getCaseToProcess()
-        if not data:
-            break
-        
-        case_data = data[0]
-        id_cur = case_data['ID']
-        path_Image_current = case_data['FILEPATH']
-        patient_current = case_data['PATIENT']
-        cancer_color_current = case_data['CANCER_COLOR']
-        not_cancer_color_current = case_data['NOT_CANCER_COLOR']
-        start_time = time.time()
+    # **MODIFIED**: Get all cases at the start
+    cases_to_process = getCasesToProcess()
+    if not cases_to_process:
+        print("No cases to process.")
+        return
 
-        path_artifacts_geojson_current = None
-        if USE_ADVANCED_ARTIFACT_FILTERING:
-            geojson_path = os.path.join(os.getenv('GEOJSON_PATH'), os.path.basename(os.path.splitext(path_Image_current)[0] + '.geojson'))
-            if os.path.exists(geojson_path):
-                path_artifacts_geojson_current = geojson_path
-            else:
-                print(f"Warning: Artifact filtering is ON, but GeoJSON not found at {geojson_path}. Proceeding without artifact check.")
+    # **MODIFIED**: Use tqdm for the main processing loop
+    with tqdm(total=len(cases_to_process), desc="Processing WSI slides") as pbar:
+        for case_data in cases_to_process:
+            id_cur = case_data['ID']
+            path_Image_current = case_data['FILEPATH']
+            slide_basename = os.path.basename(path_Image_current)
+            
+            # Update progress bar description with the current slide name
+            pbar.set_description(f"Processing: {slide_basename}")
+            
+            patient_current = case_data['PATIENT']
+            cancer_color_current = case_data['CANCER_COLOR']
+            not_cancer_color_current = case_data['NOT_CANCER_COLOR']
+            start_time = time.time()
 
-        try:
-            status, comments, count_cancer, count_not_cancer = run_image_reader_script(
-                path_Image=path_Image_current,
-                path_cancer_folder=PATH_CANCER_FOLDER,
-                path_not_cancer_folder=PATH_NOT_CANCER_FOLDER,
-                path_cancer_mask_folder=PATH_CANCER_MASK_FOLDER,
-                path_not_cancer_mask_folder=PATH_NOT_CANCER_MASK_FOLDER,
-                cancer_color=cancer_color_current,
-                not_cancer_color=not_cancer_color_current,
-                patient=patient_current,
-                path_artifacts_geojson=path_artifacts_geojson_current
-            )
-        except RuntimeError as e:
-            status, comments, count_cancer, count_not_cancer = 'FAILED', str(e), 0, 0
-        
-        end_time = time.time()
-        execution_time = (end_time - start_time) / 60
-        
-        updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
-        
-        totalCases -= 1
-        print(f"There are {totalCases} images to be processed yet")
+            path_artifacts_geojson_current = None
+            if USE_ADVANCED_ARTIFACT_FILTERING:
+                geojson_path = os.path.join(os.getenv('GEOJSON_PATH'), os.path.basename(os.path.splitext(path_Image_current)[0] + '.geojson'))
+                if os.path.exists(geojson_path):
+                    path_artifacts_geojson_current = geojson_path
+                else:
+                    # Use tqdm.write to print messages without disturbing the progress bar
+                    pbar.write(f"Warning: Artifact filtering is ON, but GeoJSON not found at {geojson_path}. Proceeding without artifact check.")
+
+            try:
+                status, comments, count_cancer, count_not_cancer = run_image_reader_script(
+                    path_Image=path_Image_current,
+                    path_cancer_folder=PATH_CANCER_FOLDER,
+                    path_not_cancer_folder=PATH_NOT_CANCER_FOLDER,
+                    path_cancer_mask_folder=PATH_CANCER_MASK_FOLDER,
+                    path_not_cancer_mask_folder=PATH_NOT_CANCER_MASK_FOLDER,
+                    cancer_color=cancer_color_current,
+                    not_cancer_color=not_cancer_color_current,
+                    patient=patient_current,
+                    path_artifacts_geojson=path_artifacts_geojson_current
+                )
+            except RuntimeError as e:
+                status, comments, count_cancer, count_not_cancer = 'FAILED', str(e), 0, 0
+                pbar.write(f"ERROR processing {slide_basename}: {comments}")
+            
+            end_time = time.time()
+            execution_time = (end_time - start_time) / 60
+            
+            updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
+            
+            # Update the progress bar
+            pbar.update(1)
+            # You can also add postfix information if you like
+            pbar.set_postfix(cancer=count_cancer, non_cancer=count_not_cancer, status=status)
 
 if __name__ == '__main__':
     load_dotenv(override=True)
