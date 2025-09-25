@@ -9,6 +9,12 @@ from datetime import datetime
 import sys
 
 
+def createfolders():
+    os.makedirs(PATH_CANCER_FOLDER, exist_ok=True)
+    os.makedirs(PATH_NOT_CANCER_FOLDER, exist_ok=True)
+    os.makedirs(PATH_CANCER_MASK_FOLDER, exist_ok=True)
+    os.makedirs(PATH_NOT_CANCER_MASK_FOLDER, exist_ok=True)
+
 def open_conn():
     conn = pymysql.connect(
         charset="utf8mb4",
@@ -140,6 +146,7 @@ def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_fold
         raise RuntimeError(f"Error running {IMAGE_READER_PATH}: {result.stderr}")
 
     output_json = result.stdout
+    import ipdb; ipdb.set_trace()
     parsed_output = json.loads(output_json)
     status = parsed_output.get("status")
     comments = parsed_output.get("comments")
@@ -167,6 +174,7 @@ def countTotal(start_time, end_time, folder):
 
 
 def mainProcess():
+    createfolders()
     if LOADCASES:
         AddNewCases()
         print('New images added to the database. Update the colors and re-run the process')
@@ -192,6 +200,8 @@ def mainProcess():
             if USE_ADVANCED_ARTIFACT_FILTERING:
                 # Assumes geojson has the same base name as svs and is in the same directory
                 geojson_path = os.path.splitext(path_Image_current)[0] + '.geojson'
+                geojson_path=os.path.basename(geojson_path)
+                geojson_path=os.path.join(os.getenv('GEOJSON_PATH'), geojson_path)
                 if os.path.exists(geojson_path):
                     path_artifacts_geojson_current = geojson_path
                 else:
