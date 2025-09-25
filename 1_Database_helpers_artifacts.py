@@ -7,7 +7,7 @@ import time
 import json
 from datetime import datetime
 import sys
-from tqdm import tqdm # **NEW**: Import tqdm
+from tqdm import tqdm
 
 def createfolders():
     os.makedirs(PATH_CANCER_FOLDER, exist_ok=True)
@@ -76,13 +76,11 @@ def find_svs_files(directory):
 def AddNewCases():
     svs_files, patients=find_svs_files(IMAGESPATH)
     print("Searching for new cases to add...")
-    # **MODIFIED**: Use tqdm for adding new cases as well
     for image, patient in tqdm(zip(svs_files, patients), desc="Adding new cases"):
         data=getFolder(image)
         if len(data)==0:
             createFolderEntry(image, patient)
 
-# **MODIFIED**: This function is now renamed to reflect it gets all cases
 def getCasesToProcess():
     try:
         conn=open_conn()
@@ -106,7 +104,25 @@ def updateCase(id, counter_cancer, counter_not_cancer, execution_time, status, c
     finally:
         conn.close()
 
+# **NEW**: A targeted function to update only the status and comments for failed cases.
+def updateCaseStatus(id, status, comments):
+    """Updates the status and comments for a specific case ID."""
+    try:
+        conn = open_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE `image_folder_control` SET `STATUS`=%s, `COMMENTS`=%s WHERE `ID` = %s",
+            (status, comments, id)
+        )
+        conn.commit()
+    except Exception as e:
+        # Using tqdm.write to not interfere with a potential progress bar
+        tqdm.write(f"Error updating case {id} in database: {e}")
+    finally:
+        conn.close()
+
 def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_folder, path_cancer_mask_folder, path_not_cancer_mask_folder, cancer_color, not_cancer_color, patient, path_artifacts_geojson=None):
+    # This function is unchanged
     command = [
         PYTHON_PATH, IMAGE_READER_PATH,
         '--path_Image', path_Image,
@@ -135,6 +151,37 @@ def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_fold
     except json.JSONDecodeError:
         raise RuntimeError(f"Failed to decode JSON from imageReader script. Output: {result.stdout}")
 
+# **NEW**: The sanity check function.
+def perform_geojson_sanity_check():
+    """
+    Checks all 'TO BE PROCESSED' slides and marks them as FAILED if a
+    corresponding GeoJSON file is not found in the GEOJSON_PATH.
+    """
+    cases_to_check = getCasesToProcess()
+    if not cases_to_check:
+        print("No cases to check.")
+        return
+
+    geojson_path = os.getenv('GEOJSON_PATH')
+    if not geojson_path or not os.path.isdir(geojson_path):
+        print(f"Error: GEOJSON_PATH is not a valid directory. Cannot perform sanity check.")
+        return
+
+    # Get a set of available geojson basenames for fast lookup
+    geojson_basenames = {os.path.splitext(f)[0] for f in os.listdir(geojson_path) if f.endswith('.geojson')}
+    
+    failed_count = 0
+    # Use tqdm to show progress of the sanity check itself
+    for case in tqdm(cases_to_check, desc="Running GeoJSON Sanity Check"):
+        svs_basename = os.path.splitext(os.path.basename(case['FILEPATH']))[0]
+        
+        if svs_basename not in geojson_basenames:
+            updateCaseStatus(case['ID'], 'FAILED', 'Failed due to missing GEOJSON')
+            failed_count += 1
+    
+    if failed_count > 0:
+        print(f"Sanity Check complete. Marked {failed_count} cases as FAILED.")
+
 def mainProcess():
     createfolders()
     if LOADCASES:
@@ -142,20 +189,29 @@ def mainProcess():
         print('New images added to the database. Ready to process.')
         sys.exit(0)
 
-    # **MODIFIED**: Get all cases at the start
+    # **MODIFIED**: Run the sanity check before the main processing loop.
+ 
+    if ACTIVATE_SANITY_CHECK_GEOJSON:
+        print("\n--- GEOJSON Sanity Check Activated ---")
+        print("Checking for missing .geojson files for all slides marked 'TO BE PROCESSED'.")
+        print("Slides without a corresponding GeoJSON file will be marked as FAILED.")
+        perform_geojson_sanity_check()
+        print("--- Sanity Check Complete ---\n")
+    else:
+        print("\nWarning: ACTIVATE_SANITY_CHECK_GEOJSON is False. Skipping GeoJSON sanity check.\n")
+
     cases_to_process = getCasesToProcess()
     if not cases_to_process:
-        print("No cases to process.")
+        print("No cases remaining to process.")
         return
 
-    # **MODIFIED**: Use tqdm for the main processing loop
     with tqdm(total=len(cases_to_process), desc="Processing WSI slides") as pbar:
         for case_data in cases_to_process:
+            # The rest of the loop is unchanged
             id_cur = case_data['ID']
             path_Image_current = case_data['FILEPATH']
             slide_basename = os.path.basename(path_Image_current)
             
-            # Update progress bar description with the current slide name
             pbar.set_description(f"Processing: {slide_basename}")
             
             patient_current = case_data['PATIENT']
@@ -169,8 +225,7 @@ def mainProcess():
                 if os.path.exists(geojson_path):
                     path_artifacts_geojson_current = geojson_path
                 else:
-                    # Use tqdm.write to print messages without disturbing the progress bar
-                    pbar.write(f"Warning: Artifact filtering is ON, but GeoJSON not found at {geojson_path}. Proceeding without artifact check.")
+                    pbar.write(f"Warning: GeoJSON file for {slide_basename} not found during processing. Skipping artifact check for this slide.")
 
             try:
                 status, comments, count_cancer, count_not_cancer = run_image_reader_script(
@@ -193,9 +248,7 @@ def mainProcess():
             
             updateCase(id_cur, count_cancer, count_not_cancer, execution_time, status, str(comments[-240:]), WINDOW_SIZE, STRIDE, TISSUE_PERCENTAGE, MATCH_PERCENTAGE)
             
-            # Update the progress bar
             pbar.update(1)
-            # You can also add postfix information if you like
             pbar.set_postfix(cancer=count_cancer, non_cancer=count_not_cancer, status=status)
 
 if __name__ == '__main__':
@@ -214,5 +267,8 @@ if __name__ == '__main__':
     PYTHON_PATH = str(os.getenv('PYTHON_PATH'))
     LOADCASES = os.getenv('LOADCASES', 'False').lower() in ('true', '1', 't')
     USE_ADVANCED_ARTIFACT_FILTERING = os.getenv('USE_ADVANCED_ARTIFACT_FILTERING', 'False').lower() in ('true', '1', 't')
+    
+    # **NEW**: Read the sanity check flag from .env
+    ACTIVATE_SANITY_CHECK_GEOJSON = os.getenv('ACTIVATE_SANITY_CHECK_GEOJSON', 'False').lower() in ('true', '1', 't')
     
     mainProcess()
