@@ -4,7 +4,7 @@ import os
 from PIL import Image
 from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.prepared import prep
-import shapely.geos
+import shapely
 from datetime import datetime
 from multiprocessing import Pool
 import random
@@ -66,7 +66,6 @@ HALF_WINDOW = WINDOW_SIZE // 2
 
 # --- Helper Functions ---
 def check_tissue_percentage_robust(patch_np, required_percentage):
-    # This function is unchanged
     if patch_np is None or patch_np.size == 0: return False
     patch_hsv = cv2.cvtColor(patch_np, cv2.COLOR_RGB2HSV)
     _, tissue_mask = cv2.threshold(patch_hsv[:, :, 1], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -75,7 +74,6 @@ def check_tissue_percentage_robust(patch_np, required_percentage):
     return (np.count_nonzero(tissue_mask) / PATCH_AREA) >= required_percentage
 
 def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
-    # This function is unchanged
     mask = np.zeros(mask_shape, dtype=np.uint8)
     patch_x_l0, patch_y_l0 = patch_coords[0] * scale_factor, patch_coords[1] * scale_factor
     win_poly_l0 = Polygon([(patch_x_l0, patch_y_l0), (patch_x_l0 + mask_shape[1]*scale_factor, patch_y_l0), (patch_x_l0 + mask_shape[1]*scale_factor, patch_y_l0 + mask_shape[0]*scale_factor), (patch_x_l0, patch_y_l0 + mask_shape[0]*scale_factor)])
@@ -84,10 +82,15 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
         if len(poly_l0) < 3: continue
         try:
             anno_poly_l0 = Polygon(poly_l0)
-        except (ValueError, shapely.geos.errors.TopologicalError):
+            if not anno_poly_l0.is_valid:
+                anno_poly_l0 = anno_poly_l0.buffer(0)
+        except Exception:
             continue
         if not prep_win.intersects(anno_poly_l0): continue
-        intersection = win_poly_l0.intersection(anno_poly_l0)
+        try:
+            intersection = win_poly_l0.intersection(anno_poly_l0)
+        except shapely.errors.TopologicalError:
+            continue
         if intersection.is_empty: continue
         geoms = intersection.geoms if isinstance(intersection, MultiPolygon) else [intersection]
         for geom in geoms:
@@ -102,9 +105,6 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     return mask
 
 def process_window(args):
-    """
-    **MODIFIED**: Returns a descriptive status string for accurate counting.
-    """
     (path_Image, target_level, window_size,
      tissue_percentage_req, match_percentage_req,
      path_cancer_folder, path_not_cancer_folder,
@@ -127,27 +127,45 @@ def process_window(args):
                 if not polygons_l0: continue
                 threshold = artifact_policy['DROP_THRESH'].get(cls)
                 if threshold is None: continue
-                scaled_polys = [Polygon([(px/scale_factor, py/scale_factor) for px, py in p]) for p in polygons_l0 if len(p) >= 3]
+                
+                scaled_polys = []
+                for p in polygons_l0:
+                    if len(p) < 3: continue
+                    try:
+                        poly = Polygon([(px/scale_factor, py/scale_factor) for px, py in p])
+                        if not poly.is_valid:
+                            poly = poly.buffer(0)
+                        scaled_polys.append(poly)
+                    except Exception:
+                        continue
+                
                 if not scaled_polys: continue
+
                 unprepared_geom = MultiPolygon(scaled_polys)
                 prepared_geom = prep(unprepared_geom)
+                
                 if prepared_geom.intersects(patch_polygon):
-                    intersection = unprepared_geom.intersection(patch_polygon)
-                    coverage = intersection.area / PATCH_AREA
-                    if coverage > threshold:
-                        logging.info(f"Patch at {patch_coords} DROPPED. Reason: {cls} coverage ({coverage:.2f}) > threshold ({threshold}).")
-                        should_drop = True
-                        break
+                    try:
+                        intersection = unprepared_geom.intersection(patch_polygon)
+                        coverage = intersection.area / PATCH_AREA
+                        if coverage > threshold:
+                            logging.info(f"Patch at {patch_coords} DROPPED. Reason: {cls} coverage ({coverage:.2f}) > threshold ({threshold}).")
+                            should_drop = True
+                            break
+                    except shapely.errors.TopologicalError:
+                         logging.warning(f"Skipping intersection check for a problematic artifact geometry at {patch_coords}.")
+                         continue
+
             if should_drop:
                 slide.close()
-                return "SKIPPED", None # Return status for counting
+                return "SKIPPED", None
 
         patch_pil = slide.read_region(patch_coords, target_level, (window_size, window_size)).convert("RGB")
         patch_np = np.array(patch_pil)
 
         if not check_tissue_percentage_robust(patch_np, tissue_percentage_req):
             slide.close()
-            return "SKIPPED", None # Return status for counting
+            return "SKIPPED", None
 
         scale_factor = slide.level_downsamples[target_level]
         cancer_mask = polygons_to_mask((window_size, window_size), annotations_cancer_level0, scale_factor, patch_coords)
@@ -169,19 +187,15 @@ def process_window(args):
             patch_pil.save(os.path.join(save_folder_img, file_basename))
             Image.fromarray(final_mask * 255).save(os.path.join(save_folder_mask, file_basename))
             slide.close()
-            # **MODIFIED**: Return specific status on success
             return f"SAVED_{label}", None
         
         slide.close()
-        return "SKIPPED", None # Return status for counting
+        return "SKIPPED", None
     except Exception:
         if slide: slide.close()
         return False, traceback.format_exc()
 
 def extract_patches_for_slide(path_Image, **kwargs):
-    """
-    **MODIFIED**: This function now returns the final patch counts.
-    """
     slide = None
     try:
         slide_basename = os.path.basename(path_Image)
@@ -218,10 +232,34 @@ def extract_patches_for_slide(path_Image, **kwargs):
                         else: annotations_not_cancer_level0.append(verts)
         if not all_polygons_level0:
             logging.warning(f"No valid annotations for slide {slide_basename}")
-            slide.close(); return 0, 0
+            slide.close(); slide = None # **THE FIX for ctypes.ArgumentError**
+            return 0, 0
 
-        scaled_polys = [Polygon([(x/scale_factor, y/scale_factor) for x, y in p]) for p in all_polygons_level0]
-        combined_annotations = prep(MultiPolygon(scaled_polys))
+        # **THE FIX for ValueError**: Flatten the list of geometries after healing them.
+        scaled_polys_raw = []
+        for p in all_polygons_level0:
+            try:
+                poly = Polygon([(x/scale_factor, y/scale_factor) for x, y in p])
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                scaled_polys_raw.append(poly)
+            except Exception:
+                continue
+        
+        # Flatten the list: handle cases where buffer(0) creates a MultiPolygon
+        scaled_polys_flat = []
+        for geom in scaled_polys_raw:
+            if geom.geom_type == 'Polygon':
+                scaled_polys_flat.append(geom)
+            elif geom.geom_type == 'MultiPolygon':
+                scaled_polys_flat.extend(list(geom.geoms))
+
+        if not scaled_polys_flat:
+            logging.warning(f"No valid annotation polygons after scaling for slide {slide_basename}")
+            slide.close(); slide = None # **THE FIX for ctypes.ArgumentError**
+            return 0,0
+
+        combined_annotations = prep(MultiPolygon(scaled_polys_flat))
         x_coords = np.arange(0, target_width - WINDOW_SIZE + 1, STRIDE)
         y_coords = np.arange(0, target_height - WINDOW_SIZE + 1, STRIDE)
         filtered_coords = [(int(x), int(y)) for x in x_coords for y in y_coords if combined_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW))]
@@ -240,7 +278,6 @@ def extract_patches_for_slide(path_Image, **kwargs):
         with Pool(processes=NUM_WORKERS) as pool:
             results = pool.map(process_window, args_list)
 
-        # **MODIFIED**: Tally the results from the workers
         cancer_patches_created = 0
         not_cancer_patches_created = 0
         errors = []
@@ -260,7 +297,6 @@ def extract_patches_for_slide(path_Image, **kwargs):
             raise Exception("Errors occurred in workers. See log for full traceback.")
         
         logging.info(f"--- Finished processing slide: {slide_basename} ---")
-        # **MODIFIED**: Return the final counts
         return cancer_patches_created, not_cancer_patches_created
 
     finally:
@@ -291,7 +327,6 @@ if __name__ == '__main__':
         args = parser.parse_args()
         logging.info(f"Script started for image: {os.path.basename(args.path_Image)}")
         
-        # **MODIFIED**: Capture the counts returned from the main function
         cancer_count, not_cancer_count = extract_patches_for_slide(
             path_Image=args.path_Image,
             target_level=TARGET_LEVEL,
@@ -311,13 +346,17 @@ if __name__ == '__main__':
         status = 'COMPLETED'
         comments = f'Successfully processed {os.path.basename(args.path_Image)}.'
         logging.info(comments)
+    except ET.ParseError as e:
+        status = 'FAILED'
+        img_path = os.path.basename(args.path_Image) if args and args.path_Image else "input WSI"
+        logging.error(f"XML ParseError for {img_path}: {e}")
+        comments = f"XML ParseError for {img_path}: Annotation file is corrupt."
     except Exception as e:
         status = 'FAILED'
         img_path = os.path.basename(args.path_Image) if args and args.path_Image else "input WSI"
         logging.exception(f"Critical failure while processing {img_path}")
         comments = f"Error processing {img_path}: {e}"
     finally:
-        # **MODIFIED**: Include the precise counts in the final JSON output
         print(json.dumps({
             "status": status,
             "comments": comments,
