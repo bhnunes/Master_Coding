@@ -105,6 +105,7 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     return mask
 
 def process_window(args):
+    """Returns a descriptive status string for accurate counting."""
     (path_Image, target_level, window_size,
      tissue_percentage_req, match_percentage_req,
      path_cancer_folder, path_not_cancer_folder,
@@ -128,20 +129,28 @@ def process_window(args):
                 threshold = artifact_policy['DROP_THRESH'].get(cls)
                 if threshold is None: continue
                 
-                scaled_polys = []
+                # Heal and flatten the list of artifact polygons
+                scaled_polys_raw = []
                 for p in polygons_l0:
                     if len(p) < 3: continue
                     try:
                         poly = Polygon([(px/scale_factor, py/scale_factor) for px, py in p])
                         if not poly.is_valid:
                             poly = poly.buffer(0)
-                        scaled_polys.append(poly)
+                        scaled_polys_raw.append(poly)
                     except Exception:
                         continue
                 
-                if not scaled_polys: continue
+                scaled_polys_flat = []
+                for geom in scaled_polys_raw:
+                    if geom.geom_type == 'Polygon':
+                        scaled_polys_flat.append(geom)
+                    elif geom.geom_type == 'MultiPolygon':
+                        scaled_polys_flat.extend(list(geom.geoms))
 
-                unprepared_geom = MultiPolygon(scaled_polys)
+                if not scaled_polys_flat: continue
+
+                unprepared_geom = MultiPolygon(scaled_polys_flat)
                 prepared_geom = prep(unprepared_geom)
                 
                 if prepared_geom.intersects(patch_polygon):
@@ -232,10 +241,9 @@ def extract_patches_for_slide(path_Image, **kwargs):
                         else: annotations_not_cancer_level0.append(verts)
         if not all_polygons_level0:
             logging.warning(f"No valid annotations for slide {slide_basename}")
-            slide.close(); slide = None # **THE FIX for ctypes.ArgumentError**
+            slide.close(); slide = None # **FIX for ctypes.ArgumentError**
             return 0, 0
 
-        # **THE FIX for ValueError**: Flatten the list of geometries after healing them.
         scaled_polys_raw = []
         for p in all_polygons_level0:
             try:
@@ -246,7 +254,7 @@ def extract_patches_for_slide(path_Image, **kwargs):
             except Exception:
                 continue
         
-        # Flatten the list: handle cases where buffer(0) creates a MultiPolygon
+        # **FIX for ValueError**: Flatten the list of geometries
         scaled_polys_flat = []
         for geom in scaled_polys_raw:
             if geom.geom_type == 'Polygon':
@@ -256,7 +264,7 @@ def extract_patches_for_slide(path_Image, **kwargs):
 
         if not scaled_polys_flat:
             logging.warning(f"No valid annotation polygons after scaling for slide {slide_basename}")
-            slide.close(); slide = None # **THE FIX for ctypes.ArgumentError**
+            slide.close(); slide = None # **FIX for ctypes.ArgumentError**
             return 0,0
 
         combined_annotations = prep(MultiPolygon(scaled_polys_flat))
@@ -309,7 +317,6 @@ if __name__ == '__main__':
     warnings.filterwarnings("ignore", category=FutureWarning)
 
     parser = argparse.ArgumentParser()
-    # [Argument parsing is unchanged]
     parser.add_argument('--path_Image', type=str, required=True)
     parser.add_argument('--path_cancer_folder', type=str, required=True)
     parser.add_argument('--path_not_cancer_folder', type=str, required=True)
