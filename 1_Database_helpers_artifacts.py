@@ -5,7 +5,6 @@ import re
 import subprocess
 import time
 import json
-from datetime import datetime
 import sys
 from tqdm import tqdm
 
@@ -125,6 +124,7 @@ def run_image_reader_script(path_Image, path_cancer_folder, path_not_cancer_fold
     # This function is unchanged
     command = [
         PYTHON_PATH, IMAGE_READER_PATH,
+        '--handler', 'SVS' if path_Image.lower().endswith('.svs') else 'NDPI',
         '--path_Image', path_Image,
         '--path_cancer_folder', path_cancer_folder,
         '--path_not_cancer_folder', path_not_cancer_folder,
@@ -267,8 +267,6 @@ if __name__ == '__main__':
     PYTHON_PATH = str(os.getenv('PYTHON_PATH'))
     LOADCASES = os.getenv('LOADCASES', 'False').lower() in ('true', '1', 't')
     USE_ADVANCED_ARTIFACT_FILTERING = os.getenv('USE_ADVANCED_ARTIFACT_FILTERING', 'False').lower() in ('true', '1', 't')
-    
-    # **NEW**: Read the sanity check flag from .env
     ACTIVATE_SANITY_CHECK_GEOJSON = os.getenv('ACTIVATE_SANITY_CHECK_GEOJSON', 'False').lower() in ('true', '1', 't')
     
     mainProcess()
