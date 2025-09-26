@@ -1,5 +1,4 @@
 import os
-import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 import shutil
@@ -9,13 +8,8 @@ from tqdm import tqdm
 import cv2
 import itertools # NEW: Import itertools for efficient cycling
 from collections import defaultdict # NEW: Import defaultdict for unique filename generation
+import albumentations as A
 
-# --- Install and Import Albumentations ---
-try:
-    import albumentations as A
-except ImportError:
-    print("Albumentations library not found. Please install it: pip install -U albumentationsx")
-    exit()
 
 # --- 1. Data Loading and Preparation (Robust) ---
 def load_data(data_dir):
@@ -250,15 +244,37 @@ def verify_split_integrity(fold_output_dir, split_name, original_df):
         return True
 
 
-# --- 4. Augmentation (MODIFIED FOR GLOBAL CYCLIC DISTRIBUTION) ---
+# --- 4. Augmentation (MODIFIED FOR SOTA PERFORMANCE BASED ON RESEARCH) ---
 
 # Define the INDIVIDUAL transformations, each with p=1.0 (always apply if chosen)
+# These are configured for a "strong" augmentation setting, ideal for training without
+# a separate stain normalization step.
+
 INDIVIDUAL_TRANSFORMS = [
-    (A.HorizontalFlip(p=1.0), "HP"),
+    # --- MORPHOLOGICAL TRANSFORMS (as recommended by the paper) ---
+    (A.HorizontalFlip(p=1.0), "HF"),
     (A.VerticalFlip(p=1.0), "VF"),
-    (A.RandomRotate90(p=1.0), "RF"),
+    (A.RandomRotate90(p=1.0), "RR"),
     (A.GaussianBlur(blur_limit=(3, 7), p=1.0), "GB"),
-    (A.ColorJitter(brightness=0.25, contrast=0.3, saturation=0.3, hue=0.04, p=1.0), "CJ") # hue=0.04 implies [-0.04, 0.04] for albumentations
+
+    # --- COLOR TRANSFORMS (the "key ingredients" for top performance) ---
+
+    # HED-Strong: Matches the paper's [-0.2, 0.2] intensity shift range.
+    # We use "random_preset" to maximize stain diversity.
+    (A.HEStain(
+        method="random_preset",
+        intensity_shift_range=(-0.2, 0.2), # Directly from paper's "strong" setting
+        intensity_scale_range=(0.7, 1.3),   # A reasonable strong scaling factor
+        p=1.0
+    ), "HED"),
+
+    # HSV-Strong: Interpreted from the paper's notes for a strong effect.
+    (A.HueSaturationValue(
+        hue_shift_limit=25,       # Strong but reasonable hue shift
+        sat_shift_limit=60,       # Strong saturation shift
+        val_shift_limit=50,       # Strong brightness/value shift
+        p=1.0
+    ), "HSV")
 ]
 
 print(f"Defined {len(INDIVIDUAL_TRANSFORMS)} individual augmentations for deterministic cyclic selection:")
