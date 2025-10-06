@@ -13,25 +13,33 @@ import logging
 import traceback
 import openslide
 from data_handlers import BaseHandler
+from dotenv import load_dotenv
+
+
+load_dotenv(override=True)
+# --- Constants ---
+WINDOW_SIZE = int(os.getenv('WINDOW_SIZE', 224)) # Default 224
+KERNEL_OPEN = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)) # For noise removal
+KERNEL_CLOSE = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)) # For hole filling
+PATCH_AREA = WINDOW_SIZE * WINDOW_SIZE
+HALF_WINDOW = WINDOW_SIZE // 2
 
 def setup_logging():
     """Configures the logger to write to a file."""
     log_format = '%(asctime)s - %(process)d - %(levelname)s - %(message)s'
     logging.basicConfig(filename='patch_extraction.log', level=logging.INFO, format=log_format, filemode='a')
 
-# --- Constants & Generic Helpers ---
-PATCH_AREA = 0
-HALF_WINDOW = 0
-
 def check_tissue_percentage_robust(patch_np, required_percentage):
     # This function is generic and correct. Unchanged.
-    global PATCH_AREA
     if patch_np is None or patch_np.size == 0:
         return False
     patch_hsv = cv2.cvtColor(patch_np, cv2.COLOR_RGB2HSV)
     _, tissue_mask = cv2.threshold(patch_hsv[:, :, 1], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPse, (7, 7))
-    tissue_mask = cv2.morphologyEx(tissue_mask, cv2.MORPH_CLOSE, kernel)
+
+        # Morphological operations for refinement
+    tissue_mask = cv2.morphologyEx(tissue_mask, cv2.MORPH_OPEN, KERNEL_OPEN)
+    tissue_mask = cv2.morphologyEx(tissue_mask, cv2.MORPH_CLOSE, KERNEL_CLOSE)
+    
     return (np.count_nonzero(tissue_mask) / PATCH_AREA) >= required_percentage
 
 def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
@@ -70,8 +78,7 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     return mask
 
 def process_window(args):
-    """Generic window processor. Now returns a detailed traceback on failure."""
-    # This function's logic is mostly unchanged, but the exception handling is key.
+    """Generic window processor. Returns a detailed traceback on failure."""
     (path_Image, target_level, window_size, tissue_percentage_req, match_percentage_req, path_cancer_folder, path_not_cancer_folder, path_cancer_mask_folder, path_not_cancer_mask_folder, patient, x, y, annotations_cancer_level0, annotations_not_cancer_level0, artifact_polygons_by_class_level0, artifact_policy, use_artifact_filter) = args
     slide = None
     try:
@@ -106,15 +113,20 @@ def process_window(args):
                 if not scaled_polys_flat:
                     continue
 
-                prepared_geom = prep(MultiPolygon(scaled_polys_flat))
+                unprepared_geom = MultiPolygon(scaled_polys_flat)
+                prepared_geom = prep(unprepared_geom)
+                
                 if prepared_geom.intersects(patch_polygon):
                     try:
-                        intersection = prepared_geom.intersection(patch_polygon)
-                        if (intersection.area / PATCH_AREA) > threshold:
+                        intersection = unprepared_geom.intersection(patch_polygon)
+                        coverage = intersection.area / PATCH_AREA
+                        if coverage > threshold:
+                            logging.info(f"Patch at {patch_coords} DROPPED. Reason: {cls} coverage ({coverage:.2f}) > threshold ({threshold}).")
                             should_drop = True
                             break
                     except shapely.errors.TopologicalError:
-                        continue
+                         logging.warning(f"Skipping intersection check for a problematic artifact geometry at {patch_coords}.")
+                         continue
             if should_drop:
                 slide.close()
                 return "SKIPPED_ARTIFACT", None
@@ -152,11 +164,8 @@ def process_window(args):
         slide.close()
         return "SKIPPED_OVERLAP", None
     except Exception:
-        # **MODIFIED**: On ANY exception, capture the full traceback.
-        # This is the crucial change for getting detailed error messages.
         if slide:
             slide.close()
-        # Return a failure status and the formatted traceback string.
         return "ERROR", traceback.format_exc()
 
 def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
@@ -183,12 +192,40 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         if kwargs.get('use_artifact_filter') and kwargs.get('path_artifacts_geojson') and kwargs.get('artifact_policy'):
             with open(kwargs['path_artifacts_geojson'], 'r') as f:
                 artifact_data = json.load(f)
+            
+            # **MODIFIED BLOCK**: This entire block is updated for robustness.
             for cls in kwargs['artifact_policy']['DROP_THRESH']:
                 artifact_polygons_by_class_level0[cls] = []
-                for feature in artifact_data.get('features', []):
-                    prop_cls = feature.get('properties', {}).get('classification', {}).get('name')
-                    if prop_cls == cls:
-                        artifact_polygons_by_class_level0[cls].extend(feature['geometry']['coordinates'])
+            
+            for feature in artifact_data.get('features', []):
+                properties = feature.get('properties', {})
+                if not properties:
+                    continue
+
+                # Safely get the classification name
+                classification_obj = properties.get('classification')
+                prop_cls = None
+                if isinstance(classification_obj, dict):
+                    prop_cls = classification_obj.get('name')
+                elif isinstance(classification_obj, str):
+                    prop_cls = classification_obj
+
+                # If we found a class name and it's one we're looking for...
+                if prop_cls and prop_cls in artifact_polygons_by_class_level0:
+                    geometry = feature.get('geometry', {})
+                    geom_type = geometry.get('type')
+                    coordinates = geometry.get('coordinates')
+
+                    if not geom_type or not coordinates:
+                        continue
+                    
+                    # Safely extract coordinates based on geometry type
+                    if geom_type == 'Polygon':
+                        artifact_polygons_by_class_level0[prop_cls].append(coordinates[0])
+                    elif geom_type == 'MultiPolygon':
+                        for poly_coords in coordinates:
+                            artifact_polygons_by_class_level0[prop_cls].append(poly_coords[0])
+
             logging.info(f"Loaded artifact coordinates for {len(artifact_polygons_by_class_level0)} classes.")
             
         scaled_polys_raw = []
@@ -232,16 +269,12 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         cancer_count = len([r for r, _ in results if r == "SAVED_CANCER"])
         not_cancer_count = len([r for r, _ in results if r == "SAVED_NOT_CANCER"])
 
-        # **MODIFIED**: This is the new, detailed error handling block.
-        # It replaces the old generic exception.
         errors = [msg for status, msg in results if status == "ERROR"]
         if errors:
-            # Log each traceback received from the workers.
             logging.error(f"Encountered {len(errors)} errors during parallel processing for {slide_basename}.")
             for i, error_traceback in enumerate(errors):
                 logging.error(f"--- Worker Error {i+1}/{len(errors)} ---\n{error_traceback}")
             
-            # Raise a more informative exception.
             error_summary = f"{len(errors)} worker process(es) failed. See '{logging.getLogger().handlers[0].baseFilename}' for detailed tracebacks."
             raise Exception(error_summary)
 

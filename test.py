@@ -98,8 +98,8 @@ def overlay_mask_edges(
 if __name__ == "__main__":
     # Example usage
     result = overlay_mask_edges(
-        image_path=r"D:\Usuario\Desktop\Base_de_dados\MASTER_BASE\CANCER\CANCER_PATIENT_00083_10080_30800_9701_20250925_200252_974642.png",
-        mask_path=r"D:\Usuario\Desktop\Base_de_dados\MASTER_BASE\CANCER_MASK\CANCER_PATIENT_00083_10080_30800_9701_20250925_200252_974642.png",
+        image_path=r"D:\Usuario\Desktop\Base_de_dados\MASTER_90\CANCER\CANCER_PATIENT_00083_17472_27888_5729_20251006_161912_797233.png",
+        mask_path=r"D:\Usuario\Desktop\Base_de_dados\MASTER_90\CANCER_MASK\CANCER_PATIENT_00083_17472_27888_5729_20251006_161912_797233.png",
         out_path="overlay_edges.png",
         color=(0, 0, 255),   # red (BGR)
         thickness=2,
