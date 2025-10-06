@@ -157,9 +157,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         slide_basename = os.path.basename(path_Image)
         logging.info(f"--- Starting processing for slide: {slide_basename} ---")
         slide = openslide.OpenSlide(path_Image)
-        
-        annotation_path = kwargs.get('annotation_path')
-        annotation_data = handler.load_annotations(slide, annotation_path, **kwargs)
+        annotation_data = handler.load_annotations(slide, **kwargs)
         annotations_cancer_level0 = annotation_data["cancer_polygons"]
         annotations_not_cancer_level0 = annotation_data["not_cancer_polygons"]
         all_polygons_level0 = annotations_cancer_level0 + annotations_not_cancer_level0

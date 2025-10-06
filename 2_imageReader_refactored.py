@@ -6,6 +6,20 @@ from dotenv import load_dotenv
 import yaml
 import warnings
 import xml.etree.ElementTree as ET
+import sys
+
+load_dotenv(override=True)
+OPENSLIDE_PATH = os.getenv('OPENSLIDE_PATH')
+# --- OpenSlide Initialization ---
+try:
+    if hasattr(os, 'add_dll_directory') and OPENSLIDE_PATH and os.path.isdir(OPENSLIDE_PATH):
+        with os.add_dll_directory(OPENSLIDE_PATH):
+            import openslide
+    else:
+        import openslide
+except ImportError as e:
+    logging.error(f"Error importing OpenSlide: {e}")
+    sys.exit(1)
 
 # Import the engine and the specific handlers
 import patch_engine
@@ -97,7 +111,6 @@ def main():
             "artifact_policy": ARTIFACT_POLICY,
             "num_workers": NUM_WORKERS
         }
-        
         cancer_count, not_cancer_count = patch_engine.run_extraction(**kwargs)
         
         status = 'COMPLETED'

@@ -5,9 +5,10 @@ from shapely.ops import unary_union
 import logging
 import os
 
+
 class BaseHandler:
     """A template for all data handlers."""
-    def load_annotations(self, slide, annotation_path, **kwargs):
+    def load_annotations(self, slide, **kwargs):
         """
         Loads annotations and returns them in a standardized dictionary format.
         MUST return: {'cancer': [poly1, poly2], 'not_cancer': [poly3, ...]}
@@ -16,8 +17,9 @@ class BaseHandler:
 
 class SVS_XML_Handler(BaseHandler):
     """Handles .svs slides with .xml annotations."""
-    def load_annotations(self, slide, annotation_path, **kwargs):
+    def load_annotations(self, slide, **kwargs):
         logging.info("Using SVS_XML_Handler to load annotations.")
+        annotation_path = kwargs.get('annotation_path')
         if not os.path.exists(annotation_path):
             raise FileNotFoundError(f"Annotation file not found: {annotation_path}")
 
@@ -47,8 +49,9 @@ class SVS_XML_Handler(BaseHandler):
 
 class NDPI_NDPA_Handler(BaseHandler):
     """Handles .ndpi slides with .ndpa annotations."""
-    def load_annotations(self, slide, annotation_path, **kwargs):
+    def load_annotations(self, slide, **kwargs):
         logging.info("Using NDPI_NDPA_Handler to load annotations.")
+        annotation_path = kwargs.get('annotation_path')
         if not os.path.exists(annotation_path):
             raise FileNotFoundError(f"Annotation file not found: {annotation_path}")
 
