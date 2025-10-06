@@ -10,6 +10,7 @@ import sys
 
 load_dotenv(override=True)
 OPENSLIDE_PATH = os.getenv('OPENSLIDE_PATH')
+
 # --- OpenSlide Initialization ---
 try:
     if hasattr(os, 'add_dll_directory') and OPENSLIDE_PATH and os.path.isdir(OPENSLIDE_PATH):
@@ -40,9 +41,9 @@ def main():
     MATCH_PERCENTAGE = float(os.getenv('MATCH_PERCENTAGE', 0.9))
     TISSUE_PERCENTAGE = float(os.getenv('TISSUE_PERCENTAGE', 0.9))
     TARGET_LEVEL = int(os.getenv('TARGET_LEVEL', 0))
-    NUM_WORKERS = os.cpu_count()
-    
-    # **MODIFIED**: Load artifact config here in the controller
+    # **MODIFIED**: Ensure num_workers is at least 1
+    NUM_WORKERS = max(1, os.cpu_count()) 
+
     USE_ADVANCED_ARTIFACT_FILTERING = os.getenv('USE_ADVANCED_ARTIFACT_FILTERING', 'False').lower() in ('true', '1', 't')
     ARTIFACT_POLICY_PATH = os.getenv('ARTIFACT_POLICY_PATH')
     ARTIFACT_POLICY = None
@@ -50,13 +51,13 @@ def main():
         try:
             with open(ARTIFACT_POLICY_PATH, 'r') as f:
                 ARTIFACT_POLICY = yaml.safe_load(f)
-                if 'DROP_THRESH' not in ARTIFACT_POLICY:
-                    raise ValueError("`DROP_THRESH` not found in artifact_policy.yaml")
+            if 'DROP_THRESH' not in ARTIFACT_POLICY:
+                raise ValueError("DROP_THRESH not found in artifact_policy.yaml")
         except Exception as e:
             logging.error(f"Could not load artifact policy: {e}")
             USE_ADVANCED_ARTIFACT_FILTERING = False
 
-    # Set global constants in the engine (these are safe and don't change per run)
+    # Set global constants in the engine
     patch_engine.PATCH_AREA = WINDOW_SIZE * WINDOW_SIZE
     patch_engine.HALF_WINDOW = WINDOW_SIZE // 2
 
@@ -72,14 +73,14 @@ def main():
     parser.add_argument('--not_cancer_color', type=str, required=True)
     parser.add_argument('--patient', type=str, required=True)
     parser.add_argument('--path_artifacts_geojson', type=str, required=False, default=None)
-
+    
     status, comments = 'UNKNOWN', ''
     cancer_count, not_cancer_count = 0, 0
     args = None
     try:
         args = parser.parse_args()
         logging.info(f"Script started for image: {os.path.basename(args.path_Image)} with handler: {args.handler}")
-        
+
         if args.handler == 'SVS':
             handler = SVS_XML_Handler()
             annotation_path = args.path_Image.replace('.svs', '.xml')
@@ -89,7 +90,6 @@ def main():
         else:
             raise ValueError(f"Unknown handler type: {args.handler}")
 
-        # **MODIFIED**: Pack all config into a dictionary to pass to the engine
         kwargs = {
             "handler": handler,
             "path_Image": args.path_Image,
@@ -111,11 +111,12 @@ def main():
             "artifact_policy": ARTIFACT_POLICY,
             "num_workers": NUM_WORKERS
         }
+
         cancer_count, not_cancer_count = patch_engine.run_extraction(**kwargs)
-        
         status = 'COMPLETED'
         comments = f'Successfully processed {os.path.basename(args.path_Image)}.'
         logging.info(comments)
+
     except ET.ParseError as e:
         status = 'FAILED'
         img_path = os.path.basename(args.path_Image) if args and args.path_Image else "input WSI"
@@ -124,7 +125,9 @@ def main():
     except Exception as e:
         status = 'FAILED'
         img_path = os.path.basename(args.path_Image) if args and args.path_Image else "input WSI"
+        # **MODIFIED**: This will now log the more informative exception from the patch engine.
         logging.exception(f"Critical failure while processing {img_path}")
+        # The 'comments' will now contain the summary, e.g., "5 worker process(es) failed..."
         comments = f"Error processing {img_path}: {e}"
     finally:
         print(json.dumps({
