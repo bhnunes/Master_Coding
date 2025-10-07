@@ -21,8 +21,8 @@ except ImportError:
 
 # --- FOLDERS ---
 BASE_DIR = r"C:\Images_IA_MEDICA\CANCER\master_candidate_pool" # Use the same path as before
-APPROVED_FOLDER = os.path.join(BASE_DIR, 'Approved')
-REJECTED_FOLDER = os.path.join(BASE_DIR, 'Rejected')
+APPROVED_FOLDER = os.path.join(BASE_DIR, 'APPROVED')
+REJECTED_FOLDER = os.path.join(BASE_DIR, 'REJECTED')
 
 # --- HYPERPARAMETER GRID ---
 PARAMETER_GRID = {
