@@ -285,8 +285,8 @@ def write_manifest_and_log_stats(fold_output_dir, fold_num):
 # --- 6. Main Execution ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_BASE'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED_CLEANED\cross_val_splits_final'
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_90'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED_CLEANED_90\cross_val_splits_final'
     N_SPLITS = 5
     RANDOM_STATE = 45
     NUM_WORKERS = max(1, (os.cpu_count() or 1) - 2)
