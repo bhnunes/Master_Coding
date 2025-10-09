@@ -168,5 +168,5 @@ def main(base_path):
             print(f"  - {check_name+':':<22} [{status}] {detail_text}")
 
 if __name__ == '__main__':
-    main_output_directory = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED_CLEANED\cross_val_splits_final'
+    main_output_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_INFERENCE\master_split'
     main(main_output_directory)

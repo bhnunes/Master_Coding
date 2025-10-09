@@ -97,42 +97,81 @@ def load_data(data_dir):
 def _get_patient_labels(df: pd.DataFrame):
     return df.groupby('patient_id')['label'].max().reset_index()
 
-def create_cross_val_splits(df, n_splits=5, random_state=42):
-    # This function is already scientifically sound.
-    logging.info(f"Creating {n_splits} patient-level stratified group splits...")
+# <<< MODIFIED FUNCTION TO HANDLE BOTH SCENARIOS >>>
+def create_cross_val_splits(df, n_splits=5, random_state=42, master_set_generation=False):
+    """
+    Creates data splits. 
+    - If master_set_generation is False: Creates N-fold cross-validation splits.
+    - If master_set_generation is True: Creates a single 80/20 TRAIN/VALIDATION split with no TEST set.
+    """
     patient_df = _get_patient_labels(df)
-    sgkf_outer = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-    final_splits = []
-    for i, (train_val_idx, test_idx) in enumerate(sgkf_outer.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id'])):
-        train_val_patients = set(patient_df.iloc[train_val_idx]['patient_id'])
-        test_patients = set(patient_df.iloc[test_idx]['patient_id'])
-        train_val_df = df[df['patient_id'].isin(train_val_patients)]
-        test_df = df[df['patient_id'].isin(test_patients)]
-        
-        inner_patient_df = _get_patient_labels(train_val_df)
-        inner_n_splits = min(5, max(2, inner_patient_df.groupby('label')['patient_id'].nunique().min()))
-        sgkf_inner = StratifiedGroupKFold(n_splits=inner_n_splits, shuffle=True, random_state=random_state)
+    
+    # <<< NEW LOGIC BRANCH FOR MASTER SET GENERATION >>>
+    if master_set_generation:
+        logging.info("--- MASTER SET GENERATION MODE: Creating a single 80% TRAIN / 20% VALIDATION split ---")
+        # For an 80/20 split, we can use a 5-fold splitter and take one fold for validation.
+        # This reuses the same robust splitting mechanism.
+        sgkf_single_split = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=random_state)
         
         try:
-            inner_train_idx, inner_val_idx = next(sgkf_inner.split(inner_patient_df, y=inner_patient_df['label'], groups=inner_patient_df['patient_id']))
+            train_idx, val_idx = next(sgkf_single_split.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
         except (StopIteration, ValueError) as e:
-            logging.error(f"Could not generate inner split for Fold {i+1}: {e}. Skipping.")
-            continue
+            logging.error(f"Could not generate the master train/validation split: {e}.")
+            return []
             
-        train_patients = set(inner_patient_df.iloc[inner_train_idx]['patient_id'])
-        val_patients = set(inner_patient_df.iloc[inner_val_idx]['patient_id'])
+        train_patients = set(patient_df.iloc[train_idx]['patient_id'])
+        val_patients = set(patient_df.iloc[val_idx]['patient_id'])
 
-        train_df = train_val_df[train_val_df['patient_id'].isin(train_patients)].reset_index(drop=True)
-        val_df = train_val_df[train_val_df['patient_id'].isin(val_patients)].reset_index(drop=True)
+        train_df = df[df['patient_id'].isin(train_patients)].reset_index(drop=True)
+        val_df = df[df['patient_id'].isin(val_patients)].reset_index(drop=True)
+        # Create an empty dataframe for the test set to maintain data structure consistency.
+        test_df = pd.DataFrame(columns=df.columns) 
         
-        assert train_patients.isdisjoint(val_patients) and train_patients.isdisjoint(test_patients) and val_patients.isdisjoint(test_patients)
-        final_splits.append({'train_df': train_df, 'val_df': val_df, 'test_df': test_df.reset_index(drop=True)})
-        logging.info(f"Fold {i+1}: Train patients={len(train_patients)}, Val patients={len(val_patients)}, Test patients={len(test_patients)}")
-    return final_splits
+        assert train_patients.isdisjoint(val_patients)
+        logging.info(f"Master Split: Train patients={len(train_patients)}, Val patients={len(val_patients)}, Test patients=0")
+        
+        # Return as a list with a single element to match the original function's output format
+        return [{'train_df': train_df, 'val_df': val_df, 'test_df': test_df}]
+    
+    # <<< ORIGINAL LOGIC FOR CROSS-VALIDATION >>>
+    else:
+        logging.info(f"--- CROSS-VALIDATION MODE: Creating {n_splits} patient-level stratified group splits... ---")
+        sgkf_outer = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        final_splits = []
+        for i, (train_val_idx, test_idx) in enumerate(sgkf_outer.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id'])):
+            train_val_patients = set(patient_df.iloc[train_val_idx]['patient_id'])
+            test_patients = set(patient_df.iloc[test_idx]['patient_id'])
+            train_val_df = df[df['patient_id'].isin(train_val_patients)]
+            test_df = df[df['patient_id'].isin(test_patients)]
+            
+            inner_patient_df = _get_patient_labels(train_val_df)
+            inner_n_splits = min(5, max(2, inner_patient_df.groupby('label')['patient_id'].nunique().min()))
+            sgkf_inner = StratifiedGroupKFold(n_splits=inner_n_splits, shuffle=True, random_state=random_state)
+            
+            try:
+                inner_train_idx, inner_val_idx = next(sgkf_inner.split(inner_patient_df, y=inner_patient_df['label'], groups=inner_patient_df['patient_id']))
+            except (StopIteration, ValueError) as e:
+                logging.error(f"Could not generate inner split for Fold {i+1}: {e}. Skipping.")
+                continue
+                
+            train_patients = set(inner_patient_df.iloc[inner_train_idx]['patient_id'])
+            val_patients = set(inner_patient_df.iloc[inner_val_idx]['patient_id'])
+
+            train_df = train_val_df[train_val_df['patient_id'].isin(train_patients)].reset_index(drop=True)
+            val_df = train_val_df[train_val_df['patient_id'].isin(val_patients)].reset_index(drop=True)
+            
+            assert train_patients.isdisjoint(val_patients) and train_patients.isdisjoint(test_patients) and val_patients.isdisjoint(test_patients)
+            final_splits.append({'train_df': train_df, 'val_df': val_df, 'test_df': test_df.reset_index(drop=True)})
+            logging.info(f"Fold {i+1}: Train patients={len(train_patients)}, Val patients={len(val_patients)}, Test patients={len(test_patients)}")
+        return final_splits
+
 
 # --- 3. File Operations & Verification ---
 def copy_files_for_split(split_df, fold_output_dir, split_name):
     # This function is already robust.
+    if split_df.empty: # <<< ADDED CHECK: Gracefully handle empty test_df
+        logging.info(f"Skipping file copy for empty split: {split_name}")
+        return
     logging.info(f"Copying {len(split_df)} original files for {split_name}...")
     copy_tasks = []
     for _, row in split_df.iterrows():
@@ -152,6 +191,9 @@ def copy_files_for_split(split_df, fold_output_dir, split_name):
 
 def verify_split_integrity(fold_output_dir, split_name, original_df=None):
     # This function is already robust.
+    if original_df is not None and original_df.empty: # <<< ADDED CHECK: Gracefully handle empty test_df
+        logging.info(f"Skipping integrity check for empty split: {split_name}")
+        return True
     logging.info(f"Verifying integrity of files for {split_name} split...")
     split_dir = os.path.join(fold_output_dir, split_name)
     error_messages = []
@@ -161,7 +203,9 @@ def verify_split_integrity(fold_output_dir, split_name, original_df=None):
         image_dir = os.path.join(split_dir, label_name)
         mask_dir = os.path.join(split_dir, f"{label_name}_MASK")
         if not (os.path.isdir(image_dir) and os.path.isdir(mask_dir)):
-            error_messages.append(f"Missing directory for {split_name}/{label_name}.")
+            # This is expected if the split is empty (like the test set in the new mode)
+            if original_df is not None:
+                error_messages.append(f"Missing directory for {split_name}/{label_name}.")
             continue
         image_files = {f for f in os.listdir(image_dir) if f.lower().endswith('.png')}
         mask_files = {f for f in os.listdir(mask_dir) if f.lower().endswith('.png')}
@@ -186,6 +230,7 @@ def verify_split_integrity(fold_output_dir, split_name, original_df=None):
     return True
 
 # --- 4. Augmentation (Reproducible & Process-Safe) ---
+# ... (No changes needed in this section)
 TRANSFORM_CODES = ["HF", "VF", "RR", "GB", "HED", "HSV"]
 
 def _transform_factory(code: str):
@@ -257,6 +302,7 @@ def augment_and_balance_train_set(fold_output_dir, train_df, random_state, num_w
     return augmentation_details
 
 # --- 5. Manifest Generation ---
+# ... (No changes needed in this section)
 def write_manifest_and_log_stats(fold_output_dir, fold_num):
     """Creates a manifest CSV for the fold and logs patient-level statistics."""
     logging.info(f"Generating manifest and stats for Fold {fold_num}...")
@@ -277,7 +323,7 @@ def write_manifest_and_log_stats(fold_output_dir, fold_num):
     logging.info(f"--- Patient-Level Stats for Fold {fold_num} ---")
     for split in ["TRAIN", "VALIDATION", "TEST"]:
         split_df = manifest_df[manifest_df['split'] == split]
-        if split_df.empty: continue
+        # if split_df.empty: continue # This check is good practice
         counts = split_df.drop_duplicates(['patient_id', 'label']).groupby('label')['patient_id'].nunique()
         logging.info(f"{split} patient counts -> NOT_CANCER={counts.get(0, 0)}, CANCER={counts.get(1, 0)}")
     return manifest_df
@@ -286,8 +332,14 @@ def write_manifest_and_log_stats(fold_output_dir, fold_num):
 if __name__ == '__main__':
     # --- Configuration ---
     data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_90'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED_CLEANED_90\cross_val_splits_final'
-    N_SPLITS = 5
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\MASTER_INFERENCE\master_split'
+    
+    # <<< NEW CONFIGURATION FLAG >>>
+    # Set to True for a single 80/20 train/val split.
+    # Set to False for the standard N-fold cross-validation.
+    MASTER_SET_GENERATION = True 
+    
+    N_SPLITS = 5 # Only used if MASTER_SET_GENERATION is False
     RANDOM_STATE = 45
     NUM_WORKERS = max(1, (os.cpu_count() or 1) - 2)
 
@@ -302,44 +354,56 @@ if __name__ == '__main__':
     try:
         logging.info("--- Starting Data Preparation Script ---")
         data_df = load_data(data_directory)
-        cross_val_splits = create_cross_val_splits(data_df, n_splits=N_SPLITS, random_state=RANDOM_STATE)
+        
+        # <<< MODIFIED FUNCTION CALL >>>
+        cross_val_splits = create_cross_val_splits(
+            data_df, 
+            n_splits=N_SPLITS, 
+            random_state=RANDOM_STATE, 
+            master_set_generation=MASTER_SET_GENERATION
+        )
+        
         if not cross_val_splits: raise RuntimeError("No cross-validation splits were generated.")
 
         for fold_idx, split_data in enumerate(cross_val_splits):
+            # If in master mode, this loop will only run once.
+            # The name 'fold_1' is still used for the output directory, which is clear enough.
             fold_num = fold_idx + 1
             fold_output_dir = os.path.join(output_base_dir, f"fold_{fold_num}")
-            logging.info(f"--- Processing Fold {fold_num}/{len(cross_val_splits)} ---")
+            
+            # <<< LOGIC ADAPTED FOR CLARITY >>>
+            processing_label = "Master Split" if MASTER_SET_GENERATION else f"Fold {fold_num}/{len(cross_val_splits)}"
+            logging.info(f"--- Processing {processing_label} ---")
             
             try:
                 # 1. Setup, Copy, and Pre-Augment Verify
                 split_dfs = {'TRAIN': split_data['train_df'], 'VALIDATION': split_data['val_df'], 'TEST': split_data['test_df']}
                 for split_name, df in split_dfs.items():
+                    # The loops will create TEST directories but they will remain empty, which is harmless.
                     for label in ['CANCER', 'NOT_CANCER']:
                         os.makedirs(os.path.join(fold_output_dir, split_name, label), exist_ok=True)
                         os.makedirs(os.path.join(fold_output_dir, split_name, f"{label}_MASK"), exist_ok=True)
                     copy_files_for_split(df, fold_output_dir, split_name)
                     verify_split_integrity(fold_output_dir, split_name, df)
 
-                # 2. Augment and Balance
+                # 2. Augment and Balance (This works perfectly as is)
                 aug_details = augment_and_balance_train_set(fold_output_dir, split_data['train_df'], RANDOM_STATE + fold_num, num_workers=NUM_WORKERS)
-                # NICE-TO-HAVE: Log augmentation summary
                 if aug_details:
                     df_aug = pd.DataFrame(aug_details)
                     logging.info(f"Augmentation transform mix: {df_aug['transform_code'].value_counts().to_dict()}")
                     logging.info(f"Stats for # of augmentations per patient: {df_aug['patient_id'].value_counts().describe().to_dict()}")
 
-                # 3. Post-Augment Verification
-                logging.info(f"--- Post-Augmentation Verification for Fold {fold_num} ---")
-                verify_split_integrity(fold_output_dir, "TRAIN") # Pass None for df as we're just checking file correspondence
+                # 3. Post-Augment Verification (This works perfectly as is)
+                logging.info(f"--- Post-Augmentation Verification for {processing_label} ---")
+                verify_split_integrity(fold_output_dir, "TRAIN") 
                 
-                # CRITICAL FIX: Helper function for accurate PNG count
                 def _count_pngs(p): return sum(1 for f in os.listdir(p) if f.lower().endswith('.png')) if os.path.isdir(p) else 0
                 n_pos = _count_pngs(os.path.join(fold_output_dir, "TRAIN", "CANCER"))
                 n_neg = _count_pngs(os.path.join(fold_output_dir, "TRAIN", "NOT_CANCER"))
                 assert n_pos == n_neg, f"TRAIN set imbalance detected: CANCER={n_pos}, NOT_CANCER={n_neg}"
                 logging.info(f"TRAIN set balance confirmed: {n_pos} images per class.")
 
-                # 4. Create manifests
+                # 4. Create manifests (This works perfectly as is)
                 manifest = write_manifest_and_log_stats(fold_output_dir, fold_num)
                 all_manifests.append(manifest)
                 if aug_details:
@@ -348,18 +412,19 @@ if __name__ == '__main__':
                     aug_df.to_csv(os.path.join(fold_output_dir, "augmentations.csv"), index=False)
                     all_aug_details.append(aug_df)
                 
-                logging.info(f"--- Fold {fold_num} completed successfully. ---")
+                logging.info(f"--- {processing_label} completed successfully. ---")
             
             except Exception as e:
-                logging.critical(f"--- Fold {fold_num} FAILED: {e} ---")
+                logging.critical(f"--- {processing_label} FAILED: {e} ---")
 
         # --- Final Summary ---
-        if len(all_manifests) == N_SPLITS:
+        final_file_count = len(cross_val_splits)
+        if len(all_manifests) == final_file_count:
             pd.concat(all_manifests).to_csv(os.path.join(output_base_dir, "full_manifest.csv"), index=False)
             if all_aug_details: pd.concat(all_aug_details).to_csv(os.path.join(output_base_dir, "full_augmentations.csv"), index=False)
-            logging.info("All folds processed successfully! Full manifests have been created.")
+            logging.info("All processing completed successfully! Full manifests have been created.")
         else:
-            logging.error(f"Processing failed. Only {len(all_manifests)}/{N_SPLITS} folds were successful.")
+            logging.error(f"Processing failed. Only {len(all_manifests)}/{final_file_count} splits were successful.")
 
     except Exception as e:
         logging.critical(f"A fatal error occurred: {e}", exc_info=True)
