@@ -138,7 +138,7 @@ def build_zip_for_fold(
 # Main
 # -------------------------------
 def main():
-    ROOT=r"D:\Usuario\Desktop\Base_de_dados\NOT_NORMALIZED_CLEANED_90\cross_val_splits_final"
+    ROOT=r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE\master_split"
     OUT=None
     WORKERS=max(os.cpu_count() - 1, 1)
     COMPRESSLEVEL=1 #0 is faster but bigger, 1 is a good trade-off

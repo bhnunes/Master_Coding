@@ -331,8 +331,8 @@ def write_manifest_and_log_stats(fold_output_dir, fold_num):
 # --- 6. Main Execution ---
 if __name__ == '__main__':
     # --- Configuration ---
-    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_90'
-    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\MASTER_INFERENCE\master_split'
+    data_directory = r'D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE'
+    output_base_dir = r'D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE\master_split'
     
     # <<< NEW CONFIGURATION FLAG >>>
     # Set to True for a single 80/20 train/val split.

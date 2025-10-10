@@ -219,11 +219,11 @@ if __name__ == "__main__":
     setup_logging()
     
     # --- IMPORTANT: Define your source and output paths here ---
-    SOURCE_IMAGE_DIR = r"C:\Images_IA_MEDICA\CANCER"
-    SOURCE_MASK_DIR = r"C:\Images_IA_MEDICA\CANCER_MASK"
-    
+    SOURCE_IMAGE_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST\CANCER"
+    SOURCE_MASK_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST\CANCER_MASK"
+
     # This is the base directory where rejected files will be placed.
-    OUTPUT_DIR = r"C:\Images_IA_MEDICA\FILTERED_OUTPUT"
+    OUTPUT_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST"
 
     # Leave as None to use all available CPU cores.
     NUMBER_OF_WORKERS = None 
