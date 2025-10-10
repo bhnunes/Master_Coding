@@ -46,6 +46,6 @@ if __name__ == "__main__":
     print(f"TRAIN ({len(train)} ids): {train}")
     print(f"TEST  ({len(test)} ids): {test}")
 
-    # Optional: save to disk
-    # with open("train_ids.txt", "w") as f: f.write("\n".join(map(str, train)))
-    # with open("test_ids.txt", "w") as f: f.write("\n".join(map(str, test)))
+    #Optional: save to disk
+    with open("train_ids.txt", "w") as f: f.write("\n".join(map(str, train)))
+    with open("test_ids.txt", "w") as f: f.write("\n".join(map(str, test)))
