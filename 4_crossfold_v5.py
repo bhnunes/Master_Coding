@@ -355,7 +355,9 @@ def write_manifest_and_log_stats(output_dir):
 if __name__ == '__main__':
     # --- 1. CONFIGURATION ---
     DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\MASTER'
+    DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
     OUTPUT_BASE_DIR = r'D:\Usuario\Desktop\Base_de_dados\ABLATION\NORMALIZED_SPLITS'
+    OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
     
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"

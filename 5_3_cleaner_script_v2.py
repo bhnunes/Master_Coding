@@ -220,10 +220,13 @@ if __name__ == "__main__":
     
     # --- IMPORTANT: Define your source and output paths here ---
     SOURCE_IMAGE_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST\CANCER"
+    SOURCE_IMAGE_DIR = os.path.normpath(SOURCE_IMAGE_DIR)
     SOURCE_MASK_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST\CANCER_MASK"
+    SOURCE_MASK_DIR = os.path.normpath(SOURCE_MASK_DIR)
 
     # This is the base directory where rejected files will be placed.
     OUTPUT_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST"
+    OUTPUT_DIR = os.path.normpath(OUTPUT_DIR)
 
     # Leave as None to use all available CPU cores.
     NUMBER_OF_WORKERS = None 

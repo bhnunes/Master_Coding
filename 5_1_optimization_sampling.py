@@ -208,8 +208,11 @@ def generate_samples_on_the_fly(image_folder, mask_folder, base_output_path, col
 if __name__ == "__main__":
     # --- Configuration ---
     SOURCE_IMAGE_FOLDER = r"C:\Images_IA_MEDICA\CANCER"
+    SOURCE_IMAGE_FOLDER = os.path.normpath(SOURCE_IMAGE_FOLDER)
     SOURCE_MASK_FOLDER = r"C:\Images_IA_MEDICA\CANCER_MASK"
+    SOURCE_MASK_FOLDER = os.path.normpath(SOURCE_MASK_FOLDER)
     OUTPUT_BASE_FOLDER = r"C:\Images_IA_MEDICA\Optimization_Test"
+    OUTPUT_BASE_FOLDER = os.path.normpath(OUTPUT_BASE_FOLDER)
 
     # --- Execution ---
     # This single function now handles the entire efficient setup process.

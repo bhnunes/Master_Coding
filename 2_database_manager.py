@@ -45,8 +45,8 @@ def open_conn(db_path):
 
 def create_folders_and_db_table(tag, base_path, db_path):
     """Handles the initial setup of folders and the database table."""
-    images_folder = os.path.normpath(os.path.join(base_path, f"IMAGES_{tag}"))
-    annotations_folder = os.path.normpath(os.path.join(base_path, f"ANNOTATIONS_{tag}"))
+    images_folder = os.path.join(base_path, f"IMAGES_{tag}")
+    annotations_folder = os.path.join(base_path, f"ANNOTATIONS_{tag}")
 
     if not os.path.exists(images_folder) or not os.path.exists(annotations_folder):
         os.makedirs(images_folder, exist_ok=True)
@@ -237,16 +237,16 @@ def main_process():
         raise ValueError("The 'TAG' environment variable is not set. Please define it in your .env file.")
 
     config = {
-        'tag': tag, 'db_path': os.getenv('SQLITE_DB_PATH'),
-        'base_path': os.getenv('PROJECTS_BASE_PATH', './projects'),
+        'tag': tag, 'db_path': os.path.normpath(os.getenv('SQLITE_DB_PATH')),
+        'base_path': os.path.normpath(os.getenv('PROJECTS_BASE_PATH', './projects')),
         'window_size': os.getenv('WINDOW_SIZE'), 'stride': os.getenv('STRIDE'),
         'match_percentage': os.getenv('MATCH_PERCENTAGE'), 'tissue_percentage': os.getenv('TISSUE_PERCENTAGE'),
-        'image_reader_path': os.getenv('IMAGE_READER_PATH'), 'python_path': os.getenv('PYTHON_PATH'),
+        'image_reader_path': os.path.normpath(os.getenv('IMAGE_READER_PATH')), 'python_path': os.path.normpath(os.getenv('PYTHON_PATH')),
         'load_cases': os.getenv('LOADCASES', 'False').lower() in ('true', '1', 't'),
         'use_advanced_artifact_filtering': os.getenv('USE_ADVANCED_ARTIFACT_FILTERING', 'False').lower() in ('true', '1', 't'),
         # --- NEW: Read GeoJSON config here ---
         'activate_sanity_check_geojson': os.getenv('ACTIVATE_SANITY_CHECK_GEOJSON', 'False').lower() in ('true', '1', 't'),
-        'geojson_path': os.getenv('GEOJSON_PATH')
+        'geojson_path': os.path.normpath(os.getenv('GEOJSON_PATH'))
     }
     table_name = f"DATABASE_{config['tag']}"
     
