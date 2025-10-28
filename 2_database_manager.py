@@ -45,9 +45,9 @@ def open_conn(db_path):
 
 def create_folders_and_db_table(tag, base_path, db_path):
     """Handles the initial setup of folders and the database table."""
-    images_folder = os.path.join(base_path, f"IMAGES_{tag}")
-    annotations_folder = os.path.join(base_path, f"ANNOTATIONS_{tag}")
-    
+    images_folder = os.path.normpath(os.path.join(base_path, f"IMAGES_{tag}"))
+    annotations_folder = os.path.normpath(os.path.join(base_path, f"ANNOTATIONS_{tag}"))
+
     if not os.path.exists(images_folder) or not os.path.exists(annotations_folder):
         os.makedirs(images_folder, exist_ok=True)
         os.makedirs(annotations_folder, exist_ok=True)
@@ -83,15 +83,15 @@ def create_folders_and_db_table(tag, base_path, db_path):
     finally:
         conn.close()
 
-def ingest_new_cases(tag, base_path, db_path):
+def ingest_new_cases(tag, base_path, db_path, activate_sanity_check, use_advanced_filtering, geojson_path): # MODIFIED: Added new args
     """
-    Scans folders, adds new images, prevents duplicates, and reports if SVS files were added.
-    Returns: A boolean indicating if any .svs files were newly ingested.
+    Scans folders, adds new images, performs GeoJSON sanity check if enabled,
+    and reports if SVS files were added.
     """
     images_folder = os.path.join(base_path, f"IMAGES_{tag}")
     annotations_folder = os.path.join(base_path, f"ANNOTATIONS_{tag}")
     table_name = f"DATABASE_{tag}"
-    svs_files_added = False # MODIFIED: Flag to track SVS file additions
+    svs_files_added = False
 
     if not os.listdir(images_folder):
         raise FileNotFoundError(f"The directory '{images_folder}' is empty. Please add images to process.")
@@ -109,22 +109,44 @@ def ingest_new_cases(tag, base_path, db_path):
         image_files = [f for f in os.listdir(images_folder) if os.path.isfile(os.path.join(images_folder, f))]
         new_cases_to_add = []
 
+        # --- NEW: GEOJSON Sanity Check Setup ---
+        geojson_basenames = set()
+        run_geojson_check = activate_sanity_check and use_advanced_filtering
+        if run_geojson_check:
+            print(f"{Style.INFO} GeoJSON sanity check is {Style.GREEN}ACTIVE{Style.RESET}.")
+            if not geojson_path or not os.path.isdir(geojson_path):
+                raise FileNotFoundError(f"GeoJSON sanity check is active, but GEOJSON_PATH ('{geojson_path}') is invalid.")
+            geojson_basenames = {os.path.splitext(f)[0] for f in os.listdir(geojson_path) if f.lower().endswith('.geojson')}
+            print(f"{Style.INFO} Found {len(geojson_basenames)} GeoJSON files for comparison.")
+        # --- END NEW ---
+
         for image_file in tqdm(image_files, desc=f"{Style.CYAN}Scanning for new images{Style.RESET}"):
             if image_file in existing_basenames:
                 continue
             
             image_path = os.path.join(images_folder, image_file)
-            if image_path.lower().endswith('.svs'): # MODIFIED
+            if image_path.lower().endswith('.svs'):
                 svs_files_added = True
-
-            next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
-            patient_id_str = str(next_patient_id)
-            existing_patients.add(next_patient_id)
 
             image_basename = os.path.splitext(image_file)[0]
             annotation_path = annotation_lookup.get(image_basename)
             
-            status, comments = ('TO BE PROCESSED', '') if annotation_path else ('FAILED', 'The equivalent annotation could not be found')
+            status, comments = 'TO BE PROCESSED', ''
+            
+            if not annotation_path:
+                status, comments = 'FAILED', 'The equivalent annotation file could not be found.'
+
+            # --- NEW: Apply GeoJSON Sanity Check ---
+            if status == 'TO BE PROCESSED' and run_geojson_check:
+                if image_basename not in geojson_basenames:
+                    status = 'FAILED'
+                    comments = 'GeoJSON Sanity Check Failed: The equivalent GeoJSON file was not found.'
+            # --- END NEW ---
+            
+            next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
+            patient_id_str = str(next_patient_id)
+            existing_patients.add(next_patient_id)
+            
             new_cases_to_add.append((image_path, annotation_path, patient_id_str, status, comments))
         
         if new_cases_to_add:
@@ -139,9 +161,9 @@ def ingest_new_cases(tag, base_path, db_path):
     finally:
         conn.close()
     
-    return svs_files_added # MODIFIED
+    return svs_files_added
 
-# ... (get_cases_to_process, update_case, and run_image_reader_script are unchanged) ...
+
 def get_cases_to_process(db_path, table_name):
     conn = open_conn(db_path)
     try:
@@ -222,6 +244,8 @@ def main_process():
         'image_reader_path': os.getenv('IMAGE_READER_PATH'), 'python_path': os.getenv('PYTHON_PATH'),
         'load_cases': os.getenv('LOADCASES', 'False').lower() in ('true', '1', 't'),
         'use_advanced_artifact_filtering': os.getenv('USE_ADVANCED_ARTIFACT_FILTERING', 'False').lower() in ('true', '1', 't'),
+        # --- NEW: Read GeoJSON config here ---
+        'activate_sanity_check_geojson': os.getenv('ACTIVATE_SANITY_CHECK_GEOJSON', 'False').lower() in ('true', '1', 't'),
         'geojson_path': os.getenv('GEOJSON_PATH')
     }
     table_name = f"DATABASE_{config['tag']}"
@@ -229,7 +253,14 @@ def main_process():
     create_folders_and_db_table(config['tag'], config['base_path'], config['db_path'])
 
     if config['load_cases']:
-        svs_added = ingest_new_cases(config['tag'], config['base_path'], config['db_path'])
+        # --- MODIFIED: Pass new config to the function ---
+        svs_added = ingest_new_cases(
+            config['tag'], config['base_path'], config['db_path'],
+            config['activate_sanity_check_geojson'], 
+            config['use_advanced_artifact_filtering'], 
+            config['geojson_path']
+        )
+
         print(f"\n{Style.GREEN}{Style.SUCCESS} Ingestion complete. Set {Style.BOLD}LOADCASES=False{Style.RESET}{Style.GREEN} in .env to start processing.{Style.RESET}")
         
         # --- NEW: SVS Color Warning ---
