@@ -185,48 +185,54 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             slide.close(); slide = None
             return 0, 0
 
-        scale_factor = slide.level_downsamples[kwargs['target_level']]
-        target_width, target_height = slide.level_dimensions[kwargs['target_level']]
-
+        # --- NEW: ROBUST ARTIFACT PARSING BLOCK ---
         artifact_polygons_by_class_level0 = {}
         if kwargs.get('use_artifact_filter') and kwargs.get('path_artifacts_geojson') and kwargs.get('artifact_policy'):
-            with open(kwargs['path_artifacts_geojson'], 'r') as f:
-                artifact_data = json.load(f)
-            
-            # **MODIFIED BLOCK**: This entire block is updated for robustness.
-            for cls in kwargs['artifact_policy']['DROP_THRESH']:
-                artifact_polygons_by_class_level0[cls] = []
-            
-            for feature in artifact_data.get('features', []):
-                properties = feature.get('properties', {})
-                if not properties:
-                    continue
+            logging.info(f"Advanced artifact filtering is ACTIVE for {slide_basename}.")
+            try:
+                with open(kwargs['path_artifacts_geojson'], 'r') as f:
+                    artifact_data = json.load(f)
+                
+                # Initialize dictionaries for all classes we care about from the policy
+                for cls in kwargs['artifact_policy']['DROP_THRESH']:
+                    artifact_polygons_by_class_level0[cls] = []
+                
+                # Safely parse the GeoJSON features
+                for feature in artifact_data.get('features', []):
+                    properties = feature.get('properties', {})
+                    if not properties: continue
 
-                # Safely get the classification name
-                classification_obj = properties.get('classification')
-                prop_cls = None
-                if isinstance(classification_obj, dict):
+                    classification_obj = properties.get('classification', {})
                     prop_cls = classification_obj.get('name')
-                elif isinstance(classification_obj, str):
-                    prop_cls = classification_obj
 
-                # If we found a class name and it's one we're looking for...
-                if prop_cls and prop_cls in artifact_polygons_by_class_level0:
-                    geometry = feature.get('geometry', {})
-                    geom_type = geometry.get('type')
-                    coordinates = geometry.get('coordinates')
+                    if prop_cls and prop_cls in artifact_polygons_by_class_level0:
+                        geometry = feature.get('geometry', {})
+                        geom_type = geometry.get('type')
+                        coordinates = geometry.get('coordinates')
+                        if not geom_type or not coordinates: continue
+                        
+                        # Handle both Polygon and MultiPolygon types
+                        if geom_type == 'Polygon':
+                            # GeoJSON Polygons have an outer ring and optional inner rings. We only need the outer.
+                            if coordinates: artifact_polygons_by_class_level0[prop_cls].append(coordinates[0])
+                        elif geom_type == 'MultiPolygon':
+                            for poly_coords in coordinates:
+                                if poly_coords: artifact_polygons_by_class_level0[prop_cls].append(poly_coords[0])
+                
+                # Log a summary of what was found
+                for cls, polys in artifact_polygons_by_class_level0.items():
+                    logging.info(f"  - Loaded {len(polys)} artifact polygons for class '{cls}'.")
 
-                    if not geom_type or not coordinates:
-                        continue
-                    
-                    # Safely extract coordinates based on geometry type
-                    if geom_type == 'Polygon':
-                        artifact_polygons_by_class_level0[prop_cls].append(coordinates[0])
-                    elif geom_type == 'MultiPolygon':
-                        for poly_coords in coordinates:
-                            artifact_polygons_by_class_level0[prop_cls].append(poly_coords[0])
+            except FileNotFoundError:
+                logging.warning(f"Artifact GeoJSON file not found: {kwargs['path_artifacts_geojson']}. Filtering will be skipped for this slide.")
+            except Exception as e:
+                logging.error(f"Failed to parse artifact GeoJSON {kwargs['path_artifacts_geojson']}: {e}. Filtering skipped.")
+                # Reset to empty dict to ensure no filtering happens on failure
+                artifact_polygons_by_class_level0 = {}
+        # --- END OF NEW BLOCK ---
 
-            logging.info(f"Loaded artifact coordinates for {len(artifact_polygons_by_class_level0)} classes.")
+        scale_factor = slide.level_downsamples[kwargs['target_level']]
+        target_width, target_height = slide.level_dimensions[kwargs['target_level']]
             
         scaled_polys_raw = []
         for p in all_polygons_level0:
