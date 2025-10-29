@@ -47,9 +47,9 @@ except ImportError as e:
 # These parameters were determined by the rigorous, parallelized grid search
 # and validated on a held-out test set. They are the core of our scientific findings.
 OPTIMAL_PARAMS = {
-    'k': 150,
-    'min_size': 100,
-    'bg_intensity_thresh': 235,
+    'k': 500,
+    'min_size': 93,
+    'bg_intensity_thresh': 230,
     'erosion_px': 0,
     'contamination_rate_thresh': 0.05  # This is our decision boundary 'tau'
 }
@@ -219,13 +219,13 @@ if __name__ == "__main__":
     setup_logging()
     
     # --- IMPORTANT: Define your source and output paths here ---
-    SOURCE_IMAGE_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST\CANCER"
+    SOURCE_IMAGE_DIR = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\CANCER"
     SOURCE_IMAGE_DIR = os.path.normpath(SOURCE_IMAGE_DIR)
-    SOURCE_MASK_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST\CANCER_MASK"
+    SOURCE_MASK_DIR = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\CANCER_MASK"
     SOURCE_MASK_DIR = os.path.normpath(SOURCE_MASK_DIR)
 
     # This is the base directory where rejected files will be placed.
-    OUTPUT_DIR = r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE_TEST"
+    OUTPUT_DIR = r"D:\Usuario\Desktop\Base_de_dados\CHILE"
     OUTPUT_DIR = os.path.normpath(OUTPUT_DIR)
 
     # Leave as None to use all available CPU cores.

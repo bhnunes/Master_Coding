@@ -37,11 +37,11 @@ logger.addHandler(console_handler)
 
 
 # --- 1. CONFIGURATION ---
-SOURCE_IMAGE_FOLDER = r"C:\Images_IA_MEDICA\CANCER"
+SOURCE_IMAGE_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\CANCER"
 SOURCE_IMAGE_FOLDER = os.path.normpath(SOURCE_IMAGE_FOLDER)
-SOURCE_MASK_FOLDER = r"C:\Images_IA_MEDICA\CANCER_MASK"
+SOURCE_MASK_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\CANCER_MASK"
 SOURCE_MASK_FOLDER = os.path.normpath(SOURCE_MASK_FOLDER)
-BASE_DIR = r"C:\Images_IA_MEDICA\Optimization_Test\master_candidate_pool"
+BASE_DIR = r"D:\Usuario\Desktop\Base_de_dados\CHILE\Optimization_Test\master_candidate_pool"
 BASE_DIR = os.path.normpath(BASE_DIR)
 APPROVED_FOLDER = os.path.join(BASE_DIR, 'APPROVED')
 REJECTED_FOLDER = os.path.join(BASE_DIR, 'REJECTED')
