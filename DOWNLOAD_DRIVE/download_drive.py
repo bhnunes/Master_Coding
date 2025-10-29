@@ -38,7 +38,7 @@ CSV_PATHS: List[str] = [
 ]
 
 DEST_DIR = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\IMAGES"         # Where files will be saved
-N_TARGET = 50                     # Stop when folder has at least this many files
+N_TARGET = 3                     # Stop when folder has at least this many files
 RANDOM_SEED = 42                  # Set None for non-deterministic
 INCLUDE_SHARED_DRIVES = True      # If any file IDs are from Shared drives
 
