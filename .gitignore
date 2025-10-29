@@ -3,3 +3,4 @@
 *.log
 *.png
 credentials.json
+token.json
