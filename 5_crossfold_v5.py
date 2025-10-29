@@ -202,37 +202,90 @@ def make_aggregate_target(image_paths):
     return median
 
 def fit_normalizer_on_train_set(train_df, method_name):
-    """Fits a stain normalizer by selecting high-entropy images from the training set."""
+    """Fits a stain normalizer and returns the normalizer and template paths.""" # <-- Docstring updated
     logging.info(f"Fitting '{method_name}' normalizer using the TRAIN set...")
     patient_files = train_df.groupby('patient_id')['image_path'].apply(list).to_dict()
     if not patient_files:
         raise ValueError("No patient images found in the training set to fit the normalizer.")
     logging.info(f"Selecting one high-entropy image per patient from {len(patient_files)} training patients...")
+    
+    # This list is what we need to save
     template_paths = [max(file_list, key=calculate_image_entropy) for file_list in patient_files.values()]
+    
     logging.info(f"Creating aggregate target from {len(template_paths)} images...")
     target_rgb = make_aggregate_target(template_paths)
     logging.info(f"Fitting normalizer...")
     normalizer = stainnorm.get_normalizer(method_name)
     normalizer.fit(target_rgb)
     logging.info(f"'{method_name}' normalizer fitted successfully.")
-    return normalizer
+    
+    return normalizer, template_paths # <-- RETURN BOTH
 
-def save_normalizer_stats(normalizer, method_name, output_file):
-    """Saves the key statistics of a fitted normalizer to a JSON file for reproducibility."""
+def save_normalizer_stats(normalizer, method_name, output_dir, template_paths):
+    """
+    Saves the essential, reproducible statistics of a fitted normalizer to a JSON file.
+    Also saves the template images used to generate these statistics.
+    """
     stats = {"method": method_name}
+    
+    # --- STEP 1: Method-Specific Parameter Extraction ---
+    # We inspect the normalizer object and save the key attributes needed for reconstruction.
     try:
         if method_name == "Reinhard":
+            # Reinhard uses target means and standard deviations.
             stats["target_means"] = normalizer.target_means.tolist()
             stats["target_stds"] = normalizer.target_stds.tolist()
-        elif method_name in ["Macenko", "Vahadane"]:
+            
+        elif method_name == "Macenko":
+            # Macenko uses a target stain matrix, max concentrations, and stain vectors.
             stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
-        else: # Ruifrok may not have simple public params
-             stats["info"] = "Fitted using tiatoolbox. No simple parameters to save."
+            stats["max_c_target"] = normalizer.max_c_target.tolist()
+            # The stain_vectorizer is an object, we save its key attribute
+            stats["stain_vectors_target"] = normalizer.stain_vectorizer.stains.tolist()
+
+        elif method_name == "Vahadane":
+            # Vahadane uses a target stain matrix and max concentrations.
+            stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
+            stats["max_c_target"] = normalizer.max_c_target.tolist()
+
+        elif method_name == "Ruifrok":
+            # Ruifrok uses specific rotation matrices and stain parameters.
+            stats["rot_matrix"] = normalizer.rot_matrix.tolist()
+            stats["stain_0"] = normalizer.stain_0.tolist()
+            stats["stain_1"] = normalizer.stain_1.tolist()
+            stats["stain_2"] = normalizer.stain_2.tolist()
+            stats["target_stains_mean"] = normalizer.target_stains_mean.tolist()
+            stats["target_stains_std"] = normalizer.target_stains_std.tolist()
+
+        else:
+            stats["info"] = "Unknown normalization method. No parameters saved."
+            logging.warning(f"Attempted to save stats for an unknown method: {method_name}")
+
+    except AttributeError as e:
+        error_msg = f"Could not extract parameters for '{method_name}'. Attribute missing: {e}"
+        stats["error"] = error_msg
+        logging.error(error_msg)
+
+    # --- STEP 2: Save the JSON metadata file ---
+    output_file = os.path.join(output_dir, 'normalization_stats.json')
+    try:
         with open(output_file, 'w') as f:
             json.dump(stats, f, indent=4)
         logging.info(f"Normalization stats saved to {output_file}")
     except Exception as e:
-        logging.error(f"Could not save normalizer stats: {e}")
+        logging.error(f"Could not save normalization_stats.json: {e}")
+
+    # --- STEP 3: Save the template images for full reproducibility ---
+    template_dir = os.path.join(output_dir, 'normalization_templates')
+    os.makedirs(template_dir, exist_ok=True)
+    logging.info(f"Saving {len(template_paths)} template images to '{template_dir}'...")
+    try:
+        for i, src_path in enumerate(template_paths):
+            dest_path = os.path.join(template_dir, f"template_{i:03d}_{os.path.basename(src_path)}")
+            shutil.copy(src_path, dest_path)
+    except Exception as e:
+        logging.error(f"Could not save template images: {e}")
+
 
 # --- File Operations (Unchanged) ---
 def process_and_copy_image(src_path, dest_path, normalizer):
@@ -438,9 +491,16 @@ if __name__ == '__main__':
         # 4.2. Fit Normalizer on TRAIN set ONLY
         normalizer = None
         if NORMALIZATION_METHOD != 'NOT_NORMALIZED':
-            normalizer = fit_normalizer_on_train_set(split_data['train_df'], NORMALIZATION_METHOD)
-            stats_file = os.path.join(output_run_dir, 'normalization_stats.json')
-            save_normalizer_stats(normalizer, NORMALIZATION_METHOD, stats_file)
+            # --- MODIFIED: Capture both return values ---
+            normalizer, template_paths = fit_normalizer_on_train_set(split_data['train_df'], NORMALIZATION_METHOD)
+
+            # --- MODIFIED: Pass the new arguments ---
+            save_normalizer_stats(
+                normalizer=normalizer,
+                method_name=NORMALIZATION_METHOD,
+                output_dir=output_run_dir, # Save in the main run directory
+                template_paths=template_paths
+            )
 
         # 4.3. Process and Write Files for all splits
         for split_name, df in split_dfs.items():
