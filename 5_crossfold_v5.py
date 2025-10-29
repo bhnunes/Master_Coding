@@ -27,12 +27,38 @@ import logging
 import random
 import sys
 import json
+
+from dotenv import load_dotenv
+
+# --- NEW: OpenSlide Dependency Setup (FOR WINDOWS) ---
+# This block MUST run before importing tiatoolbox or openslide.
+load_dotenv() # Load variables from .env file
+OPENSLIDE_PATH = os.getenv('OPENSLIDE_PATH')
+
+try:
+    if hasattr(os, 'add_dll_directory') and OPENSLIDE_PATH and os.path.isdir(OPENSLIDE_PATH):
+        # Temporarily add the OpenSlide bin directory to the DLL search path
+        with os.add_dll_directory(OPENSLIDE_PATH):
+            # Now that the path is configured, we can safely import libraries that depend on it.
+            from tiatoolbox.tools import stainnorm
+    else:
+        # On non-Windows systems or if path isn't set, just import directly.
+        from tiatoolbox.tools import stainnorm
+except (ImportError, FileNotFoundError) as e:
+    print(f"FATAL ERROR: Could not initialize OpenSlide, which TIAtoolbox depends on.")
+    print(f"1. Make sure you have downloaded the OpenSlide binaries for Windows.")
+    print(f"2. Ensure the OPENSLIDE_PATH in your .env file points to the 'bin' folder.")
+    print(f"   Current Path: {OPENSLIDE_PATH}")
+    print(f"   Error Details: {e}")
+    sys.exit(1)
+# --- END OF NEW BLOCK ---
+
+
 import albumentations as A
 import cv2
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedGroupKFold
-from tiatoolbox.tools import stainnorm
 from tqdm import tqdm
 
 # --- Logger Setup ---
@@ -75,12 +101,12 @@ def load_data(data_dir):
     """Loads image and mask data deterministically and robustly, returning a DataFrame."""
     logging.info(f"Loading data from: {data_dir}")
     data = []
-    image_base_dir = os.path.join(data_dir, "images")
-    mask_base_dir = os.path.join(data_dir, "masks")
 
     for label_name in ["CANCER", "NOT_CANCER"]:
-        image_dir = os.path.join(image_base_dir, label_name)
-        mask_dir = os.path.join(mask_base_dir, label_name)
+        image_dir = data_dir + "\\" + label_name
+        image_dir=os.path.normpath(image_dir)
+        mask_dir = data_dir + "\\" + label_name+"_MASK"
+        mask_dir=os.path.normpath(mask_dir)
         label = 1 if label_name == "CANCER" else 0
         if not (os.path.isdir(image_dir) and os.path.isdir(mask_dir)):
             logging.warning(f"Missing directories for {label_name}. Skipping.")
@@ -354,14 +380,14 @@ def write_manifest_and_log_stats(output_dir):
 # --- Main Execution ---
 if __name__ == '__main__':
     # --- 1. CONFIGURATION ---
-    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\MASTER'
+    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES'
     DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
-    OUTPUT_BASE_DIR = r'D:\Usuario\Desktop\Base_de_dados\ABLATION\NORMALIZED_SPLITS'
+    OUTPUT_BASE_DIR = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\NOT_NORMALIZED'
     OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
     
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
-    NORMALIZATION_METHOD = "REINHARD"
+    NORMALIZATION_METHOD = "NOT_NORMALIZED"
     
     # <<< CHANGE: This is now the primary control for reproducibility ---
     # Change this integer to generate a different 80/10/10 split

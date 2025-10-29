@@ -3,12 +3,11 @@ import sys
 import logging
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 from typing import Tuple
 
 # -------------------------------
-# Logging
+# Logging (Unchanged)
 # -------------------------------
 def setup_logging():
     """Configures the root logger to output to both a file and the console."""
@@ -19,6 +18,7 @@ def setup_logging():
     if logger.hasHandlers():
         logger.handlers.clear()
 
+    # Log file will be created in the same directory as the script
     file_handler = logging.FileHandler('data_zip.log', encoding='utf-8')
     file_handler.setFormatter(log_format)
     logger.addHandler(file_handler)
@@ -29,168 +29,126 @@ def setup_logging():
 
     logging.info("Logging configured. Output will be saved to data_zip.log")
 
-
 # -------------------------------
-# Core helpers
+# Core helpers (Slightly modified)
 # -------------------------------
-INCLUDE_DIRS = ("TEST", "TRAIN", "VALIDATION")
 
-def list_folds(root: Path):
-    """Yield fold directories whose name matches 'fold_<n>' with n as an integer."""
-    for p in root.iterdir():
-        if p.is_dir() and p.name.startswith("fold_"):
-            # Ensure suffix is an int
-            try:
-                int(p.name.split("_", 1)[1])
-                yield p
-            except Exception:
-                continue
-
-
-def _count_files_in_dirs(base: Path, dirs=INCLUDE_DIRS) -> int:
-    total = 0
-    for d in dirs:
-        target = base / d
-        if target.is_dir():
-            for _ in target.rglob("*"):
-                # Count only files
-                pass
-            total += sum(1 for f in target.rglob("*") if f.is_file())
-    return total
-
-
-def add_dir_flat(ziph: ZipFile, base_dir: Path, top_name: str) -> Tuple[int, int]:
+def add_dir_flat(ziph: ZipFile, base_dir: Path, pbar: tqdm) -> Tuple[int, int]:
     """
-    Add base_dir contents to zip with arcnames prefixed by 'top_name/'.
-    Ensures there is no extra parent directory in the archive.
+    Add base_dir contents to a zip file, updating a tqdm progress bar.
+    The archive names will be relative to the base_dir (e.g., CANCER/image.png).
     Returns (files_added, bytes_total).
     """
     files_added = 0
     bytes_total = 0
-    if not base_dir.exists():
-        return 0, 0
+    
+    # List files first to correctly update the progress bar
+    files_to_add = [f for f in base_dir.rglob("*") if f.is_file()]
 
-    for file_path in base_dir.rglob("*"):
-        if not file_path.is_file():
-            continue
-        # arcname ensures top-level is exactly TEST/ or TRAIN/ or VALIDATION/
-        rel = file_path.relative_to(base_dir)
-        arcname = Path(top_name) / rel
+    for file_path in files_to_add:
+        arcname = file_path.relative_to(base_dir.parent)
         try:
             ziph.write(file_path, arcname=str(arcname))
             files_added += 1
             try:
                 bytes_total += file_path.stat().st_size
             except Exception:
-                pass
+                pass # Ignore if file is gone, etc.
         except Exception as e:
             logging.warning(f"Failed to add {file_path} -> {arcname}: {e}")
+        pbar.update(1)
+        
     return files_added, bytes_total
 
-
-def build_zip_for_fold(
-    fold_dir: Path,
-    out_dir: Path,
-    compresslevel: int = 1,
-) -> Tuple[str, int, int]:
-    """
-    Create MASTER_SET_n.zip for a given fold directory in out_dir.
-    - Only TEST, TRAIN, VALIDATION are included at archive top-level.
-    - Uses ZIP_DEFLATED with fast compresslevel by default.
-    Returns (zip_name, files_added, bytes_total).
-    """
-    fold_name = fold_dir.name  # e.g., 'fold_3'
-    try:
-        n = int(fold_name.split("_", 1)[1])
-    except Exception:
-        raise ValueError(f"Invalid fold name: {fold_name}. Expected 'fold_<n>'")
-
-    zip_name = f"MASTER_SET_{n}.zip"
-    zip_path = out_dir / zip_name
-
-    # Allow overwriting if exists (safe for idempotent runs)
-    if zip_path.exists():
-        logging.info(f"Overwriting existing archive: {zip_path}")
-        zip_path.unlink(missing_ok=True)
-
-    logging.info(f"[{fold_name}] Creating {zip_name} ...")
-
-    files_added_total = 0
-    bytes_total = 0
-
-    # ZIP_DEFLATED with low compresslevel (1) is usually the fastest trade-off
-    with ZipFile(zip_path, mode="w", compression=ZIP_DEFLATED, compresslevel=compresslevel, allowZip64=True) as ziph:
-        for top in INCLUDE_DIRS:
-            src = fold_dir / top
-            if not src.exists():
-                logging.warning(f"[{fold_name}] Missing directory: {src}")
-                continue
-            fcount, bcount = add_dir_flat(ziph, src, top)
-            files_added_total += fcount
-            bytes_total += bcount
-            logging.info(f"[{fold_name}] Added {fcount} files from {top}/")
-
-    logging.info(f"[{fold_name}] DONE: {zip_name} | Files: {files_added_total} | Size ~ {bytes_total/1e9:.3f} GB (raw)")
-    return zip_name, files_added_total, bytes_total
-
-
 # -------------------------------
-# Main
+# Main (Heavily Refactored and Simplified)
 # -------------------------------
 def main():
-    ROOT=r"D:\Usuario\Desktop\Base_de_dados\MASTER_100_ENSEMBLE\master_split"
-    ROOT=os.path.normpath(ROOT)
-    OUT=None
-    WORKERS=max(os.cpu_count() - 1, 1)
-    COMPRESSLEVEL=1 #0 is faster but bigger, 1 is a good trade-off
+    # --- CONFIGURATION ---
+    # This is the only path you need to set.
+    # It should point to the output directory from your data preparation script.
+    # e.g., r'D:\...\NORMALIZED_SPLITS\REINHARD_seed_42'
+    ROOT = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\NOT_NORMALIZED\NOT_NORMALIZED_seed_42"
+    
+    # Optional: Set a different output dir for the zip file. If None, it saves alongside the ROOT folder.
+    OUT = None 
+    
+    # 1 is a good trade-off between speed and size. 0 is no compression. 9 is max.
+    COMPRESS_LEVEL = 1 
+    # --- END CONFIGURATION ---
 
     setup_logging()
 
-    root = Path(ROOT).expanduser()
-    out_dir = Path(OUT).expanduser() if OUT else root
-    out_dir.mkdir(parents=True, exist_ok=True)
+    root_path = Path(ROOT).expanduser()
+    
+    # Determine the output directory for the zip file
+    if OUT:
+        out_dir = Path(OUT).expanduser()
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        # By default, save the zip file one level up from the root directory
+        out_dir = root_path.parent
 
-    folds = sorted(list(list_folds(root)), key=lambda p: int(p.name.split("_", 1)[1]))
-    if not folds:
-        logging.error(f"No 'fold_n' directories found under: {root}")
+    # Define the name of the zip file based on the root folder's name
+    zip_name = f"{root_path.name}.zip"
+    zip_path = out_dir / zip_name
+
+    # Check if the required TRAIN/VALIDATION/TEST folders exist
+    include_dirs = ("TRAIN", "VALIDATION", "TEST")
+    source_dirs = [root_path / d for d in include_dirs]
+    
+    if not any(d.is_dir() for d in source_dirs):
+        logging.error(f"FATAL: None of the required directories (TRAIN, VALIDATION, TEST) were found in '{root_path}'.")
         sys.exit(1)
 
-    # Count total files for a global progress indicator (optional)
-    logging.info("Counting files across all folds (for progress estimation)...")
-    total_files = 0
-    for f in folds:
-        total_files += _count_files_in_dirs(f, INCLUDE_DIRS)
-    logging.info(f"Estimated total files to archive: {total_files}")
+    # --- Pre-calculate total number of files for an accurate progress bar ---
+    logging.info("Counting total files to be zipped...")
+    total_files_to_zip = sum(1 for d in source_dirs if d.is_dir() for f in d.rglob("*") if f.is_file())
+    
+    if total_files_to_zip == 0:
+        logging.warning("No files found to zip. Exiting.")
+        return
 
-    # Run folds in parallel; we show a tqdm over number of folds.
-    results = []
-    with ProcessPoolExecutor(max_workers=WORKERS) as ex:
-        future_to_fold = {
-            ex.submit(build_zip_for_fold, fold, out_dir, COMPRESSLEVEL): fold for fold in folds
-        }
-        for future in tqdm(as_completed(future_to_fold), total=len(future_to_fold), desc="Folds zipped", unit="fold"):
-            fold = future_to_fold[future]
-            try:
-                res = future.result()
-                results.append(res)
-            except Exception as e:
-                logging.exception(f"Failed to build zip for {fold.name}: {e}")
+    logging.info(f"Found {total_files_to_zip} files to archive.")
+    
+    # Allow overwriting if the zip file already exists
+    if zip_path.exists():
+        logging.warning(f"Overwriting existing archive: {zip_path}")
+        zip_path.unlink(missing_ok=True)
 
-    # Summary
-    made = [r for r in results if r]
-    made.sort(key=lambda x: int(x[0].split("_")[-1].split(".")[0]))
-    total_archived_files = sum(r[1] for r in made)
-    total_bytes = sum(r[2] for r in made)
+    logging.info(f"Creating archive: {zip_name} ...")
 
-    logging.info("===============================================")
-    logging.info("Zipping finished.")
-    for zip_name, files_cnt, bytes_cnt in made:
-        logging.info(f"{zip_name} -> files: {files_cnt}, ~{bytes_cnt/1e9:.3f} GB (raw)")
-    logging.info(f"TOTAL files archived: {total_archived_files}")
-    logging.info(f"Approx raw size: {total_bytes/1e9:.3f} GB")
-    logging.info("===============================================")
+    files_added_total = 0
+    bytes_total = 0
+    
+    try:
+        # ZIP_DEFLATED is standard. allowZip64=True is crucial for large datasets (>4GB)
+        with ZipFile(zip_path, mode="w", compression=ZIP_DEFLATED, compresslevel=COMPRESS_LEVEL, allowZip64=True) as ziph:
+            with tqdm(total=total_files_to_zip, desc="Zipping Files", unit="file") as pbar:
+                for src_dir in source_dirs:
+                    if src_dir.is_dir():
+                        f_count, b_count = add_dir_flat(ziph, src_dir, pbar)
+                        files_added_total += f_count
+                        bytes_total += b_count
+                    else:
+                        logging.warning(f"Directory not found, skipping: {src_dir}")
+
+        # --- Final Summary ---
+        logging.info("===============================================")
+        logging.info("Zipping finished successfully!")
+        logging.info(f"Archive created at: {zip_path}")
+        logging.info(f"Total files archived: {files_added_total}")
+        final_zip_size_gb = zip_path.stat().st_size / 1e9
+        logging.info(f"Final zip file size: {final_zip_size_gb:.3f} GB")
+        logging.info(f"(Approx. raw data size was: {bytes_total / 1e9:.3f} GB)")
+        logging.info("===============================================")
+
+    except Exception as e:
+        logging.exception(f"An error occurred while creating the zip file: {e}")
+        # Clean up partial zip file on error
+        if zip_path.exists():
+            zip_path.unlink()
 
 
 if __name__ == "__main__":
-    # For Windows, protect multiprocessing entry
     main()
