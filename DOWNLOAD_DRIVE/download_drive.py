@@ -19,17 +19,15 @@ On first run, a browser window will prompt consent; token.json will be created f
 import os
 import sys
 import time
-import math
 import random
 import shutil
 import pathlib
 import logging
-from typing import List, Tuple, Dict
+from typing import List,Dict
 
 import pandas as pd
 from tqdm import tqdm
 
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -48,28 +46,27 @@ CSV_PATHS: List[str] = [
 # --- Source Paths for Companion Files ---
 # The script will verify that for an image 'file.png', corresponding files
 # exist in these two folders before attempting to download.
-SOURCE_ANNOTATIONS = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\ANNOTATIONS_SOURCE"
-SOURCE_GEOJSON = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\GEOJSON_SOURCE"
+SOURCE_ANNOTATIONS = r"C:\DIAGSET\SOURCE_ANNOTATIONS"
+SOURCE_GEOJSON = r"C:\DIAGSET\SOURCE_GEOJSON"
 
 # --- Destination Paths ---
 # Where the final files will be stored.
-DEST_DIR = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\IMAGES"
-DEST_ANNOTATIONS = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\ANNOTATIONS"
-DEST_GEOJSON = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\GEOJSON"
+DEST_DIR = r"C:\DIAGSET\DIAGSET\IMAGES"
+DEST_ANNOTATIONS = r"C:\DIAGSET\DIAGSET\ANNOTATIONS"
+DEST_GEOJSON = r"C:\DIAGSET\DIAGSET\GEOJSON"
 
 # --- Script Behavior ---
 # The script will stop once the DEST_DIR has at least this many images.
-N_TARGET = 100
+N_TARGET = 104
 # Set to a number for reproducible random sampling, or None for non-deterministic.
 RANDOM_SEED = 42
 # If any file IDs are from Shared drives, this must be True.
-INCLUDE_SHARED_DRIVES = True
+INCLUDE_SHARED_DRIVES = False
 
 # --- Authentication & API ---
 # Path to your OAuth 2.0 credentials file.
 OAUTH_SECRET_FILE = r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DRIVE\credentials.json"
 # The script will create this token file after the first successful login.
-TOKEN_FILE = r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DRIVE\token.json"
 # OAuth scope—read-only is enough for downloading.
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 # Chunk size for download (bytes). Big chunks = fewer API calls.
@@ -92,27 +89,13 @@ logger = logging.getLogger(__name__)
 def get_drive_service():
     """Authenticate and return Drive v3 service (installed app flow)."""
     creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except Exception as e:
-                logger.warning(f"Failed to refresh token: {e}. Re-authenticating.")
-                creds = None
-        else:
-            if not os.path.exists(OAUTH_SECRET_FILE):
-                raise FileNotFoundError(
-                    f"'{OAUTH_SECRET_FILE}' not found. Download an OAuth client "
-                    "(Desktop App) from Google Cloud Console."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(OAUTH_SECRET_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
-
+    if not os.path.exists(OAUTH_SECRET_FILE):
+        raise FileNotFoundError(
+            f"'{OAUTH_SECRET_FILE}' not found. Download an OAuth client "
+            "(Desktop App) from Google Cloud Console."
+        )
+    flow = InstalledAppFlow.from_client_secrets_file(OAUTH_SECRET_FILE, SCOPES)
+    creds = flow.run_local_server(port=0)
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
     return service
 

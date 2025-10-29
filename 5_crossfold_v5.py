@@ -225,57 +225,67 @@ def save_normalizer_stats(normalizer, method_name, output_dir, template_paths):
     """
     Saves the essential, reproducible statistics of a fitted normalizer to a JSON file.
     Also saves the template images used to generate these statistics.
+    
+    FINAL VERSION: Based on direct inspection of the tiatoolbox source code.
+    Uses the correct attribute names for each normalizer class and robustly
+    handles JSON serialization of numpy types.
     """
     stats = {"method": method_name}
+    logging.info(f"Extracting stats for '{method_name}'...")
     
-    # --- STEP 1: Method-Specific Parameter Extraction ---
-    # We inspect the normalizer object and save the key attributes needed for reconstruction.
     try:
-        if method_name == "Reinhard":
-            # Reinhard uses target means and standard deviations.
-            stats["target_means"] = normalizer.target_means.tolist()
-            stats["target_stds"] = normalizer.target_stds.tolist()
-            
-        elif method_name == "Macenko":
-            # Macenko uses a target stain matrix, max concentrations, and stain vectors.
-            stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
-            stats["max_c_target"] = normalizer.max_c_target.tolist()
-            # The stain_vectorizer is an object, we save its key attribute
-            stats["stain_vectors_target"] = normalizer.stain_vectorizer.stains.tolist()
+        # The base class for Macenko, Vahadane, and Ruifrok
+        if isinstance(normalizer, stainnorm.StainNormalizer):
+            # These normalizers all share these core attributes from the parent class.
+            if hasattr(normalizer, 'stain_matrix_target'):
+                stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
+            if hasattr(normalizer, 'maxC_target'): # Correct attribute name is maxC_target
+                stats["maxC_target"] = normalizer.maxC_target.tolist()
 
-        elif method_name == "Vahadane":
-            # Vahadane uses a target stain matrix and max concentrations.
-            stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
-            stats["max_c_target"] = normalizer.max_c_target.tolist()
-
-        elif method_name == "Ruifrok":
-            # Ruifrok uses specific rotation matrices and stain parameters.
-            stats["rot_matrix"] = normalizer.rot_matrix.tolist()
-            stats["stain_0"] = normalizer.stain_0.tolist()
-            stats["stain_1"] = normalizer.stain_1.tolist()
-            stats["stain_2"] = normalizer.stain_2.tolist()
-            stats["target_stains_mean"] = normalizer.target_stains_mean.tolist()
-            stats["target_stains_std"] = normalizer.target_stains_std.tolist()
+            # Macenko has an additional useful property on its extractor
+            if method_name == "MACENKO" and hasattr(normalizer.extractor, 'stains'):
+                stats["stain_vectors_source_estimate"] = normalizer.extractor.stains.tolist()
+        
+        # Reinhard is a separate class
+        elif isinstance(normalizer, stainnorm.ReinhardNormalizer):
+            # These are stored as tuples, so converting to list is safe.
+            stats["target_means"] = list(normalizer.target_means)
+            stats["target_stds"] = list(normalizer.target_stds)
 
         else:
-            stats["info"] = "Unknown normalization method. No parameters saved."
-            logging.warning(f"Attempted to save stats for an unknown method: {method_name}")
+            stats["info"] = "Unknown or unsupported normalizer type."
+            logging.warning(f"Did not recognize normalizer type for '{method_name}'.")
+
+        logging.info(f"Successfully extracted stats for '{method_name}'.")
 
     except AttributeError as e:
         error_msg = f"Could not extract parameters for '{method_name}'. Attribute missing: {e}"
         stats["error"] = error_msg
         logging.error(error_msg)
+    except Exception as e:
+        error_msg = f"An unexpected error occurred extracting stats for '{method_name}': {e}"
+        stats["error"] = error_msg
+        logging.error(error_msg, exc_info=True)
 
-    # --- STEP 2: Save the JSON metadata file ---
+
+    # --- Save the JSON metadata file ---
     output_file = os.path.join(output_dir, 'normalization_stats.json')
     try:
         with open(output_file, 'w') as f:
-            json.dump(stats, f, indent=4)
+            # Custom encoder to handle any numpy types robustly
+            class NumpyEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, np.ndarray): return obj.tolist()
+                    if isinstance(obj, np.integer): return int(obj)
+                    if isinstance(obj, np.floating): return float(obj)
+                    return json.JSONEncoder.default(self, obj)
+            
+            json.dump(stats, f, indent=4, cls=NumpyEncoder)
         logging.info(f"Normalization stats saved to {output_file}")
     except Exception as e:
         logging.error(f"Could not save normalization_stats.json: {e}")
 
-    # --- STEP 3: Save the template images for full reproducibility ---
+    # --- Save the template images for full reproducibility ---
     template_dir = os.path.join(output_dir, 'normalization_templates')
     os.makedirs(template_dir, exist_ok=True)
     logging.info(f"Saving {len(template_paths)} template images to '{template_dir}'...")
