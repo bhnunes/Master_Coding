@@ -1,6 +1,14 @@
 """
 Download N random Google Drive files by ID (from CSV index) with progress.
 
+This script is designed to download a target number of unique image files,
+ensuring that for each image, a corresponding annotation and geojson file
+exist in specified source directories. Upon successful download of an image,
+the companion files are moved to their respective destination folders.
+
+The process is robust and resumable. If stopped, it will recognize existing
+files and only download the remaining number needed to reach the target.
+
 Requires:
   pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib pandas tqdm
 
@@ -27,25 +35,44 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
-# =========================
-# ====== GLOBAL VARS ======
-# =========================
+# ===============================
+# ====== GLOBAL CONFIGURATION ======
+# ===============================
 
+# --- Core Paths ---
 # One or more CSVs produced earlier in Colab (columns: name,id)
 CSV_PATHS: List[str] = [
-    r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DRIVE\IDS_list.csv",   # <- change/add your CSVs here
-    # r"./another_index.csv",
+    r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DRIVE\IDS_list.csv",
 ]
 
-DEST_DIR = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\IMAGES"         # Where files will be saved
-N_TARGET = 3                     # Stop when folder has at least this many files
-RANDOM_SEED = 42                  # Set None for non-deterministic
-INCLUDE_SHARED_DRIVES = True      # If any file IDs are from Shared drives
+# --- Source Paths for Companion Files ---
+# The script will verify that for an image 'file.png', corresponding files
+# exist in these two folders before attempting to download.
+SOURCE_ANNOTATIONS = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\ANNOTATIONS_SOURCE"
+SOURCE_GEOJSON = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\GEOJSON_SOURCE"
 
-# OAuth scope—read-only is enough for downloading
+# --- Destination Paths ---
+# Where the final files will be stored.
+DEST_DIR = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\IMAGES"
+DEST_ANNOTATIONS = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\ANNOTATIONS"
+DEST_GEOJSON = r"D:\Usuario\Desktop\Base_de_dados\DIAGSET\GEOJSON"
+
+# --- Script Behavior ---
+# The script will stop once the DEST_DIR has at least this many images.
+N_TARGET = 100
+# Set to a number for reproducible random sampling, or None for non-deterministic.
+RANDOM_SEED = 42
+# If any file IDs are from Shared drives, this must be True.
+INCLUDE_SHARED_DRIVES = True
+
+# --- Authentication & API ---
+# Path to your OAuth 2.0 credentials file.
+OAUTH_SECRET_FILE = r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DRIVE\credentials.json"
+# The script will create this token file after the first successful login.
+TOKEN_FILE = r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DRIVE\token.json"
+# OAuth scope—read-only is enough for downloading.
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-
-# Chunk size for download (bytes). Big chunks = fewer API calls; adjust if needed.
+# Chunk size for download (bytes). Big chunks = fewer API calls.
 CHUNK_SIZE = 10 * 1024 * 1024  # 10 MiB
 
 # =========================
@@ -62,27 +89,28 @@ logger = logging.getLogger(__name__)
 # =========================
 # ===== AUTH / SERVICE ====
 # =========================
-def get_drive_service() -> "googleapiclient.discovery.Resource":
+def get_drive_service():
     """Authenticate and return Drive v3 service (installed app flow)."""
     creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if os.path.exists(TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
-                from google.auth.transport.requests import Request
                 creds.refresh(Request())
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to refresh token: {e}. Re-authenticating.")
                 creds = None
-        if not creds:
-            if not os.path.exists("credentials.json"):
+        else:
+            if not os.path.exists(OAUTH_SECRET_FILE):
                 raise FileNotFoundError(
-                    "credentials.json not found. Download an OAuth client (Desktop App) "
-                    "from Google Cloud Console and place it next to this script."
+                    f"'{OAUTH_SECRET_FILE}' not found. Download an OAuth client "
+                    "(Desktop App) from Google Cloud Console."
                 )
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(OAUTH_SECRET_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open("token.json", "w") as f:
+        with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
 
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
@@ -110,6 +138,7 @@ def load_index(csv_paths: List[str]) -> pd.DataFrame:
 # === FILE SYSTEM UTILS ===
 # =========================
 def ensure_dir(path: str) -> None:
+    """Create directory if it doesn't exist."""
     pathlib.Path(path).mkdir(parents=True, exist_ok=True)
 
 
@@ -127,10 +156,46 @@ def list_existing_files(dir_path: str) -> Dict[str, int]:
     return out
 
 
+def index_companion_files(annotations_path: str, geojson_path: str) -> Dict[str, Dict[str, str]]:
+    """
+    Scans source directories to find files that have both an annotation and a
+    geojson companion. Returns a map of basename -> {annotation_file, geojson_file}.
+    """
+    logger.info("Scanning for companion files to build index...")
+    companion_map = {}
+    try:
+        ann_files = [e.name for e in os.scandir(annotations_path) if e.is_file()]
+        geojson_files = [e.name for e in os.scandir(geojson_path) if e.is_file()]
+
+        logger.info(f"Indexing {len(ann_files)} annotation files...")
+        ann_map = {pathlib.Path(f).stem: f for f in tqdm(ann_files, desc="Annotations")}
+
+        logger.info(f"Indexing {len(geojson_files)} geojson files...")
+        geojson_map = {pathlib.Path(f).stem: f for f in tqdm(geojson_files, desc="GeoJSONs")}
+
+    except FileNotFoundError as e:
+        logger.error(f"A source directory was not found: {e}. Please check your paths.")
+        sys.exit(1)
+
+    # Find the intersection of basenames
+    common_basenames = set(ann_map.keys()).intersection(set(geojson_map.keys()))
+
+    companion_map = {
+        base: {
+            'annotation': ann_map[base],
+            'geojson': geojson_map[base]
+        }
+        for base in common_basenames
+    }
+    logger.info(f"Found {len(companion_map)} complete sets of companion files.")
+    return companion_map
+
+
 # =========================
 # === DRIVE METADATA ======
 # =========================
 def get_file_metadata(service, file_id: str) -> Dict:
+    """Fetches metadata (name, size) for a given file ID."""
     fields = "id, name, size, mimeType"
     return service.files().get(
         fileId=file_id,
@@ -153,29 +218,19 @@ def download_with_progress(service, file_id: str, dest_path: str, file_size: int
     )
 
     tmp_path = dest_path + ".part"
-    # Ensure parent dir exists
     ensure_dir(os.path.dirname(dest_path))
 
-    # Open in binary write
     with open(tmp_path, "wb") as fh:
         downloader = MediaIoBaseDownload(fh, request, chunksize=CHUNK_SIZE)
         done = False
         desc = os.path.basename(dest_path)
         total = file_size if file_size is not None else None
 
-        # tqdm config
-        if total is None:
-            # Unknown size—still show progress bar in bytes
-            pbar = tqdm(unit="B", unit_scale=True, desc=desc)
-        else:
-            pbar = tqdm(total=total, unit="B", unit_scale=True, desc=desc)
-
-        last_reported = 0
-        try:
+        with tqdm(total=total, unit="B", unit_scale=True, desc=desc, leave=False) as pbar:
+            last_reported = 0
             while not done:
                 status, done = downloader.next_chunk()
-                if status is not None:
-                    # status.progress() is a float [0,1]
+                if status:
                     if total is not None:
                         current = int(status.progress() * total)
                         delta = current - last_reported
@@ -183,15 +238,10 @@ def download_with_progress(service, file_id: str, dest_path: str, file_size: int
                             pbar.update(delta)
                             last_reported = current
                     else:
-                        # If size unknown, still tick based on fraction
-                        pbar.set_postfix(progress=f"{status.progress()*100:.1f}%")
-            # Ensure bar completes
+                        pbar.set_postfix_str(f"{status.progress()*100:.1f}%")
             if total is not None and last_reported < total:
                 pbar.update(total - last_reported)
-        finally:
-            pbar.close()
 
-    # Atomic rename on success
     os.replace(tmp_path, dest_path)
 
 
@@ -202,100 +252,151 @@ def main():
     if RANDOM_SEED is not None:
         random.seed(RANDOM_SEED)
 
+    # 1) Ensure all destination directories exist
     ensure_dir(DEST_DIR)
+    ensure_dir(DEST_ANNOTATIONS)
+    ensure_dir(DEST_GEOJSON)
+    logger.info(f"Image destination: '{DEST_DIR}'")
+    logger.info(f"Annotation destination: '{DEST_ANNOTATIONS}'")
+    logger.info(f"GeoJSON destination: '{DEST_GEOJSON}'")
 
-    # 1) Load CSV index
-    df = load_index(CSV_PATHS)
-    logger.info(f"Loaded {len(df)} unique IDs from CSV(s).")
-
-    # 2) Short-circuit if folder already has N files
-    existing = list_existing_files(DEST_DIR)
-    existing_count = len(existing)
+    # 2) Check how many images are already downloaded
+    existing_images = list_existing_files(DEST_DIR)
+    existing_count = len(existing_images)
     if existing_count >= N_TARGET:
         logger.info(
-            f"Destination already has {existing_count} files (>= N_TARGET={N_TARGET}). "
+            f"Destination folder already has {existing_count} images (target is {N_TARGET}). "
             "No download needed."
         )
         return
+    logger.info(f"Found {existing_count} existing images. Need to download {N_TARGET - existing_count} more.")
 
-    # 3) Random selection (sample more than N to account for skips)
+    # 3) Index available companion files from source folders
+    companion_map = index_companion_files(SOURCE_ANNOTATIONS, SOURCE_GEOJSON)
+    if not companion_map:
+        logger.warning("No complete companion file sets found. Cannot download anything.")
+        return
+
+    # 4) Load CSV index and filter it
+    df = load_index(CSV_PATHS)
+    logger.info(f"Loaded {len(df)} unique file IDs from CSV index.")
+
+    # Filter the index to only include files that have companions
+    df['basename'] = df['name'].apply(lambda x: pathlib.Path(x).stem if pd.notna(x) else None)
+    initial_candidates = len(df)
+    df = df[df['basename'].isin(companion_map.keys())]
+    logger.info(
+        f"Filtered candidates: {initial_candidates} -> {len(df)} "
+        "(kept only entries with available companion files)."
+    )
+
+    # 5) Prepare candidates for download
     population = df.sample(frac=1.0, random_state=RANDOM_SEED)  # shuffle
     candidates = population.to_dict(orient="records")
 
-    # 4) Drive service
+    # 6) Authenticate and get Drive service
     service = get_drive_service()
 
     downloaded_now = 0
-    i = 0
+    candidate_idx = 0
 
-    # Loop while we still need more files and still have candidates
-    while (existing_count + downloaded_now) < N_TARGET and i < len(candidates):
-        rec = candidates[i]
-        i += 1
+    # 7) Main download loop
+    while (existing_count + downloaded_now) < N_TARGET and candidate_idx < len(candidates):
+        rec = candidates[candidate_idx]
+        candidate_idx += 1
         file_id = rec["id"]
-        fallback_name = rec["name"] or f"{file_id}"
+        basename = rec["basename"]
 
-        # Fetch metadata (get true name + size)
+        # --- Check if image is already in destination ---
+        # Fetch metadata to get the true filename from Drive
         try:
             meta = get_file_metadata(service, file_id)
         except HttpError as e:
-            logger.warning(f"Skipping id={file_id} due to metadata error: {e}")
+            logger.warning(f"Skipping id={file_id}: Metadata error ({e})")
             continue
 
-        name = meta.get("name") or fallback_name
+        name = meta.get("name")
+        if not name:
+            logger.warning(f"Skipping id={file_id}: File has no name in Drive.")
+            continue
+
+        # If a file with the same name already exists, skip it
+        if name in existing_images:
+            logger.info(f"Already have '{name}'. Skipping.")
+            continue
+
         size_str = meta.get("size")
         file_size = int(size_str) if size_str is not None else None
+        dest_path = os.path.join(DEST_DIR, name)
 
-        # Resolve destination (avoid name collisions by appending _<id> when needed)
-        dest_name = name
-        if dest_name in existing:
-            # If same size -> consider already downloaded; else append id to avoid clobbering
-            if file_size is not None and existing[dest_name] == file_size:
-                logger.info(f"Already have '{dest_name}' (size match). Skipping.")
-                continue
-            else:
-                stem, ext = os.path.splitext(dest_name)
-                dest_name = f"{stem}_{file_id}{ext}"
+        logger.info(f"Attempting download: {name} (id={file_id})")
 
-        dest_path = os.path.join(DEST_DIR, dest_name)
-
-        # If a partial or final file exists with matching size, skip
-        if os.path.exists(dest_path):
-            if file_size is None or os.path.getsize(dest_path) == file_size:
-                logger.info(f"Already have '{dest_name}'. Skipping.")
-                continue
-
-        logger.info(f"Downloading: {name} (id={file_id}, size={file_size if file_size else 'unknown'})")
-
-        # Retry logic for robustness
+        # --- Download with retry logic ---
         max_retries = 5
+        download_success = False
         for attempt in range(1, max_retries + 1):
             try:
                 download_with_progress(service, file_id, dest_path, file_size)
-                downloaded_now += 1
+                download_success = True
                 break
             except HttpError as e:
-                # Exponential backoff on 5xx and 403 rate limits
                 status = getattr(e, "status_code", None)
                 if status in (403, 429, 500, 503) or "userRateLimitExceeded" in str(e):
                     sleep_s = min(60, 2 ** attempt)
-                    logger.warning(f"HTTP error (attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_s}s...")
+                    logger.warning(f"HTTP error on '{name}' (attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_s}s...")
                     time.sleep(sleep_s)
                 else:
-                    logger.error(f"Unrecoverable error for id={file_id}: {e}")
+                    logger.error(f"Unrecoverable HTTP error for '{name}': {e}")
                     break
             except Exception as ex:
-                logger.error(f"Error downloading id={file_id}: {ex}")
+                logger.error(f"Unexpected error downloading '{name}': {ex}")
                 break
+        
+        # --- If download was successful, move companion files ---
+        if download_success:
+            logger.info(f"Successfully downloaded '{name}'. Moving companion files.")
+            try:
+                # Get companion filenames from our index
+                companions = companion_map[basename]
+                ann_file = companions['annotation']
+                geojson_file = companions['geojson']
 
-    # Final status
+                # Move annotation
+                shutil.move(os.path.join(SOURCE_ANNOTATIONS, ann_file),
+                            os.path.join(DEST_ANNOTATIONS, ann_file))
+                # Move geojson
+                shutil.move(os.path.join(SOURCE_GEOJSON, geojson_file),
+                            os.path.join(DEST_GEOJSON, geojson_file))
+
+                logger.info(f"Moved companions for '{basename}'.")
+                downloaded_now += 1
+
+            except (FileNotFoundError, KeyError) as e:
+                logger.error(f"CRITICAL: Failed to move companion files for '{basename}': {e}.")
+                logger.warning(f"Deleting downloaded image '{dest_path}' to maintain consistency.")
+                try:
+                    os.remove(dest_path)
+                except OSError as del_e:
+                    logger.error(f"Failed to delete inconsistent image file '{dest_path}': {del_e}")
+            except Exception as ex:
+                logger.error(f"An unexpected error occurred moving companions for '{basename}': {ex}")
+                logger.warning(f"Deleting downloaded image '{dest_path}' to maintain consistency.")
+                try:
+                    os.remove(dest_path)
+                except OSError as del_e:
+                    logger.error(f"Failed to delete inconsistent image file '{dest_path}': {del_e}")
+
+
+    # --- Final Status Report ---
     final_count = existing_count + downloaded_now
+    logger.info("=" * 30)
     if final_count >= N_TARGET:
-        logger.info(f"Reached target: {final_count} files in '{DEST_DIR}'.")
+        logger.info(f"SUCCESS: Reached target. Total images in '{DEST_DIR}': {final_count}.")
     else:
-        logger.info(
-            f"Finished. {final_count} files in '{DEST_DIR}' (< N_TARGET={N_TARGET}). "
-            f"Likely ran out of candidates or encountered errors."
+        logger.warning(
+            f"FINISHED: Process ended before reaching target. "
+            f"Total images in '{DEST_DIR}': {final_count} (Target was {N_TARGET}). "
+            f"This may be due to running out of valid candidates or encountering persistent errors."
         )
 
 

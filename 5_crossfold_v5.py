@@ -380,15 +380,16 @@ def write_manifest_and_log_stats(output_dir):
 # --- Main Execution ---
 if __name__ == '__main__':
     # --- 1. CONFIGURATION ---
-    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES'
-    DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
-    OUTPUT_BASE_DIR = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\NOT_NORMALIZED'
-    OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
-    
+
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
-    NORMALIZATION_METHOD = "NOT_NORMALIZED"
-    
+    NORMALIZATION_METHOD = "REINHARD"
+
+    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES'
+    DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
+    OUTPUT_BASE_DIR = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES' + '\\' + NORMALIZATION_METHOD
+    OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
+        
     # <<< CHANGE: This is now the primary control for reproducibility ---
     # Change this integer to generate a different 80/10/10 split
     RANDOM_STATE = 42
