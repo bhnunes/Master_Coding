@@ -190,6 +190,6 @@ def main(base_path):
 if __name__ == '__main__':
     # IMPORTANT: Change this path to the output of your simplified data prep script.
     # e.g., r'D:\Usuario\Desktop\Base_de_dados\ABLATION\NORMALIZED_SPLITS\REINHARD_seed_42'
-    MAIN_OUTPUT_DIRECTION = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\NOT_NORMALIZED\NOT_NORMALIZED_seed_42'
+    MAIN_OUTPUT_DIRECTION = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\VAHADANE\VAHADANE_seed_42'
     main_output_directory = os.path.normpath(MAIN_OUTPUT_DIRECTION)
     main(main_output_directory)

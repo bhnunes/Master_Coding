@@ -68,7 +68,7 @@ def main():
     # This is the only path you need to set.
     # It should point to the output directory from your data preparation script.
     # e.g., r'D:\...\NORMALIZED_SPLITS\REINHARD_seed_42'
-    ROOT = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\NOT_NORMALIZED\NOT_NORMALIZED_seed_42"
+    ROOT = r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\VAHADANE\VAHADANE_seed_42"
     
     # Optional: Set a different output dir for the zip file. If None, it saves alongside the ROOT folder.
     OUT = None 

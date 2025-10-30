@@ -446,7 +446,7 @@ if __name__ == '__main__':
 
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
-    NORMALIZATION_METHOD = "REINHARD"
+    NORMALIZATION_METHOD = "VAHADANE"
 
     DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES'
     DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
