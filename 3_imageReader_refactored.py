@@ -23,7 +23,28 @@ except ImportError as e:
     sys.exit(1)
 
 import patch_engine
-from data_handlers import SVS_XML_Handler, NDPI_NDPA_Handler
+from data_handlers import SVS_XML_Handler, NDPI_NDPA_Handler, JSON_Handler
+
+# --- NEW: Handler dispatch mapping ---
+HANDLER_MAPPING = {
+    ('.svs', '.xml'): SVS_XML_Handler,
+    ('.ndpi', '.ndpa'): NDPI_NDPA_Handler,
+    ('.tif', '.json'): JSON_Handler,  # CAMELYON16 case
+    ('.svs', '.json'): JSON_Handler   # CATCH case
+}
+
+def get_handler_for_files(image_path, annotation_path):
+    """Selects the correct data handler based on file extensions."""
+    img_ext = os.path.splitext(image_path)[1].lower()
+    ann_ext = os.path.splitext(annotation_path)[1].lower()
+    
+    handler_class = HANDLER_MAPPING.get((img_ext, ann_ext))
+    if handler_class is None:
+        raise ValueError(f"No handler found for file combination: Image ('{img_ext}') and Annotation ('{ann_ext}')")
+    
+    logging.info(f"Dispatching handler: {handler_class.__name__} for {os.path.basename(image_path)}")
+    return handler_class()
+
 
 def main():
     load_dotenv(override=True)
@@ -59,10 +80,9 @@ def main():
 
     # --- Argument Parsing (MODIFIED) ---
     parser = argparse.ArgumentParser(description='Generic WSI Patch Extractor.')
-    parser.add_argument('--handler', type=str, required=True, choices=['SVS', 'NDPI'], help='The handler to use for the slide format (SVS or NDPI).')
     parser.add_argument('--path_Image', type=str, required=True)
     # **NEW**: Annotation path is now a required, explicit argument
-    parser.add_argument('--annotation_path', type=str, required=True, help='Full path to the annotation file (.xml or .ndpa)')
+    parser.add_argument('--annotation_path', type=str, required=True, help='Full path to the annotation file.')
     parser.add_argument('--path_cancer_folder', type=str, required=True)
     parser.add_argument('--path_not_cancer_folder', type=str, required=True)
     parser.add_argument('--path_cancer_mask_folder', type=str, required=True)
@@ -77,24 +97,14 @@ def main():
     args = None
     try:
         args = parser.parse_args()
-        logging.info(f"Script started for image: {os.path.basename(args.path_Image)} with handler: {args.handler}")
-
-        # **MODIFIED**: Simplified handler selection and path assignment
-        if args.handler == 'SVS':
-            handler = SVS_XML_Handler()
-        elif args.handler == 'NDPI':
-            handler = NDPI_NDPA_Handler()
-        else:
-            # This case should ideally be caught by argparse choices
-            raise ValueError(f"Unknown handler type: {args.handler}")
-        
-        # The annotation_path now comes directly from the arguments
-        annotation_path = args.annotation_path
+        # --- NEW: Automatic handler dispatch ---
+        handler = get_handler_for_files(args.path_Image, args.annotation_path)
+        logging.info(f"Script started for image: {os.path.basename(args.path_Image)}")    
 
         kwargs = {
             "handler": handler,
             "path_Image": args.path_Image,
-            "annotation_path": annotation_path, # Use the direct path
+            "annotation_path": args.annotation_path, # Use the direct path
             "target_level": TARGET_LEVEL,
             "window_size": WINDOW_SIZE,
             "stride": STRIDE,
