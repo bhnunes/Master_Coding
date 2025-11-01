@@ -47,13 +47,16 @@ def create_folders_and_db_table(tag, base_path, db_path):
     """Handles the initial setup of folders and the database table."""
     images_folder = os.path.join(base_path, f"IMAGES_{tag}")
     annotations_folder = os.path.join(base_path, f"ANNOTATIONS_{tag}")
+    geojson_folder = os.path.join(base_path, f"GEOJSON_{tag}")
 
-    if not os.path.exists(images_folder) or not os.path.exists(annotations_folder):
+    if not os.path.exists(images_folder) or not os.path.exists(annotations_folder) and not os.path.exists(geojson_folder):
         os.makedirs(images_folder, exist_ok=True)
         os.makedirs(annotations_folder, exist_ok=True)
+        os.makedirs(geojson_folder, exist_ok=True)
         print(f"\n{Style.BLUE}{Style.BOLD}--- PROJECT SETUP ---{Style.RESET}")
         print(f"{Style.GREEN}{Style.SUCCESS} '{images_folder}' created.{Style.RESET}")
         print(f"{Style.GREEN}{Style.SUCCESS} '{annotations_folder}' created.{Style.RESET}")
+        print(f"{Style.GREEN}{Style.SUCCESS} '{geojson_folder}' created.{Style.RESET}")
         print(f"{Style.YELLOW}{Style.INFO} Please move your images and annotations to these folders.{Style.RESET}")
         print(f"{Style.BOLD}   IMPORTANT: Image and annotation files must share the same base name (e.g., case01.svs and case01.xml).{Style.RESET}")
         sys.exit(0)
@@ -286,7 +289,7 @@ def main_process():
     # --- NEW: SVS Color Safeguard ---
     problematic_svs_files = []
     for case in cases_to_process:
-        is_svs = case['IMAGEPATH'].lower().endswith('.svs')
+        is_svs = case['IMAGEPATH'].lower().endswith('.svs') and case['ANNOTATIONPATH'].lower().endswith('.xml')
         colors_missing = not case['CANCER_COLOR'] or not case['NOT_CANCER_COLOR']
         if is_svs and colors_missing:
             problematic_svs_files.append(os.path.basename(case['IMAGEPATH']))
@@ -325,11 +328,21 @@ def main_process():
                 geojson_file = os.path.join(config['geojson_path'], os.path.splitext(slide_basename)[0] + '.geojson')
                 if os.path.exists(geojson_file):
                     artifacts_geojson = geojson_file
+            
+            if case['CANCER_COLOR'] is None:
+                color = 'NA'
+            else:
+                color = str(case['CANCER_COLOR'])
+            
+            if case['NOT_CANCER_COLOR'] is None:
+                not_cancer_color = 'NA'
+            else:
+                not_cancer_color = str(case['NOT_CANCER_COLOR'])
 
             result = run_image_reader_script({
                 **config, 'image_path': case['IMAGEPATH'], 'annotation_path': case['ANNOTATIONPATH'],
-                'patient': case['PATIENT'], 'cancer_color': case['CANCER_COLOR'],
-                'not_cancer_color': case['NOT_CANCER_COLOR'], 'cancer_folder': path_cancer_folder,
+                'patient': case['PATIENT'], 'cancer_color': color,
+                'not_cancer_color': not_cancer_color, 'cancer_folder': path_cancer_folder,
                 'not_cancer_folder': path_not_cancer_folder, 'cancer_mask_folder': path_cancer_mask_folder,
                 'not_cancer_mask_folder': path_not_cancer_mask_folder, 'artifacts_geojson_path': artifacts_geojson
             })

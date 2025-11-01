@@ -202,8 +202,17 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
                     properties = feature.get('properties', {})
                     if not properties: continue
 
-                    classification_obj = properties.get('classification', {})
-                    prop_cls = classification_obj.get('name')
+                    classification_obj = properties.get('classification') # Use .get() for safety
+                    if not classification_obj: continue
+
+                    # --- FIX IS HERE ---
+                    # Robustly get the class name whether it's a dict or a string
+                    prop_cls = None
+                    if isinstance(classification_obj, dict):
+                        prop_cls = classification_obj.get('name')
+                    elif isinstance(classification_obj, str):
+                        prop_cls = classification_obj
+                    # --- END FIX ---
 
                     if prop_cls and prop_cls in artifact_polygons_by_class_level0:
                         geometry = feature.get('geometry', {})
