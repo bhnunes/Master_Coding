@@ -17,18 +17,37 @@ def _to_coord_list(geometry):
     return [list(p.exterior.coords) for p in geoms if p.geom_type == 'Polygon' and not p.is_empty]
 
 
+# --- MODIFIED HELPER FUNCTION TO BE MORE ROBUST ---
 def _coords_to_shapely_polygons(coord_lists):
-    """Converts lists of vertex coordinates into a list of Shapely Polygon objects."""
+    """
+    Converts lists of vertex coordinates into a list of Shapely Polygon objects.
+    This function is now robust and can handle two formats:
+    1. List of pairs: [[x1, y1], [x2, y2], ...] (e.g., CAMELYON16)
+    2. Flat list of numbers: [x1, y1, x2, y2, ...] (e.g., CATCH/COCO format)
+    """
     polygons = []
     for sublist in coord_lists:
-        # Handles potential extra list wrappers, e.g., in CATCH JSON format
-        points = sublist[0] if len(sublist) == 1 and isinstance(sublist[0], list) else sublist
+        points_raw = sublist[0] if len(sublist) == 1 and isinstance(sublist[0], list) else sublist
+        
+        if not points_raw or len(points_raw) < 6: # Need at least 3 points (6 numbers)
+            continue
+            
+        # --- NEW LOGIC TO HANDLE COCO-style FLAT LISTS ---
+        if isinstance(points_raw[0], (int, float)):
+            # This is a flat list like [x1, y1, x2, y2, ...]. Reshape it.
+            points = [(points_raw[i], points_raw[i+1]) for i in range(0, len(points_raw), 2)]
+        else:
+            # This is already a list of pairs like [[x1, y1], ...]
+            points = points_raw
+        # --- END NEW LOGIC ---
+
         if len(points) >= 3:
             try:
                 poly = Polygon(points)
                 if not poly.is_valid: poly = poly.buffer(0)
                 if not poly.is_empty: polygons.append(poly)
-            except Exception:
+            except Exception as e:
+                logging.warning(f"Could not convert points to a valid polygon. Error: {e}. Skipping.")
                 continue
     return polygons
 
@@ -112,7 +131,10 @@ class SVS_XML_Handler(BaseHandler):
         raw_cancer_polygons = _coords_to_shapely_polygons(raw_cancer_coords)
         raw_not_cancer_polygons = _coords_to_shapely_polygons(raw_not_cancer_coords)
 
+        # --- NEW DESCRIPTIVE LOGGING ---
+        logging.info(f"Successfully converted to {len(raw_cancer_polygons)} 'cancer' and {len(raw_not_cancer_polygons)} 'not_cancer' Shapely polygons.")
         clean_cancer_area, clean_non_cancer_area = _remove_ambiguous_regions(raw_cancer_polygons, raw_not_cancer_polygons)
+        logging.info(f"After cleaning overlaps, returning {len(clean_cancer_area)} final 'cancer' polygons and {len(clean_non_cancer_area)} final 'not_cancer' polygons.")
         
         return {
             "cancer_polygons": _to_coord_list(clean_cancer_area),
@@ -172,13 +194,17 @@ class NDPI_NDPA_Handler(BaseHandler):
                     if is_cancer: raw_cancer_polygons.append(poly)
                     else: raw_not_cancer_polygons.append(poly)
 
+        # --- NEW DESCRIPTIVE LOGGING ---
+        logging.info(f"Successfully converted to {len(raw_cancer_polygons)} 'cancer' and {len(raw_not_cancer_polygons)} 'not_cancer' Shapely polygons.")
         clean_cancer_area, clean_non_cancer_area = _remove_ambiguous_regions(raw_cancer_polygons, raw_not_cancer_polygons)
+        logging.info(f"After cleaning overlaps, returning {len(clean_cancer_area)} final 'cancer' polygons and {len(clean_non_cancer_area)} final 'not_cancer' polygons.")
         
         return {
             "cancer_polygons": _to_coord_list(clean_cancer_area),
             "not_cancer_polygons": _to_coord_list(clean_non_cancer_area)
         }
 
+# --- MODIFIED JSON_HANDLER WITH ENHANCED LOGGING ---
 class JSON_Handler(BaseHandler):
     """Handles annotations from JSON files and enforces overlap cleaning."""
     def _load_raw_annotations(self, slide, **kwargs):
@@ -192,13 +218,28 @@ class JSON_Handler(BaseHandler):
 
         raw_cancer_coords = data.get("cancer_polygons", [])
         raw_not_cancer_coords = data.get("not_cancer_polygons", [])
-            
+        
+        # --- NEW DESCRIPTIVE LOGGING ---
+        logging.info(f"Found {len(raw_cancer_coords)} raw 'cancer' annotation(s) and {len(raw_not_cancer_coords)} raw 'not_cancer' annotation(s) in JSON file.")
+        
         raw_cancer_polygons = _coords_to_shapely_polygons(raw_cancer_coords)
         raw_not_cancer_polygons = _coords_to_shapely_polygons(raw_not_cancer_coords)
 
+        logging.info(f"Successfully converted to {len(raw_cancer_polygons)} 'cancer' and {len(raw_not_cancer_polygons)} 'not_cancer' Shapely polygons.")
+
+        if not raw_cancer_polygons and not raw_not_cancer_polygons:
+             logging.warning(f"No valid polygons were parsed from the JSON. Please check the file structure and content.")
+             # Return empty lists to fulfill the contract, but the warning will be clear.
+             return {"cancer_polygons": [], "not_cancer_polygons": []}
+
         clean_cancer_area, clean_non_cancer_area = _remove_ambiguous_regions(raw_cancer_polygons, raw_not_cancer_polygons)
+        
+        final_cancer_list = _to_coord_list(clean_cancer_area)
+        final_not_cancer_list = _to_coord_list(clean_non_cancer_area)
+
+        logging.info(f"After cleaning overlaps, returning {len(final_cancer_list)} final 'cancer' polygons and {len(final_not_cancer_list)} final 'not_cancer' polygons.")
                 
         return {
-            "cancer_polygons": _to_coord_list(clean_cancer_area),
-            "not_cancer_polygons": _to_coord_list(clean_non_cancer_area)
+            "cancer_polygons": final_cancer_list,
+            "not_cancer_polygons": final_not_cancer_list
         }
