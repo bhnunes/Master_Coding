@@ -205,7 +205,6 @@ def run_image_reader_script(args):
     """Executes the image reader script as a subprocess."""
     command = [
         args['python_path'], args['image_reader_path'],
-        '--handler', 'SVS' if args['image_path'].lower().endswith('.svs') else 'NDPI',
         '--path_Image', args['image_path'],
         '--annotation_path', args['annotation_path'],
         '--path_cancer_folder', args['cancer_folder'],

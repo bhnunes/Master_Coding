@@ -14,6 +14,7 @@ import numpy as np
 from shapely.geometry import Polygon as ShapelyPolygon
 from imantics import Mask
 from tqdm import tqdm
+import xml.etree.ElementTree as ET # Added for XML parsing
 
 # --- OpenSlide init ---
 load_dotenv(override=True)
@@ -92,6 +93,86 @@ def infer_cam16_mode_strict(path_Image: str, override: Optional[str] = None) -> 
     if "normal" in base:
         return "normal"
     raise ValueError(f"Cannot infer mode from filename: {path_Image!r}. Expected 'tumor' or 'normal' in the name.")
+
+# --- NEW: Helper function for parsing CAMELYON16 XML files ---
+def parse_cam16_xml_annotations(xml_path: str) -> List[List[Tuple[float, float]]]:
+    """Parses an ASAP-formatted XML file and extracts polygon coordinates."""
+    if not os.path.exists(xml_path):
+        logging.warning(f"XML annotation file not found: {xml_path}")
+        return []
+    
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        polygons = []
+        
+        # Find all Annotation elements with Type="Polygon"
+        for annotation in root.findall(".//Annotation[@Type='Polygon']"):
+            coords = []
+            # Extract all Coordinate elements
+            for coordinate in annotation.findall(".//Coordinate"):
+                try:
+                    x = float(coordinate.get("X"))
+                    y = float(coordinate.get("Y"))
+                    coords.append((x, y))
+                except (ValueError, TypeError):
+                    continue # Skip malformed coordinates
+            
+            if len(coords) >= 3:
+                polygons.append(coords)
+                
+        logging.info(f"Parsed {len(polygons)} polygons from {os.path.basename(xml_path)}")
+        return polygons
+    except ET.ParseError as e:
+        logging.error(f"Failed to parse XML file {xml_path}: {e}")
+        return []
+
+# --- MODIFIED: Core logic to handle both modes ---
+def cam16_data_to_annotations(slide_path: str,
+                              annotation_path: str, # Can be mask.tif or tumor.xml
+                              threshold: int = 128,
+                              min_area_px: float = 100.0,
+                              simplify_tolerance: Optional[float] = 1.5,
+                              mode_override: Optional[str] = None) -> Dict[str, Any]:
+    
+    mode = infer_cam16_mode_strict(slide_path, override=mode_override)
+    
+    if mode == "tumor":
+        # For tumor slides, use the XML to define cancer polygons
+        logging.info(f"Processing '{os.path.basename(slide_path)}' in TUMOR mode using XML.")
+        cancer_polys = parse_cam16_xml_annotations(annotation_path)
+        return {"cancer_polygons": cancer_polys, "not_cancer_polygons": []}
+    
+    else: # mode == "normal"
+        # For normal slides, use the mask to define non-cancer tissue polygons
+        logging.info(f"Processing '{os.path.basename(slide_path)}' in NORMAL mode using mask.")
+        mask_small, sx, sy = load_mask_decimated(annotation_path, max_dim=16384, threshold=threshold)
+        logging.info("After binarize: sum=%d, shape=%s, s=(%d,%d)", int(mask_small.sum()), mask_small.shape, sx, sy)
+        
+        polys_small = mask_to_polygons_imantics(mask_small, min_area_px / (sx * sy), simplify_tolerance)
+        
+        def scale_poly(poly):
+            return [(x * sx, y * sy) for (x, y) in poly]
+        
+        not_cancer_polys = [scale_poly(p) for p in polys_small]
+        return {"cancer_polygons": [], "not_cancer_polygons": not_cancer_polys}
+
+
+# --- MODIFIED: Multiprocessing driver functions ---
+def find_annotation_for_slide(slide_path: str) -> Optional[str]:
+    """Finds the correct annotation file (.xml for tumor, _mask.tif for normal)."""
+    p = Path(slide_path)
+    stem = p.stem
+    mode = infer_cam16_mode_strict(slide_path)
+    
+    if mode == "tumor":
+        # For tumor slides, the annotation is an XML in a parallel 'annotations' folder
+        candidate = p.parent.parent / "annotations" / f"{stem}.xml"
+    else: # mode == "normal"
+        # For normal slides, the annotation is a mask in a parallel 'masks' folder
+        candidate = p.parent.parent / "masks" / f"{stem}_mask.tif"
+        
+    return str(candidate) if candidate.exists() else None
 
 
 def _collect_all_arrays_zarr(root) -> list:
@@ -257,7 +338,7 @@ def mask_name_from_slide(slide_path: str) -> Optional[str]:
 
 
 def process_one(slide_path: str,
-                mask_path: str,
+                annotation_path: str, # This will be the path returned by the function above
                 out_dir: str,
                 threshold: int,
                 min_area_px: float,
@@ -268,9 +349,9 @@ def process_one(slide_path: str,
     slide_stem = Path(slide_path).stem
     logging.info("Start slide: %s", slide_stem)
 
-    ann = cam16_pair_to_annotations(
+    ann = cam16_data_to_annotations(
         slide_path=slide_path,
-        mask_path=mask_path,
+        annotation_path=annotation_path,
         threshold=threshold,
         min_area_px=min_area_px,
         simplify_tolerance=simplify_tolerance,
@@ -285,7 +366,7 @@ def process_one(slide_path: str,
 
     summary = {
         "slide": slide_path,
-        "mask": mask_path,
+        "annotation": annotation_path,
         "num_cancer_polygons": len(ann["cancer_polygons"]),
         "num_not_cancer_polygons": len(ann["not_cancer_polygons"]),
     }
@@ -295,15 +376,16 @@ def process_one(slide_path: str,
 
 
 def build_pairs(slides_dir: str, slide_glob: str) -> List[Tuple[str, str]]:
+    """Builds pairs of (slide_path, annotation_path)."""
     slides = sorted(glob(os.path.join(slides_dir, slide_glob)))
     pairs: List[Tuple[str, str]] = []
     for s in slides:
-        m = mask_name_from_slide(s)
-        if m is None:
-            logging.warning("No mask found for slide: %s", s)
+        ann_path = find_annotation_for_slide(s)
+        if ann_path is None:
+            logging.warning("No valid annotation (.xml or _mask.tif) found for slide: %s", s)
             continue
-        pairs.append((s, m))
-    logging.info("Prepared %d pairs", len(pairs))
+        pairs.append((s, ann_path))
+    logging.info("Prepared %d slide/annotation pairs", len(pairs))
     return pairs
 
 
@@ -375,8 +457,8 @@ def main() -> None:
     os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
     # ==== CONFIGURATION SECTION ====
-    slides_dir = r"D:\Usuario\Desktop\CAMELYON16\slides"
-    out_dir = r"D:\Usuario\Desktop\CAMELYON16\ANNOTATIONS"
+    slides_dir = r"D:\Usuario\Desktop\Databases\CAMELYON16\slides"
+    out_dir = r"D:\Usuario\Desktop\Databases\CAMELYON16\ANNOTATIONS_JSON" # Recommended to output to a new folder
     slide_glob = "*.tif"              # e.g., "tumor_*.tif" or "normal_*.tif"
     threshold = 128
     min_area_px = 100.0
