@@ -265,17 +265,48 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             slide.close(); slide = None
             return 0,0
 
-        combined_annotations = prep(MultiPolygon(scaled_polys_flat))
-        x_coords = np.arange(0, target_width - kwargs['window_size'] + 1, kwargs['stride'])
-        y_coords = np.arange(0, target_height - kwargs['window_size'] + 1, kwargs['stride'])
+        combined_annotations = MultiPolygon(scaled_polys_flat)
+        # Use prep for optimized geometric checks
+        prepared_annotations = prep(combined_annotations)
 
-        filtered_coords = [(int(x), int(y)) for x in x_coords for y in y_coords if combined_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW))]
-        logging.info(f"Found {len(filtered_coords)} candidate windows.")
+        # --- OPTIMIZATION: Bounding Box Pre-filtering ---
+        # Get the bounding box of all annotations.
+        # The .bounds property returns (minx, miny, maxx, maxy).
+        min_x, min_y, max_x, max_y = combined_annotations.bounds
+
+        logging.info(f"Annotations bounding box (L{kwargs['target_level']}): [({int(min_x)}, {int(min_y)}), ({int(max_x)}, {int(max_y)})]")
+
+        # Start the grid at the beginning of the bounding box.
+        # Use max(0, ...) to ensure we don't start with negative coordinates if bounds are weird.
+        x_start = max(0, int(min_x))
+        y_start = max(0, int(min_y))
+        
+        # End the grid at the end of the bounding box, but ensure it does not exceed the slide's actual dimensions.
+        # This is where target_width and target_height are now critically important.
+        x_end = min(int(max_x) + kwargs['window_size'], target_width)
+        y_end = min(int(max_y) + kwargs['window_size'], target_height)
+
+        x_coords = np.arange(x_start, x_end - kwargs['window_size'] + 1, kwargs['stride'])
+        y_coords = np.arange(y_start, y_end - kwargs['window_size'] + 1, kwargs['stride'])
+        
+        logging.info(f"Optimized scan area: [({x_start}, {y_start}), ({x_end}, {y_end})]")
+        # --- END OF OPTIMIZATION ---
+
+        # The rest of the code now operates on a much smaller grid of candidate coordinates.
+        # Note the use of the 'prepared_annotations' object for the faster 'contains' check.
+        filtered_coords = [(int(x), int(y)) for x in x_coords for y in y_coords if prepared_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW))]
+        
+        # The number of candidate windows will now be much more reasonable.
+        logging.info(f"Found {len(filtered_coords)} candidate windows after optimization.")
 
         if not filtered_coords:
             slide.close(); return 0, 0
 
-        args_list = [(path_Image, kwargs['target_level'], kwargs['window_size'], kwargs['tissue_percentage_req'], kwargs['match_percentage_req'], kwargs['path_cancer_folder'], kwargs['path_not_cancer_folder'], kwargs['path_cancer_mask_folder'], kwargs['path_not_cancer_mask_folder'], kwargs['patient'], x, y, annotations_cancer_level0, annotations_not_cancer_level0, artifact_polygons_by_class_level0, kwargs.get('artifact_policy'), kwargs.get('use_artifact_filter')) for x, y in filtered_coords]
+        args_list = [(path_Image, kwargs['target_level'], kwargs['window_size'], kwargs['tissue_percentage_req'], 
+                      kwargs['match_percentage_req'], kwargs['path_cancer_folder'], kwargs['path_not_cancer_folder'], 
+                      kwargs['path_cancer_mask_folder'], kwargs['path_not_cancer_mask_folder'], kwargs['patient'], 
+                      x, y, annotations_cancer_level0, annotations_not_cancer_level0, artifact_polygons_by_class_level0, 
+                      kwargs.get('artifact_policy'), kwargs.get('use_artifact_filter')) for x, y in filtered_coords]
 
         logging.info(f"Starting parallel processing with {kwargs['num_workers']} workers...")
         with Pool(processes=kwargs['num_workers']) as pool:
