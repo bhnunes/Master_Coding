@@ -64,7 +64,7 @@ from tqdm import tqdm
 # --- Logger Setup ---
 def setup_logging(output_dir):
     """Configures the root logger to output to both a file and the console."""
-    log_file = os.path.join(output_dir, 'data_preparation.log')
+    log_file = 'data_preparation.log'
     log_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
@@ -148,30 +148,55 @@ def load_data(data_dir):
     logging.info(f"Loaded {len(df)} image/mask pairs for {df['patient_id'].nunique()} patients.")
     return df
 
-# <<< CHANGE: This function is now much simpler. ---
+# <<< THIS IS THE MODIFIED FUNCTION ---
 def create_train_val_test_split(df, random_state=42):
     """
-    Creates a single, stratified, patient-aware 80/10/10 split.
+    Creates a single, stratified, patient-aware split that is approximately 80/10/10.
+    Dynamically adapts the number of folds for datasets with fewer than 10 patients.
     """
-    logging.info(f"--- Creating a single 80% TRAIN / 10% VAL / 10% TEST split with seed {random_state} ---")
-    patient_df = df.groupby('patient_id')['label'].max().reset_index()
+    logging.info(f"--- Creating a best-effort ~80% TRAIN / ~10% VAL / ~10% TEST split with seed {random_state} ---")
     
-    # We use a 10-fold splitter to get 10% chunks easily.
-    # 8 folds for train, 1 for val, 1 for test.
-    sgkf_master = StratifiedGroupKFold(n_splits=10, shuffle=True, random_state=random_state)
+    patient_df = df.groupby('patient_id')['label'].max().reset_index()
+    n_patients = len(patient_df)
+
+    # --- SCIENTIFIC SAFEGUARD: Enforce minimum number of patients ---
+    if n_patients < 3:
+        raise ValueError(
+            f"Cannot create a TRAIN/VALIDATION/TEST split with fewer than 3 patients. Found only {n_patients}."
+        )
+
+    # --- DYNAMIC SPLIT LOGIC ---
+    # Determine the number of splits dynamically. Use 10 for large datasets,
+    # or the total number of patients for smaller ones. This creates a "leave-one-out"
+    # style split for the validation and test sets in small datasets.
+    n_splits_master = min(10, n_patients)
+    n_splits_inner = n_splits_master - 1
+    
+    logging.info(f"Found {n_patients} patients. Using a {n_splits_master}-fold master split.")
+    
+    # StratifiedGroupKFold requires at least 2 splits. Our n_patients < 3 check handles this.
+    sgkf_master = StratifiedGroupKFold(n_splits=n_splits_master, shuffle=True, random_state=random_state)
     
     try:
-        # First split gets the 10% test set
+        # First split gets the test set (approx 10% or 1/n_patients)
         train_val_idx, test_idx = next(sgkf_master.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
         
-        # Sub-split the remaining 90% to get train (8 parts) and validation (1 part)
+        # Sub-split the remaining data to get train and validation sets
         train_val_patient_df = patient_df.iloc[train_val_idx]
-        sgkf_inner = StratifiedGroupKFold(n_splits=9, shuffle=True, random_state=random_state)
+
+        # The inner split must have at least 2 folds.
+        if n_splits_inner < 2:
+             # This happens if n_patients was 2. But we already check for n_patients < 3.
+             # This is a safeguard for any unforeseen edge cases.
+            raise ValueError("Cannot create inner split with fewer than 2 folds.")
+            
+        sgkf_inner = StratifiedGroupKFold(n_splits=n_splits_inner, shuffle=True, random_state=random_state)
         train_idx_inner, val_idx_inner = next(sgkf_inner.split(train_val_patient_df, y=train_val_patient_df['label'], groups=train_val_patient_df['patient_id']))
         
         # Get original dataframe indices
         train_idx = train_val_patient_df.index[train_idx_inner]
         val_idx = train_val_patient_df.index[val_idx_inner]
+
     except (StopIteration, ValueError) as e:
         logging.error(f"Could not generate the data split: {e}.")
         return None
@@ -180,12 +205,10 @@ def create_train_val_test_split(df, random_state=42):
     val_patients = set(patient_df.iloc[val_idx]['patient_id'])
     test_patients = set(patient_df.iloc[test_idx]['patient_id'])
 
-    # Ensure no patient overlap between splits (the core scientific safeguard)
     assert train_patients.isdisjoint(val_patients) and train_patients.isdisjoint(test_patients) and val_patients.isdisjoint(test_patients)
     
     logging.info(f"Split created: Train patients={len(train_patients)}, Val patients={len(val_patients)}, Test patients={len(test_patients)}")
     
-    # Create the final dataframes
     train_df = df[df['patient_id'].isin(train_patients)].reset_index(drop=True)
     val_df = df[df['patient_id'].isin(val_patients)].reset_index(drop=True)
     test_df = df[df['patient_id'].isin(test_patients)].reset_index(drop=True)
@@ -448,9 +471,9 @@ if __name__ == '__main__':
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
     NORMALIZATION_METHOD = "VAHADANE"
 
-    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES'
+    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10'
     DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
-    OUTPUT_BASE_DIR = r'D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES' + '\\' + NORMALIZATION_METHOD
+    OUTPUT_BASE_DIR = DATA_DIRECTORY + '\\' + NORMALIZATION_METHOD
     OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
         
     # <<< CHANGE: This is now the primary control for reproducibility ---

@@ -34,9 +34,9 @@ console_formatter = logging.Formatter('%(levelname)s: %(message)s')
 console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
-SOURCE_IMAGE_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\CANCER")
-SOURCE_MASK_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CHILE\PATCHES\CANCER_MASK")
-BASE_DIR = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CHILE\Optimization_Test\master_candidate_pool")
+SOURCE_IMAGE_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\CANCER")
+SOURCE_MASK_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\CANCER_MASK")
+BASE_DIR = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CATCH\Optimization_Test\master_candidate_pool")
 APPROVED_FOLDER = os.path.join(BASE_DIR, 'APPROVED')
 REJECTED_FOLDER = os.path.join(BASE_DIR, 'REJECTED')
 
