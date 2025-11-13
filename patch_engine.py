@@ -128,6 +128,13 @@ def process_window(args):
                          logging.warning(f"Skipping intersection check for a problematic artifact geometry at {patch_coords}.")
                          continue
             if should_drop:
+                patch_pil = slide.read_region(patch_coords, target_level, (window_size, window_size)).convert("RGB")
+                patch_np = np.array(patch_pil)
+                save_folder_img_artifact = str(path_not_cancer_folder).replace("NOT_CANCER", "ARTIFACTS")
+                os.makedirs(save_folder_img_artifact, exist_ok=True)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                file_basename = f"ARTIFACT_PATIENT_{patient}_{x_int}_{y_int}_{random.randint(1000,9999)}_{timestamp}.png"
+                patch_pil.save(os.path.join(save_folder_img_artifact, file_basename))
                 slide.close()
                 return "SKIPPED_ARTIFACT", None
 
