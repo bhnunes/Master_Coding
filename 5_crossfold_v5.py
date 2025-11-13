@@ -148,70 +148,86 @@ def load_data(data_dir):
     logging.info(f"Loaded {len(df)} image/mask pairs for {df['patient_id'].nunique()} patients.")
     return df
 
-# <<< THIS IS THE MODIFIED FUNCTION ---
-def create_train_val_test_split(df, random_state=42):
+def create_train_val_test_split(df, create_test_set=True, random_state=42):
     """
-    Creates a single, stratified, patient-aware split that is approximately 80/10/10.
-    Dynamically adapts the number of folds for datasets with fewer than 10 patients.
+    Creates a single, stratified, patient-aware split.
+    - If create_test_set is True: Creates an ~80/10/10 TRAIN/VAL/TEST split.
+    - If create_test_set is False: Creates an ~80/20 TRAIN/VAL split.
+    Dynamically adapts for datasets with few patients.
     """
-    logging.info(f"--- Creating a best-effort ~80% TRAIN / ~10% VAL / ~10% TEST split with seed {random_state} ---")
-    
     patient_df = df.groupby('patient_id')['label'].max().reset_index()
     n_patients = len(patient_df)
 
-    # --- SCIENTIFIC SAFEGUARD: Enforce minimum number of patients ---
-    if n_patients < 3:
-        raise ValueError(
-            f"Cannot create a TRAIN/VALIDATION/TEST split with fewer than 3 patients. Found only {n_patients}."
-        )
-
-    # --- DYNAMIC SPLIT LOGIC ---
-    # Determine the number of splits dynamically. Use 10 for large datasets,
-    # or the total number of patients for smaller ones. This creates a "leave-one-out"
-    # style split for the validation and test sets in small datasets.
-    n_splits_master = min(10, n_patients)
-    n_splits_inner = n_splits_master - 1
-    
-    logging.info(f"Found {n_patients} patients. Using a {n_splits_master}-fold master split.")
-    
-    # StratifiedGroupKFold requires at least 2 splits. Our n_patients < 3 check handles this.
-    sgkf_master = StratifiedGroupKFold(n_splits=n_splits_master, shuffle=True, random_state=random_state)
-    
-    try:
-        # First split gets the test set (approx 10% or 1/n_patients)
-        train_val_idx, test_idx = next(sgkf_master.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
+    if create_test_set:
+        # --- SCENARIO 1: Create TRAIN, VALIDATION, and TEST sets (80/10/10) ---
+        logging.info(f"--- Creating a best-effort ~80/10/10 TRAIN/VAL/TEST split with seed {random_state} ---")
         
-        # Sub-split the remaining data to get train and validation sets
-        train_val_patient_df = patient_df.iloc[train_val_idx]
+        # Minimum of 3 patients needed for 3 sets
+        if n_patients < 3:
+            raise ValueError(f"Cannot create a TRAIN/VAL/TEST split with fewer than 3 patients. Found only {n_patients}.")
 
-        # The inner split must have at least 2 folds.
-        if n_splits_inner < 2:
-             # This happens if n_patients was 2. But we already check for n_patients < 3.
-             # This is a safeguard for any unforeseen edge cases.
-            raise ValueError("Cannot create inner split with fewer than 2 folds.")
+        n_splits_master = min(10, n_patients)
+        n_splits_inner = n_splits_master - 1
+        logging.info(f"Found {n_patients} patients. Using a {n_splits_master}-fold master split.")
+        
+        sgkf_master = StratifiedGroupKFold(n_splits=n_splits_master, shuffle=True, random_state=random_state)
+        
+        try:
+            train_val_idx, test_idx = next(sgkf_master.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
+            train_val_patient_df = patient_df.iloc[train_val_idx]
             
-        sgkf_inner = StratifiedGroupKFold(n_splits=n_splits_inner, shuffle=True, random_state=random_state)
-        train_idx_inner, val_idx_inner = next(sgkf_inner.split(train_val_patient_df, y=train_val_patient_df['label'], groups=train_val_patient_df['patient_id']))
+            if n_splits_inner < 2: raise ValueError("Cannot create inner split with fewer than 2 folds.")
+            
+            sgkf_inner = StratifiedGroupKFold(n_splits=n_splits_inner, shuffle=True, random_state=random_state)
+            train_idx_inner, val_idx_inner = next(sgkf_inner.split(train_val_patient_df, y=train_val_patient_df['label'], groups=train_val_patient_df['patient_id']))
+            
+            train_idx, val_idx = train_val_patient_df.index[train_idx_inner], train_val_patient_df.index[val_idx_inner]
+        except (StopIteration, ValueError) as e:
+            logging.error(f"Could not generate the 3-way data split: {e}.")
+            return None
+
+        train_patients = set(patient_df.iloc[train_idx]['patient_id'])
+        val_patients = set(patient_df.iloc[val_idx]['patient_id'])
+        test_patients = set(patient_df.iloc[test_idx]['patient_id'])
         
-        # Get original dataframe indices
-        train_idx = train_val_patient_df.index[train_idx_inner]
-        val_idx = train_val_patient_df.index[val_idx_inner]
+        test_df = df[df['patient_id'].isin(test_patients)].reset_index(drop=True)
 
-    except (StopIteration, ValueError) as e:
-        logging.error(f"Could not generate the data split: {e}.")
-        return None
+    else:
+        # --- SCENARIO 2: Create only TRAIN and VALIDATION sets (80/20) ---
+        logging.info(f"--- Creating a best-effort ~80/20 TRAIN/VAL split with seed {random_state} ---")
+        
+        # Minimum of 2 patients needed for 2 sets
+        if n_patients < 2:
+            raise ValueError(f"Cannot create a TRAIN/VAL split with fewer than 2 patients. Found only {n_patients}.")
 
-    train_patients = set(patient_df.iloc[train_idx]['patient_id'])
-    val_patients = set(patient_df.iloc[val_idx]['patient_id'])
-    test_patients = set(patient_df.iloc[test_idx]['patient_id'])
+        n_splits = min(5, n_patients) # A 5-fold split creates 20% chunks
+        logging.info(f"Found {n_patients} patients. Using a {n_splits}-fold split.")
+        
+        sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        
+        try:
+            # Take the first fold for train/validation
+            train_idx, val_idx = next(sgkf.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
+        except (StopIteration, ValueError) as e:
+            logging.error(f"Could not generate the 2-way data split: {e}.")
+            return None
 
+        train_patients = set(patient_df.iloc[train_idx]['patient_id'])
+        val_patients = set(patient_df.iloc[val_idx]['patient_id'])
+        
+        # CRITICAL: Create an empty DataFrame for the test set to ensure downstream compatibility
+        test_patients = set()
+        test_df = pd.DataFrame(columns=df.columns)
+
+    # --- Common Logic for Both Scenarios ---
+    # Ensure no patient overlap between the created splits
     assert train_patients.isdisjoint(val_patients) and train_patients.isdisjoint(test_patients) and val_patients.isdisjoint(test_patients)
     
     logging.info(f"Split created: Train patients={len(train_patients)}, Val patients={len(val_patients)}, Test patients={len(test_patients)}")
     
+    # Create the final DataFrames
     train_df = df[df['patient_id'].isin(train_patients)].reset_index(drop=True)
     val_df = df[df['patient_id'].isin(val_patients)].reset_index(drop=True)
-    test_df = df[df['patient_id'].isin(test_patients)].reset_index(drop=True)
     
     return {'train_df': train_df, 'val_df': val_df, 'test_df': test_df}
 
@@ -467,6 +483,11 @@ def write_manifest_and_log_stats(output_dir):
 if __name__ == '__main__':
     # --- 1. CONFIGURATION ---
 
+    # --- NEW FEATURE FLAG ---
+    # Set to True to create an 80/10/10 split (TRAIN/VAL/TEST).
+    # Set to False to create an 80/20 split (TRAIN/VAL only).
+    CREATE_TEST_SET = True
+
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
     NORMALIZATION_METHOD = "VAHADANE"
@@ -505,8 +526,12 @@ if __name__ == '__main__':
         
         data_df = load_data(DATA_DIRECTORY)
         
-        # <<< CHANGE: Simplified function call ---
-        split_data = create_train_val_test_split(data_df, random_state=RANDOM_STATE)
+        # --- MODIFICATION: Pass the new flag to the split function ---
+        split_data = create_train_val_test_split(
+            df=data_df, 
+            create_test_set=CREATE_TEST_SET, # Pass the flag here
+            random_state=RANDOM_STATE
+        )
         if not split_data: 
             raise RuntimeError("Data split generation failed.")
 
