@@ -8,6 +8,7 @@ from tqdm import tqdm
 # --- Configuration ---
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+# --- Constants ---
 SPLITS_TO_CHECK = ["TRAIN", "VALIDATION", "TEST"]
 EXPECTED_AUG_CODES = ["HF", "VF", "RR", "GB", "HED", "HSV"]
 EXPECTED_MASK_VALUES = [0, 255]

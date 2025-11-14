@@ -74,7 +74,10 @@ def main():
     OUT = None 
     
     # 1 is a good trade-off between speed and size. 0 is no compression. 9 is max.
-    COMPRESS_LEVEL = 1 
+    COMPRESS_LEVEL = 1
+
+    # Check if the required TRAIN/VALIDATION/TEST folders exist
+    INCLUDE_DIRS = ("TRAIN", "VALIDATION", "TEST")
     # --- END CONFIGURATION ---
 
     setup_logging()
@@ -93,9 +96,7 @@ def main():
     zip_name = f"{root_path.name}.zip"
     zip_path = out_dir / zip_name
 
-    # Check if the required TRAIN/VALIDATION/TEST folders exist
-    include_dirs = ("TRAIN", "VALIDATION", "TEST")
-    source_dirs = [root_path / d for d in include_dirs]
+    source_dirs = [root_path / d for d in INCLUDE_DIRS]
     
     if not any(d.is_dir() for d in source_dirs):
         logging.error(f"FATAL: None of the required directories (TRAIN, VALIDATION, TEST) were found in '{root_path}'.")
