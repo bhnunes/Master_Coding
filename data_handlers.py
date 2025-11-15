@@ -134,11 +134,15 @@ class SVS_XML_Handler(BaseHandler):
         # --- NEW DESCRIPTIVE LOGGING ---
         logging.info(f"Successfully converted to {len(raw_cancer_polygons)} 'cancer' and {len(raw_not_cancer_polygons)} 'not_cancer' Shapely polygons.")
         clean_cancer_area, clean_non_cancer_area = _remove_ambiguous_regions(raw_cancer_polygons, raw_not_cancer_polygons)
-        logging.info(f"After cleaning overlaps, returning {len(clean_cancer_area)} final 'cancer' polygons and {len(clean_non_cancer_area)} final 'not_cancer' polygons.")
+        
+        # --- UNIFIED LOGIC ---
+        final_cancer_list = _to_coord_list(clean_cancer_area)
+        final_not_cancer_list = _to_coord_list(clean_non_cancer_area)
+        logging.info(f"After cleaning overlaps, returning {len(final_cancer_list)} final 'cancer' polygons and {len(final_not_cancer_list)} final 'not_cancer' polygons.")
         
         return {
-            "cancer_polygons": _to_coord_list(clean_cancer_area),
-            "not_cancer_polygons": _to_coord_list(clean_non_cancer_area)
+            "cancer_polygons": final_cancer_list,
+            "not_cancer_polygons": final_not_cancer_list
         }
 
 class NDPI_NDPA_Handler(BaseHandler):
@@ -197,11 +201,16 @@ class NDPI_NDPA_Handler(BaseHandler):
         # --- NEW DESCRIPTIVE LOGGING ---
         logging.info(f"Successfully converted to {len(raw_cancer_polygons)} 'cancer' and {len(raw_not_cancer_polygons)} 'not_cancer' Shapely polygons.")
         clean_cancer_area, clean_non_cancer_area = _remove_ambiguous_regions(raw_cancer_polygons, raw_not_cancer_polygons)
-        logging.info(f"After cleaning overlaps, returning {len(clean_cancer_area)} final 'cancer' polygons and {len(clean_non_cancer_area)} final 'not_cancer' polygons.")
         
+        # --- UNIFIED LOGIC ---
+        final_cancer_list = _to_coord_list(clean_cancer_area)
+        final_not_cancer_list = _to_coord_list(clean_non_cancer_area)
+        logging.info(f"After cleaning overlaps, returning {len(final_cancer_list)} final 'cancer' polygons and {len(final_not_cancer_list)} final 'not_cancer' polygons.")
+
+                
         return {
-            "cancer_polygons": _to_coord_list(clean_cancer_area),
-            "not_cancer_polygons": _to_coord_list(clean_non_cancer_area)
+            "cancer_polygons": final_cancer_list,
+            "not_cancer_polygons": final_not_cancer_list
         }
 
 # --- MODIFIED JSON_HANDLER WITH ENHANCED LOGGING ---
