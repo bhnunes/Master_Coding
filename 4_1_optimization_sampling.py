@@ -207,11 +207,11 @@ def generate_samples_on_the_fly(image_folder, mask_folder, base_output_path, col
 
 if __name__ == "__main__":
     # --- Configuration ---
-    SOURCE_IMAGE_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\CANCER"
+    SOURCE_IMAGE_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES\CANCER"
     SOURCE_IMAGE_FOLDER = os.path.normpath(SOURCE_IMAGE_FOLDER)
-    SOURCE_MASK_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\CANCER_MASK"
+    SOURCE_MASK_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES\CANCER_MASK"
     SOURCE_MASK_FOLDER = os.path.normpath(SOURCE_MASK_FOLDER)
-    OUTPUT_BASE_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CATCH\Optimization_Test"
+    OUTPUT_BASE_FOLDER = r"D:\Usuario\Desktop\Base_de_dados\CAMELYON16\Optimization_Test"
     OUTPUT_BASE_FOLDER = os.path.normpath(OUTPUT_BASE_FOLDER)
 
     # --- Execution ---

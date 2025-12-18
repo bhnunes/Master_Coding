@@ -486,13 +486,13 @@ if __name__ == '__main__':
     # --- NEW FEATURE FLAG ---
     # Set to True to create an 80/10/10 split (TRAIN/VAL/TEST).
     # Set to False to create an 80/20 split (TRAIN/VAL only).
-    CREATE_TEST_SET = True
+    CREATE_TEST_SET = False
 
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
-    NORMALIZATION_METHOD = "VAHADANE"
+    NORMALIZATION_METHOD = "NOT_NORMALIZED"
 
-    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10'
+    DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES'
     DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
     OUTPUT_BASE_DIR = DATA_DIRECTORY + '\\' + NORMALIZATION_METHOD
     OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)

@@ -46,18 +46,18 @@ CSV_PATHS: List[str] = [
 # --- Source Paths for Companion Files ---
 # The script will verify that for an image 'file.png', corresponding files
 # exist in these two folders before attempting to download.
-SOURCE_ANNOTATIONS = r"C:\DIAGSET\SOURCE_ANNOTATIONS"
-SOURCE_GEOJSON = r"C:\DIAGSET\SOURCE_GEOJSON"
+SOURCE_ANNOTATIONS = r"D:\Usuario\Desktop\Databases\CAMELYON16\SOURCE_ANNOTATIONS"
+SOURCE_GEOJSON = r"D:\Usuario\Desktop\Databases\CAMELYON16\SOURCE_GEOJSON"
 
 # --- Destination Paths ---
 # Where the final files will be stored.
-DEST_DIR = r"C:\DIAGSET\DIAGSET\IMAGES"
-DEST_ANNOTATIONS = r"C:\DIAGSET\DIAGSET\ANNOTATIONS"
-DEST_GEOJSON = r"C:\DIAGSET\DIAGSET\GEOJSON"
+DEST_DIR = r"D:\Usuario\Desktop\Databases\CAMELYON16\slides"
+DEST_ANNOTATIONS = r"D:\Usuario\Desktop\Databases\CAMELYON16\OUTPUT_ANNOTATIONS"
+DEST_GEOJSON = r"D:\Usuario\Desktop\Databases\CAMELYON16\OUTPUT_GEOJSON"
 
 # --- Script Behavior ---
 # The script will stop once the DEST_DIR has at least this many images.
-N_TARGET = 104
+N_TARGET = 150
 # Set to a number for reproducible random sampling, or None for non-deterministic.
 RANDOM_SEED = 42
 # If any file IDs are from Shared drives, this must be True.
@@ -71,6 +71,8 @@ OAUTH_SECRET_FILE = r"D:\Usuario\Desktop\Master_Coding\Master_Coding\DOWNLOAD_DR
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 # Chunk size for download (bytes). Big chunks = fewer API calls.
 CHUNK_SIZE = 10 * 1024 * 1024  # 10 MiB
+
+BYPASS_COMPANIONS = True 
 
 # =========================
 # ====== LOGGING SETUP ====
@@ -109,7 +111,7 @@ def load_index(csv_paths: List[str]) -> pd.DataFrame:
     for p in csv_paths:
         if not os.path.exists(p):
             raise FileNotFoundError(f"CSV not found: {p}")
-        df = pd.read_csv(p, dtype=str)
+        df = pd.read_csv(p, dtype=str, sep=";")
         if not {"name", "id"}.issubset(df.columns):
             raise ValueError(f"CSV must have columns 'name' and 'id': {p}")
         frames.append(df[["name", "id"]])
@@ -254,24 +256,30 @@ def main():
         return
     logger.info(f"Found {existing_count} existing images. Need to download {N_TARGET - existing_count} more.")
 
-    # 3) Index available companion files from source folders
-    companion_map = index_companion_files(SOURCE_ANNOTATIONS, SOURCE_GEOJSON)
-    if not companion_map:
-        logger.warning("No complete companion file sets found. Cannot download anything.")
-        return
+    if BYPASS_COMPANIONS:
+        pass
+    else:
+        # 3) Index available companion files from source folders
+        companion_map = index_companion_files(SOURCE_ANNOTATIONS, SOURCE_GEOJSON)
+        if not companion_map:
+            logger.warning("No complete companion file sets found. Cannot download anything.")
+            return
 
     # 4) Load CSV index and filter it
     df = load_index(CSV_PATHS)
     logger.info(f"Loaded {len(df)} unique file IDs from CSV index.")
-
     # Filter the index to only include files that have companions
     df['basename'] = df['name'].apply(lambda x: pathlib.Path(x).stem if pd.notna(x) else None)
     initial_candidates = len(df)
-    df = df[df['basename'].isin(companion_map.keys())]
-    logger.info(
-        f"Filtered candidates: {initial_candidates} -> {len(df)} "
-        "(kept only entries with available companion files)."
-    )
+    
+    if BYPASS_COMPANIONS:
+        pass
+    else:
+        df = df[df['basename'].isin(companion_map.keys())]
+        logger.info(
+            f"Filtered candidates: {initial_candidates} -> {len(df)} "
+            "(kept only entries with available companion files)."
+        )
 
     # 5) Prepare candidates for download
     population = df.sample(frac=1.0, random_state=RANDOM_SEED)  # shuffle
@@ -340,18 +348,21 @@ def main():
             logger.info(f"Successfully downloaded '{name}'. Moving companion files.")
             try:
                 # Get companion filenames from our index
-                companions = companion_map[basename]
-                ann_file = companions['annotation']
-                geojson_file = companions['geojson']
+                if BYPASS_COMPANIONS:
+                    pass
+                else:
+                    companions = companion_map[basename]
+                    ann_file = companions['annotation']
+                    geojson_file = companions['geojson']
 
-                # Move annotation
-                shutil.move(os.path.join(SOURCE_ANNOTATIONS, ann_file),
-                            os.path.join(DEST_ANNOTATIONS, ann_file))
-                # Move geojson
-                shutil.move(os.path.join(SOURCE_GEOJSON, geojson_file),
-                            os.path.join(DEST_GEOJSON, geojson_file))
+                    # Move annotation
+                    shutil.move(os.path.join(SOURCE_ANNOTATIONS, ann_file),
+                                os.path.join(DEST_ANNOTATIONS, ann_file))
+                    # Move geojson
+                    shutil.move(os.path.join(SOURCE_GEOJSON, geojson_file),
+                                os.path.join(DEST_GEOJSON, geojson_file))
 
-                logger.info(f"Moved companions for '{basename}'.")
+                    logger.info(f"Moved companions for '{basename}'.")
                 downloaded_now += 1
 
             except (FileNotFoundError, KeyError) as e:

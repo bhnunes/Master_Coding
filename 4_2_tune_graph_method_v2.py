@@ -34,26 +34,34 @@ console_formatter = logging.Formatter('%(levelname)s: %(message)s')
 console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
-SOURCE_IMAGE_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\CANCER")
-SOURCE_MASK_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\CANCER_MASK")
-BASE_DIR = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CATCH\Optimization_Test\master_candidate_pool")
+SOURCE_IMAGE_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES\CANCER")
+SOURCE_MASK_FOLDER = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES\CANCER_MASK")
+BASE_DIR = os.path.normpath(r"D:\Usuario\Desktop\Base_de_dados\CAMELYON16\Optimization_Test\master_candidate_pool")
 APPROVED_FOLDER = os.path.join(BASE_DIR, 'APPROVED')
 REJECTED_FOLDER = os.path.join(BASE_DIR, 'REJECTED')
 
 # --- NEW: Define the Search Space for Bayesian Optimization ---
 # We define a range for each integer parameter.
 SEARCH_SPACE = [
-    Integer(230, 250, name='bg_intensity_thresh'),
+    Integer(100, 250, name='bg_intensity_thresh'),
     Integer(100, 500, name='k'),
-    Integer(50, 200, name='min_size'),
+    Integer(10, 200, name='min_size'),
     Integer(0, 10, name='erosion_px')
 ]
+
+# # We define a range for each integer parameter.
+# SEARCH_SPACE = [
+#     Integer(230, 250, name='bg_intensity_thresh'),
+#     Integer(100, 500, name='k'),
+#     Integer(50, 200, name='min_size'),
+#     Integer(0, 10, name='erosion_px')
+# ]
 
 THRESHOLDS = np.arange(0.05, 0.96, 0.01)
 N_SPLITS_INNER_CV = 3
 TEST_SET_SIZE = 0.2
 # --- NEW: Set a budget for the number of evaluations ---
-N_BAYESIAN_CALLS = 30 # We will run 30 evaluations instead of 81
+N_BAYESIAN_CALLS = 50 # We will run 30 evaluations instead of 81
 
 def get_roi_contamination(image_path, mask_path, params):
     """

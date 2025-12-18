@@ -128,13 +128,13 @@ if __name__ == '__main__':
 
     # Path to the directory containing the original, unnormalized TEST set patches.
     # This directory should contain 'CANCER', 'NOT_CANCER', 'CANCER_MASK', etc.
-    TEST_SET_DIR = r'D:\Usuario\Desktop\Base_de_dados\CATCH\RAW_TEST_SET'
+    TEST_SET_DIR = r'D:\Usuario\Desktop\Base_de_dados\DIAGSET_TEST\PATCHES'
     
     # Path to the directory from the TRAINING run that contains the 'normalization_stats.json' file.
-    STATS_DIR = r'D:\Usuario\Desktop\Base_de_dados\CATCH\PATCHES_SUBSET_10\VAHADANE\VAHADANE_seed_42'
+    STATS_DIR = r'D:\Usuario\Desktop\Base_de_dados\DIAGSET\PATCHES\VAHADANE\VAHADANE_seed_42'
     
     # Path to the new directory where the normalized TEST set will be saved.
-    OUTPUT_DIR = r'D:\Usuario\Desktop\Base_de_dados\CATCH\NORMALIZED_TEST_SET'
+    OUTPUT_DIR = r'D:\Usuario\Desktop\Base_de_dados\DIAGSET\PATCHES\VAHADANE\VAHADANE_seed_42\TEST\TEST_NORMALIZED'
     
     NUM_WORKERS = max(1, (os.cpu_count() or 1) - 2)
 
