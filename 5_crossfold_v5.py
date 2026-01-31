@@ -77,10 +77,6 @@ def setup_logging(output_dir):
     logger.addHandler(stream_handler)
     logging.info(f"Logging configured. Output will be saved to {log_file}")
 
-# --- Helper Functions (Unchanged) ---
-def seed_worker(seed):
-    random.seed(seed)
-    np.random.seed(seed)
 
 def calculate_image_entropy(image_path):
     try:
