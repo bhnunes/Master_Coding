@@ -23,9 +23,12 @@ import shutil
 import re
 import concurrent.futures
 import logging
-import random
 import sys
 import json
+import hashlib
+import platform
+import subprocess
+from datetime import datetime, timezone
 from sklearn.model_selection import StratifiedShuffleSplit
 
 from dotenv import load_dotenv
@@ -216,6 +219,8 @@ def create_train_val_test_split(
         return int(patient_df[patient_df["patient_id"].isin(pid_set)]["n_images"].sum())
 
     # Attempt stratified split multiple times until constraints satisfied
+    split_seed = None
+    split_attempt = None
     for attempt in range(max_tries):
         seed = int(rng.integers(0, 2**31 - 1))
 
@@ -278,12 +283,25 @@ def create_train_val_test_split(
             f"patients train/val/test={len(train_patients)}/{len(val_patients)}/{len(test_patients)} | "
             f"images train/val/test={train_imgs}/{val_imgs}/{test_imgs}"
         )
+        split_seed = seed
+        split_attempt = attempt + 1
         return {
             "train_df": train_df,
             "val_df": val_df,
             "test_df": test_df,
             "train_patients": sorted(train_patients),
             "val_patients": sorted(val_patients),
+            "split_seed": split_seed,
+            "split_attempt": split_attempt,
+            "constraints": {
+                "min_test_patients": min_test_patients,
+                "min_train_patients": min_train_patients,
+                "min_val_patients": min_val_patients,
+                "test_ratio": test_ratio,
+                "val_ratio": val_ratio,
+                "max_tries": max_tries,
+            },
+
             "test_patients": sorted(test_patients),
         }
 
@@ -465,34 +483,205 @@ def verify_split_integrity(output_dir, split_name):
             raise ValueError(f"Integrity check FAILED for {split_name}: Image and mask file lists do not match for {label_name}.")
     logging.info(f"Integrity verification PASSED for {split_name}.")
 
-def write_manifest_and_log_stats(output_dir):
-    logging.info("Generating manifest and stats...")
+def _sha256_file(path, chunk_size=1024 * 1024):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+def _get_git_commit_hash():
+    """
+    Best-effort git commit hash for provenance.
+    Returns None if not in a git repo or git is unavailable.
+    """
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        return out if out else None
+    except Exception:
+        return None
+
+def _collect_library_versions():
+    versions = {
+        "python": sys.version.replace("\n", " "),
+        "platform": platform.platform(),
+        "numpy": getattr(np, "__version__", None),
+        "pandas": getattr(pd, "__version__", None),
+        "opencv": getattr(cv2, "__version__", None),
+    }
+    try:
+        import sklearn
+        versions["sklearn"] = getattr(sklearn, "__version__", None)
+    except Exception:
+        versions["sklearn"] = None
+
+    # tiatoolbox is optional for NOT_NORMALIZED runs; but include if import succeeded
+    try:
+        import tiatoolbox
+        versions["tiatoolbox"] = getattr(tiatoolbox, "__version__", None)
+    except Exception:
+        versions["tiatoolbox"] = None
+
+    return versions
+
+def write_manifest_and_log_stats(
+    output_dir,
+    run_id,
+    normalization_method,
+    is_normalized,
+    data_directory,
+    split_data,
+    calc_checksums=True,
+):
+    """
+    Writes:
+      - manifest.csv: row per patch, with patient_id, label, split, file paths, and optional checksums
+      - split_stats.csv: patient + patch distribution summaries per split (and per class)
+      - run_config.json: full provenance needed to reproduce the split and preprocessing
+
+    This function is intended to be "paper-grade" reproducibility metadata.
+    """
+    logging.info("Generating manifest, split stats, and run config...")
+
+    # ---- 1) manifest.csv (from files written to output_dir)
     rows = []
-    # <<< CHANGE: We don't need fold_num anymore, it's always 1 for a given run
     for split in ["TRAIN", "VALIDATION", "TEST"]:
         for label_name in ["CANCER", "NOT_CANCER"]:
             img_dir = os.path.join(output_dir, split, label_name)
-            if not os.path.isdir(img_dir): continue
+            mask_dir = os.path.join(output_dir, split, f"{label_name}_MASK")
+            if not os.path.isdir(img_dir):
+                continue
+
             for f in sorted(os.listdir(img_dir)):
-                if not f.lower().endswith('.png'): continue
-                match = re.search(r'PATIENT_(\d+)', f)
+                if not f.lower().endswith(".png"):
+                    continue
+
+                match = re.search(r"PATIENT_(\d+)", f)
                 if not match:
                     raise ValueError(
                         f"Cannot extract patient_id from filename '{f}' in {split}/{label_name}. "
                         "Expected pattern like 'PATIENT_<id>_...'."
                     )
                 pid = int(match.group(1))
-                aug_tag = 'AUG' if '_aug_' in f else 'ORIGINAL'
-                # The 'fold' column is removed as it's no longer relevant
-                rows.append({"split": split, "label": 1 if label_name == "CANCER" else 0, "patient_id": pid, "filename": f, "source": aug_tag})
+                label = 1 if label_name == "CANCER" else 0
+
+                rel_image = os.path.join(split, label_name, f)
+                rel_mask  = os.path.join(split, f"{label_name}_MASK", f)
+                abs_image = os.path.join(output_dir, rel_image)
+                abs_mask  = os.path.join(output_dir, rel_mask)
+
+                sha_img = _sha256_file(abs_image) if calc_checksums else None
+                sha_msk = _sha256_file(abs_mask) if (calc_checksums and os.path.isfile(abs_mask)) else None
+
+                rows.append({
+                    "run_id": run_id,
+                    "split": split,
+                    "label": label,
+                    "patient_id": pid,
+                    "filename": f,
+                    "normalization_method": normalization_method,
+                    "is_normalized": bool(is_normalized),
+                    "relative_path_image": rel_image.replace("\\", "/"),
+                    "relative_path_mask": rel_mask.replace("\\", "/"),
+                    "sha256_image": sha_img,
+                    "sha256_mask": sha_msk,
+                })
+
     manifest_df = pd.DataFrame(rows)
-    manifest_df.to_csv(os.path.join(output_dir, "manifest.csv"), index=False)
-    # Patient-level stats
+    manifest_path = os.path.join(output_dir, "manifest.csv")
+    manifest_df.to_csv(manifest_path, index=False)
+    logging.info(f"Manifest written: {manifest_path} (rows={len(manifest_df)})")
+
+    # ---- 2) split_stats.csv (use split_data, patient-level + patch-level summaries)
+    # Build a patient-level table with patch counts per patient per split
+    stats_rows = []
+    for split_name, sdf in [("TRAIN", split_data["train_df"]), ("VALIDATION", split_data["val_df"]), ("TEST", split_data["test_df"])]:
+        if sdf is None or sdf.empty:
+            continue
+
+        # Patient-level
+        patient_counts = (
+            sdf.groupby(["patient_id", "label"])
+               .size()
+               .reset_index(name="n_images_patient")
+        )
+        # overall split summaries
+        n_patients = patient_counts["patient_id"].nunique()
+        n_images = len(sdf)
+        n_pos_patients = int(patient_counts[patient_counts["label"] == 1]["patient_id"].nunique())
+        n_neg_patients = int(patient_counts[patient_counts["label"] == 0]["patient_id"].nunique())
+
+        # patches-per-patient distribution
+        per_patient = patient_counts.groupby("patient_id")["n_images_patient"].sum()
+        q1 = float(per_patient.quantile(0.25))
+        q2 = float(per_patient.quantile(0.50))
+        q3 = float(per_patient.quantile(0.75))
+
+        stats_rows.append({
+            "run_id": run_id,
+            "split": split_name,
+            "n_patients": int(n_patients),
+            "n_pos_patients": int(n_pos_patients),
+            "n_neg_patients": int(n_neg_patients),
+            "n_images": int(n_images),
+            "patches_per_patient_mean": float(per_patient.mean()),
+            "patches_per_patient_std": float(per_patient.std(ddof=1)) if len(per_patient) > 1 else 0.0,
+            "patches_per_patient_min": int(per_patient.min()),
+            "patches_per_patient_q1": q1,
+            "patches_per_patient_median": q2,
+            "patches_per_patient_q3": q3,
+            "patches_per_patient_max": int(per_patient.max()),
+        })
+
+        # also add per-class patch counts (optional but useful)
+        per_class_images = sdf.groupby("label").size().to_dict()
+        stats_rows[-1]["n_images_neg"] = int(per_class_images.get(0, 0))
+        stats_rows[-1]["n_images_pos"] = int(per_class_images.get(1, 0))
+
+    split_stats_df = pd.DataFrame(stats_rows)
+    split_stats_path = os.path.join(output_dir, "split_stats.csv")
+    split_stats_df.to_csv(split_stats_path, index=False)
+    logging.info(f"Split stats written: {split_stats_path}")
+
+    # ---- 3) run_config.json (provenance)
+    run_config = {
+        "run_id": run_id,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "data_directory": os.path.normpath(data_directory),
+        "output_dir": os.path.normpath(output_dir),
+        "normalization_method": normalization_method,
+        "is_normalized": bool(is_normalized),
+        "random_state": split_data.get("constraints", {}).get("random_state", None),  # filled below
+        "split_seed": split_data.get("split_seed", None),
+        "split_attempt": split_data.get("split_attempt", None),
+        "constraints": split_data.get("constraints", {}),
+        "patients": {
+            "train": split_data.get("train_patients", []),
+            "validation": split_data.get("val_patients", []),
+            "test": split_data.get("test_patients", []),
+        },
+        "library_versions": _collect_library_versions(),
+        "git_commit": _get_git_commit_hash(),
+    }
+
+    # Add random_state explicitly if present in constraints caller context
+    # (We store it in constraints at call-site below.)
+    cfg_path = os.path.join(output_dir, "run_config.json")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(run_config, f, indent=2)
+    logging.info(f"Run config written: {cfg_path}")
+
+    # Patient-level stats log (kept, but now also in split_stats.csv)
     for split in ["TRAIN", "VALIDATION", "TEST"]:
-        split_df = manifest_df[manifest_df['split'] == split]
-        if split_df.empty: continue
-        counts = split_df.drop_duplicates(['patient_id', 'label']).groupby('label')['patient_id'].nunique()
+        split_df = manifest_df[manifest_df["split"] == split]
+        if split_df.empty:
+            continue
+        counts = split_df.drop_duplicates(["patient_id", "label"]).groupby("label")["patient_id"].nunique()
         logging.info(f"{split} patient counts -> NOT_CANCER={counts.get(0, 0)}, CANCER={counts.get(1, 0)}")
+
 
 # --- Main Execution ---
 if __name__ == '__main__':
@@ -585,7 +774,18 @@ if __name__ == '__main__':
         logging.info(f"TRAIN set written: CANCER={train_pos}, NOT_CANCER={train_neg}")
 
         # 4.6. Create Manifest
-        write_manifest_and_log_stats(output_run_dir)
+        write_manifest_and_log_stats(
+            output_dir=output_run_dir,
+            run_id=f"{NORMALIZATION_METHOD}_seed_{RANDOM_STATE}",
+            normalization_method=NORMALIZATION_METHOD,
+            is_normalized=(NORMALIZATION_METHOD != 'NOT_NORMALIZED'),
+            data_directory=DATA_DIRECTORY,
+            split_data={
+                **split_data,
+                'constraints': {**split_data.get('constraints', {}), 'random_state': RANDOM_STATE},
+            },
+            calc_checksums=True,
+        )
         logging.info(f"--- Data Split processed successfully. ---")
 
         logging.info("--- All processing tasks completed! ---")
