@@ -22,12 +22,11 @@ import os
 import shutil
 import re
 import concurrent.futures
-import itertools
 import logging
 import random
 import sys
 import json
-from sklearn.model_selection import StratifiedShuffleSplit, GroupShuffleSplit
+from sklearn.model_selection import StratifiedShuffleSplit
 
 from dotenv import load_dotenv
 
@@ -55,11 +54,9 @@ except (ImportError, FileNotFoundError) as e:
 # --- END OF NEW BLOCK ---
 
 
-import albumentations as A
 import cv2
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import StratifiedGroupKFold
 from tqdm import tqdm
 
 # --- Logger Setup ---
@@ -170,10 +167,10 @@ def create_train_val_test_split(
       - VALIDATION patients >= min_val_patients
       - TRAIN image count > VALIDATION and > TEST
 
-    Best-effort stratification:
-      - Stratify at patient level using patient_label = max(patch_label)
-      - If stratification is impossible (tiny N / single-class), we fail-fast (recommended),
-        OR you can switch to fallback GroupShuffleSplit by uncommenting below.
+    Stratification policy:
+      - Stratify at patient level using patient_label = max(patch_label).
+      - No fallback is allowed in this pipeline. If the constraints cannot be satisfied,
+        the function fails with an actionable error explaining why you need more patients.
     """
     # One row per patient with label + patch counts
     patient_df = (
@@ -212,6 +209,13 @@ def create_train_val_test_split(
 
     rng = np.random.default_rng(random_state)
 
+
+    # Failure accounting for actionable error messages (paper/audit friendly)
+    fail_val_strat = 0
+    fail_overlap = 0
+    fail_min_patients = 0
+    fail_rule2_image_dominance = 0
+
     def image_count(pid_set):
         return int(patient_df[patient_df["patient_id"].isin(pid_set)]["n_images"].sum())
 
@@ -236,9 +240,10 @@ def create_train_val_test_split(
         try:
             sss_val = StratifiedShuffleSplit(n_splits=1, test_size=n_val, random_state=seed + 1)
             train_idx, val_idx = next(sss_val.split(tv_ids, tv_y))
-        except ValueError as e:
-            # If you prefer fallback instead of failing fast, replace this `continue`
-            # with a GroupShuffleSplit fallback.
+        except ValueError:
+            # Stratified VAL split failed for this attempt (often due to too few patients in a class
+            # for the requested VAL size). We will retry with a different random seed.
+            fail_val_strat += 1
             continue
 
         train_patients = set(tv_ids[train_idx])
@@ -247,12 +252,15 @@ def create_train_val_test_split(
 
         # Hard no-leakage
         if (train_patients & val_patients) or (train_patients & test_patients) or (val_patients & test_patients):
+            fail_overlap += 1
             continue
 
         # Minimum patient counts (should already be satisfied, but keep defensive)
         if len(test_patients) < min_test_patients:
+            fail_min_patients += 1
             continue
         if len(train_patients) < min_train_patients or len(val_patients) < min_val_patients:
+            fail_min_patients += 1
             continue
 
         # Rule 2: TRAIN images must dominate
@@ -261,6 +269,7 @@ def create_train_val_test_split(
         test_imgs  = image_count(test_patients)
 
         if not (train_imgs > val_imgs and train_imgs > test_imgs):
+            fail_rule2_image_dominance += 1
             continue
 
         # Build final dfs
@@ -282,11 +291,18 @@ def create_train_val_test_split(
             "test_patients": sorted(test_patients),
         }
 
-    raise ValueError(
-        f"Split impossible under constraints after {max_tries} attempts. "
-        f"Consider adding patients or relaxing constraints (e.g., allow smaller TEST, "
-        f"or drop Rule 2 image dominance)."
+    msg = (
+        "Split impossible under the configured constraints (no fallback is permitted).\n"
+        f"Tried {max_tries} randomized stratified attempts (seeded from random_state={random_state}).\n"
+        "Failure breakdown (counts across attempts):\n"
+        f"  - VAL stratification failed: {fail_val_strat}\n"
+        f"  - Patient leakage/overlap detected (should be rare): {fail_overlap}\n"
+        f"  - Minimum patient-count constraints failed: {fail_min_patients}\n"
+        f"  - Rule 2 (TRAIN images must dominate VAL and TEST) failed: {fail_rule2_image_dominance}\n\n"
+        "Action required: add more patients (especially in the minority patient-level class), "
+        "or relax the constraints (e.g., lower min_test_patients or drop Rule 2)."
     )
+    raise ValueError(msg)
 
 # --- Normalization Functions (Unchanged) ---
 def make_aggregate_target(image_paths):
