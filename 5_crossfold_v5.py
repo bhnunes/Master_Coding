@@ -27,6 +27,7 @@ import logging
 import random
 import sys
 import json
+from sklearn.model_selection import StratifiedShuffleSplit, GroupShuffleSplit
 
 from dotenv import load_dotenv
 
@@ -149,88 +150,143 @@ def load_data(data_dir):
     logging.info(f"Loaded {len(df)} image/mask pairs for {df['patient_id'].nunique()} patients.")
     return df
 
-def create_train_val_test_split(df, create_test_set=True, random_state=42):
+def create_train_val_test_split(
+    df,
+    random_state=42,
+    min_test_patients=20,
+    min_train_patients=5,
+    min_val_patients=5,
+    test_ratio=0.10,
+    val_ratio=0.10,
+    max_tries=1000,
+):
     """
-    Creates a single, stratified, patient-aware split.
-    - If create_test_set is True: Creates an ~80/10/10 TRAIN/VAL/TEST split.
-    - If create_test_set is False: Creates an ~80/20 TRAIN/VAL split.
-    Dynamically adapts for datasets with few patients.
+    Unified, rule-based, patient-disjoint split.
+
+    Hard constraints:
+      - No patient leakage between TRAIN / VALIDATION / TEST
+      - TEST patients >= min_test_patients
+      - TRAIN patients >= min_train_patients
+      - VALIDATION patients >= min_val_patients
+      - TRAIN image count > VALIDATION and > TEST
+
+    Best-effort stratification:
+      - Stratify at patient level using patient_label = max(patch_label)
+      - If stratification is impossible (tiny N / single-class), we fail-fast (recommended),
+        OR you can switch to fallback GroupShuffleSplit by uncommenting below.
     """
-    patient_df = df.groupby('patient_id')['label'].max().reset_index()
-    n_patients = len(patient_df)
+    # One row per patient with label + patch counts
+    patient_df = (
+        df.groupby("patient_id")
+          .agg(patient_label=("label", "max"), n_images=("label", "size"))
+          .reset_index()
+    )
 
-    if create_test_set:
-        # --- SCENARIO 1: Create TRAIN, VALIDATION, and TEST sets (80/10/10) ---
-        logging.info(f"--- Creating a best-effort ~80/10/10 TRAIN/VAL/TEST split with seed {random_state} ---")
-        
-        # Minimum of 3 patients needed for 3 sets
-        if n_patients < 3:
-            raise ValueError(f"Cannot create a TRAIN/VAL/TEST split with fewer than 3 patients. Found only {n_patients}.")
+    N = len(patient_df)
+    if N < (min_test_patients + min_train_patients + min_val_patients):
+        raise ValueError(
+            f"Split impossible: N_patients={N} but need at least "
+            f"{min_test_patients + min_train_patients + min_val_patients} "
+            f"(min_test={min_test_patients}, min_train={min_train_patients}, min_val={min_val_patients})."
+        )
 
-        n_splits_master = min(10, n_patients)
-        n_splits_inner = n_splits_master - 1
-        logging.info(f"Found {n_patients} patients. Using a {n_splits_master}-fold master split.")
-        
-        sgkf_master = StratifiedGroupKFold(n_splits=n_splits_master, shuffle=True, random_state=random_state)
-        
+    # Decide patient counts for each split
+    n_test = max(min_test_patients, int(round(test_ratio * N)))
+    n_val  = max(min_val_patients,  int(round(val_ratio  * N)))
+    n_train = N - n_test - n_val
+
+    if n_train < min_train_patients:
+        # Try shrinking val first (since val is usually flexible)
+        n_val = max(min_val_patients, N - n_test - min_train_patients)
+        n_train = N - n_test - n_val
+
+    if n_train < min_train_patients or n_val < min_val_patients or n_test < min_test_patients:
+        raise ValueError(
+            f"Split impossible after sizing: train={n_train}, val={n_val}, test={n_test}. "
+            "Need more patients or relax constraints."
+        )
+
+    # Prepare arrays for sklearn
+    patient_ids = patient_df["patient_id"].to_numpy()
+    y = patient_df["patient_label"].astype(int).to_numpy()
+
+    rng = np.random.default_rng(random_state)
+
+    def image_count(pid_set):
+        return int(patient_df[patient_df["patient_id"].isin(pid_set)]["n_images"].sum())
+
+    # Attempt stratified split multiple times until constraints satisfied
+    for attempt in range(max_tries):
+        seed = int(rng.integers(0, 2**31 - 1))
+
+        # 1) pick TEST
         try:
-            train_val_idx, test_idx = next(sgkf_master.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
-            train_val_patient_df = patient_df.iloc[train_val_idx]
-            
-            if n_splits_inner < 2: raise ValueError("Cannot create inner split with fewer than 2 folds.")
-            
-            sgkf_inner = StratifiedGroupKFold(n_splits=n_splits_inner, shuffle=True, random_state=random_state)
-            train_idx_inner, val_idx_inner = next(sgkf_inner.split(train_val_patient_df, y=train_val_patient_df['label'], groups=train_val_patient_df['patient_id']))
-            
-            train_idx, val_idx = train_val_patient_df.index[train_idx_inner], train_val_patient_df.index[val_idx_inner]
-        except (StopIteration, ValueError) as e:
-            logging.error(f"Could not generate the 3-way data split: {e}.")
-            return None
+            sss_test = StratifiedShuffleSplit(n_splits=1, test_size=n_test, random_state=seed)
+            trainval_idx, test_idx = next(sss_test.split(patient_ids, y))
+        except ValueError as e:
+            raise ValueError(
+                f"Stratified split impossible at patient level (TEST). "
+                f"Likely too few patients in one class for test_size={n_test}. Details: {e}"
+            )
 
-        train_patients = set(patient_df.iloc[train_idx]['patient_id'])
-        val_patients = set(patient_df.iloc[val_idx]['patient_id'])
-        test_patients = set(patient_df.iloc[test_idx]['patient_id'])
-        
-        test_df = df[df['patient_id'].isin(test_patients)].reset_index(drop=True)
+        tv_ids = patient_ids[trainval_idx]
+        tv_y   = y[trainval_idx]
 
-    else:
-        # --- SCENARIO 2: Create only TRAIN and VALIDATION sets (80/20) ---
-        logging.info(f"--- Creating a best-effort ~80/20 TRAIN/VAL split with seed {random_state} ---")
-        
-        # Minimum of 2 patients needed for 2 sets
-        if n_patients < 2:
-            raise ValueError(f"Cannot create a TRAIN/VAL split with fewer than 2 patients. Found only {n_patients}.")
-
-        n_splits = min(5, n_patients) # A 5-fold split creates 20% chunks
-        logging.info(f"Found {n_patients} patients. Using a {n_splits}-fold split.")
-        
-        sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-        
+        # 2) pick VAL from remaining
         try:
-            # Take the first fold for train/validation
-            train_idx, val_idx = next(sgkf.split(patient_df, y=patient_df['label'], groups=patient_df['patient_id']))
-        except (StopIteration, ValueError) as e:
-            logging.error(f"Could not generate the 2-way data split: {e}.")
-            return None
+            sss_val = StratifiedShuffleSplit(n_splits=1, test_size=n_val, random_state=seed + 1)
+            train_idx, val_idx = next(sss_val.split(tv_ids, tv_y))
+        except ValueError as e:
+            # If you prefer fallback instead of failing fast, replace this `continue`
+            # with a GroupShuffleSplit fallback.
+            continue
 
-        train_patients = set(patient_df.iloc[train_idx]['patient_id'])
-        val_patients = set(patient_df.iloc[val_idx]['patient_id'])
-        
-        # CRITICAL: Create an empty DataFrame for the test set to ensure downstream compatibility
-        test_patients = set()
-        test_df = pd.DataFrame(columns=df.columns)
+        train_patients = set(tv_ids[train_idx])
+        val_patients   = set(tv_ids[val_idx])
+        test_patients  = set(patient_ids[test_idx])
 
-    # --- Common Logic for Both Scenarios ---
-    # Ensure no patient overlap between the created splits
-    assert train_patients.isdisjoint(val_patients) and train_patients.isdisjoint(test_patients) and val_patients.isdisjoint(test_patients)
-    
-    logging.info(f"Split created: Train patients={len(train_patients)}, Val patients={len(val_patients)}, Test patients={len(test_patients)}")
-    
-    # Create the final DataFrames
-    train_df = df[df['patient_id'].isin(train_patients)].reset_index(drop=True)
-    val_df = df[df['patient_id'].isin(val_patients)].reset_index(drop=True)
-    
-    return {'train_df': train_df, 'val_df': val_df, 'test_df': test_df}
+        # Hard no-leakage
+        if (train_patients & val_patients) or (train_patients & test_patients) or (val_patients & test_patients):
+            continue
+
+        # Minimum patient counts (should already be satisfied, but keep defensive)
+        if len(test_patients) < min_test_patients:
+            continue
+        if len(train_patients) < min_train_patients or len(val_patients) < min_val_patients:
+            continue
+
+        # Rule 2: TRAIN images must dominate
+        train_imgs = image_count(train_patients)
+        val_imgs   = image_count(val_patients)
+        test_imgs  = image_count(test_patients)
+
+        if not (train_imgs > val_imgs and train_imgs > test_imgs):
+            continue
+
+        # Build final dfs
+        train_df = df[df["patient_id"].isin(train_patients)].reset_index(drop=True)
+        val_df   = df[df["patient_id"].isin(val_patients)].reset_index(drop=True)
+        test_df  = df[df["patient_id"].isin(test_patients)].reset_index(drop=True)
+
+        logging.info(
+            f"Split OK (attempt {attempt+1}/{max_tries}, seed={seed}): "
+            f"patients train/val/test={len(train_patients)}/{len(val_patients)}/{len(test_patients)} | "
+            f"images train/val/test={train_imgs}/{val_imgs}/{test_imgs}"
+        )
+        return {
+            "train_df": train_df,
+            "val_df": val_df,
+            "test_df": test_df,
+            "train_patients": sorted(train_patients),
+            "val_patients": sorted(val_patients),
+            "test_patients": sorted(test_patients),
+        }
+
+    raise ValueError(
+        f"Split impossible under constraints after {max_tries} attempts. "
+        f"Consider adding patients or relaxing constraints (e.g., allow smaller TEST, "
+        f"or drop Rule 2 image dominance)."
+    )
 
 # --- Normalization Functions (Unchanged) ---
 def make_aggregate_target(image_paths):
@@ -425,12 +481,6 @@ def write_manifest_and_log_stats(output_dir):
 # --- Main Execution ---
 if __name__ == '__main__':
     # --- 1. CONFIGURATION ---
-
-    # --- NEW FEATURE FLAG ---
-    # Set to True to create an 80/10/10 split (TRAIN/VAL/TEST).
-    # Set to False to create an 80/20 split (TRAIN/VAL only).
-    CREATE_TEST_SET = False
-
     # --- Select Normalization Method ---
     # Options: "NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"
     NORMALIZATION_METHOD = "NOT_NORMALIZED"
@@ -471,9 +521,11 @@ if __name__ == '__main__':
         
         # --- MODIFICATION: Pass the new flag to the split function ---
         split_data = create_train_val_test_split(
-            df=data_df, 
-            create_test_set=CREATE_TEST_SET, # Pass the flag here
-            random_state=RANDOM_STATE
+            df=data_df,
+            random_state=RANDOM_STATE,
+            min_test_patients=20,
+            min_train_patients=5,
+            min_val_patients=5,
         )
         if not split_data: 
             raise RuntimeError("Data split generation failed.")
