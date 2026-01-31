@@ -12,7 +12,7 @@
 #     images within the TRAIN set.
 # 4.  The fitted normalizer is then used to transform all three sets (TRAIN,
 #     VALIDATION, TEST) for consistency without leakage.
-# 5.  The TRAIN set is balanced via augmentation on the normalized images.
+# 5.  NOTE: Data augmentation must be applied *on-the-fly* during training (not written to disk here).
 # 6.  A manifest and statistics file are generated for full traceability.
 #
 # Configuration is done in the `if __name__ == '__main__':` block.
@@ -376,69 +376,6 @@ def process_and_write_split_files(split_df, output_dir, split_name, normalizer):
         for error in errors: logging.error(f"Processing error: {error}")
         raise RuntimeError(f"Failed to process {len(errors)} files for {split_name}.")
 
-# --- Augmentation & Verification (Unchanged) ---
-TRANSFORM_CODES = ["HF", "VF", "RR", "GB", "HED", "HSV"]
-def _transform_factory(code: str):
-    if code == "HF": return A.HorizontalFlip(p=1.0)
-    if code == "VF": return A.VerticalFlip(p=1.0)
-    if code == "RR": return A.RandomRotate90(p=1.0)
-    if code == "GB": return A.GaussianBlur(blur_limit=(3, 7), p=1.0)
-    if code == "HED": return A.HEStain(method="random_preset", intensity_shift_range=(-0.2, 0.2), intensity_scale_range=(0.7, 1.3), p=1.0)
-    if code == "HSV": return A.HueSaturationValue(hue_shift_limit=25, sat_shift_limit=60, val_shift_limit=50, p=1.0)
-    raise ValueError(f"Unknown transform code: {code}")
-
-def apply_single_augmentation(image_path, mask_path, output_image_path, output_mask_path, transform_code, seed):
-    try:
-        seed_worker(seed)
-        transform = _transform_factory(transform_code)
-        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        if image is None or mask is None: raise IOError(f"Failed to read image/mask: {image_path}")
-        augmented = transform(image=image, mask=mask)
-        if not (cv2.imwrite(output_image_path, augmented['image']) and cv2.imwrite(output_mask_path, augmented['mask'])):
-            raise IOError("cv2.imwrite() failed to save.")
-        return True, None
-    except Exception as e:
-        return False, f"Error on {os.path.basename(image_path)} [{transform_code}, seed={seed}]: {e}"
-
-def augment_and_balance_train_set(output_dir, train_df, random_state, num_workers=None):
-    logging.info("Augmenting and balancing TRAIN set...")
-    label_counts = train_df['label'].value_counts()
-    n_cancer, n_nocancer = label_counts.get(1, 0), label_counts.get(0, 0)
-    if n_cancer == n_nocancer:
-        logging.info("Classes are already balanced.")
-        return
-    minority_label = 1 if n_cancer < n_nocancer else 0
-    needed_augs = abs(n_cancer - n_nocancer)
-    logging.info(f"Target: Augmenting {'CANCER' if minority_label == 1 else 'NOT_CANCER'} to generate {needed_augs} new samples.")
-    minority_df = train_df[train_df['label'] == minority_label]
-    files_by_patient = minority_df.groupby('patient_id')['filename'].apply(list).to_dict()
-    minority_patients = sorted(files_by_patient.keys())
-    patient_cycler, transform_cycler = itertools.cycle(minority_patients), itertools.cycle(TRANSFORM_CODES)
-    rng = np.random.default_rng(random_state)
-    augmentation_tasks = []
-    for _ in range(needed_augs):
-        patient_id = next(patient_cycler)
-        original_filename = rng.choice(files_by_patient[patient_id])
-        transform_code = next(transform_cycler)
-        seed = int(rng.integers(0, 2**31 - 1))
-        base_name, _ = os.path.splitext(original_filename)
-        output_filename = f"{base_name}_aug_{transform_code}_{seed}.png"
-        label_dir = 'CANCER' if minority_label == 1 else 'NOT_CANCER'
-        img_dir = os.path.join(output_dir, 'TRAIN', label_dir)
-        mask_dir = os.path.join(output_dir, 'TRAIN', f"{label_dir}_MASK")
-        task = (os.path.join(img_dir, original_filename), os.path.join(mask_dir, original_filename), os.path.join(img_dir, output_filename), os.path.join(mask_dir, output_filename), transform_code, seed)
-        augmentation_tasks.append(task)
-    errors = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = {executor.submit(apply_single_augmentation, *task) for task in augmentation_tasks}
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Applying Augmentations"):
-            success, msg = future.result()
-            if not success: errors.append(msg)
-    if errors:
-        for error in errors: logging.error(f"Augmentation error: {error}")
-        raise RuntimeError(f"{len(errors)} augmentation errors occurred.")
-
 def verify_split_integrity(output_dir, split_name):
     logging.info(f"Verifying integrity of files for {split_name} split...")
     split_dir = os.path.join(output_dir, split_name)
@@ -565,16 +502,14 @@ if __name__ == '__main__':
             process_and_write_split_files(df, output_run_dir, split_name, normalizer)
             verify_split_integrity(output_run_dir, split_name)
 
-        # 4.4. Augment and Balance TRAIN set
-        augment_and_balance_train_set(output_run_dir, split_data['train_df'], RANDOM_STATE, num_workers=NUM_WORKERS)
-        
-        # 4.5. Post-Augmentation Verification
-        logging.info(f"--- Post-Augmentation Verification ---")
-        verify_split_integrity(output_run_dir, "TRAIN") 
-        n_pos = len(os.listdir(os.path.join(output_run_dir, "TRAIN", "CANCER")))
-        n_neg = len(os.listdir(os.path.join(output_run_dir, "TRAIN", "NOT_CANCER")))
-        assert n_pos == n_neg, f"TRAIN set imbalance detected: CANCER={n_pos}, NOT_CANCER={n_neg}"
-        logging.info(f"TRAIN set balance confirmed: {n_pos} images per class.")
+        # 4.4. Offline augmentation/balancing REMOVED (scientific: augmentation must be on-the-fly)
+        logging.info("Skipping offline augmentation/balancing. Apply augmentations on-the-fly during training.")
+
+        # 4.5. Post-write sanity check (counts only; no enforced balancing here)
+        verify_split_integrity(output_run_dir, "TRAIN")
+        train_pos = len([f for f in os.listdir(os.path.join(output_run_dir, "TRAIN", "CANCER")) if f.lower().endswith(".png")])
+        train_neg = len([f for f in os.listdir(os.path.join(output_run_dir, "TRAIN", "NOT_CANCER")) if f.lower().endswith(".png")])
+        logging.info(f"TRAIN set written: CANCER={train_pos}, NOT_CANCER={train_neg}")
 
         # 4.6. Create Manifest
         write_manifest_and_log_stats(output_run_dir)
