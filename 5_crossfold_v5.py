@@ -487,6 +487,7 @@ if __name__ == '__main__':
 
     DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES'
     DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
+    OVERWRITE_OUTPUT_DIR = True
     OUTPUT_BASE_DIR = DATA_DIRECTORY + '\\' + NORMALIZATION_METHOD
     OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
         
@@ -505,8 +506,10 @@ if __name__ == '__main__':
     output_run_dir = os.path.join(OUTPUT_BASE_DIR, f"{NORMALIZATION_METHOD}_seed_{RANDOM_STATE}")
     
     if os.path.exists(output_run_dir):
-        if input(f"Output directory '{output_run_dir}' exists. Delete and proceed? (yes/no): ").lower() != 'yes':
-            sys.exit("Exiting.")
+        if OVERWRITE_OUTPUT_DIR:
+            logging.info(f"Overwriting existing output directory: {output_run_dir}")
+        else:
+            sys.exit(f"Output directory already exists: {output_run_dir}. Set OVERWRITE_OUTPUT_DIR=True to overwrite.")
         shutil.rmtree(output_run_dir)
     os.makedirs(output_run_dir, exist_ok=True)
     setup_logging(output_run_dir)
