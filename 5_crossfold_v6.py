@@ -784,7 +784,7 @@ if __name__ == '__main__':
                 **split_data,
                 'constraints': {**split_data.get('constraints', {}), 'random_state': RANDOM_STATE},
             },
-            calc_checksums=True,
+            calc_checksums=True, #If you’re processing hundreds of thousands of patches and it becomes too slow, set it to False
         )
         logging.info(f"--- Data Split processed successfully. ---")
 
