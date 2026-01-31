@@ -64,7 +64,8 @@ from tqdm import tqdm
 # --- Logger Setup ---
 def setup_logging(output_dir):
     """Configures the root logger to output to both a file and the console."""
-    log_file = 'data_preparation.log'
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = os.path.join(output_dir, 'data_preparation.log')
     log_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
@@ -103,10 +104,8 @@ def load_data(data_dir):
     data = []
 
     for label_name in ["CANCER", "NOT_CANCER"]:
-        image_dir = data_dir + "\\" + label_name
-        image_dir=os.path.normpath(image_dir)
-        mask_dir = data_dir + "\\" + label_name+"_MASK"
-        mask_dir=os.path.normpath(mask_dir)
+        image_dir = os.path.normpath(os.path.join(data_dir, label_name))
+        mask_dir  = os.path.normpath(os.path.join(data_dir, f"{label_name}_MASK"))
         label = 1 if label_name == "CANCER" else 0
         if not (os.path.isdir(image_dir) and os.path.isdir(mask_dir)):
             logging.warning(f"Missing directories for {label_name}. Skipping.")
@@ -130,8 +129,10 @@ def load_data(data_dir):
             if not (os.path.isfile(image_path) and os.path.isfile(mask_path)):
                 logging.warning(f"File path(s) invalid for '{image_name}'. Skipping.")
                 continue
-            if cv2.imread(image_path) is None or cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) is None:
-                logging.warning(f"Could not read image/mask file '{image_path}'. Skipping.")
+            img = cv2.imread(image_path)
+            msk = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if img is None or msk is None:
+                logging.warning(f"Could not read image/mask file for '{image_name}'. Skipping.")
                 continue
 
             data.append({
@@ -403,7 +404,12 @@ def write_manifest_and_log_stats(output_dir):
             for f in sorted(os.listdir(img_dir)):
                 if not f.lower().endswith('.png'): continue
                 match = re.search(r'PATIENT_(\d+)', f)
-                pid = int(match.group(1)) if match else None
+                if not match:
+                    raise ValueError(
+                        f"Cannot extract patient_id from filename '{f}' in {split}/{label_name}. "
+                        "Expected pattern like 'PATIENT_<id>_...'."
+                    )
+                pid = int(match.group(1))
                 aug_tag = 'AUG' if '_aug_' in f else 'ORIGINAL'
                 # The 'fold' column is removed as it's no longer relevant
                 rows.append({"split": split, "label": 1 if label_name == "CANCER" else 0, "patient_id": pid, "filename": f, "source": aug_tag})
