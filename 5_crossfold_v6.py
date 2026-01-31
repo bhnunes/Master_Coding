@@ -302,12 +302,16 @@ def create_train_val_test_split(
 
 # --- Normalization Functions (Unchanged) ---
 def make_aggregate_target(image_paths):
-    """Creates a median aggregate target image from a list of image paths."""
-    images_rgb = [cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB) for p in image_paths if cv2.imread(p) is not None]
-    if not images_rgb: raise ValueError("No valid images found to build aggregate target.")
+    images_rgb = []
+    for p in image_paths:
+        bgr = cv2.imread(p)
+        if bgr is None:
+            continue
+        images_rgb.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+    if not images_rgb:
+        raise ValueError("No valid images found to build aggregate target.")
     stack = np.stack(images_rgb, axis=0)
-    median = np.median(stack, axis=0).astype(np.uint8)
-    return median
+    return np.median(stack, axis=0).astype(np.uint8)
 
 def fit_normalizer_on_train_set(train_df, method_name):
     """Fits a stain normalizer and returns the normalizer and template paths.""" # <-- Docstring updated
@@ -500,15 +504,12 @@ if __name__ == '__main__':
     DATA_DIRECTORY = r'D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES'
     DATA_DIRECTORY=os.path.normpath(DATA_DIRECTORY)
     OVERWRITE_OUTPUT_DIR = True
-    OUTPUT_BASE_DIR = DATA_DIRECTORY + '\\' + NORMALIZATION_METHOD
-    OUTPUT_BASE_DIR=os.path.normpath(OUTPUT_BASE_DIR)
+    OUTPUT_BASE_DIR = os.path.join(DATA_DIRECTORY, NORMALIZATION_METHOD)
         
     # <<< CHANGE: This is now the primary control for reproducibility ---
     # Change this integer to generate a different 80/10/10 split
     RANDOM_STATE = 42
     
-    NUM_WORKERS = max(1, (os.cpu_count() or 1) - 2)
-
     # --- 2. SETUP ---
     VALID_METHODS = ["NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"]
     if NORMALIZATION_METHOD not in VALID_METHODS:
@@ -579,7 +580,6 @@ if __name__ == '__main__':
         logging.info("Skipping offline augmentation/balancing. Apply augmentations on-the-fly during training.")
 
         # 4.5. Post-write sanity check (counts only; no enforced balancing here)
-        verify_split_integrity(output_run_dir, "TRAIN")
         train_pos = len([f for f in os.listdir(os.path.join(output_run_dir, "TRAIN", "CANCER")) if f.lower().endswith(".png")])
         train_neg = len([f for f in os.listdir(os.path.join(output_run_dir, "TRAIN", "NOT_CANCER")) if f.lower().endswith(".png")])
         logging.info(f"TRAIN set written: CANCER={train_pos}, NOT_CANCER={train_neg}")
