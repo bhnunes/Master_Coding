@@ -20,9 +20,6 @@ Design goals
 - Prefer using manifest.csv as the source of truth, and verify disk parity.
 - Fail-fast on hard integrity violations (e.g., patient leakage, missing files, unreadable masks).
 
-How to run
-----------
-python 6_sanity_checks_v3_manifest_driven.py --base_dir /path/to/output_run_dir
 
 Optional:
   --full_mask_scan         Scan ALL masks for pixel values (slow but thorough)
