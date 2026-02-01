@@ -465,7 +465,7 @@ def main(base_dir, sample_pairs, full_mask_scan, full_shape_scan, checksum_mode)
 if __name__ == "__main__":
     base_dir = 'D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES\NOT_NORMALIZED\NOT_NORMALIZED_seed_42' #"Path to the prepared dataset run directory (contains manifest.csv)."
     sample_pairs = 1000 #"Number of image/mask pairs to sample for expensive checks."
-    full_mask_scan = False #"Scan ALL masks for pixel values (slow)."
-    full_shape_scan = False #"Decode+shape check ALL pairs (slow)."
+    full_mask_scan = True #"Scan ALL masks for pixel values (slow)."
+    full_shape_scan = True #"Decode+shape check ALL pairs (slow)."
     checksum_mode = "sample" #"Checksum verification: off, sample, or full (slow)."
     main(base_dir, sample_pairs, full_mask_scan, full_shape_scan, checksum_mode)
