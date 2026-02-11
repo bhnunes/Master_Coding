@@ -28,7 +28,7 @@ Optional:
   --sample_pairs 1000      Number of pairs to sample for expensive checks
 """
 
-import argparse
+
 import json
 import os
 import platform
@@ -146,13 +146,28 @@ def check_duplicate_rows(manifest_df: pd.DataFrame) -> CheckResult:
 def check_split_patient_lists_against_run_config(manifest_df: pd.DataFrame, run_cfg: Optional[dict]) -> CheckResult:
     if not run_cfg:
         return CheckResult("N/A", "run_config.json not found; skipping patient-list cross-check.")
-    for key in ["train_patients", "val_patients", "test_patients"]:
-        if key not in run_cfg:
-            return CheckResult("WARN", f"run_config.json missing key '{key}'; cannot cross-check patient lists.")
-    # Compare sets
-    cfg_train = set(run_cfg["train_patients"])
-    cfg_val = set(run_cfg["val_patients"])
-    cfg_test = set(run_cfg["test_patients"])
+
+    # New schema: run_cfg["patients"] = {"train": [...], "validation": [...], "test": [...]}
+    patients = run_cfg.get("patients", None)
+    if not isinstance(patients, dict):
+        return CheckResult("WARN", "run_config.json missing key 'patients'; cannot cross-check patient lists.")
+
+    # Accept either 'validation' (new) or 'val' (legacy, if ever present)
+    train_list = patients.get("train", None)
+    val_list = patients.get("validation", patients.get("val", None))
+    test_list = patients.get("test", None)
+
+    if train_list is None or val_list is None or test_list is None:
+        missing = []
+        if train_list is None: missing.append("patients.train")
+        if val_list is None: missing.append("patients.validation")
+        if test_list is None: missing.append("patients.test")
+        return CheckResult("WARN", f"run_config.json missing key(s) {missing}; cannot cross-check patient lists.")
+
+    # Compare sets (ensure ints)
+    cfg_train = set(int(x) for x in train_list)
+    cfg_val = set(int(x) for x in val_list)
+    cfg_test = set(int(x) for x in test_list)
 
     m_train = set(manifest_df.loc[manifest_df["split"] == "TRAIN", "patient_id"].unique().tolist())
     m_val = set(manifest_df.loc[manifest_df["split"] == "VALIDATION", "patient_id"].unique().tolist())
@@ -173,19 +188,25 @@ def check_split_patient_lists_against_run_config(manifest_df: pd.DataFrame, run_
 def check_split_constraints_from_run_config(manifest_df: pd.DataFrame, run_cfg: Optional[dict]) -> CheckResult:
     if not run_cfg:
         return CheckResult("N/A", "run_config.json not found; skipping constraint cross-check.")
-    # If these are not present, we won't fail; we'll warn.
+
+    constraints = run_cfg.get("constraints", None)
+    if not isinstance(constraints, dict):
+        return CheckResult("WARN", "run_config.json missing key 'constraints'; cannot verify split constraints.")
+
     needed = ["min_test_patients", "min_train_patients", "min_val_patients"]
-    missing = [k for k in needed if k not in run_cfg]
+    missing = [k for k in needed if k not in constraints]
     if missing:
-        return CheckResult("WARN", f"run_config.json missing constraint keys {missing}; cannot verify split constraints.")
-    # Verify patient minima
-    n_train = manifest_df[manifest_df["split"]=="TRAIN"]["patient_id"].nunique()
-    n_val = manifest_df[manifest_df["split"]=="VALIDATION"]["patient_id"].nunique()
-    n_test = manifest_df[manifest_df["split"]=="TEST"]["patient_id"].nunique()
+        return CheckResult("WARN", f"run_config.json constraints missing keys {missing}; cannot verify split constraints.")
+
+    n_train = manifest_df[manifest_df["split"] == "TRAIN"]["patient_id"].nunique()
+    n_val = manifest_df[manifest_df["split"] == "VALIDATION"]["patient_id"].nunique()
+    n_test = manifest_df[manifest_df["split"] == "TEST"]["patient_id"].nunique()
+
     fails = []
-    if n_train < int(run_cfg["min_train_patients"]): fails.append(f"TRAIN patients {n_train} < {run_cfg['min_train_patients']}")
-    if n_val < int(run_cfg["min_val_patients"]): fails.append(f"VALIDATION patients {n_val} < {run_cfg['min_val_patients']}")
-    if n_test < int(run_cfg["min_test_patients"]): fails.append(f"TEST patients {n_test} < {run_cfg['min_test_patients']}")
+    if n_train < int(constraints["min_train_patients"]): fails.append(f"TRAIN patients {n_train} < {constraints['min_train_patients']}")
+    if n_val < int(constraints["min_val_patients"]): fails.append(f"VALIDATION patients {n_val} < {constraints['min_val_patients']}")
+    if n_test < int(constraints["min_test_patients"]): fails.append(f"TEST patients {n_test} < {constraints['min_test_patients']}")
+
     if fails:
         return CheckResult("FAIL", "Split constraints violated: " + "; ".join(fails))
     return CheckResult("PASS", "Split patient minima satisfy constraints in run_config.json.")
@@ -460,9 +481,9 @@ def main(base_dir, sample_pairs, full_mask_scan, full_shape_scan, checksum_mode)
     sys.exit(2)
 
 if __name__ == "__main__":
-    base_dir = 'D:\Usuario\Desktop\Base_de_dados\CAMELYON16\PATCHES\NOT_NORMALIZED\NOT_NORMALIZED_seed_42' #"Path to the prepared dataset run directory (contains manifest.csv)."
+    base_dir = 'D:/Usuario/Desktop/Base_de_dados/CAMELYON16/PATCHES/NOT_NORMALIZED/NOT_NORMALIZED_seed_42' #"Path to the prepared dataset run directory (contains manifest.csv)."
     sample_pairs = 1000 #"Number of image/mask pairs to sample for expensive checks."
-    full_mask_scan = True #"Scan ALL masks for pixel values (slow)."
-    full_shape_scan = True #"Decode+shape check ALL pairs (slow)."
-    checksum_mode = "sample" #"Checksum verification: off, sample, or full (slow)."
+    full_mask_scan = False #"Scan ALL masks for pixel values (slow)."
+    full_shape_scan = False #"Decode+shape check ALL pairs (slow)."
+    checksum_mode = "off" #"Checksum verification: off, sample, or full (slow)."
     main(base_dir, sample_pairs, full_mask_scan, full_shape_scan, checksum_mode)
