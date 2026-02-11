@@ -23,41 +23,25 @@ print("Importing libraries...")
 
 from google.colab import drive
 drive.mount('/content/drive')
-
 import os
 import atexit
 import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, Subset
-from PIL import Image, UnidentifiedImageError
-import gc
-import time
+from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-import torchvision.models as models
 from datetime import datetime
 import torch.nn.functional as F
 import random
 import shutil
 import h5py # <--- Added
-from torch.cuda.amp import autocast
 import cv2
 import segmentation_models_pytorch as smp
-import timm
-from torchinfo import summary
-import pandas as pd
 import json
 import warnings
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-import zipfile
-import math
 import optuna
-from optuna.trial import TrialState
-import re
 from collections import defaultdict
-import contextlib
-from torch.utils.data.dataloader import default_collate
 from sklearn.metrics import average_precision_score
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -122,17 +106,8 @@ WHERE_WAS_CREATED = '/content/drive/MyDrive/Personal_Drive_Bruno/'
 CURRENT_ENV = '/content/drive/MyDrive/'
 
 # -----------------------------------------------------------------------------
-# 8) Threshold policy (how you choose the global decision threshold)
-# -----------------------------------------------------------------------------
-# Your older policy (tpr_target) aims to achieve at least TPR_TARGET and maximize SECONDARY_METRIC.
-TPR_TARGET = 0.95
-THRESHOLD_POLICY = "tpr_target"   # options: "tpr_target" or "maximize_metric" (if your code supports both)
-SECONDARY_METRIC = "tnr"          # used when THRESHOLD_POLICY == "tpr_target" (e.g., "tnr", "mcc")
-
-# -----------------------------------------------------------------------------
 # 9) Optuna Stage 1: ensemble weights optimization
 # -----------------------------------------------------------------------------
-N_OPTUNA_TRIALS = 50  # weight combinations to test (50 ok for quick, 100–200 for stronger search)
 
 # Chunk sizes used to keep RAM stable during ensemble aggregation + threshold scans
 OPTUNA_ENSEMBLE_CHUNK = 4096  # chunk over N pixels when building ensemble (reduce if RAM spikes)
@@ -148,32 +123,12 @@ THRESH_NUM_STEPS_TRIALS = 100
 VAL_HOLDOUT_FRAC = 0.20
 VAL_HOLDOUT_SEED = SEED + 123
 
-# -----------------------------------------------------------------------------
-# 12) NEW: Optuna Stage 2 (operating point + postprocessing)
-# -----------------------------------------------------------------------------
-# This stage tunes: threshold (thr), min_area, open_ksize
-# Objective: minimize macro cost = lam*FPR_macro + (1-lam)*FNR_macro
-# Constraint: macro_TPR >= TPR_FLOOR  (prune trials that violate sensitivity floor)
-TPR_FLOOR = 0.5
-LAMBDA_FP = 0.75
-N_OPTUNA_TRIALS_STAGE2 = 100
-
-
-# --- Context Gating Config ---
-USE_CONTEXT_GATE = True
-CONTEXT_SCALE = 3
-GATE_MARGIN = 0.05
-GATE_MAXPROB = 0.60
-FUSE_MODE = "max"
-
 # =============================================================================
 # 5) Model Grouping & Optimization Config
 # =============================================================================
 # Architecture grouping (Configurable)
 SEMANTIC_ARCHS = ["SWIN", "DPT", "SEGFORMER", "TRANSFORMER"] # Add others as needed
 SPATIAL_ARCHS  = ["DEEPLABV3PLUS", "UPERNET", "UNET++", "FPN", "MANET", "UNET", "INCEPTIONRESNETV2"]
-
-# Ensemble weights are optimized freely (no explicit anti-collapse caps).
 
 # ROI Generation & Guardrails
 ROI_CONTEXT_SCALE = 4      # Downsample factor for "coarse" view
@@ -1195,130 +1150,6 @@ def check_patient_collapse_streamed(weights, pred_mms, trues_mm, pat_map, patien
     if n_pats == 0: return 1.0
     return tpr_sum / n_pats
 
-# Update Objective S1 to use the histogram function
-def objective_s1(trial):
-    ws = [trial.suggest_float(f"w_{i}", 0, 1) for i in range(len(ensemble_models))]
-    s = sum(ws)
-    ws = [w/s for w in ws] if s>0 else [1/len(ws)]*len(ws)
-
-    # 1. Pixel-level Search (Histogram Optimized)
-    best_thr, score = compute_metrics_histogram(
-        ws, trues_mm, opt_idx, H, W,
-        OPTUNA_ENSEMBLE_CHUNK, TPR_TARGET, SECONDARY_METRIC, pred_mms
-    )
-
-    # 2. Patient-level Guardrail
-    # We still do this check, but it is fast because it's just one threshold
-    macro_tpr = check_patient_collapse_streamed(
-        ws, pred_mms, trues_mm, pat_map, list(opt_pats), best_thr, TPR_FLOOR
-    )
-
-    trial.set_user_attr("opt_thr", best_thr)
-    trial.set_user_attr("weights", ws)
-    trial.set_user_attr("stage1_macro_tpr", macro_tpr)
-
-    if macro_tpr < TPR_FLOOR:
-        raise optuna.exceptions.TrialPruned(f"Patient Collapse: {macro_tpr:.3f} < {TPR_FLOOR}")
-
-    return score
-
-def objective_s2(trial):
-    # OPTIMIZATION: Intelligent search space
-    # Center the search around the Stage 1 threshold
-    search_center = opt_pool_threshold
-    thr_low = max(0.01, search_center - 0.1)
-    thr_high = min(0.99, search_center + 0.1)
-
-    thr = trial.suggest_float("thr", thr_low, thr_high)
-    min_area = trial.suggest_categorical("min_area", [0, 64, 128, 256])
-    open_k = trial.suggest_categorical("open_k", [0, 3, 5])
-
-    tpr_accum = 0.0; fpr_accum = 0.0; fnr_accum = 0.0
-    n_pos_pats = 0; n_neg_pats = 0
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_k, open_k)) if open_k>0 else None
-
-    # Iterate Patient-by-Patient
-    for p in opt_pats:
-        idxs = pat_map[p]
-
-        # 1. Reconstruct Patient Ensemble Prob
-        pat_ens = np.zeros((len(idxs), H, W), dtype=np.float32)
-        for mi, mm in enumerate(pred_mms):
-            if best_weights[mi]>1e-5:
-                # Decode uint16
-                w_eff = best_weights[mi] / 65535.0
-                pat_ens += mm[idxs].astype(np.float32) * w_eff
-
-        # 2. Context Fusion (if applicable)
-        if USE_CONTEXT_GATE and len(hard_indices)>0:
-            for loc_i, glob_idx in enumerate(idxs):
-                if glob_idx in hard_lookup:
-                    ctx_val = ctx_accum[hard_lookup[glob_idx]]
-                    if FUSE_MODE == 'max': pat_ens[loc_i] = np.maximum(pat_ens[loc_i], ctx_val)
-                    else: pat_ens[loc_i] = 0.5*(pat_ens[loc_i] + ctx_val)
-
-        # 3. Threshold
-        # Create binary mask
-        pred_bin = (pat_ens >= thr).astype(np.uint8)
-
-        # OPTIMIZATION: Conditional Post-Processing
-        # Only apply morphology if there are positive pixels
-        if pred_bin.sum() > 0:
-            if open_k > 0 or min_area > 0:
-                for i in range(len(pred_bin)):
-                    mask = pred_bin[i]
-                    if mask.sum() == 0: continue
-
-                    if open_k > 0:
-                        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-                    if min_area > 0:
-                        n_l, l, st, _ = cv2.connectedComponentsWithStats(mask, 8)
-                        if n_l > 1: # Only if components exist
-                            for li in range(1, n_l):
-                                if st[li, cv2.CC_STAT_AREA] < min_area: mask[l==li] = 0
-                        else:
-                            mask[:] = 0 # Should not happen if sum>0 but safe
-
-                    pred_bin[i] = mask
-
-        pat_gt = trues_mm[idxs]
-
-        # 4. Metrics Logic (Same as before)
-        is_patient_positive = (np.sum(pat_gt) > 0)
-        tp = np.sum((pred_bin==1) & (pat_gt==1))
-        fp = np.sum((pred_bin==1) & (pat_gt==0))
-        fn = np.sum((pred_bin==0) & (pat_gt==1))
-        tn_denom = np.sum(pat_gt==0)
-
-        # DOCUMENTATION:
-        # We include positive patients in FPR calculation because they contain background pixels.
-        # This ensures FPR reflects the model's selectivity across the entire cohort.
-        if is_patient_positive:
-            tpr = tp / (tp + fn + 1e-7)
-            tpr_accum += tpr
-            fnr_accum += (1.0 - tpr)
-            n_pos_pats += 1
-            fpr = fp / (tn_denom + 1e-7)
-            fpr_accum += fpr
-        else:
-        # Negative Patient: Contributes to Specificity/FPR only.
-        # Cannot calculate TPR (div by zero).
-            fpr = fp / (tn_denom + 1e-7)
-            fpr_accum += fpr
-            n_neg_pats += 1
-
-    n_total = n_pos_pats + n_neg_pats
-    macro_tpr = tpr_accum / n_pos_pats if n_pos_pats > 0 else 0.0
-    macro_fnr = fnr_accum / n_pos_pats if n_pos_pats > 0 else 1.0
-    macro_fpr = fpr_accum / n_total if n_total > 0 else 0.0
-
-    if macro_tpr < TPR_FLOOR:
-        raise optuna.exceptions.TrialPruned(f"Macro TPR {macro_tpr:.2f} < {TPR_FLOOR}")
-
-    return LAMBDA_FP * macro_fpr + (1 - LAMBDA_FP) * macro_fnr
-
 def pick_n(total, frac):
     if total <= 1:
         return 0  # can't hold out without killing opt pool
@@ -1350,7 +1181,6 @@ def objective_semantic(trial):
     roi_area_fracs = []
     roi_pos_recalls = []
     n_empty_rois = 0
-    n_total_patches = len(roi_mask)
 
     # Patient Level Loop
     tpr_accum = 0
@@ -1777,7 +1607,6 @@ for j, m in enumerate(ensemble_models):
 # Sort by max contribution in either stream (descending)
 rows = sorted(rows, key=lambda r: max(r["semantic_weight"], r["spatial_weight"]), reverse=True)
 print(json.dumps(rows, indent=2))
-
 
 timestamp = get_formatted_datetime_string()
 metadata = {
