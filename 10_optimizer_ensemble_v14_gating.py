@@ -173,6 +173,8 @@ FUSE_MODE = "max"
 SEMANTIC_ARCHS = ["SWIN", "DPT", "SEGFORMER", "TRANSFORMER"] # Add others as needed
 SPATIAL_ARCHS  = ["DEEPLABV3PLUS", "UPERNET", "UNET++", "FPN", "MANET", "UNET", "INCEPTIONRESNETV2"]
 
+# Ensemble weights are optimized freely (no explicit anti-collapse caps).
+
 # ROI Generation & Guardrails
 ROI_CONTEXT_SCALE = 4      # Downsample factor for "coarse" view
 ROI_MAX_MEDIAN    = 0.60   # Max allowed median area fraction
@@ -1759,6 +1761,23 @@ for i, local_i in enumerate(sem_indices): final_sem_weights[local_i] = best_sem_
 
 final_spa_weights = np.zeros(len(ensemble_models))
 for i, local_i in enumerate(spa_indices): final_spa_weights[local_i] = best_spa_weights[i]
+
+# --- Mandatory paper logging: final per-model weights (by stream) ---
+print("\n=== FINAL ENSEMBLE WEIGHTS (Two-Stream) ===")
+rows = []
+for j, m in enumerate(ensemble_models):
+    rows.append({
+        "model_index": int(j),
+        "architecture": str(m.arch_name),
+        "encoder": str(getattr(m, "encoder_name", "")),
+        "semantic_weight": float(final_sem_weights[j]),
+        "spatial_weight": float(final_spa_weights[j]),
+        "semantic_or_spatial": "semantic" if j in sem_indices else ("spatial" if j in spa_indices else "none")
+    })
+# Sort by max contribution in either stream (descending)
+rows = sorted(rows, key=lambda r: max(r["semantic_weight"], r["spatial_weight"]), reverse=True)
+print(json.dumps(rows, indent=2))
+
 
 timestamp = get_formatted_datetime_string()
 metadata = {
