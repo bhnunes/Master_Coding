@@ -1,2 +1,7 @@
 # Environment files
 .env
+*.log
+*.png
+*.pyc
+credentials.json
+token.json
