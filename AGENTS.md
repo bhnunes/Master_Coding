@@ -10,16 +10,23 @@ This file gives coding agents repository-specific guidance for working safely an
 - There is no formal build system, test suite, or linter configuration checked into the repo.
 
 ## Repository Layout
-
+- `1_artifact_detection_v2.py`: Generation of GeoJSON information about artifacts on the whole-slide-images. Written to run with GPU on google colab notebook.
 - `2_database_manager.py`: top-level orchestration for ingestion, SQLite tracking, and per-case processing.
 - `3_1_imageReader_refactored.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
 - `data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
 - `patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
+- `4_1_optimization_sampling.py`: Script responsible for selecting a sub sample of Cancer images for a Human-in-the-loop cleaning process of incorrect annotations.
+- `4_2_tune_graph_method_v2.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
+- `4_3_cleaner_script_v2.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
 - `5_crossfold_v6.py`: patient-level dataset split creation plus optional stain normalization.
 - `6_sanity_checks_v3.py`: scientific integrity and dataset consistency checks.
 - `7_pack_splits_to_hdf5.py`: converts prepared split folders into `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`.
-- `HELPERS/`: one-off utilities, legacy scripts, conversions, cleanup, and ad hoc support code.
-- `background_experiment/`: separate experiment workflow with its own requirements.
+- `8_smart_sampler.py`: Selects the best images from `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`, keeping only the most informative samples. Written to run with GPU on google colab notebook.
+- `9_lr_finder_v10_final_v3.py`: Used to estimate the best learning rate for training fro every model. Written to run with GPU on google colab notebook.
+- `10_training_ensemble_v16.py`: Responsible for training the models using smp, schedulefree and pytorch. Written to run with GPU on google colab notebook.
+- `11_optimizer_ensemble_v14.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context). Written to run with GPU on google colab notebook.
+- `12_inference_ensemble_optimized_v10.py`: Responsible for generating the results on the test set. Written to run with GPU on google colab notebook.
+
 
 ## Rules Files
 
