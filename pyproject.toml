@@ -1,0 +1,56 @@
+[project]
+name = "master-project"
+version = "0.1.0"
+description = "High-performance medical imaging experiments"
+requires-python = ">=3.12"
+dependencies = [
+    "torch==2.8.0",
+    "torchvision==0.23.0",
+    "torchaudio==2.8.0",
+    "numpy==1.26.4",
+    "pandas==2.2.2",
+    "scikit-learn==1.4.2",
+    "scikit-image==0.23.2",
+    "opencv-contrib-python==4.9.0.80",
+    "openslide-python",
+    "tiatoolbox",
+    "albumentations",
+    "segmentation_models_pytorch==0.3.1",
+    "h5py",
+    "tqdm==4.66.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff==0.15.5",
+    "mypy>=1.13.0",
+    "torchinfo",
+]
+
+# --- UV Magic: Fetching CUDA 12.6 specifically ---
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+
+# --- Tool Configuration ---
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"] # Standard errors, imports, and best practices
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true # Useful for medical libs without stubs
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

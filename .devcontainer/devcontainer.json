@@ -1,5 +1,5 @@
 {
-    "name": "Master_Coding Dev Container",
+    "name": "GrandQC Experiment Env",
     "build": {
         "dockerfile": "../Dockerfile",
         "context": ".."
@@ -9,21 +9,26 @@
             "extensions": [
                 "ms-python.python",
                 "ms-toolsai.jupyter",
-                "ms-vscode-remote.remote-containers"
+                "charliermarsh.ruff", // Added ruff extension for VS Code
+                "ms-python.mypy-vscode" // Added mypy extension for VS Code
             ],
             "settings": {
-                "python.defaultInterpreterPath": "/usr/bin/python3"
+                "python.defaultInterpreterPath": "/usr/bin/python3",
+                "python.testing.pytestEnabled": true,
+                "editor.formatOnSave": true,
+                "editor.codeActionsOnSave": {
+                    "source.fixAll.ruff": "always",
+                    "source.organizeImports.ruff": "always"
+                }
             }
         }
     },
-    // This allows the container to use your Windows GPU
-    "runArgs": ["--gpus", "all"],
-    
-    // Mount your OpenCode config so the agent stays logged in
+    "runArgs": [],
     "mounts": [
-        "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind"
+        "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind",
+        // Mount your Windows drives for easy (but slower) data access
+        "source=/mnt/c,target=/mnt/c,type=bind",
+        "source=/mnt/d,target=/mnt/d,type=bind"
     ],
-
-    // Install OpenCode CLI automatically when the container starts
-    "postCreateCommand": "curl -fsSL https://opencode.ai/install | bash"
+    "remoteUser": "root"
 }
