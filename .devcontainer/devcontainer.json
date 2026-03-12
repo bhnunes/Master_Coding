@@ -1,0 +1,29 @@
+{
+    "name": "Master_Coding Dev Container",
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "context": ".."
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-toolsai.jupyter",
+                "ms-vscode-remote.remote-containers"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/bin/python3"
+            }
+        }
+    },
+    // This allows the container to use your Windows GPU
+    "runArgs": ["--gpus", "all"],
+    
+    // Mount your OpenCode config so the agent stays logged in
+    "mounts": [
+        "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind"
+    ],
+
+    // Install OpenCode CLI automatically when the container starts
+    "postCreateCommand": "curl -fsSL https://opencode.ai/install | bash"
+}
