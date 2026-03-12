@@ -1,3 +1,5 @@
+=========================================================================================
+
 # AGENTS.md
 
 This file gives coding agents repository-specific guidance for working safely and effectively in this codebase.
@@ -5,162 +7,28 @@ This file gives coding agents repository-specific guidance for working safely an
 ## Purpose
 
 - This repository is a Python research pipeline for pathology whole-slide-image processing.
+- This is a script-first research pipeline.
 - Main responsibilities include patch extraction, dataset splitting, scientific sanity checks, and HDF5 packaging.
 - The repo is script-driven rather than package-driven.
 - There is no formal build system, test suite, or linter configuration checked into the repo.
 
 ## Repository Layout
-- `1_artifact_detection_v2.py`: Generation of GeoJSON information about artifacts on the whole-slide-images. Written to run with GPU on google colab notebook.
+- `1_artifact_detection.py`: Generation of GeoJSON information about artifacts on the whole-slide-images.
 - `2_database_manager.py`: top-level orchestration for ingestion, SQLite tracking, and per-case processing.
-- `3_1_imageReader_refactored.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
+- `3_1_imageReader.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
 - `data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
 - `patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
 - `4_1_optimization_sampling.py`: Script responsible for selecting a sub sample of Cancer images for a Human-in-the-loop cleaning process of incorrect annotations.
-- `4_2_tune_graph_method_v2.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
-- `4_3_cleaner_script_v2.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
-- `5_crossfold_v6.py`: patient-level dataset split creation plus optional stain normalization.
-- `6_sanity_checks_v3.py`: scientific integrity and dataset consistency checks.
+- `4_2_tune_graph_method.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
+- `4_3_cleaner_script.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
+- `5_crossfold.py`: patient-level dataset split creation plus optional stain normalization.
+- `6_sanity_checks.py`: scientific integrity and dataset consistency checks.
 - `7_pack_splits_to_hdf5.py`: converts prepared split folders into `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`.
 - `8_smart_sampler.py`: Selects the best images from `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`, keeping only the most informative samples. Written to run with GPU on google colab notebook.
-- `9_lr_finder_v10_final_v3.py`: Used to estimate the best learning rate for training fro every model. Written to run with GPU on google colab notebook.
-- `10_training_ensemble_v16.py`: Responsible for training the models using smp, schedulefree and pytorch. Written to run with GPU on google colab notebook.
-- `11_optimizer_ensemble_v14.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context). Written to run with GPU on google colab notebook.
-- `12_inference_ensemble_optimized_v10.py`: Responsible for generating the results on the test set. Written to run with GPU on google colab notebook.
-
-
-## Rules Files
-
-- No repository-local Cursor rules were found in `.cursor/rules/`.
-- No `.cursorrules` file was found.
-- No Copilot instructions file was found at `.github/copilot-instructions.md`.
-- If such files are added later, follow them in addition to this document.
-
-## Environment Setup
-
-- Use Python 3.11+ if possible; this repo already contains `__pycache__` artifacts for Python 3.11.
-- Install main dependencies with:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-- Install background experiment dependencies separately when needed:
-
-```bash
-python -m pip install -r background_experiment/requirements.txt
-```
-
-- Several scripts require a populated `.env` file.
-- `.vscode/settings.json` enables `python.terminal.useEnvFile`, so local terminals may auto-load `.env`.
-- Important env vars used by the main pipeline include:
-  - `OPENSLIDE_PATH`
-  - `TAG`
-  - `SQLITE_DB_PATH`
-  - `PROJECTS_BASE_PATH`
-  - `IMAGE_READER_PATH`
-  - `PYTHON_PATH`
-  - `WINDOW_SIZE`
-  - `STRIDE`
-  - `MATCH_PERCENTAGE`
-  - `TISSUE_PERCENTAGE`
-  - `USE_ADVANCED_ARTIFACT_FILTERING`
-  - `ACTIVATE_SANITY_CHECK_GEOJSON`
-  - `GEOJSON_PATH`
-
-## Build / Run Commands
-
-- There is no package build step, `Makefile`, `tox`, or `pyproject.toml` workflow in this repo.
-- The real execution model is running standalone Python scripts.
-- Common commands:
-
-```bash
-python 2_database_manager.py
-python 5_crossfold_v6.py
-python 6_sanity_checks_v3.py
-python 7_pack_splits_to_hdf5.py
-```
-
-- The most focused executable entrypoint is the single-slide extractor:
-
-```bash
-python 3_1_imageReader_refactored.py \
-  --path_Image <slide_path> \
-  --annotation_path <annotation_path> \
-  --path_cancer_folder <out_cancer_dir> \
-  --path_not_cancer_folder <out_not_cancer_dir> \
-  --path_cancer_mask_folder <out_cancer_mask_dir> \
-  --path_not_cancer_mask_folder <out_not_cancer_mask_dir> \
-  --cancer_color <line_color_or_label> \
-  --not_cancer_color <line_color_or_label> \
-  --patient <patient_id>
-```
-
-- Optional artifact input for the worker script:
-
-```bash
-python 3_1_imageReader_refactored.py ... --path_artifacts_geojson <geojson_path>
-```
-
-## Lint / Format / Type Check Status
-
-- No repo-configured `black`, `ruff`, `flake8`, `pylint`, `isort`, or `mypy` setup was found.
-- Do not invent formatting or lint rules and apply them repo-wide unless asked.
-- Keep edits narrow and aligned with the style already used in the file you are touching.
-- Safe ad hoc syntax checks agents may run:
-
-```bash
-python -m py_compile 2_database_manager.py 3_1_imageReader_refactored.py patch_engine.py data_handlers.py
-python -m compileall .
-```
-
-- Treat these as optional verification helpers, not as an official test suite.
-
-## Test Commands
-
-- There is no in-repo unit test framework.
-- No `pytest`, `unittest`, or dedicated test directories were found.
-- For this repo, “testing” usually means running the relevant script against a real sample or prepared dataset.
-
-### Closest Equivalent to Running a Single Test
-
-- Best single-target verification: run `3_1_imageReader_refactored.py` on one image/annotation pair.
-- Best dataset-level verification: run `6_sanity_checks_v3.py` on one prepared dataset directory.
-- Note that `6_sanity_checks_v3.py` is configured in its `if __name__ == "__main__":` block rather than a true CLI.
-- `5_crossfold_v6.py` and `7_pack_splits_to_hdf5.py` are also configured primarily by editing the `__main__` configuration block.
-
-## Configuration Conventions
-
-- Preserve the existing configuration style of the file you edit.
-- Operational scripts often read from `.env`.
-- Analysis and packaging scripts often use hardcoded config constants inside `__main__`.
-- Do not refactor a script from config-by-edit to argparse unless the user asks.
-- Normalize filesystem paths where the script already does so.
-- Be careful with Windows-specific paths such as `D:\...` and `C:\...`.
-
-## Import Conventions
-
-- Prefer `stdlib` imports first, then third-party imports, then local imports.
-- Keep one import per line unless the file already uses grouped imports naturally.
-- Follow the import style already present in the file rather than reformatting unrelated imports.
-- Avoid introducing unused imports.
-
-## Formatting Conventions
-
-- Use `snake_case` for functions, local variables, and module-level helpers.
-- Use `CamelCase` for classes.
-- Use `UPPER_CASE` for constants, env var names, and top-level configuration constants.
-- Keep line lengths reasonable, but do not rewrap large files unless needed for your change.
-- Prefer explicit helper functions over dense inline logic in newer/refactored code.
-- Preserve versioned filenames such as `*_v2.py` and `*_v6.py` unless renaming is requested.
-
-## Type Hints and Data Structures
-
-- Newer scripts in this repo use type hints, `dataclass`, and structured configuration objects.
-- Older scripts often do not.
-- When editing modern files, prefer to continue the typed style.
-- When editing older scripts, add types only where they improve clarity and do not force broad churn.
-- Favor dictionaries with stable keys only when the surrounding code already relies on them.
-- Favor `dataclass` or small helpers for new structured config in refactored code.
+- `9_lr_finder.py`: Used to estimate the best learning rate for training fro every model.
+- `10_training_ensemble.py`: Responsible for training the models using smp, schedulefree and pytorch.
+- `11_optimizer_ensemble.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context).
+- `12_inference_ensemble.py`: Responsible for generating the results on the test set.
 
 ## Naming Conventions
 
@@ -168,21 +36,12 @@ python -m compileall .
 - Preserve output folder names exactly when they are part of the pipeline contract.
 - Do not silently rename `TRAIN`, `VALIDATION`, `TEST`, `CANCER`, `NOT_CANCER`, `CANCER_MASK`, or `NOT_CANCER_MASK`.
 
-## Error Handling
-
-- Fail fast on invalid required configuration or missing critical files.
-- Use `ValueError` or `RuntimeError` for programming/configuration errors inside functions.
-- Use `sys.exit(...)` in top-level script entrypoints when the file already follows that style.
-- Use warnings or logged messages for partial-data problems when processing can safely continue.
-- Preserve machine-readable output contracts, especially the JSON result emitted by `3_1_imageReader_refactored.py`.
-- Do not swallow exceptions silently.
-
 ## Logging and Output
 
 - Prefer `logging` for nontrivial workflows and long-running scripts.
 - Many scripts configure root logging with both file and console handlers; follow that pattern when extending those files.
 - Avoid excessive `print` in modern/refactored scripts unless the file already provides a terminal UX.
-- In `2_database_manager.py`, styled terminal output with ANSI sequences and emoji is already part of the current UX; preserve that style if editing nearby code.
+- Allow styled terminal output with ANSI sequences and emoji to make it user-friendly and colorful.
 
 ## Data Integrity Rules
 
@@ -200,13 +59,6 @@ python -m compileall .
 - Respect `.gitignore`, which already ignores `.env`, logs, PNGs, bytecode, and credential files.
 - Avoid deleting source folders or generated datasets unless the user explicitly requests destructive cleanup.
 
-## Platform Assumptions
-
-- The repo strongly assumes Windows in many places.
-- `OPENSLIDE_PATH` and `os.add_dll_directory(...)` are used for OpenSlide setup.
-- Hardcoded Windows drive paths are common in `__main__` blocks.
-- If you are working from Linux or WSL, do not “fix” platform assumptions globally unless asked.
-
 ## Agent-Specific Guidance
 
 - Prefer minimal, local edits over broad rewrites.
@@ -217,16 +69,583 @@ python -m compileall .
 - If you touch scientific logic, be conservative and preserve reproducibility.
 - If you touch split generation or sanity checks, assume correctness matters more than cleverness.
 
-## Git / Workspace Notes
+## 1. Purpose
 
-- In some environments, `git status` may fail with a dubious ownership warning.
-- Do not change global git configuration unless the user explicitly asks.
-- The worktree may contain local data files and generated artifacts; avoid treating them as safe to remove.
+This file defines the architectural, engineering, testing, and implementation rules that all agents must follow when modifying this project.
 
-## Quick Summary
+The objective is to guarantee:
 
-- This is a script-first research pipeline.
-- There is no formal lint/test harness in-repo.
-- The closest thing to a single test is running `3_1_imageReader_refactored.py` on one sample.
-- Preserve data contracts, patient isolation, and filesystem conventions.
-- Be careful with `.env`, Windows paths, OpenSlide setup, and large generated outputs.
+- clean separation of concerns
+- deterministic behavior where appropriate
+- high test coverage
+- safe refactoring
+- maintainable Python code
+- minimal reinvention of existing solutions
+
+This document is normative. Agents must treat these rules as requirements, not suggestions.
+
+---
+
+## 2. Core Engineering Principles
+
+This project follows:
+
+- **Clean Architecture**
+- **Separation of Concerns (SoC)**
+- **Single Responsibility Principle (SRP)**
+- **Extreme Programming (XP)**
+- **Test-Driven Development (TDD)**
+- **Fail Fast**
+- **Prefer composition over unnecessary complexity**
+
+Agents must preserve these properties in every implementation.
+
+---
+
+## 3. Technology Stack
+
+The project stack uses:
+
+- **Python**
+- **uv** for dependency and environment management
+- **pytest** for tests
+- **pytest-cov** for coverage
+- **ruff** for linting
+- **mypy** for static typing
+- **python-dotenv** for environment configuration
+-**argparse** for parameters input
+
+Agents must use the project’s existing stack unless there is a strong technical reason to introduce a new dependency.
+
+Libraries and begaviors must be defined on toml file.
+
+---
+
+## 4. Dependency Management Rules
+
+All dependencies must be managed with **uv**.
+
+### Required commands
+
+Install runtime dependency:
+
+uv add <package>
+
+Install development dependency:
+
+uv add --dev <package>
+
+Run Python commands inside the project environment:
+
+uv run <command>
+
+Examples:
+
+
+uv run pytest
+uv run pytest --cov=helpers --cov-report=term-missing
+uv run ruff check .
+uv run mypy .
+
+Dependency policy
+
+Agents must:
+
+- add dependencies only when necessary
+
+- prefer mature, widely used libraries (specially numpy, pandas or Pollars over coding from scratch)
+
+- avoid adding dependencies for trivial functionality already available in the standard library or existing project stack
+
+- keep the dependency graph as small as possible
+
+Agents must not reinvent the wheel when a stable Python library already solves the problem well.
+
+---
+
+## 5. Project Structure
+
+MASTER_CODING:
+- `1_artifact_detection.py`
+- `2_database_manager.py`
+- `3_imageReader.py`
+- `4_1_optimization_sampling.py`
+- `4_2_tune_graph_method.py`
+- `4_3_cleaner_script.py`
+- `5_crossfold.py`
+- `6_sanity_checks.py`
+- `7_pack_splits_to_hdf5.py`
+- `8_smart_sampler.py`
+- `9_lr_finder.py`
+- `10_training_ensemble.py`
+- `11_optimizer_ensemble.py`
+- `12_inference_ensemble.py`
+- `.env`
+-`.gitignore`
+- `AGENTS.md`
+- `artifact_policy.yaml`
+- `README.md`
+- `requirements.txt`
+- `databases/`
+- `databases/database.db`
+- `helpers/data_handlers.py`
+- `helpers/patch_engine.py`
+- `logs/`
+- `tests/`
+
+---	
+
+## 6. Architectural Boundaries
+
+Every script from :
+
+- 1_artifact_detection.py
+- 2_database_manager.py
+- 3_imageReader.py
+- 4_1_optimization_sampling.py
+- 4_2_tune_graph_method.py
+- 4_3_cleaner_script.py
+- 5_crossfold.py
+- 6_sanity_checks.py
+- 7_pack_splits_to_hdf5.py
+- 8_smart_sampler.py
+- 9_lr_finder.py
+- 10_training_ensemble.py
+- 11_optimizer_ensemble.py
+- 12_inference_ensemble.py
+
+is a monolitic self contained script and they perform actions independently of each other (except for 2_database_manager.py and 3_imageReader.py, that interact with each other, along with helpers data_handlers.py and patch_engine.py).
+
+---
+
+## 7. Mandatory Testing Policy
+
+- Testing is mandatory for all new behavior.
+
+**Absolute rule**
+
+Every new function, behavior change, bug fix, or edge-case handling must include tests.
+
+**TDD workflow**
+
+Agents must follow this sequence:
+
+- write a failing test
+
+- run the tests and verify the test fails for the expected reason
+
+- implement the minimal code necessary
+
+- rerun the tests and verify they pass
+
+- refactor only after the tests are green
+
+**Validity rule**
+
+- If the test did not fail before implementation, the validation is incomplete.
+
+Minimum expectation
+
+- every public function must have direct tests
+
+- critical private logic should be covered through behavior tests
+
+- bug fixes must include a regression test
+
+- edge cases must be tested explicitly
+
+## 9. Coverage Rules
+
+- Coverage is a quality gate.
+
+**Coverage target**
+
+- minimum target: 90% line coverage in the core project
+
+- all new code should be covered
+
+- untested branches in critical logic are not acceptable without justification
+
+Required command
+
+`uv run pytest --cov=helpers --cov-report=term-missing`
+
+Agents should use the missing-lines report to identify coverage gaps before finishing.
+
+---
+
+## 10. Test Design Rules
+
+Tests must be:
+
+- deterministic
+
+- isolated
+
+- readable
+
+- small in scope when unit tests
+
+- explicit about expected behavior
+
+**Tests must avoid**
+
+- network calls
+
+- external APIs
+
+- flaky timing assumptions
+
+- hidden state dependencies
+
+- dependence on unrelated files unless explicitly integration-tested
+
+**Preferred patterns**
+
+- simple fixture factories
+
+- parametrized tests for rule matrices
+
+- mocks only at true infrastructure boundaries
+
+- direct assertion of observable behavior
+
+
+def test_classify_usage_rejects_when_usage_exceeds_threshold() -> None:
+    result = classify_usage(cpu_used=80.0, cpu_requested=50.0)
+    assert result == "Rejected"
+
+
+---
+
+## 11. Python Coding Standards
+
+All code must follow modern Python best practices.
+
+**Required standards**
+
+- PEP 8 compliance
+
+- meaningful naming
+
+- explicit imports
+
+- type hints on all public functions
+
+- docstrings on public functions
+
+- small, composable functions
+
+- low cyclomatic complexity where practical
+
+**Forbidden patterns**
+
+- wildcard imports
+
+- dead code
+
+- commented-out production code
+
+- misleading names
+
+- giant functions with mixed responsibilities
+
+- broad except Exception without justification
+
+- silent failure paths
+
+**Function design guidance**
+
+Prefer functions that:
+
+- do one thing well
+
+- accept explicit inputs
+
+- return explicit outputs
+
+- are easy to test in isolation
+
+---
+
+## 12. Typing Policy
+
+- Type hints are required.
+
+**Agents must**:
+
+- annotate function parameters
+
+- annotate return types
+
+- prefer precise standard types
+
+- use TypedDict, Protocol, dataclass, or clear domain objects where they improve clarity
+
+Run static checks with:
+
+uv run mypy .
+
+If a library lacks typing support, prefer installing type stubs when appropriate rather than weakening the entire typing discipline.
+
+---
+
+## 13. Linting and Formatting Policy
+
+- Code quality checks are mandatory.
+
+*Required commands*
+
+uv run ruff check .
+uv run ruff format .
+
+
+Lint issues must be resolved before finalizing changes.
+
+## 14. Error Handling Policy
+
+- The code must fail early and fail clearly.
+
+**Rules**
+
+- validate inputs as early as practical
+
+- raise meaningful exceptions
+
+- avoid swallowing errors
+
+- include contextual information in error messages
+
+- distinguish domain errors from infrastructure errors when useful
+
+---
+
+15. Logging and Observability
+
+- Implementations should be debuggable.
+- All logs should be saved on folder /logs
+
+**Agents should prefer**:
+
+- structured log messages
+
+- explicit error context
+
+- stable identifiers in logs where useful
+
+- observability at important boundaries
+
+
+## 16. Refactoring Rules
+
+- Refactoring is encouraged, but must be disciplined.
+
+**Agents may refactor to improve**:
+
+- readability
+
+- testability
+
+- modularity
+
+- duplication
+
+- naming
+
+- architecture alignment
+
+**Agents must not refactor in a way that**:
+
+- changes behavior unintentionally
+
+- removes tests
+
+- mixes unrelated concerns
+
+- introduces speculative abstractions with no present need
+
+**Safe refactoring sequence**
+
+- ensure tests are green
+
+- refactor incrementally
+
+- rerun tests
+
+- keep behavior unchanged unless the task explicitly requires a behavior change
+
+---
+
+## 17. Implementation Constraints for Agents
+
+When implementing or changing code, agents must obey the following operational rules.
+
+# 17.1 Before writing code
+
+Agents must first:
+
+- understand which layer owns the behavior
+
+- determine whether a library already solves the problem
+
+- identify the tests that need to be added or updated
+
+# 17.2 During implementation
+
+Agents must:
+
+- keep changes minimal and focused
+
+- preserve architecture boundaries
+
+- avoid mixing concerns across modules
+
+- add or update tests alongside the code
+
+# 17.3 After implementation
+
+Agents must verify:
+
+- tests pass
+
+- lint passes
+
+- typing passes
+
+- coverage remains acceptable
+
+- no unrelated code was changed unnecessarily
+
+---
+
+## 18. Anti-Patterns
+
+The following are prohibited unless explicitly justified.
+
+**Architecture anti-patterns**
+
+- formatting logic spread across unrelated modules
+
+**Testing anti-patterns**
+
+- implementing code without tests
+
+- tests that assert implementation details instead of behavior
+
+- flaky tests
+
+- tests that depend on execution order
+
+**Code anti-patterns**
+
+- giant procedural functions
+
+- copy-paste duplication
+
+- mutable global state
+
+- magic constants scattered through the code
+
+- deep nesting when guard clauses would be clearer
+
+---
+
+## 19. Preferred Design Heuristics
+
+Agents should prefer:
+
+- pure functions for transformation logic
+
+- dataclass for clear structured data where appropriate
+
+- constants for thresholds and repeated literals
+
+- small adapters around infrastructure dependencies
+
+- thin orchestration and rich helper modules
+
+- explicit contracts between pipeline stages
+
+- Use abstraction only when it simplifies the system. Do not introduce unnecessary indirection.
+
+---
+
+## 20. Example Delivery Checklist
+
+Before considering a task complete, agents must ensure the answer to each item is yes.
+
+- Was the correct module chosen for the change?
+
+- Was a failing test written first?
+
+- Does every new behavior have tests?
+
+- Do all tests pass?
+
+- Does lint pass?
+
+- Does typing pass?
+
+- Is the implementation PEP-compliant?
+
+- Was an existing library used instead of custom reinvention when appropriate?
+
+- Were architecture boundaries preserved?
+
+- Is the code easier to understand than before?
+
+- If any answer is no, the task is incomplete.
+
+---
+
+## 21. Recommended Developer Commands
+
+uv sync
+uv run pytest
+uv run pytest --cov=helpers --cov-report=term-missing
+uv run ruff check .
+uv run ruff format .
+uv run mypy .
+
+
+If only a subset is needed during local iteration, agents may scope commands appropriately, but final validation should cover the full affected surface.
+
+
+## 22. Definition of Done
+
+A task is complete only when all of the following are true:
+
+- the requested behavior is implemented
+
+- tests covering the behavior exist
+
+- the tests fail before implementation and pass after implementation
+
+- linting passes
+
+- typing checks pass
+
+- architecture rules are respected
+
+- no unnecessary complexity was introduced
+
+- the solution uses established Python best practices
+
+If these conditions are not met, the implementation is not complete.
+
+---
+
+## 24. Final Rule
+
+Agents must optimize for:
+
+correctness first
+
+clarity second
+
+maintainability third
+
+performance where relevant and measurable
+
+Do not trade correctness and testability for cleverness.
+
