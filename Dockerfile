@@ -13,16 +13,17 @@ ENV CUDA_VISIBLE_DEVICES=""
 # 2. Install System Dependencies (OpenSlide, LaTeX)
 RUN apt-get update && apt-get install -y \
     python3-pip python3-dev git libopenjp2-7-dev \
-    libopenjp2-tools openslide-tools texlive-latex-extra \
+    libopenjp2-tools openslide-tools libgeos-dev \
+    texlive-latex-extra curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 
 # 3. Copy project files and sync environment
-# Note: We use --system to install directly into the container
 COPY pyproject.toml .
-RUN uv sync --system --no-dev  # Installs core deps
-RUN uv sync --system           # Installs dev tools (ruff, mypy, pytest)
+RUN uv python install 3.12
+RUN uv sync --python 3.12 --no-dev
+RUN uv sync --python 3.12
 
 # Set up the OpenCode Agent auto-install
 RUN curl -fsSL https://opencode.ai/install | bash

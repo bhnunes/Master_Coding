@@ -3,4 +3,4 @@ DROP_THRESH:
   "Darkspot & Foreign Object": 0.15
   "PenMarking": 0.12
   "Edge & Air Bubble": 0.30
-  "OOF": 0.40
+  "OOF": 0.45

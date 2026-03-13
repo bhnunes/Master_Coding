@@ -13,7 +13,7 @@
                 "ms-python.mypy-vscode" // Added mypy extension for VS Code
             ],
             "settings": {
-                "python.defaultInterpreterPath": "/usr/bin/python3",
+                "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
                 "python.testing.pytestEnabled": true,
                 "editor.formatOnSave": true,
                 "editor.codeActionsOnSave": {
@@ -30,5 +30,6 @@
         "source=/mnt/c,target=/mnt/c,type=bind",
         "source=/mnt/d,target=/mnt/d,type=bind"
     ],
-    "remoteUser": "root"
+    "remoteUser": "root",
+    "postStartCommand": "sudo chown -R $(whoami) ."
 }
