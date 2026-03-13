@@ -30,6 +30,5 @@
         "source=/mnt/c,target=/mnt/c,type=bind",
         "source=/mnt/d,target=/mnt/d,type=bind"
     ],
-    "remoteUser": "root",
-    "postStartCommand": "sudo chown -R $(whoami) ."
+    "remoteUser": "root"
 }
