@@ -30,6 +30,16 @@ This file gives coding agents repository-specific guidance for working safely an
 - `11_optimizer_ensemble.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context).
 - `12_inference_ensemble.py`: Responsible for generating the results on the test set.
 
+## Architecture
+
+- Each script on root was created as a standalone application. 
+- The architecture is a monolith with Domain Driven Design.
+- All environment variables should be saved on .env file. This file must have comments to indicate to each script those variables belong to.
+- All test scripts must be saved on folder /tests.
+- All logs generated must be saved on /logs.
+- All helpers should be standalone classes organized by domain and saved on /helpers.
+- Database should be saved on /database.
+
 ## Naming Conventions
 
 - Match existing domain terminology: `cancer`, `not_cancer`, `patient`, `split`, `manifest`, `artifact`, `annotation`.
