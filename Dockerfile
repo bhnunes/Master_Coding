@@ -23,3 +23,5 @@ WORKDIR /workspace
 COPY pyproject.toml .
 RUN uv python install 3.12
 RUN uv sync --python 3.12
+
+RUN curl -fsSL https://opencode.ai/install | bash
