@@ -1,34 +1,48 @@
 {
-    "name": "GrandQC Experiment Env",
-    "build": {
-        "dockerfile": "../Dockerfile",
-        "context": ".."
-    },
-    "customizations": {
-        "vscode": {
-            "extensions": [
-                "ms-python.python",
-                "ms-toolsai.jupyter",
-                "charliermarsh.ruff", // Added ruff extension for VS Code
-                "ms-python.mypy-vscode" // Added mypy extension for VS Code
-            ],
-            "settings": {
-                "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
-                "python.testing.pytestEnabled": true,
-                "editor.formatOnSave": true,
-                "editor.codeActionsOnSave": {
-                    "source.fixAll.ruff": "always",
-                    "source.organizeImports.ruff": "always"
-                }
-            }
-        }
-    },
-    "runArgs": [],
-    "mounts": [
-        "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind",
-        // Mount your Windows drives for easy (but slower) data access
-        "source=/mnt/c,target=/mnt/c,type=bind",
-        "source=/mnt/d,target=/mnt/d,type=bind"
-    ],
-    "remoteUser": "root"
+  "name": "Experiment Env",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+
+  "workspaceFolder": "/workspace",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "charliermarsh.ruff",
+        "ms-python.mypy-vscode",
+        "ms-azuretools.vscode-docker",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.cwd": "/workspace",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.ruff": "always",
+          "source.organizeImports.ruff": "always"
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  "runArgs": [
+    "--init",
+    "--shm-size=16g"
+  ],
+
+  "mounts": [
+    "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind",
+    "source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,readonly",
+    "source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind,readonly"
+  ],
+
+  "postCreateCommand": "git config --global --add safe.directory /workspace && ssh -T git@github.com || true && opencode --help || true",
+
+  "remoteUser": "root"
 }
