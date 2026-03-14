@@ -22,8 +22,4 @@ WORKDIR /workspace
 # 3. Copy project files and sync environment
 COPY pyproject.toml .
 RUN uv python install 3.12
-RUN uv sync --python 3.12 --no-dev
 RUN uv sync --python 3.12
-
-# Set up the OpenCode Agent auto-install
-RUN curl -fsSL https://opencode.ai/install | bash
