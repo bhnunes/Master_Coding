@@ -1,6 +1,5 @@
 FROM nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04
 
-# uv binaries
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,9 +14,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     bash \
-    less \
-    vim \
-    procps \
     libopenjp2-7-dev \
     libopenjp2-tools \
     openslide-tools \
@@ -25,22 +21,19 @@ RUN apt-get update && apt-get install -y \
     texlive-latex-extra \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace
+WORKDIR /tmp/build
 
-# Install Python runtime
 RUN uv python install 3.12
 
-# Copy only dependency descriptors for layer caching
 COPY pyproject.toml ./
 COPY uv.lock* ./
 
-# Create env and install dependencies
 RUN uv sync --python 3.12
 
-# Install OpenCode
 RUN curl -fsSL https://opencode.ai/install | bash
 
-# Make opencode visible in shells
-ENV PATH="/root/.opencode/bin:/workspace/.venv/bin:${PATH}"
+ENV PATH="/root/.opencode/bin:/tmp/build/.venv/bin:${PATH}"
+
+WORKDIR /workspace
 
 CMD ["/bin/bash"]
