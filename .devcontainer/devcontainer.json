@@ -28,9 +28,8 @@
   },
   "mounts": [
     "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind",
-    "source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,readonly",
-    "source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind,readonly"
+    "source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,readonly"
   ],
-  "postCreateCommand": "git config --global --add safe.directory /workspace && uv sync --python 3.12",
+  "postCreateCommand": "git config --global user.name 'Bruno Nunes' && git config --global user.email 'bruno.nunes.1987@gmail.com' && git config --global --add safe.directory /workspace && uv sync --python 3.12",
   "remoteUser": "root"
 }
