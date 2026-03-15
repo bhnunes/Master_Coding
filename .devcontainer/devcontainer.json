@@ -4,18 +4,15 @@
     "dockerfile": "../Dockerfile",
     "context": ".."
   },
-
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
-
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
         "ms-toolsai.jupyter",
         "charliermarsh.ruff",
-        "ms-python.mypy-vscode",
-        "ms-azuretools.vscode-docker",
-        "eamodio.gitlens"
+        "ms-python.mypy-vscode"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
@@ -25,24 +22,15 @@
         "editor.codeActionsOnSave": {
           "source.fixAll.ruff": "always",
           "source.organizeImports.ruff": "always"
-        },
-        "terminal.integrated.defaultProfile.linux": "bash"
+        }
       }
     }
   },
-
-  "runArgs": [
-    "--init",
-    "--shm-size=16g"
-  ],
-
   "mounts": [
     "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind",
     "source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,readonly",
     "source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind,readonly"
   ],
-
-  "postCreateCommand": "git config --global --add safe.directory /workspace && ssh -T git@github.com || true && opencode --help || true",
-
+  "postCreateCommand": "git config --global --add safe.directory /workspace && uv sync --python 3.12",
   "remoteUser": "root"
 }
