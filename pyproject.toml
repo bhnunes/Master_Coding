@@ -13,6 +13,7 @@ dependencies = [
     "scikit-image==0.23.2",
     "scikit-optimize==0.10.2",
     "opencv-contrib-python==4.9.0.80",
+    "Pillow>=10.4.0",
     "openslide-python",
     "tiatoolbox",
     "shapely>=2.0.0",
@@ -22,12 +23,16 @@ dependencies = [
     "tqdm==4.66.4",
     "numba>=0.60.0",
     "joblib>=1.4.0",
+    "matplotlib",
     "python-dotenv==1.2.2",
+    "PyYAML",
     "torch-lr-finder==0.2.2",
     "seaborn==0.13.2",
     "torchmetrics==1.9.0",
     "optuna==4.8.0",
     "schedulefree==1.4.1",
+    "aim",
+    "psutil",
 ]
 
 [dependency-groups]

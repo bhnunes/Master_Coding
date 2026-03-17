@@ -1,150 +1,139 @@
-# 🚀 GrandQC: Google Colab Setup Guide
+# Google Colab Setup
 
-This document explains how to mirror your local **VS Code Dev
-Container** environment inside a **Google Colab notebook**. By using
-**uv** and our **pyproject.toml**, we ensure that versions (like **NumPy
-1.26.4** and **PyTorch 2.8**) stay consistent across environments.
+This repository uses `pyproject.toml` as the only dependency source of truth. On Google Colab, the supported path is:
 
-------------------------------------------------------------------------
+1. clone the repository
+2. run `setup_colab.sh`
+3. configure `.env`
+4. run the script you want with `uv`
 
-# 1. Prerequisites
+The setup script installs the system packages, installs `uv`, installs Python 3.12, syncs the project dependencies, creates `.env` from `.env_example` when missing, and verifies the critical Stage 1 imports.
 
--   A Google account with access to **Google Colab**.
+## 1. Prepare the Colab runtime
 
-### Change Runtime Type
+- In Colab, go to `Runtime` -> `Change runtime type`
+- Select `T4 GPU` or a stronger GPU
+- Restart the runtime if Colab asks
 
-    Runtime → Change runtime type → Hardware accelerator → T4 GPU (or higher)
+## 2. Clone the repository and run the setup script
 
-------------------------------------------------------------------------
+Run this in the first Colab cell:
 
-# 2. One-Cell Environment Setup
-
-Copy and paste the following code into the **very first cell** of your
-Colab notebook.
-
-``` python
-# --- 1. Install uv (Fastest Python Package Manager) ---
-!curl -fsSL https://astral.sh/uv/install.sh | sh
-import os
-os.environ['PATH'] = f"{os.environ['PATH']}:/root/.cargo/bin"
-
-# --- 2. Clone the Repository ---
-# Replace with your actual repository URL
-!git clone https://github.com/your-username/grandqc-project.git
-%cd grandqc-project
-
-# --- 3. Install System Dependencies (OpenSlide, LaTeX) ---
-print("Installing system libraries...")
-!apt-get update -qq
-!apt-get install -y -qq libopenjp2-7-dev libopenjp2-tools openslide-tools \
-    texlive-latex-base texlive-latex-recommended texlive-latex-extra \
-    texlive-fonts-recommended texlive-fonts-extra > /dev/null
-
-# --- 4. Sync Python Environment via uv ---
-# This pulls the exact versions from your pyproject.toml
-# and ensures the CUDA 12.6 wheels are used for PyTorch.
-print("Syncing Python dependencies (this is fast!)...")
-!uv pip install --system --no-cache-dir -U \
-    --index-url https://download.pytorch.org/whl/cu126 .
-
-# --- 5. Verify the Installation ---
-import torch
-import numpy as np
-import openslide
-
-print(f"✅ GPU Available: {torch.cuda.is_available()}")
-print(f"✅ Device Name: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None'}")
-print(f"✅ NumPy Version: {np.__version__} (Should be 1.26.4)")
-print(f"✅ OpenSlide Version: {openslide.__library_version__}")
+```bash
+!git clone <your-repository-url>
+%cd <your-repository-folder>
+!bash setup_colab.sh
 ```
 
-------------------------------------------------------------------------
+After this completes, the repository is installed through `uv` from `pyproject.toml` and is ready to run.
 
-# 3. Handling Large Datasets
+## 3. Mount Google Drive if your data or models live there
 
-Since you are dealing with **massive datasets**, **do not upload files
-directly to Colab**. Use one of the following methods.
-
-------------------------------------------------------------------------
-
-## Method A: Google Drive (Recommended)
-
-Mount your drive to access datasets stored there.
-
-``` python
+```python
 from google.colab import drive
 drive.mount('/content/drive')
-
-# Update your script paths to point to /content/drive/MyDrive/...
 ```
 
-------------------------------------------------------------------------
+Typical Colab paths look like:
 
-## Method B: GCS / S3
+- `/content/drive/MyDrive/path/to/slides.zip`
+- `/content/drive/MyDrive/path/to/models/td`
+- `/content/drive/MyDrive/path/to/models/qc`
 
-If your data is stored in the cloud, use **gsutil** or **boto3** to
-stream data directly to the `/content` local disk (SSD) for maximum
-training speed.
+## 4. Configure `.env`
 
-------------------------------------------------------------------------
+If `.env` did not already exist, `setup_colab.sh` creates it from `.env_example`.
 
-# 4. Development Workflow
+Update the Stage 1 variables before running `1_artifact_detection.py`:
 
-### Code Locally
-
-Use **VS Code** and your **Dev Container**.
-
-Run:
-
-    ruff
-    mypy
-
-to catch linting and typing errors.
-
-------------------------------------------------------------------------
-
-### Commit & Push
-
-Push your changes to GitHub.
-
-------------------------------------------------------------------------
-
-### Pull on Colab
-
-``` bash
-!git pull origin main
-!uv pip install --system .  # Refresh dependencies if pyproject.toml changed
+```bash
+ARTIFACT_IMAGES_ZIP=/content/drive/MyDrive/path/to/slides.zip
+ARTIFACT_GEOJSON_OUTPUT=/content/artifacts/geojson
+ARTIFACT_DATABASE_FOLDER=/content/artifact_databases
+ARTIFACT_DATABASE_NAME=artifact_detection.db
+ARTIFACT_TEMP_FOLDER=/content/artifact_temp
+ARTIFACT_LOG_FOLDER=/content/artifact_logs
+ARTIFACT_DEVICE=cuda
+ARTIFACT_TD_MODEL_DIR=/content/drive/MyDrive/path/to/models/td
+ARTIFACT_TD_MODEL_NAME=Tissue_Detection_MPP10.pth
+ARTIFACT_QC_MODEL_DIR=/content/drive/MyDrive/path/to/models/qc
+ARTIFACT_MPP_MODEL=1.5
+ARTIFACT_OVERLAY_FACTOR=10
 ```
 
-------------------------------------------------------------------------
+You can edit `.env` in Colab with:
 
-### Run Experiments
+```bash
+!cp .env .env.bak
+!sed -n '1,120p' .env
+```
 
-Execute your **high-memory / GPU training loops**.
+Or use the file browser and edit it directly.
 
-------------------------------------------------------------------------
+## 5. Run Stage 1 artifact detection
 
-# 5. Troubleshooting
+```bash
+!uv run --python 3.12 python 1_artifact_detection.py
+```
 
-### NumPy Conflicts
+## 6. Run any other repository script
 
-If Colab warns about a **NumPy restart**, it is because Colab
-pre-installs **NumPy 2.x**.
+The same environment can be used for the rest of the repository scripts:
 
-The command:
+```bash
+!uv run --python 3.12 python 2_database_manager.py
+!uv run --python 3.12 python 5_crossfold.py
+!uv run --python 3.12 python 6_sanity_checks.py
+```
 
-    uv pip install --system
+## 7. What `setup_colab.sh` installs
 
-overrides this version.
+The script mirrors the project runtime used by `Dockerfile` and the devcontainer workflow:
 
-You may need to click **Restart Session** once if prompted, but the
-files will remain.
+- system packages such as OpenSlide, OpenJPEG, GEOS, and the current container utilities
+- `uv`
+- Python 3.12
+- all Python dependencies from `pyproject.toml`
 
-------------------------------------------------------------------------
+## 8. Quick verification
 
-### LaTeX Errors
+`setup_colab.sh` already verifies these imports:
 
-If `pdflatex` fails, verify that the package below was installed
-correctly in the setup cell:
+- `torch`
+- `openslide`
+- `cv2`
+- `segmentation_models_pytorch`
 
-    texlive-latex-extra
+If you want to rerun the check manually:
+
+```bash
+!uv run --python 3.12 python - <<'PY'
+import cv2
+import openslide
+import segmentation_models_pytorch as smp
+import torch
+
+print(torch.__version__)
+print(torch.cuda.is_available())
+print(openslide.__library_version__)
+print(cv2.__version__)
+print(smp.__version__)
+PY
+```
+
+## 9. Common blockers
+
+- `ARTIFACT_IMAGES_ZIP` points to a missing file: update `.env` with the real zip path
+- model weights are missing: place the tissue detector and QC weights in the configured model folders
+- `ARTIFACT_DEVICE=cuda` but no GPU is enabled: switch the Colab runtime to GPU or set `ARTIFACT_DEVICE=cpu`
+- outputs go to Drive and feel slow: prefer `/content/...` for temporary folders and logs
+
+## 10. Re-running setup after updates
+
+If `pyproject.toml` changes, rerun:
+
+```bash
+!bash setup_colab.sh
+```
+
+That keeps Colab aligned with the repository configuration.

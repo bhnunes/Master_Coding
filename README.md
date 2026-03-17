@@ -50,7 +50,8 @@ Master_Coding/
 ├── logs/                            # Log files
 │
 ├── .env_example                     # Environment configuration template
-├── requirements.txt                 # Python dependencies
+├── setup_colab.sh                   # One-step Google Colab bootstrap
+├── colab_setup.md                   # Google Colab usage guide
 ├── pyproject.toml                   # Project configuration (uv)
 ├── Dockerfile                       # Container definition
 ├── artifact_policy.yaml             # Artifact filtering thresholds
@@ -194,12 +195,24 @@ DROP_THRESH:
 ### Using uv (Recommended)
 
 ```bash
-# Install dependencies
-uv sync
+# Install dependencies from pyproject.toml
+uv sync --python 3.12
 
 # Or install with dev dependencies
-uv sync --group dev
+uv sync --python 3.12 --group dev
 ```
+
+### Using Google Colab
+
+```bash
+# After cloning the repository in Colab
+bash setup_colab.sh
+
+# Then run any script through uv's Python 3.12 environment
+uv run --python 3.12 python 1_artifact_detection.py
+```
+
+See `colab_setup.md` for the complete Colab workflow, including Google Drive mounting and `.env` configuration.
 
 ### Using Docker
 
@@ -234,32 +247,32 @@ docker exec -it container_name_or_id bash
 
 ```bash
 # 1. Artifact Detection (optional)
-uv run python 1_artifact_detection.py
+uv run --python 3.12 python 1_artifact_detection.py
 
 # 2. Database & Patch Extraction
 # Configure .env first, then:
-uv run python 2_database_manager.py
+uv run --python 3.12 python 2_database_manager.py
 
 # 3. Annotation Cleaning (optional, for cancer patches)
-uv run python 4_1_optimization_sampling.py
+uv run --python 3.12 python 4_1_optimization_sampling.py
 # After human review, place approved/rejected in folders
-uv run python 4_2_tune_graph_method.py
-uv run python 4_3_cleaner_script.py
+uv run --python 3.12 python 4_2_tune_graph_method.py
+uv run --python 3.12 python 4_3_cleaner_script.py
 
 # 4. Create dataset splits
-uv run python 5_crossfold.py
+uv run --python 3.12 python 5_crossfold.py
 
 # 5. Run sanity checks
-uv run python 6_sanity_checks.py
+uv run --python 3.12 python 6_sanity_checks.py
 
 # 6. Pack to HDF5
-uv run python 7_pack_splits_to_hdf5.py
+uv run --python 3.12 python 7_pack_splits_to_hdf5.py
 
 # 8-12. Training & Inference (typically run in Colab with GPU)
-uv run python 9_lr_finder.py
-uv run python 10_training_ensemble.py
-uv run python 11_optimizer_ensemble.py
-uv run python 12_inference_ensemble.py
+uv run --python 3.12 python 9_lr_finder.py
+uv run --python 3.12 python 10_training_ensemble.py
+uv run --python 3.12 python 11_optimizer_ensemble.py
+uv run --python 3.12 python 12_inference_ensemble.py
 ```
 
 ### Running Tests
@@ -303,7 +316,7 @@ The pipeline produces these standardized output folders:
 
 ## Dependencies
 
-Key dependencies (see `requirements.txt` and `pyproject.toml`):
+Key dependencies (defined in `pyproject.toml`):
 
 - **Deep Learning**: PyTorch, segmentation_models_pytorch, ScheduleFree
 - **Image Processing**: OpenCV, OpenSlide, Pillow, albumentations

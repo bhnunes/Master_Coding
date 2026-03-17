@@ -49,6 +49,8 @@ This file gives coding agents repository-specific guidance for working safely an
 - Active legacy helpers still used by extraction workflows include `helpers/data_handlers.py`, `helpers/patch_engine.py`, `helpers/wsi_colors.py`, `helpers/wsi_maps.py`, `helpers/wsi_process.py`, `helpers/wsi_slide_info.py`, and `helpers/wsi_tis_detect_helper_fx.py`.
 - Removed legacy helper files that should not be reintroduced without clear need: `helpers/main.py`, `helpers/wsi_tis_detect.py`, and `helpers/wsi_stain_norm.py`.
 - Use package-safe imports from `helpers...` for helper modules. Do not add new sibling-style imports such as `from data_handlers import ...`.
+- `pyproject.toml` is the only dependency source of truth for Python dependencies.
+- `setup_colab.sh` is the canonical Google Colab bootstrap. It installs system dependencies, installs `uv`, installs Python 3.12, syncs from `pyproject.toml`, and prepares `.env` when missing.
 - Current validation status: `uv run pytest` passes, and scoped checks pass for `1_artifact_detection.py`, `3_1_imageReader.py`, `helpers`, and `tests` with Ruff and MyPy. Full-repo `ruff check .` and `mypy .` still fail because of unrelated legacy root scripts.
 - `pytest-cov` is referenced by policy, but it is not currently installed in the environment. Do not claim coverage output was produced unless that dependency is added and the command is rerun.
 
@@ -208,7 +210,8 @@ MASTER_CODING:
 - `AGENTS.md`
 - `artifact_policy.yaml`
 - `README.md`
-- `requirements.txt`
+- `setup_colab.sh`
+- `colab_setup.md`
 - `helpers/__init__.py`
 - `helpers/artifact_config.py`
 - `helpers/artifact_logging.py`
