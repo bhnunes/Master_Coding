@@ -5,16 +5,20 @@ import torch
 import argparse
 from PIL import Image
 import segmentation_models_pytorch as smp
-from wsi_tis_detect_helper_fx import get_preprocessing, make_class_map
+from helpers.wsi_tis_detect_helper_fx import get_preprocessing, make_class_map
 from pathlib import Path
-from wsi_colors import colors_QC7 as colors
-from wsi_slide_info import slide_info
-from wsi_process import slide_process_single, mask_to_geojson
-from wsi_maps import make_overlay
+from helpers.wsi_colors import colors_QC7 as colors
+from helpers.wsi_slide_info import slide_info
+from helpers.wsi_process import slide_process_single, mask_to_geojson
+from helpers.wsi_maps import make_overlay
 from tqdm.auto import tqdm
 import os, timeit
 import shutil
 import sys
+import shutil
+import zipfile
+from pathlib import Path
+
 Image.MAX_IMAGE_PIXELS = 1000000000
 
 #INPUT PATHS
@@ -44,10 +48,7 @@ end = -1
 create_geojson = "Y"
 OVERLAY_FACTOR = 10
 
-#bypass zip
-BYPASS_ZIP = True
-#IF files are zipped and bypass is False
-ZIP_FILES_LIST = ['/content/drive/MyDrive/IA_MEDICA/Imagens_anotadas.zip','/content/drive/MyDrive/IA_MEDICA/REJECTS.zip']
+IMAGES_ZIP = '/content/drive/MyDrive/IA_MEDICA/Imagens_anotadas.zip'
 
 # MODEL(S)
 MODEL_QC_DIR = './models/qc/'
@@ -71,7 +72,6 @@ BACK_CLASS = 7
 colors = [[50, 50, 250],    # BLUE: TISSUE
           [128, 128, 128]]  # GRAY: BACKGROUND
 
-from pathlib import Path
 
 def get_wsi_files(root_folder, geojson_folder):
     """
@@ -368,23 +368,14 @@ def main(slide_name, tis_tir_mask_path, tis_tir_mask_col_path, tis_overlay_path,
     tqdm.write(f"[done] {slide_base} in {stop - start:.1f}s → {map_path}, {mask_path}, {geojson_save_path}")
 
 
-if BYPASS_ZIP == False:
-  import shutil
-  import zipfile
+try:
+    with zipfile.ZipFile(IMAGES_ZIP,'r') as z:
+        z.extractall(SLIDE_DIR)
+    print("Extracted. Verifying...");
+except Exception as e:
+    print(f"Extract Err: {e}. Skip.")
+    raise Exception("Extract Err")
 
-  zip_files = ZIP_FILES_LIST
-  base_data_dir = SLIDE_DIR
-
-  for fold_zip_path in zip_files:
-    try:
-        with zipfile.ZipFile(fold_zip_path,'r') as z:
-          z.extractall(base_data_dir)
-        print("Extracted. Verifying...");
-    except Exception as e:
-      print(f"Extract Err: {e}. Skip.")
-      raise Exception("Extract Err")
-else:
-  pass
 
 # Get slide names
 slide_names = get_wsi_files(SLIDE_DIR, GEOJSON_DRIVER_FOLDER)
