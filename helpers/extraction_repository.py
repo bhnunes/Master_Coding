@@ -1,0 +1,269 @@
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ExtractionCaseRecord:
+    """One extraction case tracked in the Stage 2 database."""
+
+    record_id: int
+    status: str
+    image_path: Path
+    annotation_path: Path | None
+    cancer_qtd: int | None
+    non_cancer_qtd: int | None
+    valid_image: int | None
+    cancer_color: str | None
+    not_cancer_color: str | None
+    processing_time_minutes: float | None
+    patient: str
+    comments: str
+    window_size: int | None
+    stride: int | None
+    match_percentage: str | None
+    tissue_percentage: str | None
+    last_update: str | None
+
+
+@dataclass(frozen=True)
+class CaseUpdate:
+    """Persisted processing result for one extraction case."""
+
+    cancer_qtd: int
+    non_cancer_qtd: int
+    exec_time_minutes: float
+    comments: str
+    status: str
+    window_size: int
+    stride: int
+    match_percentage: float
+    tissue_percentage: float
+
+
+class ExtractionRepository:
+    """SQLite-backed repository for Stage 2 case ingestion and processing."""
+
+    def __init__(self, database_path: Path, tag: str) -> None:
+        self.database_path = database_path
+        self.tag = tag
+        self.table_name = f"DATABASE_{tag}"
+
+    def ensure_case_directories(self, base_path: Path) -> tuple[Path, Path, Path]:
+        """Return the case folders and create them when missing."""
+
+        images_folder = base_path / f"IMAGES_{self.tag}"
+        annotations_folder = base_path / f"ANNOTATIONS_{self.tag}"
+        geojson_folder = base_path / f"GEOJSON_{self.tag}"
+        for folder in (images_folder, annotations_folder, geojson_folder):
+            folder.mkdir(parents=True, exist_ok=True)
+        return images_folder, annotations_folder, geojson_folder
+
+    def initialize(self) -> None:
+        """Create the Stage 2 database table when needed."""
+
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.table_name} (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    STATUS TEXT DEFAULT 'TO BE PROCESSED',
+                    IMAGEPATH TEXT NOT NULL,
+                    ANNOTATIONPATH TEXT,
+                    LastUpdate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CANCER_QTD INTEGER,
+                    NON_CANCER_QTD INTEGER,
+                    VALID_IMAGE INTEGER,
+                    CANCER_COLOR TEXT,
+                    NOT_CANCER_COLOR TEXT,
+                    PROCESSINGTIME_MINUTES REAL,
+                    PATIENT TEXT NOT NULL UNIQUE,
+                    COMMENTS TEXT,
+                    WINDOW_SIZE INTEGER,
+                    STRIDE INTEGER,
+                    MATCH_PERCENTAGE TEXT,
+                    TISSUE_PERCENTAGE TEXT
+                )
+                """
+            )
+            connection.commit()
+
+    def ingest_new_cases(
+        self,
+        base_path: Path,
+        activate_sanity_check: bool,
+        use_advanced_filtering: bool,
+        geojson_path: Path | None,
+    ) -> bool:
+        """Scan case folders and insert unseen cases into the database."""
+
+        images_folder = base_path / f"IMAGES_{self.tag}"
+        annotations_folder = base_path / f"ANNOTATIONS_{self.tag}"
+        image_files = sorted(path for path in images_folder.iterdir() if path.is_file())
+        if not image_files:
+            raise FileNotFoundError(
+                f"The directory '{images_folder}' is empty. Please add images to process."
+            )
+
+        geojson_basenames: set[str] = set()
+        run_geojson_check = activate_sanity_check and use_advanced_filtering
+        if run_geojson_check:
+            if geojson_path is None or not geojson_path.is_dir():
+                raise FileNotFoundError(
+                    "GeoJSON sanity check is active, but GEOJSON_PATH "
+                    f"('{geojson_path}') is invalid."
+                )
+            geojson_basenames = {
+                path.stem
+                for path in geojson_path.iterdir()
+                if path.is_file() and path.suffix.lower() == ".geojson"
+            }
+
+        annotation_lookup = {
+            path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
+        }
+
+        svs_files_added = False
+        with self._connect() as connection:
+            existing_data = connection.execute(
+                f"SELECT IMAGEPATH, PATIENT FROM {self.table_name}"
+            ).fetchall()
+            existing_basenames = {Path(str(row["IMAGEPATH"])).name for row in existing_data}
+            existing_patients = {
+                int(str(row["PATIENT"])) for row in existing_data if str(row["PATIENT"]).isdigit()
+            }
+
+            next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
+            payload: list[tuple[str, str | None, str, str, str]] = []
+            for image_path in image_files:
+                if image_path.name in existing_basenames:
+                    continue
+
+                if image_path.suffix.lower() == ".svs":
+                    svs_files_added = True
+
+                annotation_path = annotation_lookup.get(image_path.stem)
+                status = "TO BE PROCESSED"
+                comments = ""
+                if annotation_path is None:
+                    status = "FAILED"
+                    comments = "The equivalent annotation file could not be found."
+                elif run_geojson_check and image_path.stem not in geojson_basenames:
+                    status = "FAILED"
+                    comments = (
+                        "GeoJSON Sanity Check Failed: The equivalent GeoJSON file was not found."
+                    )
+
+                payload.append(
+                    (
+                        str(image_path),
+                        annotation_path,
+                        str(next_patient_id),
+                        status,
+                        comments,
+                    )
+                )
+                next_patient_id += 1
+
+            if payload:
+                connection.executemany(
+                    f"""
+                    INSERT INTO {self.table_name}
+                    (IMAGEPATH, ANNOTATIONPATH, PATIENT, STATUS, COMMENTS)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    payload,
+                )
+                connection.commit()
+
+        return svs_files_added
+
+    def list_pending_cases(self) -> list[ExtractionCaseRecord]:
+        """Return all cases still waiting for processing, ordered deterministically."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM {self.table_name} WHERE STATUS = 'TO BE PROCESSED' ORDER BY ID ASC"
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def mark_processing(self, case_id: int) -> None:
+        """Mark one case as currently being processed."""
+
+        with self._connect() as connection:
+            connection.execute(
+                f"""
+                UPDATE {self.table_name}
+                SET STATUS = 'PROCESSING', LastUpdate = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                """,
+                (case_id,),
+            )
+            connection.commit()
+
+    def update_case(self, case_id: int, update: CaseUpdate) -> None:
+        """Persist the result of one case processing run."""
+
+        with self._connect() as connection:
+            connection.execute(
+                f"""
+                UPDATE {self.table_name}
+                SET CANCER_QTD = ?,
+                    NON_CANCER_QTD = ?,
+                    PROCESSINGTIME_MINUTES = ?,
+                    COMMENTS = ?,
+                    STATUS = ?,
+                    WINDOW_SIZE = ?,
+                    STRIDE = ?,
+                    MATCH_PERCENTAGE = ?,
+                    TISSUE_PERCENTAGE = ?,
+                    LastUpdate = CURRENT_TIMESTAMP
+                WHERE ID = ?
+                """,
+                (
+                    update.cancer_qtd,
+                    update.non_cancer_qtd,
+                    update.exec_time_minutes,
+                    update.comments,
+                    update.status,
+                    update.window_size,
+                    update.stride,
+                    str(update.match_percentage),
+                    str(update.tissue_percentage),
+                    case_id,
+                ),
+            )
+            connection.commit()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path, timeout=20)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _row_to_record(self, row: sqlite3.Row) -> ExtractionCaseRecord:
+        return ExtractionCaseRecord(
+            record_id=int(row["ID"]),
+            status=str(row["STATUS"]),
+            image_path=Path(str(row["IMAGEPATH"])),
+            annotation_path=Path(str(row["ANNOTATIONPATH"])) if row["ANNOTATIONPATH"] else None,
+            cancer_qtd=int(row["CANCER_QTD"]) if row["CANCER_QTD"] is not None else None,
+            non_cancer_qtd=int(row["NON_CANCER_QTD"])
+            if row["NON_CANCER_QTD"] is not None
+            else None,
+            valid_image=int(row["VALID_IMAGE"]) if row["VALID_IMAGE"] is not None else None,
+            cancer_color=str(row["CANCER_COLOR"]) if row["CANCER_COLOR"] else None,
+            not_cancer_color=str(row["NOT_CANCER_COLOR"]) if row["NOT_CANCER_COLOR"] else None,
+            processing_time_minutes=float(row["PROCESSINGTIME_MINUTES"])
+            if row["PROCESSINGTIME_MINUTES"] is not None
+            else None,
+            patient=str(row["PATIENT"]),
+            comments=str(row["COMMENTS"] or ""),
+            window_size=int(row["WINDOW_SIZE"]) if row["WINDOW_SIZE"] is not None else None,
+            stride=int(row["STRIDE"]) if row["STRIDE"] is not None else None,
+            match_percentage=str(row["MATCH_PERCENTAGE"]) if row["MATCH_PERCENTAGE"] else None,
+            tissue_percentage=str(row["TISSUE_PERCENTAGE"]) if row["TISSUE_PERCENTAGE"] else None,
+            last_update=str(row["LastUpdate"]) if row["LastUpdate"] else None,
+        )
