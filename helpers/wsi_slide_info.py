@@ -1,15 +1,15 @@
 # EXTRACTION OF META-DATA FROM SLIDE
 
-from PIL import Image
-from wsi_stain_norm import standardizer
-import numpy as np
+from typing import Any
 
 
-def slide_info(slide, m_p_s, mpp_model):
+def slide_info(
+    slide: Any, m_p_s: int, mpp_model: float
+) -> tuple[int, int, int, float, int, int, Any]:
     # Objective power
     try:
         obj_power = slide.properties["openslide.objective-power"]
-    except:
+    except (KeyError, TypeError, ValueError):
         obj_power = 99
 
     # Microne per pixel
@@ -48,6 +48,9 @@ def slide_info(slide, m_p_s, mpp_model):
     print("Model patch size at slide MPP: ", p_s, "x", p_s)
     print("Width - number of patches: ", patch_n_w_l0)
     print("Height - number of patches: ", patch_n_h_l0)
-    print("Overall number of patches / slide (without tissue detection): ", patch_n_w_l0 * patch_n_h_l0)
+    print(
+        "Overall number of patches / slide (without tissue detection): ",
+        patch_n_w_l0 * patch_n_h_l0,
+    )
 
     return p_s, patch_n_w_l0, patch_n_h_l0, mpp, w_l0, h_l0, obj_power

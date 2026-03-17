@@ -10,14 +10,13 @@ This file gives coding agents repository-specific guidance for working safely an
 - This is a script-first research pipeline.
 - Main responsibilities include patch extraction, dataset splitting, scientific sanity checks, and HDF5 packaging.
 - The repo is script-driven rather than package-driven.
-- There is no formal build system, test suite, or linter configuration checked into the repo.
 
 ## Repository Layout
 - `1_artifact_detection.py`: Generation of GeoJSON information about artifacts on the whole-slide-images.
 - `2_database_manager.py`: top-level orchestration for ingestion, SQLite tracking, and per-case processing.
 - `3_1_imageReader.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
-- `data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
-- `patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
+- `helpers/data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
+- `helpers/patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
 - `4_1_optimization_sampling.py`: Script responsible for selecting a sub sample of Cancer images for a Human-in-the-loop cleaning process of incorrect annotations.
 - `4_2_tune_graph_method.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
 - `4_3_cleaner_script.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
@@ -38,7 +37,20 @@ This file gives coding agents repository-specific guidance for working safely an
 - All test scripts must be saved on folder /tests.
 - All logs generated must be saved on /logs.
 - All helpers should be standalone classes organized by domain and saved on /helpers.
-- Database should be saved on /database.
+- Databases should be saved on /databases.
+
+## Current Repository Notes
+
+- `1_artifact_detection.py` is now a `.env`-driven Stage 1 orchestrator. Keep orchestration there and keep runtime/domain behavior in `helpers/artifact_*.py`.
+- Stage 1 artifact detection reads WSI members directly from a zip archive, extracts one slide at a time to a temporary workspace, writes GeoJSON outputs, updates SQLite status, and cleans temporary files after each slide.
+- Stage 1 database tracking must preserve at least `Image_Name`, `GeoJSON_Processed`, and `Comments`. Operational metadata such as `LastUpdate` is also allowed.
+- Stage 1 logging is intentionally colorful and user-facing. Preserve the styled console + file logging pattern established in `helpers/artifact_logging.py` and inspired by `2_database_manager.py`.
+- Active Stage 1 helper modules are `helpers/artifact_config.py`, `helpers/artifact_logging.py`, `helpers/artifact_model_loader.py`, `helpers/artifact_paths.py`, `helpers/artifact_pipeline.py`, `helpers/artifact_processor.py`, `helpers/artifact_repository.py`, and `helpers/artifact_zip.py`.
+- Active legacy helpers still used by extraction workflows include `helpers/data_handlers.py`, `helpers/patch_engine.py`, `helpers/wsi_colors.py`, `helpers/wsi_maps.py`, `helpers/wsi_process.py`, `helpers/wsi_slide_info.py`, and `helpers/wsi_tis_detect_helper_fx.py`.
+- Removed legacy helper files that should not be reintroduced without clear need: `helpers/main.py`, `helpers/wsi_tis_detect.py`, and `helpers/wsi_stain_norm.py`.
+- Use package-safe imports from `helpers...` for helper modules. Do not add new sibling-style imports such as `from data_handlers import ...`.
+- Current validation status: `uv run pytest` passes, and scoped checks pass for `1_artifact_detection.py`, `3_1_imageReader.py`, `helpers`, and `tests` with Ruff and MyPy. Full-repo `ruff check .` and `mypy .` still fail because of unrelated legacy root scripts.
+- `pytest-cov` is referenced by policy, but it is not currently installed in the environment. Do not claim coverage output was produced unless that dependency is added and the command is rerun.
 
 ## Naming Conventions
 
@@ -52,6 +64,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - Many scripts configure root logging with both file and console handlers; follow that pattern when extending those files.
 - Avoid excessive `print` in modern/refactored scripts unless the file already provides a terminal UX.
 - Allow styled terminal output with ANSI sequences and emoji to make it user-friendly and colorful.
+- For Stage 1 artifact detection, preserve the current colorful console + file logging pattern instead of reverting to plain output.
 
 ## Data Integrity Rules
 
@@ -178,7 +191,7 @@ Agents must not reinvent the wheel when a stable Python library already solves t
 MASTER_CODING:
 - `1_artifact_detection.py`
 - `2_database_manager.py`
-- `3_imageReader.py`
+- `3_1_imageReader.py`
 - `4_1_optimization_sampling.py`
 - `4_2_tune_graph_method.py`
 - `4_3_cleaner_script.py`
@@ -196,6 +209,15 @@ MASTER_CODING:
 - `artifact_policy.yaml`
 - `README.md`
 - `requirements.txt`
+- `helpers/__init__.py`
+- `helpers/artifact_config.py`
+- `helpers/artifact_logging.py`
+- `helpers/artifact_model_loader.py`
+- `helpers/artifact_paths.py`
+- `helpers/artifact_pipeline.py`
+- `helpers/artifact_processor.py`
+- `helpers/artifact_repository.py`
+- `helpers/artifact_zip.py`
 - `databases/`
 - `databases/database.db`
 - `helpers/data_handlers.py`
@@ -211,7 +233,7 @@ Every script from :
 
 - 1_artifact_detection.py
 - 2_database_manager.py
-- 3_imageReader.py
+- 3_1_imageReader.py
 - 4_1_optimization_sampling.py
 - 4_2_tune_graph_method.py
 - 4_3_cleaner_script.py
@@ -224,7 +246,7 @@ Every script from :
 - 11_optimizer_ensemble.py
 - 12_inference_ensemble.py
 
-is a monolitic self contained script and they perform actions independently of each other (except for 2_database_manager.py and 3_imageReader.py, that interact with each other, along with helpers data_handlers.py and patch_engine.py).
+is a monolitic self contained script and they perform actions independently of each other (except for `2_database_manager.py` and `3_1_imageReader.py`, that interact with each other, along with `helpers/data_handlers.py` and `helpers/patch_engine.py`).
 
 ---
 
@@ -658,4 +680,3 @@ maintainability third
 performance where relevant and measurable
 
 Do not trade correctness and testability for cleverness.
-

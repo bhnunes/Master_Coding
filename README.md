@@ -33,6 +33,15 @@ Master_Coding/
 ├── 12_inference_ensemble.py         # Generate predictions on test set
 │
 ├── helpers/
+│   ├── __init__.py
+│   ├── artifact_config.py           # Stage 1 .env parsing and validation
+│   ├── artifact_logging.py          # Colorful Stage 1 console + file logging
+│   ├── artifact_model_loader.py     # Stage 1 model loading
+│   ├── artifact_paths.py            # Stage 1 path management and temp workspaces
+│   ├── artifact_pipeline.py         # Stage 1 orchestration flow helpers
+│   ├── artifact_processor.py        # Stage 1 per-slide processing
+│   ├── artifact_repository.py       # Stage 1 SQLite tracking
+│   ├── artifact_zip.py              # Stage 1 zip-backed slide access
 │   ├── data_handlers.py             # Annotation format adapters
 │   └── patch_engine.py              # Core patch extraction logic
 │
@@ -56,7 +65,7 @@ The pipeline follows a monolithic script-driven architecture where each script p
 
 | Stage | Script(s) | Description |
 |-------|-----------|-------------|
-| 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using deep learning. Output: GeoJSON files with artifact annotations |
+| 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using a `.env`-driven Stage 1 pipeline. Output: GeoJSON files with artifact annotations and SQLite processing status |
 | 2 | `2_database_manager.py` + `3_1_imageReader.py` | Extract patches from WSIs based on annotations. Output: PNG patches + masks |
 | 3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script` | Human-in-the-loop + graph segmentation to remove incorrect annotations |
 | 4 | `5_crossfold.py` | Create patient-level stratified TRAIN/VALIDATION/TEST splits |
@@ -71,7 +80,16 @@ The pipeline follows a monolithic script-driven architecture where each script p
 
 | Script | Purpose |
 |--------|---------|
-| `1_artifact_detection.py` | Detects artifacts (fold, darkspot, pen markings, etc.) on whole-slide images using deep learning models. Generates GeoJSON files that mark artifact regions. |
+| `1_artifact_detection.py` | Thin Stage 1 orchestrator that loads `.env`, initializes logging, models, zip access, and SQLite tracking, then processes slides into GeoJSON outputs. |
+
+Current Stage 1 behavior:
+
+- Reads Stage 1 configuration from `.env` / `.env_example`
+- Scans WSI files directly from a configured zip archive instead of extracting the full archive up front
+- Extracts only one slide at a time into a temporary workspace during processing
+- Stores and resumes progress through SQLite entries with fields such as `Image_Name`, `GeoJSON_Processed`, `Comments`, and operational metadata like `LastUpdate`
+- Writes GeoJSON artifact annotations to the configured output folder
+- Uses colorful console + file logging for long-running user-facing feedback
 
 ### Stage 2: Patch Extraction
 
@@ -130,28 +148,33 @@ The pipeline follows a monolithic script-driven architecture where each script p
 Copy `.env_example` to `.env` and configure:
 
 ```bash
-# Project tag (used for folder/database naming)
+# Stage 1 - Artifact detection
+ARTIFACT_IMAGES_ZIP=/path/to/wsi_archive.zip
+ARTIFACT_GEOJSON_OUTPUT=./artifacts/geojson
+ARTIFACT_DATABASE_FOLDER=./databases
+ARTIFACT_DATABASE_NAME=artifact_detection.db
+ARTIFACT_TEMP_FOLDER=./temp/artifact_detection
+ARTIFACT_LOG_FOLDER=./logs
+ARTIFACT_DEVICE=cuda
+ARTIFACT_TD_MODEL_DIR=./models/td
+ARTIFACT_TD_MODEL_NAME=Tissue_Detection_MPP10.pth
+ARTIFACT_QC_MODEL_DIR=./models/qc
+
+# Optional Stage 1 runtime controls
+ARTIFACT_MPP_MODEL=1.5
+ARTIFACT_OVERLAY_FACTOR=10
+ARTIFACT_OVERWRITE_EXISTING=false
+
+# Patch extraction and later stages keep using their own .env variables
 TAG=CAMELYON16
-
-# Database
-SQLITE_DB_PATH=./databases/database.db
-
-# Base paths
-PROJECTS_BASE_PATH=/path/to/projects
-
-# Patch extraction parameters
 WINDOW_SIZE=224
 STRIDE=112
 TISSUE_PERCENTAGE=0.3
 MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=/path/to/openslide/bin
-
-# Artifact filtering (optional)
-USE_ADVANCED_ARTIFACT_FILTERING=True
-ARTIFACT_POLICY_PATH=./artifact_policy.yaml
-ACTIVATE_SANITY_CHECK_GEOJSON=True
-GEOJSON_PATH=/path/to/geojson
 ```
+
+See `.env_example` for the current commented template, including the Stage 1 artifact detection block.
 
 ### Artifact Policy (artifact_policy.yaml)
 
@@ -211,50 +234,52 @@ docker exec -it container_name_or_id bash
 
 ```bash
 # 1. Artifact Detection (optional)
-python 1_artifact_detection.py
+uv run python 1_artifact_detection.py
 
 # 2. Database & Patch Extraction
 # Configure .env first, then:
-python 2_database_manager.py
+uv run python 2_database_manager.py
 
 # 3. Annotation Cleaning (optional, for cancer patches)
-python 4_1_optimization_sampling.py
+uv run python 4_1_optimization_sampling.py
 # After human review, place approved/rejected in folders
-python 4_2_tune_graph_method.py
-python 4_3_cleaner_script.py
+uv run python 4_2_tune_graph_method.py
+uv run python 4_3_cleaner_script.py
 
 # 4. Create dataset splits
-python 5_crossfold.py
+uv run python 5_crossfold.py
 
 # 5. Run sanity checks
-python 6_sanity_checks.py
+uv run python 6_sanity_checks.py
 
 # 6. Pack to HDF5
-python 7_pack_splits_to_hdf5.py
+uv run python 7_pack_splits_to_hdf5.py
 
 # 8-12. Training & Inference (typically run in Colab with GPU)
-python 9_lr_finder.py
-python 10_training_ensemble.py
-python 11_optimizer_ensemble.py
-python 12_inference_ensemble.py
+uv run python 9_lr_finder.py
+uv run python 10_training_ensemble.py
+uv run python 11_optimizer_ensemble.py
+uv run python 12_inference_ensemble.py
 ```
 
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all tests currently present in the repository
 uv run pytest
 
-# Run with coverage
+# Run coverage after installing pytest-cov
 uv run pytest --cov=helpers --cov-report=term-missing
 
-# Run linting
-uv run ruff check .
+# Run linting and typing on the refactored Stage 1 / helper surface
+uv run ruff check 1_artifact_detection.py 3_1_imageReader.py helpers tests
 uv run ruff format .
 
-# Run type checking
-uv run mypy .
+# Run type checking on the same touched scope
+uv run mypy 1_artifact_detection.py 3_1_imageReader.py helpers tests
 ```
+
+Note: full-repository `uv run ruff check .` and `uv run mypy .` still report issues in unrelated legacy root scripts outside the Stage 1 refactor scope.
 
 ## Data Integrity Rules
 
