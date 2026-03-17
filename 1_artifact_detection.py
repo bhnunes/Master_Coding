@@ -18,14 +18,18 @@ import sys
 import shutil
 import zipfile
 from pathlib import Path
+from tqdm import tqdm
 
 Image.MAX_IMAGE_PIXELS = 1000000000
 
 #INPUT PATHS
 SLIDE_DIR = r"/content/drive/MyDrive/CATCH/IMAGES"
 OUTPUT_DIR = r"/content/output_folder"
-GEOJSON_DRIVER_FOLDER = r"/content/drive/MyDrive/IA_MEDICA/GEOJSON_CATCH"
-DST_FOLDER = r"/content/slide_folder"
+
+GEOJSON_OUTPUT = r"/content/drive/MyDrive/IA_MEDICA/GEOJSON_CATCH"
+PROCESS_FOLDER = r"/content/slide_folder"
+IMAGES_ZIP = r'/content/drive/MyDrive/IA_MEDICA/Imagens_anotadas.zip'
+DATABASE_FOLDER = "/content/drive/MyDrive/IA_MEDICA/DATABASE_CATCH"
 
 # DEVICE
 DEVICE = 'cuda'
@@ -47,8 +51,6 @@ start = 0
 end = -1
 create_geojson = "Y"
 OVERLAY_FACTOR = 10
-
-IMAGES_ZIP = '/content/drive/MyDrive/IA_MEDICA/Imagens_anotadas.zip'
 
 # MODEL(S)
 MODEL_QC_DIR = './models/qc/'
@@ -247,7 +249,6 @@ def wis_tis_detect(slide_name, tis_det_dir_mask, tis_det_dir_mask_col, tis_det_d
 
   return tis_tir_mask_path, tis_tir_mask_col_path, tis_overlay_path, thumbnail_path
 
-from tqdm import tqdm
 
 def copy_large_file(src_path, dst_folder):
     """
@@ -351,7 +352,7 @@ def main(slide_name, tis_tir_mask_path, tis_tir_mask_col_path, tis_overlay_path,
 
 
         geojson_name = get_geojson_name(slide_name)
-        geojson_save_path = os.path.join(GEOJSON_DRIVER_FOLDER, geojson_name)
+        geojson_save_path = os.path.join(GEOJSON_OUTPUT, geojson_name)
 
         map_img.save(map_path)
         cv2.imwrite(mask_path, full_mask)
@@ -378,7 +379,7 @@ except Exception as e:
 
 
 # Get slide names
-slide_names = get_wsi_files(SLIDE_DIR, GEOJSON_DRIVER_FOLDER)
+slide_names = get_wsi_files(SLIDE_DIR, GEOJSON_OUTPUT)
 
 preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER_MODEL_TD, ENCODER_MODEL_TD_WEIGHTS)
 
@@ -394,7 +395,7 @@ model.to(DEVICE)
 model.eval()
 
 for slide_name in tqdm(slide_names, desc="Slides", unit="slide", dynamic_ncols=True):
-    slide_name = copy_large_file(slide_name, DST_FOLDER)
+    slide_name = copy_large_file(slide_name, PROCESS_FOLDER)
     sname = Path(slide_name).name
     try:
         with tqdm(total=3, desc=f"{sname}", unit="step", leave=False, position=1, dynamic_ncols=True) as pbar:
