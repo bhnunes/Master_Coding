@@ -11,16 +11,23 @@ dependencies = [
     "pandas==2.2.2",
     "scikit-learn==1.4.2",
     "scikit-image==0.23.2",
+    "scikit-optimize==0.10.2",
     "opencv-contrib-python==4.9.0.80",
     "openslide-python",
     "tiatoolbox",
     "shapely>=2.0.0",
     "albumentations",
-    "segmentation_models_pytorch==0.3.1",
+    "segmentation-models-pytorch==0.3.1",
     "h5py",
     "tqdm==4.66.4",
     "numba>=0.60.0",
     "joblib>=1.4.0",
+    "python-dotenv==1.2.2",
+    "torch-lr-finder==0.2.2",
+    "seaborn==0.13.2",
+    "torchmetrics==1.9.0",
+    "optuna==4.8.0",
+    "schedulefree==1.4.1",
 ]
 
 [dependency-groups]
@@ -45,6 +52,7 @@ explicit = true
 torch = { index = "pytorch-cu126" }
 torchvision = { index = "pytorch-cu126" }
 torchaudio = { index = "pytorch-cu126" }
+segmentation-models-pytorch = { git = "https://github.com/qubvel/segmentation_models.pytorch" }
 
 # --- Tool Configuration ---
 [tool.ruff]

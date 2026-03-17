@@ -15,7 +15,6 @@ from tqdm import tqdm
 import torchvision.models as models
 from datetime import datetime
 import torch.nn.functional as F
-from google.colab import userdata
 import random
 import seaborn as sns
 import shutil
