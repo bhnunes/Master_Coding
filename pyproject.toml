@@ -33,6 +33,8 @@ dependencies = [
     "schedulefree==1.4.1",
     "aim",
     "psutil",
+    "pyarrow",
+    "orjson",
 ]
 
 [dependency-groups]

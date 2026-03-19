@@ -75,7 +75,7 @@ Modify patch extraction to:
 
 3. Do NOT save artifact-only debug patches
 
-4. Store metadata per patch in a PatchIndex file (CSV or Parquet)
+4. Store metadata per patch in a PatchIndex file (Parquet)
 
 ### PatchIndex Schema
 
@@ -145,6 +145,7 @@ Advantages:
 - No repatching
 - Minimal overhead
 - Fully vectorized
+- Use of Pyarrow library
 
 Limitations:
 - No reduction in dataset size
