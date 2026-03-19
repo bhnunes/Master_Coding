@@ -41,29 +41,28 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from functools import partial
 from dotenv import load_dotenv
 
+from helpers.runtime_platform import load_openslide_module
+
 # -----------------------------------------------------------------------------
 # Optional: OpenSlide / TIAtoolbox setup (same intent as your original script)
 # -----------------------------------------------------------------------------
 load_dotenv()
-OPENSLIDE_PATH = os.getenv("OPENSLIDE_PATH")
 
 try:
-    if hasattr(os, "add_dll_directory") and OPENSLIDE_PATH and os.path.isdir(OPENSLIDE_PATH):
-        with os.add_dll_directory(OPENSLIDE_PATH):
-            from tiatoolbox.tools import stainnorm
-    else:
-        from tiatoolbox.tools import stainnorm
-except (ImportError, FileNotFoundError) as e:
+    load_openslide_module()
+    from tiatoolbox.tools import stainnorm
+except (ImportError, FileNotFoundError, RuntimeError, ValueError) as e:
     print("FATAL ERROR: Could not initialize OpenSlide / TIAtoolbox dependency.")
     print("1) Install OpenSlide binaries (Windows) if needed.")
     print("2) Ensure OPENSLIDE_PATH in .env points to the OpenSlide 'bin' folder.")
-    print(f"   OPENSLIDE_PATH={OPENSLIDE_PATH}")
+    print(f"   OPENSLIDE_PATH={os.getenv('OPENSLIDE_PATH')}")
     print(f"   Details: {e}")
     sys.exit(1)
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SplitConstraints:
@@ -77,8 +76,12 @@ class SplitConstraints:
     val_ratio: float = 0.10
 
     # Guardrails
-    require_train_image_dominance: bool = True  # TRAIN images > VAL and > TEST (your current Rule 2)
-    require_both_classes_if_possible: bool = True  # If dataset has both classes, try to keep both in each split
+    require_train_image_dominance: bool = (
+        True  # TRAIN images > VAL and > TEST (your current Rule 2)
+    )
+    require_both_classes_if_possible: bool = (
+        True  # If dataset has both classes, try to keep both in each split
+    )
 
     # Search
     max_tries: int = 1000
@@ -127,6 +130,7 @@ class RunConfig:
 # Logging
 # -----------------------------------------------------------------------------
 
+
 def setup_logging(output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "data_preparation.log")
@@ -154,6 +158,7 @@ def setup_logging(output_dir: str) -> None:
 # -----------------------------------------------------------------------------
 
 _PATIENT_RE = re.compile(r"PATIENT_(\d+)_")
+
 
 def _extract_patient_id(filename: str) -> Optional[int]:
     m = _PATIENT_RE.search(filename)
@@ -200,6 +205,7 @@ def calculate_image_entropy_from_path(image_path: str, thumb: int = 128) -> Tupl
 # Data Loading
 # -----------------------------------------------------------------------------
 
+
 def load_data(data_dir: str) -> pd.DataFrame:
     """
     Loads image + mask pairs from:
@@ -241,7 +247,6 @@ def load_data(data_dir: str) -> pd.DataFrame:
                 logging.warning(f"Invalid paths for {fname}. Skipping.")
                 continue
 
-
             rows.append(
                 dict(
                     patient_id=pid,
@@ -264,6 +269,7 @@ def load_data(data_dir: str) -> pd.DataFrame:
 # Patient-level tables and adaptive sizing
 # -----------------------------------------------------------------------------
 
+
 def build_patient_table(df: pd.DataFrame) -> pd.DataFrame:
     """
     One row per patient:
@@ -272,10 +278,10 @@ def build_patient_table(df: pd.DataFrame) -> pd.DataFrame:
     """
     return (
         df.groupby("patient_id")
-          .agg(patient_label=("label", "max"), n_images=("label", "size"))
-          .reset_index()
-          .sort_values("patient_id")
-          .reset_index(drop=True)
+        .agg(patient_label=("label", "max"), n_images=("label", "size"))
+        .reset_index()
+        .sort_values("patient_id")
+        .reset_index(drop=True)
     )
 
 
@@ -329,7 +335,9 @@ def _adaptive_min_patients(
     return min_train, min_val, min_test
 
 
-def decide_split_sizes(patient_df: pd.DataFrame, constraints: SplitConstraints) -> Tuple[int, int, int, Dict]:
+def decide_split_sizes(
+    patient_df: pd.DataFrame, constraints: SplitConstraints
+) -> Tuple[int, int, int, Dict]:
     """
     Returns (n_train, n_val, n_test, sizing_meta).
     """
@@ -375,6 +383,7 @@ def decide_split_sizes(patient_df: pd.DataFrame, constraints: SplitConstraints) 
 # -----------------------------------------------------------------------------
 # Entropy cache (patch -> entropy), then patient entropies
 # -----------------------------------------------------------------------------
+
 
 def compute_all_patch_entropies(
     df: pd.DataFrame,
@@ -422,9 +431,7 @@ def compute_patient_entropy_median(
     merged["entropy"] = merged["entropy"].fillna(0.0)
 
     patient_entropy = (
-        merged.groupby("patient_id")["entropy"]
-              .median()
-              .reset_index(name="patient_entropy_median")
+        merged.groupby("patient_id")["entropy"].median().reset_index(name="patient_entropy_median")
     )
     return patient_entropy
 
@@ -445,6 +452,7 @@ def score_split_by_patient_entropy_median(
 # -----------------------------------------------------------------------------
 # Split generation: evaluate multiple feasible splits, pick best
 # -----------------------------------------------------------------------------
+
 
 def create_train_val_test_split_best(
     df: pd.DataFrame,
@@ -474,7 +482,7 @@ def create_train_val_test_split_best(
     y = patient_df["patient_label"].astype(int).to_numpy()
 
     # Determine if "both classes" constraint is meaningful (dataset might be single-class)
-    dataset_has_both_classes = (patient_df["patient_label"].nunique() >= 2)
+    dataset_has_both_classes = patient_df["patient_label"].nunique() >= 2
 
     rng = np.random.default_rng(random_state)
 
@@ -524,23 +532,38 @@ def create_train_val_test_split_best(
         test_patients = set(patient_ids[test_idx])
 
         # No leakage
-        if (train_patients & val_patients) or (train_patients & test_patients) or (val_patients & test_patients):
+        if (
+            (train_patients & val_patients)
+            or (train_patients & test_patients)
+            or (val_patients & test_patients)
+        ):
             fail_overlap += 1
             continue
 
         # Minimum patient counts
-        if len(train_patients) < sizing_meta["min_train"] or len(val_patients) < sizing_meta["min_val"] or len(test_patients) < sizing_meta["min_test"]:
+        if (
+            len(train_patients) < sizing_meta["min_train"]
+            or len(val_patients) < sizing_meta["min_val"]
+            or len(test_patients) < sizing_meta["min_test"]
+        ):
             fail_min_patients += 1
             continue
 
         # Optional: class coverage guardrail (only if dataset has both classes)
         if constraints.require_both_classes_if_possible and dataset_has_both_classes:
+
             def split_has_both(pids: set) -> bool:
-                labs = set(patient_df[patient_df["patient_id"].isin(pids)]["patient_label"].tolist())
+                labs = set(
+                    patient_df[patient_df["patient_id"].isin(pids)]["patient_label"].tolist()
+                )
                 return (0 in labs) and (1 in labs)
 
             # If feasible, enforce for all splits
-            if not (split_has_both(train_patients) and split_has_both(val_patients) and split_has_both(test_patients)):
+            if not (
+                split_has_both(train_patients)
+                and split_has_both(val_patients)
+                and split_has_both(test_patients)
+            ):
                 fail_class_coverage += 1
                 continue
 
@@ -684,6 +707,7 @@ def _build_split_return(
 # Normalization (unchanged logic)
 # -----------------------------------------------------------------------------
 
+
 def make_aggregate_target(image_paths: List[str]) -> np.ndarray:
     images_rgb = []
     for p in image_paths:
@@ -728,9 +752,7 @@ def fit_normalizer_on_train_set(
 
     else:
         # --- SLOW FALLBACK: compute entropy by reading images again ---
-        logging.warning(
-            "entropy_df not provided; selecting templates by rereading images (slow)."
-        )
+        logging.warning("entropy_df not provided; selecting templates by rereading images (slow).")
         patient_files = train_df.groupby("patient_id")["image_path"].apply(list).to_dict()
         if not patient_files:
             raise ValueError("No patient images found in TRAIN to fit the normalizer.")
@@ -759,7 +781,9 @@ def fit_normalizer_on_train_set(
     return normalizer, template_paths
 
 
-def save_normalizer_stats(normalizer, method_name: str, output_dir: str, template_paths: List[str]) -> None:
+def save_normalizer_stats(
+    normalizer, method_name: str, output_dir: str, template_paths: List[str]
+) -> None:
     stats = {"method": method_name}
 
     try:
@@ -810,7 +834,10 @@ def save_normalizer_stats(normalizer, method_name: str, output_dir: str, templat
 # File I/O: normalize images (optional) + copy masks
 # -----------------------------------------------------------------------------
 
-def process_and_write_image(src_path: str, dest_path: str, normalizer) -> Tuple[bool, Optional[str]]:
+
+def process_and_write_image(
+    src_path: str, dest_path: str, normalizer
+) -> Tuple[bool, Optional[str]]:
     """
     Non-destructive: reads image, optionally normalizes, writes to dest_path.
     Used for normalized pipelines or when you explicitly want a copy.
@@ -838,6 +865,7 @@ def process_and_write_image(src_path: str, dest_path: str, normalizer) -> Tuple[
 
 
 _MOVE_FALLBACKS = 0
+
 
 def move_file(src_path: str, dest_path: str) -> Tuple[bool, Optional[str]]:
     global _MOVE_FALLBACKS
@@ -874,7 +902,7 @@ def process_and_write_split_files(
         logging.info(f"Skipping empty split: {split_name}")
         return
 
-    is_not_normalized = (normalization_method == "NOT_NORMALIZED")
+    is_not_normalized = normalization_method == "NOT_NORMALIZED"
     if is_not_normalized:
         logging.warning(
             f"[DESTRUCTIVE MODE] NOT_NORMALIZED => moving files into split folders for {split_name}. "
@@ -932,7 +960,9 @@ def process_and_write_split_files(
         # chunksize affects batching to workers; higher reduces overhead (esp. Windows)
         results_iter = ex.map(_process_one, rows_iter, chunksize=256)
 
-        for ok, msg in tqdm(results_iter, total=len(split_df), desc=f"Write {split_name}", leave=False):
+        for ok, msg in tqdm(
+            results_iter, total=len(split_df), desc=f"Write {split_name}", leave=False
+        ):
             if not ok and msg:
                 errors.append(msg)
 
@@ -940,7 +970,6 @@ def process_and_write_split_files(
         for e in errors[:30]:
             logging.error(f"Write error: {e}")
         raise RuntimeError(f"Failed to process {len(errors)} items for split {split_name}.")
-
 
 
 def verify_split_integrity(output_dir: str, split_name: str) -> None:
@@ -958,7 +987,9 @@ def verify_split_integrity(output_dir: str, split_name: str) -> None:
         img_files = {f for f in os.listdir(img_dir) if f.lower().endswith(".png")}
         msk_files = {f for f in os.listdir(msk_dir) if f.lower().endswith(".png")}
         if img_files != msk_files:
-            raise ValueError(f"Integrity FAILED for {split_name}/{label_name}: image/mask filenames differ.")
+            raise ValueError(
+                f"Integrity FAILED for {split_name}/{label_name}: image/mask filenames differ."
+            )
 
     logging.info(f"Integrity PASSED: {split_name}")
 
@@ -967,8 +998,10 @@ def verify_split_integrity(output_dir: str, split_name: str) -> None:
 # Provenance
 # -----------------------------------------------------------------------------
 
+
 def _sha256_file(path: str, chunk_size: int = 1024 * 1024) -> str:
     import hashlib
+
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while True:
@@ -978,7 +1011,10 @@ def _sha256_file(path: str, chunk_size: int = 1024 * 1024) -> str:
             h.update(b)
     return h.hexdigest()
 
-def fill_manifest_checksums_inplace(manifest_df: pd.DataFrame, num_workers: int = 8) -> pd.DataFrame:
+
+def fill_manifest_checksums_inplace(
+    manifest_df: pd.DataFrame, num_workers: int = 8
+) -> pd.DataFrame:
     """
     Compute sha256 for destination files listed in manifest_df['abs_image_path'] / ['abs_mask_path'].
     Parallelized. Still expensive for 700k+ files.
@@ -997,7 +1033,9 @@ def fill_manifest_checksums_inplace(manifest_df: pd.DataFrame, num_workers: int 
     sha_msk_out = [None] * len(manifest_df)
 
     with ThreadPoolExecutor(max_workers=num_workers) as ex:
-        futures = {ex.submit(hash_pair, img_paths[i], msk_paths[i]): i for i in range(len(manifest_df))}
+        futures = {
+            ex.submit(hash_pair, img_paths[i], msk_paths[i]): i for i in range(len(manifest_df))
+        }
         for fut in tqdm(as_completed(futures), total=len(futures), desc="SHA256", leave=False):
             i = futures[fut]
             try:
@@ -1012,9 +1050,12 @@ def fill_manifest_checksums_inplace(manifest_df: pd.DataFrame, num_workers: int 
     manifest_df["sha256_mask"] = sha_msk_out
     return manifest_df
 
+
 def _get_git_commit_hash() -> Optional[str]:
     try:
-        out = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        out = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+        ).strip()
         return out or None
     except Exception:
         return None
@@ -1030,12 +1071,14 @@ def _collect_library_versions() -> Dict:
     }
     try:
         import sklearn
+
         versions["sklearn"] = getattr(sklearn, "__version__", None)
     except Exception:
         versions["sklearn"] = None
 
     try:
         import tiatoolbox
+
         versions["tiatoolbox"] = getattr(tiatoolbox, "__version__", None)
     except Exception:
         versions["tiatoolbox"] = None
@@ -1066,7 +1109,9 @@ def build_manifest_from_split_dfs(
 
             # Destination (what the script writes/moves to)
             rel_img = os.path.join(split_name, label_dir, row["filename"]).replace("\\", "/")
-            rel_msk = os.path.join(split_name, f"{label_dir}_MASK", row["filename"]).replace("\\", "/")
+            rel_msk = os.path.join(split_name, f"{label_dir}_MASK", row["filename"]).replace(
+                "\\", "/"
+            )
 
             abs_img = os.path.join(output_dir, split_name, label_dir, row["filename"])
             abs_msk = os.path.join(output_dir, split_name, f"{label_dir}_MASK", row["filename"])
@@ -1107,6 +1152,7 @@ def build_manifest_from_split_dfs(
     ).reset_index(drop=True)
 
     return manifest_df
+
 
 class SafeJSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -1158,14 +1204,16 @@ def write_manifest_and_log_stats(
 
     # --- split_stats.csv (unchanged, computed from split_data dfs) ---
     stats_rows = []
-    for split_name, sdf in [("TRAIN", split_data["train_df"]), ("VALIDATION", split_data["val_df"]), ("TEST", split_data["test_df"])]:
+    for split_name, sdf in [
+        ("TRAIN", split_data["train_df"]),
+        ("VALIDATION", split_data["val_df"]),
+        ("TEST", split_data["test_df"]),
+    ]:
         if sdf is None or sdf.empty:
             continue
 
         patient_counts = (
-            sdf.groupby(["patient_id", "label"])
-              .size()
-              .reset_index(name="n_images_patient")
+            sdf.groupby(["patient_id", "label"]).size().reset_index(name="n_images_patient")
         )
 
         n_patients = int(patient_counts["patient_id"].nunique())
@@ -1234,20 +1282,27 @@ def write_manifest_and_log_stats(
 # Main
 # -----------------------------------------------------------------------------
 
+
 def main(cfg: RunConfig) -> None:
     valid_methods = ["NOT_NORMALIZED", "REINHARD", "RUIFROK", "MACENKO", "VAHADANE"]
     if cfg.normalization_method not in valid_methods:
-        raise ValueError(f"Invalid normalization_method={cfg.normalization_method}. Must be one of {valid_methods}")
+        raise ValueError(
+            f"Invalid normalization_method={cfg.normalization_method}. Must be one of {valid_methods}"
+        )
 
     data_dir = os.path.normpath(cfg.data_directory)
     output_base_dir = os.path.join(data_dir, cfg.normalization_method)
-    output_run_dir = os.path.join(output_base_dir, f"{cfg.normalization_method}_seed_{cfg.random_state}")
+    output_run_dir = os.path.join(
+        output_base_dir, f"{cfg.normalization_method}_seed_{cfg.random_state}"
+    )
 
     if os.path.exists(output_run_dir):
         if cfg.overwrite_output_dir:
             shutil.rmtree(output_run_dir)
         else:
-            raise RuntimeError(f"Output directory exists: {output_run_dir} (set overwrite_output_dir=True)")
+            raise RuntimeError(
+                f"Output directory exists: {output_run_dir} (set overwrite_output_dir=True)"
+            )
 
     os.makedirs(output_run_dir, exist_ok=True)
     setup_logging(output_run_dir)
@@ -1278,7 +1333,9 @@ def main(cfg: RunConfig) -> None:
 
         if cfg.save_entropy_cache_csv:
             entropy_df.to_csv(entropy_cache_path, index=False)
-            patient_entropy_df.to_csv(os.path.join(output_run_dir, "patient_entropy_median.csv"), index=False)
+            patient_entropy_df.to_csv(
+                os.path.join(output_run_dir, "patient_entropy_median.csv"), index=False
+            )
             logging.info(f"Saved entropy cache: {entropy_cache_path}")
 
     # 3) Split search: pick best feasible split (or first feasible if objective disabled)
@@ -1313,24 +1370,28 @@ def main(cfg: RunConfig) -> None:
     template_paths = None
     if cfg.normalization_method != "NOT_NORMALIZED":
         normalizer, template_paths = fit_normalizer_on_train_set(
-                                            split_data["train_df"],
-                                            cfg.normalization_method,
-                                            entropy_df=entropy_df,   # <- NEW
-                                        )
+            split_data["train_df"],
+            cfg.normalization_method,
+            entropy_df=entropy_df,  # <- NEW
+        )
         save_normalizer_stats(normalizer, cfg.normalization_method, output_run_dir, template_paths)
 
     # 6) Write files (normalize images if enabled; masks copied raw)
-    split_dfs = {"TRAIN": split_data["train_df"], "VALIDATION": split_data["val_df"], "TEST": split_data["test_df"]}
+    split_dfs = {
+        "TRAIN": split_data["train_df"],
+        "VALIDATION": split_data["val_df"],
+        "TEST": split_data["test_df"],
+    }
     for split_name, sdf in split_dfs.items():
         process_and_write_split_files(
-                                    sdf,
-                                    output_run_dir,
-                                    split_name,
-                                    normalizer,
-                                    normalization_method=cfg.normalization_method,
-                                )
+            sdf,
+            output_run_dir,
+            split_name,
+            normalizer,
+            normalization_method=cfg.normalization_method,
+        )
         verify_split_integrity(output_run_dir, split_name)
-    
+
     logging.info(f"Move fallbacks (copy+delete likely): {_MOVE_FALLBACKS}")
 
     # 7) Manifest + stats + run config
@@ -1350,7 +1411,7 @@ def main(cfg: RunConfig) -> None:
         is_normalized=(cfg.normalization_method != "NOT_NORMALIZED"),
         data_directory=data_dir,
         split_data=split_data,
-        manifest_df=manifest_df,           # <-- ADD THIS
+        manifest_df=manifest_df,  # <-- ADD THIS
         calc_checksums=cfg.calc_checksums,
         extra=extra,
     )

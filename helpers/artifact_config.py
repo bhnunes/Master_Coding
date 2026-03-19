@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.runtime_platform import resolve_env_path
+
 
 @dataclass(frozen=True)
 class ArtifactDetectionConfig:
@@ -46,26 +48,54 @@ class ArtifactDetectionConfig:
 
 def load_artifact_detection_config(
     environment: Mapping[str, str | None],
+    *,
+    system_name: str | None = None,
 ) -> ArtifactDetectionConfig:
     """Load Stage 1 artifact detection settings from environment variables."""
 
-    images_zip = _required_path(environment, "ARTIFACT_IMAGES_ZIP")
+    images_zip = _required_path(environment, "ARTIFACT_IMAGES_ZIP", system_name=system_name)
     geojson_output = _path_with_default(
-        environment, "ARTIFACT_GEOJSON_OUTPUT", "./artifacts/geojson"
+        environment,
+        "ARTIFACT_GEOJSON_OUTPUT",
+        "./artifacts/geojson",
+        system_name=system_name,
     )
-    database_folder = _path_with_default(environment, "ARTIFACT_DATABASE_FOLDER", "./databases")
-    temp_root = _path_with_default(environment, "ARTIFACT_TEMP_FOLDER", "./temp/artifact_detection")
-    log_folder = _path_with_default(environment, "ARTIFACT_LOG_FOLDER", "./logs")
+    database_folder = _path_with_default(
+        environment,
+        "ARTIFACT_DATABASE_FOLDER",
+        "./databases",
+        system_name=system_name,
+    )
+    temp_root = _path_with_default(
+        environment,
+        "ARTIFACT_TEMP_FOLDER",
+        "./temp/artifact_detection",
+        system_name=system_name,
+    )
+    log_folder = _path_with_default(
+        environment,
+        "ARTIFACT_LOG_FOLDER",
+        "./logs",
+        system_name=system_name,
+    )
     device = _string_with_default(environment, "ARTIFACT_DEVICE", "cuda")
     tissue_detector_model_dir = _path_with_default(
-        environment, "ARTIFACT_TD_MODEL_DIR", "./models/td"
+        environment,
+        "ARTIFACT_TD_MODEL_DIR",
+        "./models/td",
+        system_name=system_name,
     )
     tissue_detector_model_name = _string_with_default(
         environment,
         "ARTIFACT_TD_MODEL_NAME",
         "Tissue_Detection_MPP10.pth",
     )
-    qc_model_dir = _path_with_default(environment, "ARTIFACT_QC_MODEL_DIR", "./models/qc")
+    qc_model_dir = _path_with_default(
+        environment,
+        "ARTIFACT_QC_MODEL_DIR",
+        "./models/qc",
+        system_name=system_name,
+    )
     mpp_model = _float_with_default(environment, "ARTIFACT_MPP_MODEL", 1.5)
     database_name = _string_with_default(
         environment, "ARTIFACT_DATABASE_NAME", "artifact_detection.db"
@@ -88,16 +118,33 @@ def load_artifact_detection_config(
     )
 
 
-def _required_path(environment: Mapping[str, str | None], name: str) -> Path:
-    value = environment.get(name)
-    if not value:
-        raise ValueError(f"The '{name}' environment variable is required.")
-    return Path(value).expanduser()
+def _required_path(
+    environment: Mapping[str, str | None],
+    name: str,
+    *,
+    system_name: str | None = None,
+) -> Path:
+    path = resolve_env_path(
+        environment.get(name),
+        name,
+        system_name=system_name,
+        required=True,
+    )
+    assert path is not None
+    return path
 
 
-def _path_with_default(environment: Mapping[str, str | None], name: str, default: str) -> Path:
+def _path_with_default(
+    environment: Mapping[str, str | None],
+    name: str,
+    default: str,
+    *,
+    system_name: str | None = None,
+) -> Path:
     value = environment.get(name) or default
-    return Path(value).expanduser()
+    path = resolve_env_path(value, name, system_name=system_name, required=True)
+    assert path is not None
+    return path
 
 
 def _string_with_default(environment: Mapping[str, str | None], name: str, default: str) -> str:

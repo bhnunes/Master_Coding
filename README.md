@@ -50,6 +50,7 @@ Master_Coding/
 ├── logs/                            # Log files
 │
 ├── .env_example                     # Environment configuration template
+├── setup_windows.ps1                # Native Windows bootstrap
 ├── setup_colab.sh                   # One-step Google Colab bootstrap
 ├── colab_setup.md                   # Google Colab usage guide
 ├── pyproject.toml                   # Project configuration (uv)
@@ -172,10 +173,17 @@ WINDOW_SIZE=224
 STRIDE=112
 TISSUE_PERCENTAGE=0.3
 MATCH_PERCENTAGE=1.0
-OPENSLIDE_PATH=/path/to/openslide/bin
+OPENSLIDE_PATH=
 ```
 
 See `.env_example` for the current commented template, including the Stage 1 artifact detection block.
+
+OpenSlide runtime rules:
+
+- Native Windows requires `OPENSLIDE_PATH`, and it must point to the OpenSlide `bin` folder.
+- Linux, containers, and Google Colab ignore `OPENSLIDE_PATH` and rely on the system OpenSlide install.
+- When running from WSL, heavy reads and writes on `/mnt/c` or `/mnt/d` can be much slower than native Linux paths.
+- If your source data and outputs live on Windows disks, native Windows remains the recommended production path.
 
 ### Artifact Policy (artifact_policy.yaml)
 
@@ -213,6 +221,14 @@ uv run --python 3.12 python 1_artifact_detection.py
 ```
 
 See `colab_setup.md` for the complete Colab workflow, including Google Drive mounting and `.env` configuration.
+
+### Using Native Windows
+
+```powershell
+./setup_windows.ps1
+```
+
+The bootstrap script validates `uv`, syncs dependencies from `pyproject.toml`, checks `OPENSLIDE_PATH`, and verifies `openslide`, `cv2`, and `torch` imports.
 
 ### Using Docker
 

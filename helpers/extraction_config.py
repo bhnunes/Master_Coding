@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.runtime_platform import resolve_env_path
+
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
@@ -26,13 +28,13 @@ def _parse_float(value: str | None, variable_name: str, default: float | None = 
     return float(candidate)
 
 
-def _parse_optional_path(value: str | None) -> Path | None:
-    if value is None:
-        return None
-    stripped = value.strip()
-    if not stripped:
-        return None
-    return Path(stripped).expanduser()
+def _parse_optional_path(
+    value: str | None,
+    variable_name: str,
+    *,
+    system_name: str | None = None,
+) -> Path | None:
+    return resolve_env_path(value, variable_name, system_name=system_name)
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,8 @@ class DatabaseManagerConfig:
 
 def load_database_manager_config(
     env: Mapping[str, str | None] | None = None,
+    *,
+    system_name: str | None = None,
 ) -> DatabaseManagerConfig:
     """Load and validate database manager configuration from environment values."""
 
@@ -77,15 +81,28 @@ def load_database_manager_config(
 
     window_size = _parse_int(values.get("WINDOW_SIZE"), "WINDOW_SIZE", default=224)
     stride = _parse_int(values.get("STRIDE"), "STRIDE", default=window_size // 2)
+    use_advanced_artifact_filtering = _parse_bool(values.get("USE_ADVANCED_ARTIFACT_FILTERING"))
+    activate_sanity_check_geojson = _parse_bool(values.get("ACTIVATE_SANITY_CHECK_GEOJSON"))
 
-    database_path_value = values.get("SQLITE_DB_PATH")
-    if not database_path_value:
-        raise ValueError("The 'SQLITE_DB_PATH' environment variable is required.")
+    database_path = resolve_env_path(
+        values.get("SQLITE_DB_PATH"),
+        "SQLITE_DB_PATH",
+        system_name=system_name,
+        required=True,
+    )
+    base_path = resolve_env_path(
+        values.get("PROJECTS_BASE_PATH") or "./projects",
+        "PROJECTS_BASE_PATH",
+        system_name=system_name,
+        required=True,
+    )
+    assert database_path is not None
+    assert base_path is not None
 
     return DatabaseManagerConfig(
         tag=tag,
-        database_path=Path(database_path_value).expanduser(),
-        base_path=Path(values.get("PROJECTS_BASE_PATH") or "./projects").expanduser(),
+        database_path=database_path,
+        base_path=base_path,
         window_size=window_size,
         stride=stride,
         match_percentage=_parse_float(
@@ -101,8 +118,24 @@ def load_database_manager_config(
             1, _parse_int(values.get("NUM_WORKERS"), "NUM_WORKERS", default=os.cpu_count() or 1)
         ),
         load_cases=_parse_bool(values.get("LOADCASES")),
-        use_advanced_artifact_filtering=_parse_bool(values.get("USE_ADVANCED_ARTIFACT_FILTERING")),
-        activate_sanity_check_geojson=_parse_bool(values.get("ACTIVATE_SANITY_CHECK_GEOJSON")),
-        geojson_path=_parse_optional_path(values.get("GEOJSON_PATH")),
-        artifact_policy_path=_parse_optional_path(values.get("ARTIFACT_POLICY_PATH")),
+        use_advanced_artifact_filtering=use_advanced_artifact_filtering,
+        activate_sanity_check_geojson=activate_sanity_check_geojson,
+        geojson_path=(
+            _parse_optional_path(
+                values.get("GEOJSON_PATH"),
+                "GEOJSON_PATH",
+                system_name=system_name,
+            )
+            if use_advanced_artifact_filtering or activate_sanity_check_geojson
+            else None
+        ),
+        artifact_policy_path=(
+            _parse_optional_path(
+                values.get("ARTIFACT_POLICY_PATH"),
+                "ARTIFACT_POLICY_PATH",
+                system_name=system_name,
+            )
+            if use_advanced_artifact_filtering
+            else None
+        ),
     )

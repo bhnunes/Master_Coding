@@ -13,39 +13,45 @@ This file gives coding agents repository-specific guidance for working safely an
 
 ## Repository Layout
 - `1_artifact_detection.py`: Generation of GeoJSON information about artifacts on the whole-slide-images.
-- `2_database_manager.py`: top-level orchestration for ingestion, SQLite tracking, and per-case processing.
+- `2_database_manager.py`: `.env`-driven Stage 2 orchestrator for ingestion, SQLite tracking, project setup, and per-case patch extraction.
 - `3_1_imageReader.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
 - `helpers/data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
 - `helpers/patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
-- `4_1_optimization_sampling.py`: Script responsible for selecting a sub sample of Cancer images for a Human-in-the-loop cleaning process of incorrect annotations.
+- `4_1_optimization_sampling.py`: Script responsible for selecting a subsample of cancer images for a human-in-the-loop cleaning process of incorrect annotations.
 - `4_2_tune_graph_method.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
 - `4_3_cleaner_script.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
 - `5_crossfold.py`: patient-level dataset split creation plus optional stain normalization.
 - `6_sanity_checks.py`: scientific integrity and dataset consistency checks.
 - `7_pack_splits_to_hdf5.py`: converts prepared split folders into `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`.
-- `8_smart_sampler.py`: Selects the best images from `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`, keeping only the most informative samples. Written to run with GPU on google colab notebook.
-- `9_lr_finder.py`: Used to estimate the best learning rate for training fro every model.
+- `8_smart_sampler.py`: Selects the best images from `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`, keeping only the most informative samples. Written to run with GPU on Google Colab.
+- `9_lr_finder.py`: Used to estimate the best learning rate for training for every model.
 - `10_training_ensemble.py`: Responsible for training the models using smp, schedulefree and pytorch.
 - `11_optimizer_ensemble.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context).
 - `12_inference_ensemble.py`: Responsible for generating the results on the test set.
 
 ## Architecture
 
-- Each script on root was created as a standalone application. 
+- Each root script was created as a standalone application.
 - The architecture is a monolith with Domain Driven Design.
-- All environment variables should be saved on .env file. This file must have comments to indicate to each script those variables belong to.
-- All test scripts must be saved on folder /tests.
-- All logs generated must be saved on /logs.
-- All helpers should be standalone classes organized by domain and saved on /helpers.
-- Databases should be saved on /databases.
+- All environment variables should be saved in the `.env` file. This file must have comments indicating which script each variable belongs to.
+- All test scripts must be saved in `/tests`.
+- All logs generated must be saved in `/logs`.
+- All helpers should be standalone modules or classes organized by domain and saved in `/helpers`.
+- Databases should be saved in `/databases`.
 
 ## Current Repository Notes
 
 - `1_artifact_detection.py` is now a `.env`-driven Stage 1 orchestrator. Keep orchestration there and keep runtime/domain behavior in `helpers/artifact_*.py`.
 - Stage 1 artifact detection reads WSI members directly from a zip archive, extracts one slide at a time to a temporary workspace, writes GeoJSON outputs, updates SQLite status, and cleans temporary files after each slide.
+- Stage 1 GeoJSON outputs are intended to be reused by Stage 2 through `GEOJSON_PATH` when advanced artifact filtering is enabled.
 - Stage 1 database tracking must preserve at least `Image_Name`, `GeoJSON_Processed`, and `Comments`. Operational metadata such as `LastUpdate` is also allowed.
 - Stage 1 logging is intentionally colorful and user-facing. Preserve the styled console + file logging pattern established in `helpers/artifact_logging.py` and inspired by `2_database_manager.py`.
 - Active Stage 1 helper modules are `helpers/artifact_config.py`, `helpers/artifact_logging.py`, `helpers/artifact_model_loader.py`, `helpers/artifact_paths.py`, `helpers/artifact_pipeline.py`, `helpers/artifact_processor.py`, `helpers/artifact_repository.py`, and `helpers/artifact_zip.py`.
+- `2_database_manager.py` is now a `.env`-driven Stage 2 orchestrator. Keep orchestration there and keep configuration, repository access, and slide-processing services in `helpers/extraction_config.py`, `helpers/extraction_repository.py`, and `helpers/image_reader_service.py`.
+- Stage 2 supports two execution modes: ingestion mode with `LOADCASES=True`, and processing mode that consumes pending database cases and dispatches per-slide extraction.
+- Stage 2 initializes project folders and SQLite schema, validates optional GeoJSON sanity checks during ingestion, and records per-case extraction metadata such as status, comments, patch counts, runtime, and extraction parameters.
+- Stage 2 can attach artifact GeoJSON files generated by Stage 1 when `USE_ADVANCED_ARTIFACT_FILTERING=True` and `GEOJSON_PATH` points to the Stage 1 output folder.
+- Active Stage 2 helper modules are `helpers/extraction_config.py`, `helpers/extraction_repository.py`, and `helpers/image_reader_service.py`.
 - Active legacy helpers still used by extraction workflows include `helpers/data_handlers.py`, `helpers/patch_engine.py`, `helpers/wsi_colors.py`, `helpers/wsi_maps.py`, `helpers/wsi_process.py`, `helpers/wsi_slide_info.py`, and `helpers/wsi_tis_detect_helper_fx.py`.
 - Removed legacy helper files that should not be reintroduced without clear need: `helpers/main.py`, `helpers/wsi_tis_detect.py`, and `helpers/wsi_stain_norm.py`.
 - Use package-safe imports from `helpers...` for helper modules. Do not add new sibling-style imports such as `from data_handlers import ...`.
@@ -53,6 +59,14 @@ This file gives coding agents repository-specific guidance for working safely an
 - `setup_colab.sh` is the canonical Google Colab bootstrap. It installs system dependencies, installs `uv`, installs Python 3.12, syncs from `pyproject.toml`, and prepares `.env` when missing.
 - Current validation status: `uv run pytest` passes, and scoped checks pass for `1_artifact_detection.py`, `3_1_imageReader.py`, `helpers`, and `tests` with Ruff and MyPy. Full-repo `ruff check .` and `mypy .` still fail because of unrelated legacy root scripts.
 - `pytest-cov` is referenced by policy, but it is not currently installed in the environment. Do not claim coverage output was produced unless that dependency is added and the command is rerun.
+
+## Skills
+
+- Repository-local skills are available under `skills/` and should be used when the task matches their scope.
+- Use `skills/scientific-code-to-latex/SKILL.md` when converting repository behavior into publication-ready scientific prose or LaTeX methods text grounded in the code.
+- Use `skills/scientific-validation-review/SKILL.md` when reviewing training, evaluation, splitting, preprocessing, or other research code for threats to scientific validity, leakage, bias, or irreproducibility.
+- Use `skills/python-performance-optimization/SKILL.md` when profiling or optimizing Python performance, especially for scientific workloads, heavy loops, pandas/NumPy code, or parallel execution.
+- For optimization work, prefer representative samples located under `PROJECTS_BASE_PATH` from `.env` for profiling and benchmarking whenever those project samples are available.
 
 ## Naming Conventions
 
@@ -138,11 +152,11 @@ The project stack uses:
 - **ruff** for linting
 - **mypy** for static typing
 - **python-dotenv** for environment configuration
--**argparse** for parameters input
+- **argparse** for parameter input
 
 Agents must use the project’s existing stack unless there is a strong technical reason to introduce a new dependency.
 
-Libraries and begaviors must be defined on toml file.
+Libraries and behaviors must be defined in `pyproject.toml`.
 
 ---
 
@@ -167,10 +181,10 @@ uv run <command>
 Examples:
 
 
-uv run pytest
-uv run pytest --cov=helpers --cov-report=term-missing
-uv run ruff check .
-uv run mypy .
+`uv run pytest`
+`uv run pytest --cov=helpers --cov-report=term-missing`
+`uv run ruff check .`
+`uv run mypy .`
 
 Dependency policy
 
@@ -178,7 +192,7 @@ Agents must:
 
 - add dependencies only when necessary
 
-- prefer mature, widely used libraries (specially numpy, pandas or Pollars over coding from scratch)
+- prefer mature, widely used libraries (especially NumPy, pandas, or Polars over coding from scratch)
 
 - avoid adding dependencies for trivial functionality already available in the standard library or existing project stack
 
@@ -206,7 +220,7 @@ MASTER_CODING:
 - `11_optimizer_ensemble.py`
 - `12_inference_ensemble.py`
 - `.env`
--`.gitignore`
+- `.gitignore`
 - `AGENTS.md`
 - `artifact_policy.yaml`
 - `README.md`
@@ -228,11 +242,11 @@ MASTER_CODING:
 - `logs/`
 - `tests/`
 
----	
+---
 
 ## 6. Architectural Boundaries
 
-Every script from :
+Each root script listed below is a monolithic, self-contained script:
 
 - 1_artifact_detection.py
 - 2_database_manager.py
@@ -249,7 +263,7 @@ Every script from :
 - 11_optimizer_ensemble.py
 - 12_inference_ensemble.py
 
-is a monolitic self contained script and they perform actions independently of each other (except for `2_database_manager.py` and `3_1_imageReader.py`, that interact with each other, along with `helpers/data_handlers.py` and `helpers/patch_engine.py`).
+These scripts perform actions independently of each other, except for `2_database_manager.py` and `3_1_imageReader.py`, which interact with each other and with `helpers/data_handlers.py` and `helpers/patch_engine.py`.
 
 ---
 
@@ -346,9 +360,11 @@ Tests must be:
 - direct assertion of observable behavior
 
 
+```python
 def test_classify_usage_rejects_when_usage_exceeds_threshold() -> None:
     result = classify_usage(cpu_used=80.0, cpu_requested=50.0)
     assert result == "Rejected"
+```
 
 
 ---
@@ -429,10 +445,10 @@ If a library lacks typing support, prefer installing type stubs when appropriate
 
 - Code quality checks are mandatory.
 
-*Required commands*
+**Required commands**
 
-uv run ruff check .
-uv run ruff format .
+`uv run ruff check .`
+`uv run ruff format .`
 
 
 Lint issues must be resolved before finalizing changes.
@@ -455,10 +471,10 @@ Lint issues must be resolved before finalizing changes.
 
 ---
 
-15. Logging and Observability
+## 15. Logging and Observability
 
 - Implementations should be debuggable.
-- All logs should be saved on folder /logs
+- All logs should be saved in `/logs`.
 
 **Agents should prefer**:
 
@@ -515,7 +531,7 @@ Lint issues must be resolved before finalizing changes.
 
 When implementing or changing code, agents must obey the following operational rules.
 
-# 17.1 Before writing code
+### 17.1 Before writing code
 
 Agents must first:
 
@@ -525,7 +541,7 @@ Agents must first:
 
 - identify the tests that need to be added or updated
 
-# 17.2 During implementation
+### 17.2 During implementation
 
 Agents must:
 
@@ -537,7 +553,7 @@ Agents must:
 
 - add or update tests alongside the code
 
-# 17.3 After implementation
+### 17.3 After implementation
 
 Agents must verify:
 
@@ -601,7 +617,7 @@ Agents should prefer:
 
 - explicit contracts between pipeline stages
 
-- Use abstraction only when it simplifies the system. Do not introduce unnecessary indirection.
+- use abstraction only when it simplifies the system. Do not introduce unnecessary indirection.
 
 ---
 
@@ -635,12 +651,12 @@ Before considering a task complete, agents must ensure the answer to each item i
 
 ## 21. Recommended Developer Commands
 
-uv sync
-uv run pytest
-uv run pytest --cov=helpers --cov-report=term-missing
-uv run ruff check .
-uv run ruff format .
-uv run mypy .
+`uv sync`
+`uv run pytest`
+`uv run pytest --cov=helpers --cov-report=term-missing`
+`uv run ruff check .`
+`uv run ruff format .`
+`uv run mypy .`
 
 
 If only a subset is needed during local iteration, agents may scope commands appropriately, but final validation should cover the full affected surface.

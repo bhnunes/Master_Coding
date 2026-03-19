@@ -17,6 +17,7 @@ from helpers.data_handlers import (
     NDPI_NDPA_Handler,
     SVS_XML_Handler,
 )
+from helpers.runtime_platform import load_openslide_module, resolve_env_path
 
 HANDLER_MAPPING: dict[tuple[str, str], type[BaseHandler]] = {
     (".svs", ".xml"): SVS_XML_Handler,
@@ -86,6 +87,8 @@ class SlideProcessingResult:
 
 def load_slide_runtime_settings(
     env: Mapping[str, str | None] | None = None,
+    *,
+    system_name: str | None = None,
 ) -> SlideRuntimeSettings:
     """Load patch extraction settings from environment values."""
 
@@ -101,11 +104,15 @@ def load_slide_runtime_settings(
     }
 
     artifact_policy: dict[str, Any] | None = None
-    artifact_policy_path = values.get("ARTIFACT_POLICY_PATH")
     if use_advanced_artifact_filtering:
+        artifact_policy_path = resolve_env_path(
+            values.get("ARTIFACT_POLICY_PATH"),
+            "ARTIFACT_POLICY_PATH",
+            system_name=system_name,
+        )
         if not artifact_policy_path:
             raise ValueError("ARTIFACT_POLICY_PATH is required when artifact filtering is enabled")
-        with open(artifact_policy_path, encoding="utf-8") as artifact_policy_file:
+        with artifact_policy_path.open(encoding="utf-8") as artifact_policy_file:
             loaded_policy = yaml.safe_load(artifact_policy_file)
         if not isinstance(loaded_policy, dict) or "DROP_THRESH" not in loaded_policy:
             raise ValueError("DROP_THRESH not found in artifact_policy.yaml")
@@ -145,6 +152,7 @@ def get_handler_for_files(image_path: str, annotation_path: str) -> BaseHandler:
 def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResult:
     """Run patch extraction for one slide through the shared Python API."""
 
+    load_openslide_module()
     _setup_patch_logging_once()
     warnings.filterwarnings("ignore", category=UserWarning, module="PIL")
     warnings.filterwarnings("ignore", category=RuntimeWarning)

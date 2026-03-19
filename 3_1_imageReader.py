@@ -2,13 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
-import os
-import sys
-from contextlib import AbstractContextManager, nullcontext
-from importlib import import_module
 from pathlib import Path
-from typing import cast
 
 from dotenv import load_dotenv
 
@@ -17,20 +11,9 @@ from helpers.image_reader_service import (
     load_slide_runtime_settings,
     run_slide_processing,
 )
+from helpers.runtime_platform import load_openslide_module
 
 load_dotenv(override=True)
-OPENSLIDE_PATH = os.getenv("OPENSLIDE_PATH")
-
-try:
-    dll_context: AbstractContextManager[None] = nullcontext()
-    add_dll_directory = getattr(os, "add_dll_directory", None)
-    if callable(add_dll_directory) and OPENSLIDE_PATH and os.path.isdir(OPENSLIDE_PATH):
-        dll_context = cast(AbstractContextManager[None], add_dll_directory(OPENSLIDE_PATH))
-    with dll_context:
-        import_module("openslide")
-except ImportError as error:
-    logging.error("Error importing OpenSlide: %s", error)
-    sys.exit(1)
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +42,7 @@ def main() -> None:
     """Run one slide extraction job and emit the legacy JSON contract."""
 
     load_dotenv(override=True)
+    load_openslide_module()
     args = parse_args()
     runtime_settings = load_slide_runtime_settings()
 

@@ -8,6 +8,7 @@ from PIL import Image
 
 from helpers.artifact_config import ArtifactDetectionConfig
 from helpers.artifact_model_loader import ArtifactModelLoader
+from helpers.runtime_platform import load_openslide_module
 
 Image.MAX_IMAGE_PIXELS = 1_000_000_000
 
@@ -34,11 +35,11 @@ class ArtifactProcessor:
         import cv2
         import numpy as np
         import torch
-        from openslide import OpenSlide
 
         from helpers.wsi_tis_detect_helper_fx import get_preprocessing, make_class_map
 
         models = self.model_loader.load()
+        openslide_module = load_openslide_module()
         tissue_mask_dir = output_dir / "tis_det_mask"
         tissue_overlay_dir = output_dir / "tis_det_overlay"
         tissue_thumb_dir = output_dir / "tis_det_thumbnail"
@@ -51,7 +52,7 @@ class ArtifactProcessor:
         ]:
             directory.mkdir(parents=True, exist_ok=True)
 
-        slide = OpenSlide(str(slide_path))
+        slide = openslide_module.OpenSlide(str(slide_path))
         width_l0, height_l0 = slide.level_dimensions[0]
         mpp = round(float(slide.properties["openslide.mpp-x"]), 4)
         reduction_factor = self.config.mpp_model_td / mpp
@@ -155,7 +156,6 @@ class ArtifactProcessor:
     ) -> None:
         import cv2
         import numpy as np
-        from openslide import open_slide
 
         from helpers.wsi_colors import colors_QC7
         from helpers.wsi_maps import make_overlay
@@ -164,7 +164,8 @@ class ArtifactProcessor:
 
         start = timeit.default_timer()
         models = self.model_loader.load()
-        slide = open_slide(str(slide_path))
+        openslide_module = load_openslide_module()
+        slide = openslide_module.open_slide(str(slide_path))
         patch_size, patch_count_w, patch_count_h, mpp, width_l0, height_l0, _ = slide_info(
             slide,
             self.config.model_patch_size,

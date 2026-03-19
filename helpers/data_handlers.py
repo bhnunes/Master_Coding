@@ -7,9 +7,10 @@ import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from typing import Any, cast
 
-import openslide
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
+
+from helpers.runtime_platform import load_openslide_module
 
 
 def _to_coord_list(geometry: Polygon | MultiPolygon) -> list[list[tuple[float, float]]]:
@@ -137,10 +138,12 @@ class NDPI_NDPA_Handler(BaseHandler):
         raw_cancer_polygons: list[Polygon] = []
         raw_not_cancer_polygons: list[Polygon] = []
 
+        openslide_module = load_openslide_module()
+
         offset_x_nm = int(slide.properties.get("hamamatsu.XOffsetFromSlideCentre", 0))
         offset_y_nm = int(slide.properties.get("hamamatsu.YOffsetFromSlideCentre", 0))
-        mpp_x = float(slide.properties.get(openslide.PROPERTY_NAME_MPP_X, 0.25))
-        mpp_y = float(slide.properties.get(openslide.PROPERTY_NAME_MPP_Y, 0.25))
+        mpp_x = float(slide.properties.get(openslide_module.PROPERTY_NAME_MPP_X, 0.25))
+        mpp_y = float(slide.properties.get(openslide_module.PROPERTY_NAME_MPP_Y, 0.25))
         nm_per_pixel_x = mpp_x * 1000
         nm_per_pixel_y = mpp_y * 1000
         slide_width_level0, slide_height_level0 = slide.level_dimensions[0]

@@ -11,7 +11,6 @@ from typing import cast
 
 import cv2
 import numpy as np
-import openslide
 import shapely
 from dotenv import load_dotenv
 from PIL import Image
@@ -19,6 +18,7 @@ from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.prepared import prep
 
 from helpers.data_handlers import BaseHandler
+from helpers.runtime_platform import load_openslide_module
 
 load_dotenv(override=True)
 # --- Constants ---
@@ -125,8 +125,9 @@ def process_window(args):
         use_artifact_filter,
     ) = args
     slide = None
+    openslide_module = load_openslide_module()
     try:
-        slide = openslide.OpenSlide(path_Image)
+        slide = openslide_module.OpenSlide(path_Image)
         x_int, y_int = int(x), int(y)
         patch_coords = (x_int, y_int)
 
@@ -275,10 +276,11 @@ def process_window(args):
 
 def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
     slide = None
+    openslide_module = load_openslide_module()
     try:
         slide_basename = os.path.basename(path_Image)
         logging.info(f"--- Starting processing for slide: {slide_basename} ---")
-        slide = openslide.OpenSlide(path_Image)
+        slide = openslide_module.OpenSlide(path_Image)
 
         annotation_data = handler.load_annotations(slide, **kwargs)
         annotations_cancer_level0 = annotation_data["cancer_polygons"]
