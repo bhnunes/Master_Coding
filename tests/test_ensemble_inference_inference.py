@@ -1,0 +1,320 @@
+from __future__ import annotations
+
+import contextlib
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+import torch
+from torch import nn
+
+from helpers.ensemble_inference import inference
+
+
+class _ConstantBinaryModel(nn.Module):
+    def __init__(self, value: float) -> None:
+        super().__init__()
+        self.value = value
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        return torch.full(
+            (images.shape[0], 1, images.shape[2], images.shape[3]),
+            self.value,
+            dtype=torch.float32,
+            device=images.device,
+        )
+
+
+class _TupleTwoClassModel(nn.Module):
+    def forward(self, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        output = torch.zeros(
+            (images.shape[0], 2, images.shape[2], images.shape[3]),
+            dtype=torch.float32,
+            device=images.device,
+        )
+        output[:, 1] = 1.0
+        aux = torch.zeros((), dtype=torch.float32, device=images.device)
+        return output, aux
+
+
+class _IdentityNormalizer(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.float()
+
+
+def test_autocast_context_returns_nullcontext_on_cpu() -> None:
+    context = inference._autocast_context(torch.zeros((1, 3, 2, 2)), use_amp=True)
+
+    assert isinstance(context, contextlib.nullcontext)
+
+
+def test_predict_with_tta_batched_handles_single_channel_logits() -> None:
+    images = torch.zeros((2, 3, 4, 4), dtype=torch.float32)
+
+    probabilities = inference.predict_with_tta_batched(_ConstantBinaryModel(0.0), images)
+
+    assert torch.allclose(probabilities, torch.full((2, 4, 4), 0.5))
+
+
+def test_predict_with_tta_batched_handles_two_class_tuple_output() -> None:
+    images = torch.zeros((1, 3, 3, 3), dtype=torch.float32)
+
+    probabilities = inference.predict_with_tta_batched(_TupleTwoClassModel(), images)
+    expected_prob = float(torch.softmax(torch.tensor([0.0, 1.0]), dim=0)[1])
+
+    assert torch.allclose(
+        probabilities,
+        torch.full((1, 3, 3), expected_prob),
+    )
+
+
+def test_compute_two_stream_probabilities_returns_zero_mask_when_stream_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        inference,
+        "predict_with_tta_batched",
+        lambda model, images, use_amp=True: torch.ones(
+            (images.shape[0], images.shape[2], images.shape[3])
+        ),
+    )
+
+    result = inference.compute_two_stream_probabilities(
+        [nn.Identity()],
+        [{"stream_role": "semantic", "weight": 1.0}],
+        torch.zeros((1, 3, 4, 4), dtype=torch.float32),
+        roi_threshold=0.5,
+        roi_scale=2,
+    )
+
+    assert torch.equal(result, torch.zeros((1, 4, 4)))
+
+
+def test_compute_two_stream_probabilities_applies_roi_gating_and_weight_filtering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeModel(nn.Module):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.name = name
+
+    def fake_predict(model: FakeModel, images: torch.Tensor, use_amp: bool = True) -> torch.Tensor:
+        del images, use_amp
+        if model.name == "semantic":
+            return torch.tensor([[[1.0, 1.0], [0.0, 0.0]]], dtype=torch.float32)
+        if model.name == "spatial":
+            return torch.tensor([[[0.8, 0.6], [0.4, 0.2]]], dtype=torch.float32)
+        raise AssertionError("unexpected model")
+
+    monkeypatch.setattr(inference, "predict_with_tta_batched", fake_predict)
+
+    result = inference.compute_two_stream_probabilities(
+        [FakeModel("semantic"), FakeModel("ignored"), FakeModel("spatial")],
+        [
+            {"stream_role": "semantic", "weight": 1.0},
+            {"stream_role": "spatial", "weight": 0.0},
+            {"stream_role": "spatial", "weight": 1.0},
+        ],
+        torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+        roi_threshold=0.5,
+        roi_scale=1,
+    )
+
+    assert torch.equal(result, torch.tensor([[[0.8, 0.6], [0.0, 0.0]]], dtype=torch.float32))
+
+
+def test_compute_two_stream_probabilities_sanitizes_nan_and_inf_predictions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeModel(nn.Module):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.name = name
+
+    def fake_predict(model: FakeModel, images: torch.Tensor, use_amp: bool = True) -> torch.Tensor:
+        del images, use_amp
+        if model.name == "semantic":
+            return torch.ones((1, 2, 2), dtype=torch.float32)
+        return torch.tensor([[[float("nan"), float("inf")], [float("-inf"), 0.25]]])
+
+    monkeypatch.setattr(inference, "predict_with_tta_batched", fake_predict)
+
+    result = inference.compute_two_stream_probabilities(
+        [FakeModel("semantic"), FakeModel("spatial")],
+        [
+            {"stream_role": "semantic", "weight": 1.0},
+            {"stream_role": "spatial", "weight": 1.0},
+        ],
+        torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+        roi_threshold=0.1,
+        roi_scale=1,
+    )
+
+    assert torch.equal(result, torch.tensor([[[0.0, 1.0], [0.0, 0.25]]], dtype=torch.float32))
+
+
+def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_summary(
+        stats_by_patient: dict[str, list[dict[str, int]]], *, seed: int
+    ) -> dict[str, Any]:
+        captured["stats"] = stats_by_patient
+        captured["seed"] = seed
+        return {"base": True}
+
+    monkeypatch.setattr(
+        inference,
+        "compute_two_stream_probabilities",
+        lambda models, meta, images, roi_threshold, roi_scale: torch.tensor(
+            [[[0.0, 1.0], [1.0, 0.0]], [[1.0, 0.0], [0.0, 1.0]]],
+            dtype=torch.float32,
+        ),
+    )
+    monkeypatch.setattr(inference, "summarize_patient_metrics", fake_summary)
+    monkeypatch.setattr(inference, "compute_auc_from_histograms", lambda pos, neg: 0.75)
+
+    test_loader = cast(
+        Any,
+        [
+            None,
+            (
+                torch.zeros((2, 3, 2, 2), dtype=torch.uint8),
+                torch.tensor(
+                    [
+                        [[0, 1], [1, 0]],
+                        [[1, 0], [0, 0]],
+                    ],
+                    dtype=torch.uint8,
+                ),
+                ["patient-a", "patient-b"],
+            ),
+        ],
+    )
+
+    summary = inference.analyze_ensemble_metrics(
+        [nn.Identity()],
+        [{"stream_role": "semantic", "weight": 1.0}],
+        test_loader,
+        device=torch.device("cpu"),
+        optimal_threshold=0.33,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        gpu_normalizer=_IdentityNormalizer(),
+        seed=17,
+    )
+
+    assert captured["seed"] == 17
+    assert captured["stats"] == {
+        "patient-a": [{"tn": 2, "fn": 0, "fp": 0, "tp": 2}],
+        "patient-b": [{"tn": 2, "fn": 0, "fp": 1, "tp": 1}],
+    }
+    assert summary["auc"] == 0.75
+    assert summary["normalization"] == {"mean": [0.1, 0.2, 0.3], "std": [0.4, 0.5, 0.6]}
+    assert summary["ensemble"] == {
+        "method": "two_stream_spatial_gating",
+        "threshold": 0.33,
+        "weights": None,
+    }
+
+
+def test_export_visualizations_returns_empty_for_nonpositive_sample_count(tmp_path: Path) -> None:
+    output_paths = inference.export_visualizations(
+        [nn.Identity()],
+        cast(Any, []),
+        device=torch.device("cpu"),
+        threshold=0.5,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        constituent_models_info=[],
+        gpu_normalizer=_IdentityNormalizer(),
+        output_dir=tmp_path,
+        num_samples=0,
+    )
+
+    assert output_paths == []
+
+
+def test_export_visualizations_returns_empty_for_empty_or_none_batch(tmp_path: Path) -> None:
+    assert (
+        inference.export_visualizations(
+            [nn.Identity()],
+            cast(Any, []),
+            device=torch.device("cpu"),
+            threshold=0.5,
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            constituent_models_info=[],
+            gpu_normalizer=_IdentityNormalizer(),
+            output_dir=tmp_path / "empty",
+            num_samples=1,
+        )
+        == []
+    )
+    assert (
+        inference.export_visualizations(
+            [nn.Identity()],
+            cast(Any, [None]),
+            device=torch.device("cpu"),
+            threshold=0.5,
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            constituent_models_info=[],
+            gpu_normalizer=_IdentityNormalizer(),
+            output_dir=tmp_path / "none",
+            num_samples=1,
+        )
+        == []
+    )
+
+
+def test_export_visualizations_writes_requested_number_of_pngs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        inference,
+        "compute_two_stream_probabilities",
+        lambda models, meta, images, roi_threshold, roi_scale: torch.tensor(
+            [[[0.9, 0.1], [0.8, 0.2]], [[0.2, 0.3], [0.4, 0.9]]],
+            dtype=torch.float32,
+        ),
+    )
+    dataloader = cast(
+        Any,
+        [
+            (
+                torch.ones((2, 3, 2, 2), dtype=torch.float32),
+                torch.tensor(
+                    [
+                        [[0, 1], [1, 0]],
+                        [[1, 0], [0, 1]],
+                    ],
+                    dtype=torch.uint8,
+                ),
+                ["p1", "p2"],
+            )
+        ],
+    )
+
+    output_paths = inference.export_visualizations(
+        [nn.Identity()],
+        dataloader,
+        device=torch.device("cpu"),
+        threshold=0.5,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
+        gpu_normalizer=_IdentityNormalizer(),
+        output_dir=tmp_path,
+        num_samples=1,
+    )
+
+    assert len(output_paths) == 1
+    assert output_paths[0].exists()
