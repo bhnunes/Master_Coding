@@ -238,7 +238,7 @@ Current Stage 8 smart-sampling behavior:
 | `9_lr_finder.py` | Thin LR-finder orchestrator that loads `.env`, screens approved architecture/encoder pairs, and writes a LaTeX-generated PDF report plus CSV/JSON sidecars. |
 | `10_training_ensemble.py` | Thin training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
 | `11_optimizer_ensemble.py` | Thin ensemble-optimizer orchestrator that loads `.env`, stages validation HDF5 data, optimizes a two-stream recipe, and writes the declarative JSON consumed by Stage 12. |
-| `12_inference_ensemble.py` | Generates predictions on the test set using the optimized ensemble. |
+| `12_inference_ensemble.py` | Thin inference orchestrator that loads the Stage 11 recipe, evaluates the two-stream ensemble on `TEST.h5`, and exports JSON/CSV/LaTeX reporting artifacts. |
 
 Current training behavior:
 
@@ -248,6 +248,7 @@ Current training behavior:
 - `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
 - `11_optimizer_ensemble.py` is now orchestration-focused; Stage 11 config, metadata ranking, validation staging, model loading, patient holdout splitting, Optuna optimization, and JSON reporting live in `helpers/ensemble_optimizer/*.py`
 - Stage 11 preserves the `two_stream_spatial_gating` JSON contract used by `12_inference_ensemble.py`, including `roi_config`, `spatial_config`, `model_registry`, and `holdout_metrics`
+- `12_inference_ensemble.py` is now orchestration-focused; Stage 12 config, recipe parsing, test-data staging, recipe-model loading, two-stream inference, metrics, and reporting live in `helpers/ensemble_inference/*.py`
 - Architecture and encoder choices are validated against `training_model_registry.json`
 - Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
 - `TRAINING_MODEL_REGISTRY_PATH` can override the default registry when a controlled experiment needs a different file
