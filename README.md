@@ -28,7 +28,7 @@ Master_Coding/
 ├── 7_pack_splits_to_hdf5.py         # Convert splits to HDF5 format
 ├── 8_smart_sampler.py               # Select most informative training samples
 ├── 9_lr_finder.py                   # Find optimal learning rates
-├── 10_training_ensemble.py          # Train ensemble models
+├── 10_training_ensemble.py          # Train one approved model per execution
 ├── 11_optimizer_ensemble.py         # Optimize ensemble parameters
 ├── 12_inference_ensemble.py         # Generate predictions on test set
 │
@@ -42,8 +42,24 @@ Master_Coding/
 │   ├── artifact_processor.py        # Stage 1 per-slide processing
 │   ├── artifact_repository.py       # Stage 1 SQLite tracking
 │   ├── artifact_zip.py              # Stage 1 zip-backed slide access
+│   ├── extraction_config.py         # Stage 2 .env parsing and validation
+│   ├── extraction_repository.py     # Stage 2 SQLite/project state access
+│   ├── image_reader_service.py      # Stage 2 slide processing dispatch
 │   ├── data_handlers.py             # Annotation format adapters
-│   └── patch_engine.py              # Core patch extraction logic
+│   ├── patch_engine.py              # Core patch extraction logic
+│   ├── training_checkpointing.py    # Stage 8 checkpoints and resume metadata
+│   ├── training_config.py           # Stage 8 .env parsing and validation
+│   ├── training_data.py             # Stage 8 HDF5 datasets and batching
+│   ├── training_gpu.py              # Stage 8 GPU image utilities
+│   ├── training_loop.py             # Stage 8 train/validation loops
+│   ├── training_losses.py           # Stage 8 custom losses
+│   ├── training_metrics.py          # Stage 8 metric tracking helpers
+│   ├── training_models.py           # Stage 8 model and optimizer factories
+│   ├── training_pipeline.py         # Stage 8 orchestration helpers
+│   ├── training_registry.py         # Approved architecture/encoder registry loader
+│   ├── training_reporting.py        # Stage 8 Aim/email reporting helpers
+│   ├── training_runtime.py          # Stage 8 seeds, AMP, precision helpers
+│   └── training_utils.py            # Stage 8 misc runtime utilities
 │
 ├── tests/                           # Test scripts
 ├── databases/                       # SQLite databases
@@ -74,7 +90,7 @@ The pipeline follows a monolithic script-driven architecture where each script p
 | 5 | `6_sanity_checks.py` | Scientific integrity checks: patient leakage, file integrity, class balance |
 | 6 | `7_pack_splits_to_hdf5.py` | Convert PNG splits to HDF5 format for efficient training |
 | 7 | `8_smart_sampler.py` | Select most informative training samples (optional) |
-| 8 | `9_lr_finder.py` → `10_training_ensemble.py` → `11_optimizer_ensemble.py` → `12_inference_ensemble.py` | Train ensemble models and generate predictions |
+| 8 | `9_lr_finder.py` → `10_training_ensemble.py` → `11_optimizer_ensemble.py` → `12_inference_ensemble.py` | Tune LR, train one approved model per run, optimize ensemble weights, and generate predictions |
 
 ## Script Documentation
 
@@ -139,9 +155,17 @@ Current Stage 1 behavior:
 | Script | Purpose |
 |--------|---------|
 | `9_lr_finder.py` | Estimates optimal learning rate for each model using the LR Finder technique. |
-| `10_training_ensemble.py` | Trains an ensemble of models using segmentation_models_pytorch (smp), ScheduleFree optimizer, and PyTorch. Supports multiple encoder architectures. |
+| `10_training_ensemble.py` | Thin Stage 8 training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
 | `11_optimizer_ensemble.py` | Optimizes ensemble weights using Optuna to maximize validation AUPRC. Organizes models by Transformers (global context) and convolutional (local context). |
 | `12_inference_ensemble.py` | Generates predictions on the test set using the optimized ensemble. |
+
+Current Stage 8 behavior:
+
+- `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training_*.py`
+- Architecture and encoder choices are validated against `training_model_registry.json`
+- Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
+- `TRAINING_MODEL_REGISTRY_PATH` can override the default registry when a controlled experiment needs a different file
+- Only the approved research architecture/encoder pairs documented in `.env_example` are supported
 
 ## Configuration
 
@@ -167,6 +191,11 @@ ARTIFACT_MPP_MODEL=1.5
 ARTIFACT_OVERLAY_FACTOR=10
 ARTIFACT_OVERWRITE_EXISTING=false
 
+# Stage 8 - Training
+TRAINING_ARCHITECTURE=SEGFORMER
+TRAINING_ENCODER_NAME=mit_b5
+TRAINING_MODEL_REGISTRY_PATH=
+
 # Patch extraction and later stages keep using their own .env variables
 TAG=CAMELYON16
 WINDOW_SIZE=224
@@ -176,7 +205,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-See `.env_example` for the current commented template, including the Stage 1 artifact detection block.
+See `.env_example` for the current commented template, including Stage 1, Stage 2, and the Stage 8 approved training matrix.
 
 OpenSlide runtime rules:
 
@@ -284,12 +313,29 @@ uv run --python 3.12 python 6_sanity_checks.py
 # 6. Pack to HDF5
 uv run --python 3.12 python 7_pack_splits_to_hdf5.py
 
-# 8-12. Training & Inference (typically run in Colab with GPU)
+# 8-12. Training & Inference (typically run on a GPU machine)
 uv run --python 3.12 python 9_lr_finder.py
 uv run --python 3.12 python 10_training_ensemble.py
 uv run --python 3.12 python 11_optimizer_ensemble.py
 uv run --python 3.12 python 12_inference_ensemble.py
 ```
+
+### Approved Training Pairs
+
+`10_training_ensemble.py` only supports the following approved research combinations:
+
+| Architecture | Encoder |
+|--------------|---------|
+| `SWIN` | `tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k` |
+| `DEEPLABV3PLUS` | `tu-resnest101e` |
+| `UNET++` | `efficientnet-b7` |
+| `FPN` | `senet154` |
+| `SEGFORMER` | `mit_b5` |
+| `MANET` | `resnet152` |
+| `DPT` | `tu-vit_large_patch16_224.augreg_in21k_ft_in1k` |
+| `UPERNET` | `tu-hiera_large_224` |
+
+The defaults for learning rate, weight decay, and allowed encoders live in `training_model_registry.json`.
 
 ### Running Tests
 
@@ -300,15 +346,15 @@ uv run pytest
 # Run coverage after installing pytest-cov
 uv run pytest --cov=helpers --cov-report=term-missing
 
-# Run linting and typing on the refactored Stage 1 / helper surface
-uv run ruff check 1_artifact_detection.py 3_1_imageReader.py helpers tests
+# Run linting and typing on the actively maintained surfaces
+uv run ruff check 1_artifact_detection.py 2_database_manager.py 3_1_imageReader.py 10_training_ensemble.py helpers tests
 uv run ruff format .
 
 # Run type checking on the same touched scope
-uv run mypy 1_artifact_detection.py 3_1_imageReader.py helpers tests
+uv run mypy 1_artifact_detection.py 2_database_manager.py 3_1_imageReader.py 10_training_ensemble.py helpers tests
 ```
 
-Note: full-repository `uv run ruff check .` and `uv run mypy .` still report issues in unrelated legacy root scripts outside the Stage 1 refactor scope.
+Note: scoped Ruff and MyPy checks pass on the actively maintained Stage 1, Stage 2, Stage 8, `helpers`, and `tests` surfaces. Full-repository `uv run ruff check .` and `uv run mypy .` still report issues in unrelated legacy root scripts.
 
 ## Data Integrity Rules
 
