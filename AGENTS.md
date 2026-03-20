@@ -23,7 +23,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - `5_crossfold.py`: patient-level dataset split creation plus optional stain normalization.
 - `6_sanity_checks.py`: scientific integrity and dataset consistency checks.
 - `7_pack_splits_to_hdf5.py`: converts prepared split folders into `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`.
-- `8_smart_sampler.py`: Selects the best images from `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`, keeping only the most informative samples. Written to run with GPU on Google Colab.
+- `8_smart_sampler.py`: `.env`-driven smart-sampling orchestrator that filters `TRAIN.h5` into `TRAIN_FILTERED.h5` for downstream LR finding and training.
 - `9_lr_finder.py`: Used to estimate the best learning rate for training for every model.
 - `10_training_ensemble.py`: Thin Stage 8 training orchestrator that trains one approved model per execution.
 - `11_optimizer_ensemble.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context).
@@ -67,6 +67,9 @@ This file gives coding agents repository-specific guidance for working safely an
 - `7_pack_splits_to_hdf5.py` should stay orchestration-focused. Keep Stage 7 environment loading, split discovery, pairing checks, and HDF5 writing in `helpers/packaging/*.py`.
 - Stage 7 must preserve the minimal training HDF5 contract used by Stage 8: datasets named exactly `images`, `masks`, `labels`, `patient_ids`, and `filenames`, with no unnecessary metadata payloads.
 - Active Stage 7 helper modules are `helpers/packaging/config.py`, `helpers/packaging/discovery.py`, `helpers/packaging/pipeline.py`, and `helpers/packaging/writer.py`.
+- `8_smart_sampler.py` should stay orchestration-focused. Keep Stage 8 smart-sampling configuration, HDF5 indexing, embedding extraction, per-patient selection, output writing, and optional sidecar generation in `helpers/smart_sampling/*.py`.
+- Stage 8 smart sampling must preserve downstream `TRAIN_FILTERED.h5` compatibility for `9_lr_finder.py` and `10_training_ensemble.py`, always writing datasets named exactly `images`, `masks`, `labels`, `patient_ids`, and `filenames`.
+- Active Stage 8 smart-sampling helper modules are `helpers/smart_sampling/config.py`, `helpers/smart_sampling/index.py`, `helpers/smart_sampling/embeddings.py`, `helpers/smart_sampling/selection.py`, `helpers/smart_sampling/storage.py`, `helpers/smart_sampling/writer.py`, and `helpers/smart_sampling/pipeline.py`.
 - `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training/*.py`.
 - `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph/tuning_config.py`, `helpers/graph/contamination.py`, and `helpers/graph/tuning_pipeline.py`.
 - Stage 4.2 must preserve the current scientific workflow: human labels from `master_candidate_pool/APPROVED` and `REJECTED`, source image/mask pairing by filename stem, stratified train/test split, nested cross-validation for parameter search, F1 optimization on the `Rejected` class, and final held-out test evaluation.

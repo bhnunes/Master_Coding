@@ -1,38 +1,13 @@
-from __future__ import annotations
-
-import ast
-import os
-from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
 
 import h5py
 import numpy as np
-from tqdm.auto import tqdm
 
-
-def _load_smart_sampler_functions() -> dict[str, object]:
-    source_path = Path("/workspace/8_smart_sampler.py")
-    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
-    selected_nodes: list[ast.stmt] = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name in {"guardrail", "resolve_filename_key", "write_filtered_hdf5"}
-    ]
-    module = ast.Module(body=selected_nodes, type_ignores=[])
-    namespace: dict[str, object] = {"h5py": h5py, "os": os, "tqdm": tqdm}
-    exec(compile(module, filename=str(source_path), mode="exec"), namespace)
-    return namespace
+from helpers.smart_sampling.config import SmartSamplerConfig
+from helpers.smart_sampling.writer import write_filtered_hdf5
 
 
 def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) -> None:
-    functions = _load_smart_sampler_functions()
-    write_filtered_hdf5 = cast(
-        Callable[[Any, np.ndarray[Any, Any]], None], functions["write_filtered_hdf5"]
-    )
-
     source_path = tmp_path / "TRAIN.h5"
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -47,10 +22,32 @@ def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) 
             data=np.array([b"PATIENT_1_a.png", b"PATIENT_2_b.png"], dtype="S32"),
         )
 
-    config = SimpleNamespace(
-        TRAIN_H5_PATH=str(source_path),
-        OUTPUT_DIR=str(output_dir),
-        OUTPUT_FILENAME="TRAIN_FILTERED.h5",
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=output_dir,
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=None,
+        stage_input_locally=False,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
     )
 
     write_filtered_hdf5(config, np.array([1], dtype=np.int64))

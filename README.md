@@ -217,22 +217,30 @@ Current Stage 7 behavior:
 - Writes only the training-required HDF5 datasets: `images`, `masks`, `labels`, `patient_ids`, and `filenames`
 - Does not embed extra provenance attributes or delete source folders during packaging
 
-### Stage 7: Smart Sampling
+### Stage 8: Smart Sampling
 
 | Script | Purpose |
 |--------|---------|
-| `8_smart_sampler.py` | Selects the most informative training samples using MiniBatch K-Means clustering. Reduces dataset size while preserving diversity. Designed for GPU execution. |
+| `8_smart_sampler.py` | Thin smart-sampling orchestrator that loads `.env`, filters `TRAIN.h5` patient-by-patient, and writes `TRAIN_FILTERED.h5` for downstream LR finding and training. |
 
-### Stage 8: Training & Inference
+Current Stage 8 smart-sampling behavior:
+
+- Loads smart-sampling settings from `.env` / `.env_example` through `helpers/smart_sampling/config.py`
+- Builds a patient index from `TRAIN.h5`, extracts embeddings, and selects diverse per-patient samples through `helpers/smart_sampling/*.py`
+- Preserves downstream HDF5 compatibility for `9_lr_finder.py` and `10_training_ensemble.py` by writing `images`, `masks`, `labels`, `patient_ids`, and `filenames`
+- Accepts legacy source files with `filename` or `filenames`, but always writes `filenames` in `TRAIN_FILTERED.h5`
+- Optionally writes `train_filtered_selection.csv`, `patient_filter_stats.csv`, and `filter_run_config.json` beside the filtered HDF5
+
+### Stage 9+: Training & Inference
 
 | Script | Purpose |
 |--------|---------|
 | `9_lr_finder.py` | Estimates optimal learning rate for each model using the LR Finder technique. |
-| `10_training_ensemble.py` | Thin Stage 8 training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
+| `10_training_ensemble.py` | Thin training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
 | `11_optimizer_ensemble.py` | Optimizes ensemble weights using Optuna to maximize validation AUPRC. Organizes models by Transformers (global context) and convolutional (local context). |
 | `12_inference_ensemble.py` | Generates predictions on the test set using the optimized ensemble. |
 
-Current Stage 8 behavior:
+Current training behavior:
 
 - `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
 - Architecture and encoder choices are validated against `training_model_registry.json`
