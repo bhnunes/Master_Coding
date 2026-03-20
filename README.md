@@ -187,7 +187,16 @@ Current Stage 5 behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `6_sanity_checks.py` | Runs scientific integrity checks on prepared datasets: patient leakage detection, file integrity, class balance, checksum verification. |
+| `6_sanity_checks.py` | Thin Stage 6 orchestrator that loads `.env`, validates Stage 5 provenance and split folders, and prints a reviewer-facing PASS/WARN/FAIL report. |
+
+Current Stage 6 behavior:
+
+- Loads Stage 6 settings from `.env` / `.env_example` through `helpers/sanity/config.py`
+- Uses `manifest.csv` as the source of truth and cross-checks `run_config.json` and `split_stats.csv`
+- Fails on patient leakage, duplicate manifest rows, filename-contract violations, and manifest/disk mismatches
+- Verifies exact image/mask filename parity, decodeability, shape agreement, mask pixel values, and optional checksum parity
+- Adds scientific label checks such as empty positive masks and positive pixels inside negative masks
+- Reports class balance and patches-per-patient skew to support reviewer interpretation
 
 ### Stage 6: Data Packaging
 
