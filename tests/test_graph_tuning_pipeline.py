@@ -7,9 +7,11 @@ import numpy as np
 import pytest
 
 from helpers.graph_contamination import GraphContaminationParameters
+from helpers.graph_parameter_store import GraphCleaningParameterArtifact
 from helpers.graph_tuning_pipeline import (
     GraphTuningResult,
     GraphTuningSummary,
+    build_graph_cleaning_parameter_artifact,
     build_recommendation_message,
     collect_review_labels,
     resolve_labeled_source_records,
@@ -156,3 +158,32 @@ def test_build_recommendation_message_includes_final_tau() -> None:
     message = build_recommendation_message(summary)
 
     assert "Contamination Rate Threshold (tau):    0.24" in message
+
+
+def test_build_graph_cleaning_parameter_artifact_maps_summary_to_artifact() -> None:
+    summary = GraphTuningSummary(
+        total_labeled_pairs=10,
+        training_pairs=8,
+        test_pairs=2,
+        best_cross_validated_f1=0.9,
+        best_params=GraphContaminationParameters(
+            bg_intensity_thresh=198,
+            k=386.0,
+            min_size=200,
+            erosion_px=0,
+        ),
+        final_tau=0.24,
+    )
+
+    artifact = build_graph_cleaning_parameter_artifact(summary, random_state=42)
+
+    assert artifact == GraphCleaningParameterArtifact(
+        graph_params=summary.best_params,
+        tau=0.24,
+        best_cross_validated_f1=0.9,
+        total_labeled_pairs=10,
+        training_pairs=8,
+        test_pairs=2,
+        random_state=42,
+        generated_by="4_2_tune_graph_method.py",
+    )

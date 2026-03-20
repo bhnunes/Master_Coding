@@ -4,8 +4,13 @@ import os
 
 from dotenv import load_dotenv
 
+from helpers.graph_parameter_store import save_graph_cleaning_parameter_artifact
 from helpers.graph_tuning_config import load_graph_tuning_config
-from helpers.graph_tuning_pipeline import build_recommendation_message, run_graph_tuning_pipeline
+from helpers.graph_tuning_pipeline import (
+    build_graph_cleaning_parameter_artifact,
+    build_recommendation_message,
+    run_graph_tuning_pipeline,
+)
 from helpers.optimization_sampling_logging import configure_stage_logger
 
 
@@ -38,6 +43,9 @@ def main() -> None:
         erosion_range=config.erosion_range,
         logger=logger,
     )
+    artifact = build_graph_cleaning_parameter_artifact(summary, random_state=config.random_state)
+    save_graph_cleaning_parameter_artifact(config.output_params_path, artifact)
+    logger.info("Saved graph cleaning parameters to: %s", config.output_params_path)
     print(build_recommendation_message(summary))
 
 

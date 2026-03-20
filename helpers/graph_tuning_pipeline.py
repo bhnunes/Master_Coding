@@ -15,12 +15,14 @@ from skopt import gp_minimize
 from skopt.space import Integer
 
 from helpers.graph_contamination import GraphContaminationParameters, calculate_roi_contamination
+from helpers.graph_parameter_store import GraphCleaningParameterArtifact
 from helpers.optimization_sampling_sampling import ImageMaskPair, discover_image_mask_pairs
 
 APPROVED_LABEL = "Approved"
 REJECTED_LABEL = "Rejected"
 REVIEW_EXTENSIONS = {".png", ".jpg", ".tif"}
 THRESHOLDS = np.arange(0.05, 0.96, 0.01)
+ZERO_DIVISION = 0.0
 
 ProgressItem = TypeVar("ProgressItem")
 ProgressFactory = Callable[[Iterable[ProgressItem]], Iterable[ProgressItem]]
@@ -115,7 +117,12 @@ def select_best_contamination_threshold(
         predictions = [
             REJECTED_LABEL if rate > tau else APPROVED_LABEL for rate in contamination_rates
         ]
-        f1 = f1_score(true_labels, predictions, pos_label=REJECTED_LABEL, zero_division=0)
+        f1 = f1_score(
+            true_labels,
+            predictions,
+            pos_label=REJECTED_LABEL,
+            zero_division=ZERO_DIVISION,
+        )
         if f1 > best_f1:
             best_f1 = float(f1)
             best_tau = float(tau)
@@ -145,7 +152,12 @@ def evaluate_on_test_set(
     test_rates, test_labels = _score_records(test_iterable, best_params, scorer)
     predictions = [REJECTED_LABEL if rate > final_tau else APPROVED_LABEL for rate in test_rates]
     accuracy = accuracy_score(test_labels, predictions)
-    f1 = f1_score(test_labels, predictions, pos_label=REJECTED_LABEL, zero_division=0)
+    f1 = f1_score(
+        test_labels,
+        predictions,
+        pos_label=REJECTED_LABEL,
+        zero_division=ZERO_DIVISION,
+    )
     logger.info("\n--- Final Test Set Performance ---")
     logger.info("Accuracy: %.3f", accuracy)
     logger.info("F1-Score (Rejected): %.3f", f1)
@@ -275,6 +287,25 @@ def build_recommendation_message(summary: GraphTuningSummary) -> str:
     )
 
 
+def build_graph_cleaning_parameter_artifact(
+    summary: GraphTuningSummary,
+    *,
+    random_state: int,
+) -> GraphCleaningParameterArtifact:
+    """Build the Stage 4 handoff artifact used by `4_3_cleaner_script.py`."""
+
+    return GraphCleaningParameterArtifact(
+        graph_params=summary.best_params,
+        tau=summary.final_tau,
+        best_cross_validated_f1=summary.best_cross_validated_f1,
+        total_labeled_pairs=summary.total_labeled_pairs,
+        training_pairs=summary.training_pairs,
+        test_pairs=summary.test_pairs,
+        random_state=random_state,
+        generated_by="4_2_tune_graph_method.py",
+    )
+
+
 def build_search_space(
     *,
     bg_intensity_range: tuple[int, int],
@@ -325,7 +356,7 @@ def _build_objective(
                 validation_labels,
                 predictions,
                 pos_label=REJECTED_LABEL,
-                zero_division=0,
+                zero_division=ZERO_DIVISION,
             )
             fold_f1_scores.append(float(f1))
         return -float(np.mean(fold_f1_scores) if fold_f1_scores else 0.0)
@@ -350,9 +381,11 @@ def _run_gp_minimize(
         random_state=random_state,
         verbose=True,
     )
-    best_values = result.x
+    result_payload = result
+    assert result_payload is not None
+    best_values = result_payload.x
     return GraphTuningResult(
-        best_score=-float(result.fun if result.fun is not None else 0.0),
+        best_score=-float(result_payload.fun if result_payload.fun is not None else 0.0),
         best_params=GraphContaminationParameters(
             bg_intensity_thresh=int(best_values[0]),
             k=float(best_values[1]),

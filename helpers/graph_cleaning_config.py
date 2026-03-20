@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.graph_contamination import GraphContaminationParameters
+from helpers.graph_parameter_store import load_graph_cleaning_parameter_artifact
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -72,6 +73,7 @@ class GraphCleaningConfig:
     output_base_dir: Path
     log_folder: Path
     log_file_name: str
+    params_path: Path | None
     num_workers: int
     graph_params: GraphContaminationParameters
     tau: float
@@ -89,6 +91,14 @@ def load_graph_cleaning_config(
     """Load and validate Stage 4.3 graph cleaning configuration."""
 
     values = env if env is not None else os.environ
+    params_path = resolve_env_path(
+        values.get("GRAPH_CLEANING_PARAMS_PATH"),
+        "GRAPH_CLEANING_PARAMS_PATH",
+        system_name=system_name,
+    )
+    artifact = (
+        load_graph_cleaning_parameter_artifact(params_path) if params_path is not None else None
+    )
     return GraphCleaningConfig(
         source_image_dir=_required_path(
             values,
@@ -116,6 +126,7 @@ def load_graph_cleaning_config(
             "GRAPH_CLEANING_LOG_FILE",
             "production_filtering.log",
         ),
+        params_path=params_path,
         num_workers=max(
             1,
             _parse_int(
@@ -124,23 +135,31 @@ def load_graph_cleaning_config(
                 default=os.cpu_count() or 1,
             ),
         ),
-        graph_params=GraphContaminationParameters(
-            bg_intensity_thresh=_parse_int(
-                values.get("GRAPH_CLEANING_BG_INTENSITY_THRESH"),
-                "GRAPH_CLEANING_BG_INTENSITY_THRESH",
-                default=198,
-            ),
-            k=_parse_float(values.get("GRAPH_CLEANING_K"), "GRAPH_CLEANING_K", default=386.0),
-            min_size=_parse_int(
-                values.get("GRAPH_CLEANING_MIN_SIZE"),
-                "GRAPH_CLEANING_MIN_SIZE",
-                default=200,
-            ),
-            erosion_px=_parse_int(
-                values.get("GRAPH_CLEANING_EROSION_PX"),
-                "GRAPH_CLEANING_EROSION_PX",
-                default=0,
-            ),
+        graph_params=(
+            artifact.graph_params
+            if artifact is not None
+            else GraphContaminationParameters(
+                bg_intensity_thresh=_parse_int(
+                    values.get("GRAPH_CLEANING_BG_INTENSITY_THRESH"),
+                    "GRAPH_CLEANING_BG_INTENSITY_THRESH",
+                    default=198,
+                ),
+                k=_parse_float(values.get("GRAPH_CLEANING_K"), "GRAPH_CLEANING_K", default=386.0),
+                min_size=_parse_int(
+                    values.get("GRAPH_CLEANING_MIN_SIZE"),
+                    "GRAPH_CLEANING_MIN_SIZE",
+                    default=200,
+                ),
+                erosion_px=_parse_int(
+                    values.get("GRAPH_CLEANING_EROSION_PX"),
+                    "GRAPH_CLEANING_EROSION_PX",
+                    default=0,
+                ),
+            )
         ),
-        tau=_parse_float(values.get("GRAPH_CLEANING_TAU"), "GRAPH_CLEANING_TAU", default=0.24),
+        tau=(
+            artifact.tau
+            if artifact is not None
+            else _parse_float(values.get("GRAPH_CLEANING_TAU"), "GRAPH_CLEANING_TAU", default=0.24)
+        ),
     )

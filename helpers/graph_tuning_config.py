@@ -71,6 +71,7 @@ class GraphTuningConfig:
     review_base_dir: Path
     log_folder: Path
     log_file_name: str
+    output_params_path: Path
     test_set_size: float
     n_splits_inner_cv: int
     n_bayesian_calls: int
@@ -116,6 +117,12 @@ def load_graph_tuning_config(
             values,
             "GRAPH_TUNING_LOG_FILE",
             "bayesian_optimization.log",
+        ),
+        output_params_path=_path_with_default(
+            values,
+            "GRAPH_TUNING_OUTPUT_PARAMS_PATH",
+            "./graph_cleaning_params.json",
+            system_name=system_name,
         ),
         test_set_size=_parse_float(
             values.get("GRAPH_TUNING_TEST_SET_SIZE"),

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,46 @@ def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -
 def test_load_graph_cleaning_config_requires_source_image_dir() -> None:
     with pytest.raises(ValueError, match="GRAPH_CLEANING_SOURCE_IMAGE_DIR"):
         load_graph_cleaning_config({})
+
+
+def test_load_graph_cleaning_config_prefers_parameter_artifact(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "graph_cleaning_params.json"
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "graph_params": {
+                    "bg_intensity_thresh": 111,
+                    "k": 222.0,
+                    "min_size": 33,
+                    "erosion_px": 4,
+                },
+                "tau": 0.5,
+                "best_cross_validated_f1": 0.9,
+                "total_labeled_pairs": 10,
+                "training_pairs": 8,
+                "test_pairs": 2,
+                "random_state": 42,
+                "generated_by": "4_2_tune_graph_method.py",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_graph_cleaning_config(
+        {
+            "GRAPH_CLEANING_SOURCE_IMAGE_DIR": str(tmp_path / "images"),
+            "GRAPH_CLEANING_SOURCE_MASK_DIR": str(tmp_path / "masks"),
+            "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
+            "GRAPH_CLEANING_PARAMS_PATH": str(artifact_path),
+            "GRAPH_CLEANING_TAU": "0.24",
+            "GRAPH_CLEANING_K": "386",
+        }
+    )
+
+    assert config.tau == 0.5
+    assert config.graph_params == GraphContaminationParameters(
+        bg_intensity_thresh=111,
+        k=222.0,
+        min_size=33,
+        erosion_px=4,
+    )
