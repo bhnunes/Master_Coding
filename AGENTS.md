@@ -26,7 +26,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - `8_smart_sampler.py`: `.env`-driven smart-sampling orchestrator that filters `TRAIN.h5` into `TRAIN_FILTERED.h5` for downstream LR finding and training.
 - `9_lr_finder.py`: `.env`-driven LR-finder orchestrator that screens approved model pairs and writes a LaTeX PDF report.
 - `10_training_ensemble.py`: Thin Stage 8 training orchestrator that trains one approved model per execution.
-- `11_optimizer_ensemble.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context).
+- `11_optimizer_ensemble.py`: `.env`-driven Stage 11 orchestrator that optimizes the two-stream ensemble recipe used by Stage 12 inference.
 - `12_inference_ensemble.py`: Responsible for generating the results on the test set.
 
 ## Architecture
@@ -74,6 +74,9 @@ This file gives coding agents repository-specific guidance for working safely an
 - Stage 9 must preserve compatibility with Stage 8 smart-sampling outputs, reuse the approved architecture/encoder matrix from `training_model_registry.json`, and always emit both `report.tex` and `report.pdf` plus reproducibility sidecars.
 - Active Stage 9 helper modules are `helpers/lr_finder/config.py`, `helpers/lr_finder/data.py`, `helpers/lr_finder/search_space.py`, `helpers/lr_finder/analysis.py`, `helpers/lr_finder/runner.py`, `helpers/lr_finder/reporting.py`, and `helpers/lr_finder/pipeline.py`.
 - `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training/*.py`.
+- `11_optimizer_ensemble.py` is now a thin Stage 11 orchestrator. Keep orchestration there and keep configuration, metadata selection, validation-data staging, model loading, prediction caching, split logic, Optuna objectives, holdout evaluation, and JSON reporting in `helpers/ensemble_optimizer/*.py`.
+- Stage 11 must preserve the declarative Stage 12 recipe contract with `ensemble_strategy="two_stream_spatial_gating"` plus stable `roi_config`, `spatial_config`, `model_registry`, and `holdout_metrics` fields.
+- Active Stage 11 helper modules are `helpers/ensemble_optimizer/config.py`, `helpers/ensemble_optimizer/data.py`, `helpers/ensemble_optimizer/metadata.py`, `helpers/ensemble_optimizer/models.py`, `helpers/ensemble_optimizer/optimization.py`, `helpers/ensemble_optimizer/reporting.py`, `helpers/ensemble_optimizer/splitting.py`, and `helpers/ensemble_optimizer/pipeline.py`.
 - `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph/tuning_config.py`, `helpers/graph/contamination.py`, and `helpers/graph/tuning_pipeline.py`.
 - Stage 4.2 must preserve the current scientific workflow: human labels from `master_candidate_pool/APPROVED` and `REJECTED`, source image/mask pairing by filename stem, stratified train/test split, nested cross-validation for parameter search, F1 optimization on the `Rejected` class, and final held-out test evaluation.
 - Stage 4.2 graph contamination logic is now shared domain logic. Future edits must avoid re-implementing the ROI contamination metric in root scripts; reuse `helpers/graph/contamination.py` so tuning and cleaning remain aligned.

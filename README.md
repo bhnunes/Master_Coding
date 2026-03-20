@@ -237,7 +237,7 @@ Current Stage 8 smart-sampling behavior:
 |--------|---------|
 | `9_lr_finder.py` | Thin LR-finder orchestrator that loads `.env`, screens approved architecture/encoder pairs, and writes a LaTeX-generated PDF report plus CSV/JSON sidecars. |
 | `10_training_ensemble.py` | Thin training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
-| `11_optimizer_ensemble.py` | Optimizes ensemble weights using Optuna to maximize validation AUPRC. Organizes models by Transformers (global context) and convolutional (local context). |
+| `11_optimizer_ensemble.py` | Thin ensemble-optimizer orchestrator that loads `.env`, stages validation HDF5 data, optimizes a two-stream recipe, and writes the declarative JSON consumed by Stage 12. |
 | `12_inference_ensemble.py` | Generates predictions on the test set using the optimized ensemble. |
 
 Current training behavior:
@@ -246,6 +246,8 @@ Current training behavior:
 - Stage 9 derives the screened architecture/encoder plan from `training_model_registry.json` instead of hardcoded lists
 - Stage 9 writes both `report.tex` and `report.pdf`, plus `SUMMARY_ALL.csv`, per-architecture CSV summaries, `LHS_SAMPLES.json`, and `lr_finder_run_config.json`
 - `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
+- `11_optimizer_ensemble.py` is now orchestration-focused; Stage 11 config, metadata ranking, validation staging, model loading, patient holdout splitting, Optuna optimization, and JSON reporting live in `helpers/ensemble_optimizer/*.py`
+- Stage 11 preserves the `two_stream_spatial_gating` JSON contract used by `12_inference_ensemble.py`, including `roi_config`, `spatial_config`, `model_registry`, and `holdout_metrics`
 - Architecture and encoder choices are validated against `training_model_registry.json`
 - Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
 - `TRAINING_MODEL_REGISTRY_PATH` can override the default registry when a controlled experiment needs a different file
@@ -285,6 +287,11 @@ TRAINING_ARCHITECTURE=SEGFORMER
 TRAINING_ENCODER=mit_b5
 TRAINING_MODEL_REGISTRY_PATH=
 
+# Stage 11 - Ensemble optimizer
+ENSEMBLE_OPT_HDF5_DRIVE_DIR=./data/CAMELYON16
+ENSEMBLE_OPT_METADATA_DIR=./metadata/CAMELYON16
+ENSEMBLE_OPT_OUTPUT_DIR=./reports/ensemble_optimizer
+
 # Patch extraction and later stages keep using their own .env variables
 TAG=CAMELYON16
 WINDOW_SIZE=224
@@ -294,7 +301,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-See `.env_example` for the current commented template, including Stage 1, Stage 2, Stage 8 smart sampling, Stage 9 LR-finder reporting, and the approved Stage 10 training matrix.
+See `.env_example` for the current commented template, including Stage 1, Stage 2, Stage 8 smart sampling, Stage 9 LR-finder reporting, the Stage 10 training matrix, and Stage 11 ensemble-optimizer settings.
 
 OpenSlide runtime rules:
 
