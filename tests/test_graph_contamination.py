@@ -6,6 +6,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from helpers.graph.contamination import (
@@ -128,7 +129,7 @@ def test_calculate_roi_contamination_returns_expected_rate(
     segment_map = np.array([[0, 1], [0, 1]], dtype=np.int32)
 
     class DummySegmentator:
-        def processImage(self, image_input: np.ndarray) -> np.ndarray:
+        def processImage(self, image_input: npt.NDArray[np.uint8]) -> npt.NDArray[np.int32]:
             assert np.array_equal(image_input, image)
             return segment_map
 
@@ -169,7 +170,7 @@ def test_calculate_roi_contamination_returns_none_on_opencv_error(
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
     class RaisingSegmentator:
-        def processImage(self, image_input: np.ndarray) -> np.ndarray:
+        def processImage(self, image_input: npt.NDArray[np.uint8]) -> npt.NDArray[np.int32]:
             del image_input
             raise cv2.error("graph", "processImage", "boom")
 

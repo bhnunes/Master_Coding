@@ -120,7 +120,7 @@ def test_early_stopping_can_clear_missing_initial_checkpoint(tmp_path: Path) -> 
 def test_early_stopping_saves_original_module_state_dict(tmp_path: Path) -> None:
     compiled_inner = torch.nn.Linear(2, 2)
     wrapper = type("CompiledModel", (torch.nn.Module,), {})()
-    wrapper._orig_mod = compiled_inner  # type: ignore[attr-defined]
+    wrapper._orig_mod = compiled_inner
     optimizer = torch.optim.SGD(compiled_inner.parameters(), lr=0.1)
     checkpoint_path = tmp_path / "best_model.pth"
     early_stopping = EarlyStopping(verbose=False, output_best_model_path=str(checkpoint_path))

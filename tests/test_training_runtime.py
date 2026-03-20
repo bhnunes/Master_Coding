@@ -122,10 +122,14 @@ def test_autocast_ctx_uses_torch_autocast_for_cuda_tensor(monkeypatch: pytest.Mo
     class FakeTensor:
         is_cuda = True
 
+    def fake_autocast(device_type: str, dtype: torch.dtype) -> contextlib.nullcontext[None]:
+        calls.append((device_type, dtype))
+        return contextlib.nullcontext()
+
     monkeypatch.setattr(
         torch,
         "autocast",
-        lambda device_type, dtype: calls.append((device_type, dtype)) or contextlib.nullcontext(),
+        fake_autocast,
     )
 
     context_manager = autocast_ctx(FakeTensor(), torch.float16)  # type: ignore[arg-type]
