@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
 import numpy.typing as npt
+import psutil
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -46,6 +48,29 @@ def _write_hdf5(path: Path, patient_ids: list[bytes] | None = None) -> None:
         handle.create_dataset("patient_ids", data=np.array(patient_ids, dtype="S8"))
         handle.create_dataset(
             "filenames",
+            data=np.array(
+                [
+                    b"NOT_CANCER_PATIENT_1_0_0_0001.png",
+                    b"CANCER_PATIENT_2_0_0_0002.png",
+                    b"NOT_CANCER_PATIENT_3_0_0_0003.png",
+                ],
+                dtype="S64",
+            ),
+        )
+
+
+def _write_hdf5_with_legacy_filename_dataset(path: Path) -> None:
+    images = np.arange(3 * 4 * 4 * 3, dtype=np.uint8).reshape(3, 4, 4, 3)
+    masks = np.zeros((3, 4, 4), dtype=np.uint8)
+    labels = np.array([0, 1, 0], dtype=np.uint8)
+
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset("images", data=images)
+        handle.create_dataset("masks", data=masks)
+        handle.create_dataset("labels", data=labels)
+        handle.create_dataset("patient_ids", data=np.array([b"p1", b"p2", b"p3"], dtype="S8"))
+        handle.create_dataset(
+            "filename",
             data=np.array(
                 [
                     b"NOT_CANCER_PATIENT_1_0_0_0001.png",
@@ -124,7 +149,7 @@ def test_prostate_dataset_reads_items_and_metadata(
     )
 
     dataset = ProstateCancerDatasetHDF5(str(hdf5_path), mode="val", subset_indices=[1, 2])
-    image, mask = dataset[0]
+    image, mask = cast(tuple[torch.Tensor, torch.Tensor], dataset[0])
 
     assert image is not None
     assert mask is not None
@@ -247,10 +272,10 @@ def test_hybrid_dataset_supports_ram_cache_and_class_counts(
     class MemoryInfo:
         available = 10**12
 
-    monkeypatch.setattr(training_data.psutil, "virtual_memory", lambda: MemoryInfo())
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: MemoryInfo())
     dataset = HybridProstateDataset(str(hdf5_path), mode="val", subset_indices=[2, 0])
 
-    image, mask = dataset[0]
+    image, mask = cast(tuple[torch.Tensor, torch.Tensor], dataset[0])
 
     assert dataset.use_ram_cache is True
     assert tuple(image.shape) == (3, 4, 4)
@@ -270,7 +295,7 @@ def test_hybrid_dataset_opens_file_in_disk_mode_and_returns_artifact_covariates(
     class MemoryInfo:
         available = 1
 
-    monkeypatch.setattr(training_data.psutil, "virtual_memory", lambda: MemoryInfo())
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: MemoryInfo())
     dataset = HybridProstateDataset(
         str(hdf5_path),
         mode="val",
@@ -278,7 +303,9 @@ def test_hybrid_dataset_opens_file_in_disk_mode_and_returns_artifact_covariates(
         artifact_coverage_by_filename={"CANCER_PATIENT_2_0_0_0002.png": (0.1, 0.2, 0.3, 0.4, 0.5)},
     )
 
-    image, mask, artifact_covariates = dataset[0]
+    image, mask, artifact_covariates = cast(
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor], dataset[0]
+    )
 
     assert dataset.use_ram_cache is False
     assert dataset.h5_file is not None
@@ -287,6 +314,32 @@ def test_hybrid_dataset_opens_file_in_disk_mode_and_returns_artifact_covariates(
     assert torch.allclose(artifact_covariates, torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5]))
     dataset.close()
     assert dataset.h5_file is None
+
+
+def test_hybrid_dataset_supports_legacy_singular_filename_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN_FILTERED.h5"
+    _write_hdf5_with_legacy_filename_dataset(hdf5_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    class MemoryInfo:
+        available = 1
+
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: MemoryInfo())
+    dataset = HybridProstateDataset(
+        str(hdf5_path),
+        mode="val",
+        subset_indices=[1],
+        artifact_coverage_by_filename={"CANCER_PATIENT_2_0_0_0002.png": (0.1, 0.2, 0.3, 0.4, 0.5)},
+    )
+
+    _, _, artifact_covariates = cast(tuple[torch.Tensor, torch.Tensor, torch.Tensor], dataset[0])
+
+    assert torch.allclose(artifact_covariates, torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5]))
+    dataset.close()
 
 
 def test_hybrid_dataset_raises_runtime_error_when_transform_fails(
@@ -305,7 +358,7 @@ def test_hybrid_dataset_raises_runtime_error_when_transform_fails(
             del image, mask
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(training_data.psutil, "virtual_memory", lambda: MemoryInfo())
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: MemoryInfo())
     monkeypatch.setattr(training_data, "get_transforms", lambda mode, img_size: FailingTransform())
     dataset = HybridProstateDataset(str(hdf5_path), mode="val")
 

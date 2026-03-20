@@ -21,6 +21,7 @@ from torch.utils.data.dataloader import default_collate
 NumericArray = npt.NDArray[np.generic]
 ArtifactCoverageLookup = dict[str, tuple[float, float, float, float, float]]
 ZERO_ARTIFACT_COVERAGE = (0.0, 0.0, 0.0, 0.0, 0.0)
+FILENAME_DATASET_CANDIDATES = ("filenames", "filename")
 ARTIFACT_COVERAGE_COLUMNS = (
     "cov_fold",
     "cov_penmarking",
@@ -34,6 +35,17 @@ def _decode_filename(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8")
     return str(value)
+
+
+def _get_filenames_dataset(handle: h5py.File) -> Any:
+    for dataset_name in FILENAME_DATASET_CANDIDATES:
+        if dataset_name in handle:
+            return handle[dataset_name]
+    available = ", ".join(handle.keys())
+    raise KeyError(
+        "HDF5 file is missing the filename dataset. Expected one of "
+        f"{FILENAME_DATASET_CANDIDATES}. Available: {available}"
+    )
 
 
 def load_artifact_coverage_lookup(parquet_path: str) -> ArtifactCoverageLookup:
@@ -182,7 +194,7 @@ class HybridProstateDataset(Dataset[Any]):
             masks = cast(Any, handle["masks"])
             labels = cast(Any, handle["labels"])
             patient_ids = cast(Any, handle["patient_ids"])
-            filenames = cast(Any, handle["filenames"])
+            filenames = cast(Any, _get_filenames_dataset(handle))
             self.full_labels = np.asarray(labels[:])
             self.full_pids = np.asarray(patient_ids[:])
             self.full_filenames = np.asarray(filenames[:])
@@ -247,7 +259,7 @@ class HybridProstateDataset(Dataset[Any]):
             )
             self.images_dset = self.h5_file["images"]
             self.masks_dset = self.h5_file["masks"]
-            self.filenames_dset = self.h5_file["filenames"]
+            self.filenames_dset = _get_filenames_dataset(self.h5_file)
             self._opened_pid = pid
             if not self._atexit_registered:
                 atexit.register(self.close)
@@ -353,7 +365,7 @@ class ProstateCancerDatasetHDF5(Dataset[Any]):
         with h5py.File(self.hdf5_path, "r") as handle:
             self.full_labels = np.asarray(cast(Any, handle["labels"])[:])
             self.full_pids = np.asarray(cast(Any, handle["patient_ids"])[:])
-            self.full_filenames = np.asarray(cast(Any, handle["filenames"])[:])
+            self.full_filenames = np.asarray(cast(Any, _get_filenames_dataset(handle))[:])
             self.total_len = len(self.full_labels)
 
         if subset_indices is not None:
@@ -386,7 +398,7 @@ class ProstateCancerDatasetHDF5(Dataset[Any]):
             )
             self.images_dset = self.h5_file["images"]
             self.masks_dset = self.h5_file["masks"]
-            self.filenames_dset = self.h5_file["filenames"]
+            self.filenames_dset = _get_filenames_dataset(self.h5_file)
             self._opened_pid = pid
             if not self._atexit_registered:
                 atexit.register(self.close)

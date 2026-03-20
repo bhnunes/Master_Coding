@@ -74,6 +74,11 @@ Master_Coding/
 │   │   ├── pipeline.py
 │   │   ├── provenance.py
 │   │   └── splitting.py
+│   ├── packaging/                   # Stage 7 HDF5 packaging domain
+│   │   ├── config.py
+│   │   ├── discovery.py
+│   │   ├── pipeline.py
+│   │   └── writer.py
 │   ├── training/                    # Stage 8 training domain
 │   │   ├── checkpointing.py
 │   │   ├── config.py
@@ -202,7 +207,15 @@ Current Stage 6 behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `7_pack_splits_to_hdf5.py` | Converts PNG-based split folders into HDF5 files for efficient random access during training. |
+| `7_pack_splits_to_hdf5.py` | Thin Stage 7 orchestrator that loads `.env`, scans split folders, and writes the minimal HDF5 datasets required by training. |
+
+Current Stage 7 behavior:
+
+- Loads Stage 7 settings from `.env` / `.env_example` through `helpers/packaging/config.py`
+- Scans `TRAIN`, `VALIDATION`, and optional `TEST` folders deterministically
+- Requires exact filename parity between image and mask folders before packing
+- Writes only the training-required HDF5 datasets: `images`, `masks`, `labels`, `patient_ids`, and `filenames`
+- Does not embed extra provenance attributes or delete source folders during packaging
 
 ### Stage 7: Smart Sampling
 
