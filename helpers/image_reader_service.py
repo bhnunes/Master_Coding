@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
-
 from helpers import patch_engine
 from helpers.data_handlers import (
     BaseHandler,
@@ -17,7 +15,7 @@ from helpers.data_handlers import (
     NDPI_NDPA_Handler,
     SVS_XML_Handler,
 )
-from helpers.runtime_platform import load_openslide_module, resolve_env_path
+from helpers.runtime_platform import load_openslide_module
 
 HANDLER_MAPPING: dict[tuple[str, str], type[BaseHandler]] = {
     (".svs", ".xml"): SVS_XML_Handler,
@@ -40,7 +38,6 @@ class SlideRuntimeSettings:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
-    artifact_policy: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -63,7 +60,6 @@ class SlideProcessingRequest:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
-    artifact_policy: dict[str, Any] | None
     artifacts_geojson_path: Path | None = None
 
 
@@ -75,6 +71,7 @@ class SlideProcessingResult:
     comments: str
     cancer_patches_created: int
     not_cancer_patches_created: int
+    artifact_patch_records: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -82,6 +79,7 @@ class SlideProcessingResult:
             "comments": self.comments,
             "cancer_patches_created": self.cancer_patches_created,
             "not_cancer_patches_created": self.not_cancer_patches_created,
+            "artifact_patch_records": self.artifact_patch_records,
         }
 
 
@@ -103,21 +101,6 @@ def load_slide_runtime_settings(
         "t",
     }
 
-    artifact_policy: dict[str, Any] | None = None
-    if use_advanced_artifact_filtering:
-        artifact_policy_path = resolve_env_path(
-            values.get("ARTIFACT_POLICY_PATH"),
-            "ARTIFACT_POLICY_PATH",
-            system_name=system_name,
-        )
-        if not artifact_policy_path:
-            raise ValueError("ARTIFACT_POLICY_PATH is required when artifact filtering is enabled")
-        with artifact_policy_path.open(encoding="utf-8") as artifact_policy_file:
-            loaded_policy = yaml.safe_load(artifact_policy_file)
-        if not isinstance(loaded_policy, dict) or "DROP_THRESH" not in loaded_policy:
-            raise ValueError("DROP_THRESH not found in artifact_policy.yaml")
-        artifact_policy = loaded_policy
-
     return SlideRuntimeSettings(
         window_size=window_size,
         stride=stride,
@@ -126,7 +109,6 @@ def load_slide_runtime_settings(
         target_level=int(values.get("TARGET_LEVEL") or 0),
         num_workers=max(1, int(values.get("NUM_WORKERS") or (os.cpu_count() or 1))),
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
-        artifact_policy=artifact_policy,
     )
 
 
@@ -165,7 +147,7 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
     logging.info("Script started for image: %s", request.image_path.name)
 
     try:
-        cancer_count, not_cancer_count = patch_engine.run_extraction(
+        cancer_count, not_cancer_count, artifact_patch_records = patch_engine.run_extraction(
             handler=handler,
             path_Image=str(request.image_path),
             annotation_path=str(request.annotation_path),
@@ -185,7 +167,6 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             if request.artifacts_geojson_path is not None
             else None,
             use_artifact_filter=request.use_advanced_artifact_filtering,
-            artifact_policy=request.artifact_policy,
             num_workers=request.num_workers,
         )
     except Exception as error:
@@ -195,6 +176,7 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             comments=f"Error processing {request.image_path.name}: {error}",
             cancer_patches_created=0,
             not_cancer_patches_created=0,
+            artifact_patch_records=[],
         )
 
     comments = f"Successfully processed {request.image_path.name}."
@@ -204,6 +186,7 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
         comments=comments,
         cancer_patches_created=cancer_count,
         not_cancer_patches_created=not_cancer_count,
+        artifact_patch_records=artifact_patch_records,
     )
 
 

@@ -27,16 +27,24 @@ class BCEDiceHybridLossPaper(nn.Module):
     def _flatten(x: torch.Tensor) -> torch.Tensor:
         return x.reshape(x.size(0), -1)
 
-    def _dice_loss_khened(self, p: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+    def _dice_loss_per_sample(self, p: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         p = self._flatten(p)
         g = self._flatten(g)
 
         intersection = (p * g).sum(dim=1)
         denominator = p.pow(2).sum(dim=1) + g.pow(2).sum(dim=1)
         dice = (2.0 * intersection + self.smooth) / (denominator + self.smooth)
-        return cast(torch.Tensor, 1.0 - dice.mean())
+        return cast(torch.Tensor, 1.0 - dice)
 
-    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        logits: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        artifact_covariates: torch.Tensor | None = None,
+        apply_artifact_discount: bool = True,
+        reduction: str = "mean",
+    ) -> torch.Tensor:
         if target.ndim == 4 and target.size(1) == 1:
             target = target.squeeze(1)
         elif target.ndim == 4 and target.size(-1) == 1:
@@ -63,9 +71,22 @@ class BCEDiceHybridLossPaper(nn.Module):
             ground_truth_fg * torch.log(probability_fg)
             + (1.0 - ground_truth_fg) * torch.log(1.0 - probability_fg)
         )
-        ce_loss = ce_loss.mean()
+        ce_loss = ce_loss.mean(dim=(1, 2))
 
-        dice_bg = self._dice_loss_khened(probabilities[:, 0, :, :], target_one_hot[:, 0, :, :])
-        dice_fg = self._dice_loss_khened(probabilities[:, 1, :, :], target_one_hot[:, 1, :, :])
+        dice_bg = self._dice_loss_per_sample(probabilities[:, 0, :, :], target_one_hot[:, 0, :, :])
+        dice_fg = self._dice_loss_per_sample(probabilities[:, 1, :, :], target_one_hot[:, 1, :, :])
 
-        return cast(torch.Tensor, self.alpha * ce_loss + self.beta * dice_bg + self.gamma * dice_fg)
+        loss_per_sample = cast(
+            torch.Tensor,
+            self.alpha * ce_loss + self.beta * dice_bg + self.gamma * dice_fg,
+        )
+
+        if artifact_covariates is not None and apply_artifact_discount:
+            alpha_eff = artifact_covariates.max(dim=1).values
+            loss_per_sample = loss_per_sample * (1.0 - alpha_eff)
+
+        if reduction == "none":
+            return loss_per_sample
+        if reduction != "mean":
+            raise ValueError(f"Unsupported reduction: {reduction}")
+        return loss_per_sample.mean()

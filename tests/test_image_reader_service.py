@@ -18,10 +18,11 @@ def test_run_slide_processing_returns_patch_engine_counts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured: dict[str, object] = {}
+    artifact_records = [{"filename": "patch.png", "cov_fold": 0.5}]
 
-    def fake_run_extraction(**kwargs: object) -> tuple[int, int]:
+    def fake_run_extraction(**kwargs: object) -> tuple[int, int, list[dict[str, object]]]:
         captured.update(kwargs)
-        return (7, 3)
+        return (7, 3, artifact_records)
 
     monkeypatch.setattr(
         "helpers.image_reader_service.patch_engine.run_extraction", fake_run_extraction
@@ -44,7 +45,6 @@ def test_run_slide_processing_returns_patch_engine_counts(
         target_level=0,
         num_workers=2,
         use_advanced_artifact_filtering=False,
-        artifact_policy=None,
         artifacts_geojson_path=None,
     )
 
@@ -53,6 +53,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert result.status == "COMPLETED"
     assert result.cancer_patches_created == 7
     assert result.not_cancer_patches_created == 3
+    assert result.artifact_patch_records == artifact_records
     assert captured["path_Image"] == str(tmp_path / "slide.svs")
     assert captured["patient"] == "100001"
     assert captured["window_size"] == 224

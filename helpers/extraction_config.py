@@ -54,7 +54,6 @@ class DatabaseManagerConfig:
     use_advanced_artifact_filtering: bool
     activate_sanity_check_geojson: bool
     geojson_path: Path | None
-    artifact_policy_path: Path | None
 
     @property
     def table_name(self) -> str:
@@ -81,7 +80,10 @@ def load_database_manager_config(
 
     window_size = _parse_int(values.get("WINDOW_SIZE"), "WINDOW_SIZE", default=224)
     stride = _parse_int(values.get("STRIDE"), "STRIDE", default=window_size // 2)
-    use_advanced_artifact_filtering = _parse_bool(values.get("USE_ADVANCED_ARTIFACT_FILTERING"))
+    use_advanced_artifact_filtering = _parse_bool(
+        values.get("USE_ADVANCED_ARTIFACT_FILTERING"),
+        default=True,
+    )
     activate_sanity_check_geojson = _parse_bool(values.get("ACTIVATE_SANITY_CHECK_GEOJSON"))
 
     database_path = resolve_env_path(
@@ -127,15 +129,6 @@ def load_database_manager_config(
                 system_name=system_name,
             )
             if use_advanced_artifact_filtering or activate_sanity_check_geojson
-            else None
-        ),
-        artifact_policy_path=(
-            _parse_optional_path(
-                values.get("ARTIFACT_POLICY_PATH"),
-                "ARTIFACT_POLICY_PATH",
-                system_name=system_name,
-            )
-            if use_advanced_artifact_filtering
             else None
         ),
     )

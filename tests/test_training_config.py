@@ -26,6 +26,8 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
             "TRAINING_EXECUTION_MODE": "PAPER",
             "TRAINING_SMART_SAMPLING": "false",
             "TRAINING_UNLEASHED": "true",
+            "TRAINING_USE_ARTIFACT_AWARE_LOSS": "true",
+            "TRAINING_ARTIFACT_INDEX_PATH": str(tmp_path / "artifact_patch_index.parquet"),
         }
     )
 
@@ -47,6 +49,8 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.execution_mode == "PAPER"
     assert config.smart_sampling is False
     assert config.unleashed is True
+    assert config.use_artifact_aware_loss is True
+    assert config.artifact_index_path == tmp_path / "artifact_patch_index.parquet"
 
 
 def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) -> None:
@@ -66,6 +70,8 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.email_recipients == ()
     assert config.amp_precision == "fp16"
     assert config.execution_mode == "FAST_DEV"
+    assert config.use_artifact_aware_loss is False
+    assert config.artifact_index_path is None
 
 
 def test_load_training_ensemble_config_rejects_invalid_execution_mode(tmp_path: Path) -> None:

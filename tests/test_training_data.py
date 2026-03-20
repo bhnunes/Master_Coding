@@ -5,6 +5,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 import numpy.typing as npt
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import torch
 
@@ -15,6 +17,7 @@ from helpers.training_data import (
     collate_batch,
     create_stratified_subset_within_patients,
     get_training_hdf5_filename,
+    load_artifact_coverage_lookup,
     setup_local_hdf5,
     verify_patient_separation,
 )
@@ -39,6 +42,17 @@ def _write_hdf5(path: Path, patient_ids: list[bytes] | None = None) -> None:
         handle.create_dataset("masks", data=masks)
         handle.create_dataset("labels", data=labels)
         handle.create_dataset("patient_ids", data=np.array(patient_ids, dtype="S8"))
+        handle.create_dataset(
+            "filenames",
+            data=np.array(
+                [
+                    b"NOT_CANCER_PATIENT_1_0_0_0001.png",
+                    b"CANCER_PATIENT_2_0_0_0002.png",
+                    b"NOT_CANCER_PATIENT_3_0_0_0003.png",
+                ],
+                dtype="S64",
+            ),
+        )
 
 
 class _IdentityTransform:
@@ -96,6 +110,51 @@ def test_prostate_dataset_reads_items_and_metadata(
     assert tuple(mask.shape) == (4, 4)
     assert dataset.get_labels().tolist() == [1, 0]
     assert dataset.get_patient_ids().tolist() == [b"p2", b"p3"]
+
+
+def test_prostate_dataset_returns_artifact_covariates_when_lookup_is_provided(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN.h5"
+    artifact_path = tmp_path / "artifact_patch_index.parquet"
+    _write_hdf5(hdf5_path)
+    pq.write_table(
+        pa.table(
+            {
+                "filename": ["CANCER_PATIENT_2_0_0_0002.png"],
+                "cov_fold": [0.2],
+                "cov_penmarking": [0.1],
+                "cov_oof": [0.3],
+                "cov_darkspot_foreign": [0.0],
+                "cov_edge_airbubble": [0.4],
+            }
+        ),
+        artifact_path,
+    )
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    dataset = ProstateCancerDatasetHDF5(
+        str(hdf5_path),
+        mode="val",
+        subset_indices=[1],
+        artifact_coverage_by_filename=load_artifact_coverage_lookup(str(artifact_path)),
+    )
+    image, mask, artifact_covariates = dataset[0]
+
+    assert image is not None
+    assert mask is not None
+    assert torch.allclose(artifact_covariates, torch.tensor([0.2, 0.1, 0.3, 0.0, 0.4]))
+
+
+def test_load_artifact_coverage_lookup_defaults_missing_values_to_zero(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "artifact_patch_index.parquet"
+    pq.write_table(pa.table({"filename": ["patch.png"], "cov_fold": [0.5]}), artifact_path)
+
+    lookup = load_artifact_coverage_lookup(str(artifact_path))
+
+    assert lookup["patch.png"] == (0.5, 0.0, 0.0, 0.0, 0.0)
 
 
 def test_subset_view_exposes_filtered_labels_and_patient_ids(

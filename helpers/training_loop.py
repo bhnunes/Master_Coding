@@ -27,6 +27,7 @@ def train_epoch(
     amp_precision: str,
     gpu_normalizer: torch.nn.Module,
     gpu_downscale: torch.nn.Module,
+    use_artifact_aware_loss: bool = False,
 ) -> tuple[float, dict[str, str]]:
     """Run one training epoch and return average loss plus AMP mode description."""
 
@@ -53,7 +54,11 @@ def train_epoch(
             health.train_skip("dataloader_none_batch")
             continue
         try:
-            images, masks = batch_data
+            if len(batch_data) == 3:
+                images, masks, artifact_covariates = batch_data
+            else:
+                images, masks = batch_data
+                artifact_covariates = None
         except Exception:
             health.train_skip("unpack_failed")
             continue
@@ -66,6 +71,10 @@ def train_epoch(
 
         images = images.to(device, non_blocking=True, memory_format=torch.channels_last)
         masks = masks.to(device, non_blocking=True, dtype=torch.long)
+        if artifact_covariates is not None:
+            artifact_covariates = artifact_covariates.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
         images = gpu_normalizer(images)
         images = gpu_downscale(images)
 
@@ -100,7 +109,10 @@ def train_epoch(
                 health.train_skip("channel_mismatch")
                 continue
 
-            loss = loss_fn(outputs, masks)
+            if use_artifact_aware_loss and artifact_covariates is not None:
+                loss = loss_fn(outputs, masks, artifact_covariates=artifact_covariates)
+            else:
+                loss = loss_fn(outputs, masks)
 
         if not torch.isfinite(loss):
             health.train_naninf_loss()
@@ -161,7 +173,10 @@ def validate_epoch(
                 health.val_skip("dataloader_none_batch")
                 continue
             try:
-                images, masks = batch_data
+                if len(batch_data) == 3:
+                    images, masks, _ = batch_data
+                else:
+                    images, masks = batch_data
             except Exception:
                 health.val_skip("unpack_failed")
                 continue

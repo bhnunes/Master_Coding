@@ -71,7 +71,6 @@ Master_Coding/
 ├── colab_setup.md                   # Google Colab usage guide
 ├── pyproject.toml                   # Project configuration (uv)
 ├── Dockerfile                       # Container definition
-├── artifact_policy.yaml             # Artifact filtering thresholds
 └── AGENTS.md                        # Developer guidelines
 ```
 
@@ -84,7 +83,7 @@ The pipeline follows a monolithic script-driven architecture where each script p
 | Stage | Script(s) | Description |
 |-------|-----------|-------------|
 | 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using a `.env`-driven Stage 1 pipeline. Output: GeoJSON files with artifact annotations and SQLite processing status |
-| 2 | `2_database_manager.py` + `3_1_imageReader.py` | Extract patches from WSIs based on annotations. Output: PNG patches + masks |
+| 2 | `2_database_manager.py` + `3_1_imageReader.py` | Extract patches from WSIs based on annotations. Output: PNG patches, masks, and artifact coverage Parquet metadata |
 | 3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script` | Human-in-the-loop + graph segmentation to remove incorrect annotations |
 | 4 | `5_crossfold.py` | Create patient-level stratified TRAIN/VALIDATION/TEST splits |
 | 5 | `6_sanity_checks.py` | Scientific integrity checks: patient leakage, file integrity, class balance |
@@ -116,7 +115,14 @@ Current Stage 1 behavior:
 | `2_database_manager.py` | Orchestrates the entire processing pipeline. Manages SQLite database, handles case ingestion, and invokes the image reader for each slide. |
 | `3_1_imageReader.py` | Per-slide worker that extracts patches based on annotations. Supports multiple annotation formats via handler dispatch. |
 | `helpers/data_handlers.py` | Annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats. |
-| `helpers/patch_engine.py` | Core extraction engine: tissue detection, polygon masking, artifact filtering, and image/mask writing. |
+| `helpers/patch_engine.py` | Core extraction engine: tissue detection, polygon masking, artifact coverage computation, and image/mask writing. |
+
+Current Stage 2 artifact-aware behavior:
+
+- `USE_ADVANCED_ARTIFACT_FILTERING=True` computes per-class artifact coverage for every saved patch instead of rejecting patches by threshold
+- `USE_ADVANCED_ARTIFACT_FILTERING=False` skips artifact geometry work for speed, but still writes the same Parquet schema with zero-valued coverage columns
+- Stage 2 writes filename-keyed artifact metadata to `PATCHES/artifact_patch_index.parquet`
+- Stage 8 can join that Parquet file with HDF5 `filenames` for artifact-aware loss discounting during training
 
 ### Stage 3: Annotation Cleaning
 
@@ -213,19 +219,6 @@ OpenSlide runtime rules:
 - Linux, containers, and Google Colab ignore `OPENSLIDE_PATH` and rely on the system OpenSlide install.
 - When running from WSL, heavy reads and writes on `/mnt/c` or `/mnt/d` can be much slower than native Linux paths.
 - If your source data and outputs live on Windows disks, native Windows remains the recommended production path.
-
-### Artifact Policy (artifact_policy.yaml)
-
-Defines thresholds for filtering patches containing artifacts:
-
-```yaml
-DROP_THRESH:
-  "Fold": 0.15
-  "Darkspot & Foreign Object": 0.15
-  "PenMarking": 0.12
-  "Edge & Air Bubble": 0.30
-  "OOF": 0.45
-```
 
 ## Installation
 

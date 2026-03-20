@@ -88,7 +88,8 @@ def run_training_epochs(
     amp_precision: str,
     gpu_normalizer: torch.nn.Module,
     gpu_downscale: torch.nn.Module,
-    run: Any | None,
+    use_artifact_aware_loss: bool = False,
+    run: Any | None = None,
 ) -> EpochRunState:
     """Run the epoch loop for a single architecture and return resulting state."""
 
@@ -116,6 +117,7 @@ def run_training_epochs(
                 amp_precision=amp_precision,
                 gpu_normalizer=gpu_normalizer,
                 gpu_downscale=gpu_downscale,
+                use_artifact_aware_loss=use_artifact_aware_loss,
             )
         except Exception as error:
             print(f"\nTrain Err E{current_epoch_num}:{error}")

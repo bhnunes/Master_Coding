@@ -64,7 +64,6 @@ def main() -> None:
             target_level=runtime_settings.target_level,
             num_workers=runtime_settings.num_workers,
             use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
-            artifact_policy=runtime_settings.artifact_policy,
             artifacts_geojson_path=Path(args.path_artifacts_geojson)
             if args.path_artifacts_geojson
             else None,

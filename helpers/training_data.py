@@ -4,7 +4,7 @@ import atexit
 import os
 import shutil
 import time
-from typing import Any
+from typing import Any, cast
 
 import albumentations as A
 import cv2
@@ -12,12 +12,52 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import psutil
+import pyarrow.parquet as pq
 import torch
 from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataloader import default_collate
 
 NumericArray = npt.NDArray[np.generic]
+ArtifactCoverageLookup = dict[str, tuple[float, float, float, float, float]]
+ZERO_ARTIFACT_COVERAGE = (0.0, 0.0, 0.0, 0.0, 0.0)
+ARTIFACT_COVERAGE_COLUMNS = (
+    "cov_fold",
+    "cov_penmarking",
+    "cov_oof",
+    "cov_darkspot_foreign",
+    "cov_edge_airbubble",
+)
+
+
+def _decode_filename(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def load_artifact_coverage_lookup(parquet_path: str) -> ArtifactCoverageLookup:
+    """Load filename-keyed artifact coverage vectors from Parquet."""
+
+    parquet_file = pq.ParquetFile(parquet_path)
+    available_columns = set(parquet_file.schema.names)
+    selected_columns = [
+        "filename",
+        *[c for c in ARTIFACT_COVERAGE_COLUMNS if c in available_columns],
+    ]
+    table = parquet_file.read(columns=selected_columns)
+    data = table.to_pydict()
+    filenames = data.pop("filename", [])
+    lookup: ArtifactCoverageLookup = {}
+    for index, filename in enumerate(filenames):
+        lookup[str(filename)] = cast(
+            tuple[float, float, float, float, float],
+            tuple(
+                float((data.get(column_name) or [0.0] * len(filenames))[index] or 0.0)
+                for column_name in ARTIFACT_COVERAGE_COLUMNS
+            ),
+        )
+    return lookup
 
 
 def get_transforms(mode: str = "train", img_size: int = 224) -> A.Compose:
@@ -122,11 +162,15 @@ def setup_local_hdf5(drive_dir: str, local_dir: str, smart_sampling: bool) -> st
     return chosen_file_name
 
 
-class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+class HybridProstateDataset(Dataset[Any]):
     """HDF5 dataset that optionally caches a subset in RAM."""
 
     def __init__(
-        self, hdf5_path: str, mode: str = "train", subset_indices: list[int] | None = None
+        self,
+        hdf5_path: str,
+        mode: str = "train",
+        subset_indices: list[int] | None = None,
+        artifact_coverage_by_filename: ArtifactCoverageLookup | None = None,
     ) -> None:
         self.hdf5_path = hdf5_path
         self.mode = mode
@@ -134,12 +178,14 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
 
         print(f"Opening {hdf5_path}...")
         with h5py.File(self.hdf5_path, "r") as handle:
-            images = handle["images"]
-            masks = handle["masks"]
-            labels = handle["labels"]
-            patient_ids = handle["patient_ids"]
+            images = cast(Any, handle["images"])
+            masks = cast(Any, handle["masks"])
+            labels = cast(Any, handle["labels"])
+            patient_ids = cast(Any, handle["patient_ids"])
+            filenames = cast(Any, handle["filenames"])
             self.full_labels = np.asarray(labels[:])
             self.full_pids = np.asarray(patient_ids[:])
+            self.full_filenames = np.asarray(filenames[:])
             img_shape = tuple(images.shape)
             mask_shape = tuple(masks.shape)
 
@@ -159,8 +205,10 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.h5_file: Any = None
         self.images_dset: Any = None
         self.masks_dset: Any = None
+        self.filenames_dset: Any = None
         self._opened_pid: int | None = None
         self._atexit_registered = False
+        self.artifact_coverage_by_filename = artifact_coverage_by_filename
 
         if self.use_ram_cache:
             print(
@@ -180,10 +228,11 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         start_time = time.time()
         sorted_indices = np.sort(self.indices)
         with h5py.File(self.hdf5_path, "r") as handle:
-            self.images_cache = np.asarray(handle["images"][sorted_indices])
-            self.masks_cache = np.asarray(handle["masks"][sorted_indices])
+            self.images_cache = np.asarray(cast(Any, handle["images"])[sorted_indices])
+            self.masks_cache = np.asarray(cast(Any, handle["masks"])[sorted_indices])
         self.labels = self.full_labels[sorted_indices]
         self.patient_ids = self.full_pids[sorted_indices]
+        self.filenames = self.full_filenames[sorted_indices]
         self.indices = np.arange(len(sorted_indices))
         print(f"Loaded {len(self.indices)} samples in {time.time() - start_time:.2f}s.")
 
@@ -198,6 +247,7 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             )
             self.images_dset = self.h5_file["images"]
             self.masks_dset = self.h5_file["masks"]
+            self.filenames_dset = self.h5_file["filenames"]
             self._opened_pid = pid
             if not self._atexit_registered:
                 atexit.register(self.close)
@@ -206,25 +256,35 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __len__(self) -> int:
         return len(self.indices)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(
+        self, idx: int
+    ) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if self.use_ram_cache:
             assert self.images_cache is not None
             assert self.masks_cache is not None
             image = self.images_cache[idx]
             mask = self.masks_cache[idx]
+            filename = _decode_filename(self.filenames[idx])
         else:
             if self.h5_file is None:
                 self._open_file()
             real_idx = int(self.indices[idx])
             image = self.images_dset[real_idx]
             mask = self.masks_dset[real_idx]
+            filename = _decode_filename(self.filenames_dset[real_idx])
 
         try:
             augmented = self.transform(image=image, mask=mask)
             transformed_mask = augmented["mask"]
             if transformed_mask.ndim == 3 and transformed_mask.shape[-1] == 1:
                 transformed_mask = transformed_mask.squeeze(-1)
-            return augmented["image"], transformed_mask.long()
+            if self.artifact_coverage_by_filename is None:
+                return augmented["image"], transformed_mask.long()
+            artifact_covariates = torch.tensor(
+                self.artifact_coverage_by_filename.get(filename, ZERO_ARTIFACT_COVERAGE),
+                dtype=torch.float32,
+            )
+            return augmented["image"], transformed_mask.long(), artifact_covariates
         except Exception as error:
             raise RuntimeError(f"Transform failed at idx={idx}") from error
 
@@ -250,6 +310,7 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             self.h5_file = None
             self.images_dset = None
             self.masks_dset = None
+            self.filenames_dset = None
             self._opened_pid = None
 
     def __del__(self) -> None:
@@ -260,6 +321,7 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         state["h5_file"] = None
         state["images_dset"] = None
         state["masks_dset"] = None
+        state["filenames_dset"] = None
         state["_opened_pid"] = None
         state["_atexit_registered"] = False
         return state
@@ -269,23 +331,29 @@ class HybridProstateDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.h5_file = None
         self.images_dset = None
         self.masks_dset = None
+        self.filenames_dset = None
         self._opened_pid = None
         self._atexit_registered = False
 
 
-class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tuple[None, None]]):
+class ProstateCancerDatasetHDF5(Dataset[Any]):
     """Lazy HDF5 dataset used by validation and training paths."""
 
     def __init__(
-        self, hdf5_path: str, mode: str = "train", subset_indices: list[int] | None = None
+        self,
+        hdf5_path: str,
+        mode: str = "train",
+        subset_indices: list[int] | None = None,
+        artifact_coverage_by_filename: ArtifactCoverageLookup | None = None,
     ) -> None:
         self.hdf5_path = hdf5_path
         self.mode = mode
         self.transform = get_transforms(mode=mode, img_size=224)
 
         with h5py.File(self.hdf5_path, "r") as handle:
-            self.full_labels = np.asarray(handle["labels"][:])
-            self.full_pids = np.asarray(handle["patient_ids"][:])
+            self.full_labels = np.asarray(cast(Any, handle["labels"])[:])
+            self.full_pids = np.asarray(cast(Any, handle["patient_ids"])[:])
+            self.full_filenames = np.asarray(cast(Any, handle["filenames"])[:])
             self.total_len = len(self.full_labels)
 
         if subset_indices is not None:
@@ -295,11 +363,14 @@ class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tupl
 
         self.labels = self.full_labels[self.indices]
         self.patient_ids = self.full_pids[self.indices]
+        self.filenames = self.full_filenames[self.indices]
         self.h5_file: Any = None
         self.images_dset: Any = None
         self.masks_dset: Any = None
+        self.filenames_dset: Any = None
         self._opened_pid: int | None = None
         self._atexit_registered = False
+        self.artifact_coverage_by_filename = artifact_coverage_by_filename
 
     def _open_file(self) -> None:
         pid = os.getpid()
@@ -315,6 +386,7 @@ class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tupl
             )
             self.images_dset = self.h5_file["images"]
             self.masks_dset = self.h5_file["masks"]
+            self.filenames_dset = self.h5_file["filenames"]
             self._opened_pid = pid
             if not self._atexit_registered:
                 atexit.register(self.close)
@@ -323,15 +395,23 @@ class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tupl
     def __len__(self) -> int:
         return len(self.indices)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor] | tuple[None, None]:
+    def __getitem__(self, idx: int) -> Any:
         if self.h5_file is None:
             self._open_file()
         real_idx = int(self.indices[idx])
         image = self.images_dset[real_idx]
         mask = self.masks_dset[real_idx]
+        filename = _decode_filename(self.filenames_dset[real_idx])
         try:
             augmented = self.transform(image=image, mask=mask)
-            return augmented["image"], augmented["mask"].long()
+            transformed_mask = augmented["mask"].long()
+            if self.artifact_coverage_by_filename is None:
+                return augmented["image"], transformed_mask
+            artifact_covariates = torch.tensor(
+                self.artifact_coverage_by_filename.get(filename, ZERO_ARTIFACT_COVERAGE),
+                dtype=torch.float32,
+            )
+            return augmented["image"], transformed_mask, artifact_covariates
         except Exception as error:
             print(f"Error on index {idx}: {error}")
             return None, None
@@ -360,6 +440,7 @@ class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tupl
             self.h5_file = None
             self.images_dset = None
             self.masks_dset = None
+            self.filenames_dset = None
             self._opened_pid = None
 
     def __del__(self) -> None:
@@ -373,6 +454,7 @@ class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tupl
         state["h5_file"] = None
         state["images_dset"] = None
         state["masks_dset"] = None
+        state["filenames_dset"] = None
         state["_opened_pid"] = None
         state["_atexit_registered"] = False
         return state
@@ -382,6 +464,7 @@ class ProstateCancerDatasetHDF5(Dataset[tuple[torch.Tensor, torch.Tensor] | tupl
         self.h5_file = None
         self.images_dset = None
         self.masks_dset = None
+        self.filenames_dset = None
         self._opened_pid = None
         self._atexit_registered = False
 

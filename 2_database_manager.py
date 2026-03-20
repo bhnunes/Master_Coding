@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
 
+from helpers.extraction_artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
 from helpers.extraction_config import DatabaseManagerConfig, load_database_manager_config
 from helpers.extraction_repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
 from helpers.image_reader_service import (
@@ -164,7 +165,6 @@ def build_slide_request(
         target_level=runtime_settings.target_level,
         num_workers=runtime_settings.num_workers,
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
-        artifact_policy=runtime_settings.artifact_policy,
         artifacts_geojson_path=resolve_artifacts_geojson(case, config),
     )
 
@@ -213,44 +213,54 @@ def main_process() -> None:
 
     print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.ROCKET} STARTING PROCESSING ---{Style.RESET}")
     patch_folders = ensure_patch_output_folders(config.base_path)
+    artifact_index_writer = ArtifactIndexWriter(
+        config.patch_base_path / "artifact_patch_index.parquet"
+    )
 
-    with tqdm(
-        total=len(cases_to_process), desc=f"{Style.CYAN}Processing WSI slides{Style.RESET}"
-    ) as progress_bar:
-        for case in cases_to_process:
-            progress_bar.set_description(
-                f"Processing: {Style.CYAN}{case.image_path.name}{Style.RESET}"
-            )
-            if case.annotation_path is None:
+    try:
+        with tqdm(
+            total=len(cases_to_process), desc=f"{Style.CYAN}Processing WSI slides{Style.RESET}"
+        ) as progress_bar:
+            for case in cases_to_process:
+                progress_bar.set_description(
+                    f"Processing: {Style.CYAN}{case.image_path.name}{Style.RESET}"
+                )
+                if case.annotation_path is None:
+                    progress_bar.update(1)
+                    continue
+
+                repository.mark_processing(case.record_id)
+                started_at = time.perf_counter()
+                result = run_slide_processing(
+                    build_slide_request(case, config, runtime_settings, patch_folders)
+                )
+                artifact_index_writer.append_records(
+                    [ArtifactPatchRecord(**record) for record in result.artifact_patch_records]
+                )
+                elapsed_minutes = (time.perf_counter() - started_at) / 60
+                repository.update_case(
+                    case.record_id,
+                    CaseUpdate(
+                        cancer_qtd=result.cancer_patches_created,
+                        non_cancer_qtd=result.not_cancer_patches_created,
+                        exec_time_minutes=elapsed_minutes,
+                        comments=result.comments[-240:],
+                        status=result.status,
+                        window_size=config.window_size,
+                        stride=config.stride,
+                        match_percentage=config.match_percentage,
+                        tissue_percentage=config.tissue_percentage,
+                    ),
+                )
                 progress_bar.update(1)
-                continue
-
-            repository.mark_processing(case.record_id)
-            started_at = time.perf_counter()
-            result = run_slide_processing(
-                build_slide_request(case, config, runtime_settings, patch_folders)
-            )
-            elapsed_minutes = (time.perf_counter() - started_at) / 60
-            repository.update_case(
-                case.record_id,
-                CaseUpdate(
-                    cancer_qtd=result.cancer_patches_created,
-                    non_cancer_qtd=result.not_cancer_patches_created,
-                    exec_time_minutes=elapsed_minutes,
-                    comments=result.comments[-240:],
+                progress_bar.set_postfix(
+                    cancer=result.cancer_patches_created,
+                    non_cancer=result.not_cancer_patches_created,
+                    artifact_rows=len(result.artifact_patch_records),
                     status=result.status,
-                    window_size=config.window_size,
-                    stride=config.stride,
-                    match_percentage=config.match_percentage,
-                    tissue_percentage=config.tissue_percentage,
-                ),
-            )
-            progress_bar.update(1)
-            progress_bar.set_postfix(
-                cancer=result.cancer_patches_created,
-                non_cancer=result.not_cancer_patches_created,
-                status=result.status,
-            )
+                )
+    finally:
+        artifact_index_writer.close()
 
 
 if __name__ == "__main__":

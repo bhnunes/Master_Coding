@@ -114,6 +114,8 @@ class TrainingEnsembleConfig:
     architecture: str
     encoder: str
     resume_checkpoint: Path | None
+    use_artifact_aware_loss: bool
+    artifact_index_path: Path | None
 
 
 def load_training_ensemble_config(
@@ -140,6 +142,20 @@ def load_training_ensemble_config(
         "TRAINING_RESUME_CHECKPOINT",
         system_name=system_name,
     )
+    use_artifact_aware_loss = _parse_bool(
+        values.get("TRAINING_USE_ARTIFACT_AWARE_LOSS"),
+        default=False,
+    )
+    artifact_index_path = _parse_optional_path(
+        values.get("TRAINING_ARTIFACT_INDEX_PATH"),
+        "TRAINING_ARTIFACT_INDEX_PATH",
+        system_name=system_name,
+    )
+    if use_artifact_aware_loss and artifact_index_path is None:
+        raise ValueError(
+            "The 'TRAINING_ARTIFACT_INDEX_PATH' environment variable is required when "
+            "TRAINING_USE_ARTIFACT_AWARE_LOSS is enabled."
+        )
 
     execution_mode = _parse_choice(
         values.get("TRAINING_EXECUTION_MODE"),
@@ -230,4 +246,6 @@ def load_training_ensemble_config(
         architecture=architecture,
         encoder=encoder,
         resume_checkpoint=resume_checkpoint,
+        use_artifact_aware_loss=use_artifact_aware_loss,
+        artifact_index_path=artifact_index_path,
     )

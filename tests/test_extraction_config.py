@@ -35,6 +35,18 @@ def test_load_database_manager_config_reads_expected_environment(tmp_path: Path)
     assert config.geojson_path == tmp_path / "geojson"
 
 
+def test_load_database_manager_config_defaults_artifact_feature_to_true(tmp_path: Path) -> None:
+    config = load_database_manager_config(
+        {
+            "TAG": "TCGA",
+            "SQLITE_DB_PATH": str(tmp_path / "databases" / "cases.db"),
+            "PROJECTS_BASE_PATH": str(tmp_path / "projects"),
+        }
+    )
+
+    assert config.use_advanced_artifact_filtering is True
+
+
 def test_load_database_manager_config_requires_tag() -> None:
     with pytest.raises(ValueError, match="TAG"):
         load_database_manager_config({})

@@ -27,6 +27,22 @@ def _loss_fn(outputs: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
     return torch.nn.functional.mse_loss(outputs, targets)
 
 
+class ArtifactAwareLoss:
+    def __init__(self) -> None:
+        self.last_covariates: torch.Tensor | None = None
+
+    def __call__(
+        self,
+        outputs: torch.Tensor,
+        masks: torch.Tensor,
+        *,
+        artifact_covariates: torch.Tensor,
+    ) -> torch.Tensor:
+        self.last_covariates = artifact_covariates.detach().clone()
+        targets = torch.nn.functional.one_hot(masks, num_classes=2).permute(0, 3, 1, 2).float()
+        return torch.nn.functional.mse_loss(outputs, targets)
+
+
 def test_train_epoch_returns_loss_and_amp_log() -> None:
     model = TinySegmentationModel()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
@@ -105,3 +121,32 @@ def test_validate_epoch_marks_skipped_batches_when_loader_yields_none() -> None:
     assert health.run["val_skipped_batches"] == 2
     assert health.run["val_skip_reasons"]["dataloader_none_batch"] == 1
     assert health.run["val_skip_reasons"]["no_samples_processed"] == 1
+
+
+def test_train_epoch_passes_artifact_covariates_when_enabled() -> None:
+    model = TinySegmentationModel()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    health = TrainingHealthTracker(name="train")
+    loss_fn = ArtifactAwareLoss()
+    images = torch.randn(2, 3, 4, 4)
+    masks = torch.randint(0, 2, (2, 4, 4), dtype=torch.long)
+    artifact_covariates = torch.tensor([[0.1, 0.0, 0.2, 0.0, 0.0], [0.0, 0.0, 0.0, 0.3, 0.0]])
+
+    train_epoch(
+        model=model,
+        optimizer=optimizer,
+        dataloader=[(images, masks, artifact_covariates)],
+        device=torch.device("cpu"),
+        current_epoch=0,
+        loss_fn=loss_fn,
+        health=health,
+        architecture="UNET++",
+        accumulation_steps=1,
+        amp_precision="fp16",
+        gpu_normalizer=IdentityModule(),
+        gpu_downscale=IdentityModule(),
+        use_artifact_aware_loss=True,
+    )
+
+    assert loss_fn.last_covariates is not None
+    assert torch.allclose(loss_fn.last_covariates, artifact_covariates)

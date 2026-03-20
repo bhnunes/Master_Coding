@@ -27,6 +27,13 @@ KERNEL_OPEN = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))  # For noise 
 KERNEL_CLOSE = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))  # For hole filling
 PATCH_AREA = WINDOW_SIZE * WINDOW_SIZE
 HALF_WINDOW = WINDOW_SIZE // 2
+ARTIFACT_CLASS_TO_COLUMN = {
+    "Fold": "cov_fold",
+    "PenMarking": "cov_penmarking",
+    "OOF": "cov_oof",
+    "Darkspot & Foreign Object": "cov_darkspot_foreign",
+    "Edge & Air Bubble": "cov_edge_airbubble",
+}
 
 
 def setup_logging():
@@ -103,6 +110,60 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     return mask
 
 
+def get_zero_artifact_coverages():
+    return {column_name: 0.0 for column_name in ARTIFACT_CLASS_TO_COLUMN.values()}
+
+
+def compute_artifact_coverages_for_patch(
+    artifact_polygons_by_class_level0,
+    patch_polygon,
+    scale_factor,
+    patch_area,
+):
+    coverages = get_zero_artifact_coverages()
+    for artifact_class, column_name in ARTIFACT_CLASS_TO_COLUMN.items():
+        polygons_l0 = artifact_polygons_by_class_level0.get(artifact_class, [])
+        if not polygons_l0:
+            continue
+
+        scaled_polys_raw = []
+        for polygon_points in polygons_l0:
+            if len(polygon_points) < 3:
+                continue
+            try:
+                poly = Polygon(
+                    [(px / scale_factor, py / scale_factor) for px, py in polygon_points]
+                )
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                scaled_polys_raw.append(poly)
+            except Exception:
+                continue
+
+        scaled_polys_flat = [
+            geom_part
+            for geom in scaled_polys_raw
+            for geom_part in (geom.geoms if geom.geom_type == "MultiPolygon" else [geom])
+            if geom.is_valid and geom.geom_type == "Polygon"
+        ]
+        if not scaled_polys_flat:
+            continue
+
+        try:
+            artifact_geometry = MultiPolygon(scaled_polys_flat)
+            if not prep(artifact_geometry).intersects(patch_polygon):
+                continue
+            intersection = artifact_geometry.intersection(patch_polygon)
+            coverages[column_name] = float(intersection.area / patch_area)
+        except shapely.errors.TopologicalError:
+            logging.warning(
+                "Skipping artifact coverage for a problematic geometry at patch polygon %s.",
+                patch_polygon.bounds,
+            )
+            continue
+    return coverages
+
+
 def process_window(args):
     """Generic window processor. Returns a detailed traceback on failure."""
     (
@@ -121,7 +182,6 @@ def process_window(args):
         annotations_cancer_level0,
         annotations_not_cancer_level0,
         artifact_polygons_by_class_level0,
-        artifact_policy,
         use_artifact_filter,
     ) = args
     slide = None
@@ -131,85 +191,23 @@ def process_window(args):
         x_int, y_int = int(x), int(y)
         patch_coords = (x_int, y_int)
 
-        if use_artifact_filter and artifact_polygons_by_class_level0 and artifact_policy:
-            scale_factor = slide.level_downsamples[target_level]
-            patch_polygon = Polygon(
-                [
-                    (x, y),
-                    (x + window_size, y),
-                    (x + window_size, y + window_size),
-                    (x, y + window_size),
-                ]
+        scale_factor = slide.level_downsamples[target_level]
+        patch_polygon = Polygon(
+            [
+                (x, y),
+                (x + window_size, y),
+                (x + window_size, y + window_size),
+                (x, y + window_size),
+            ]
+        )
+        artifact_coverages = get_zero_artifact_coverages()
+        if use_artifact_filter and artifact_polygons_by_class_level0:
+            artifact_coverages = compute_artifact_coverages_for_patch(
+                artifact_polygons_by_class_level0=artifact_polygons_by_class_level0,
+                patch_polygon=patch_polygon,
+                scale_factor=scale_factor,
+                patch_area=PATCH_AREA,
             )
-            should_drop = False
-            for cls, polygons_l0 in artifact_polygons_by_class_level0.items():
-                if not polygons_l0:
-                    continue
-                threshold = artifact_policy["DROP_THRESH"].get(cls)
-                if threshold is None:
-                    continue
-
-                scaled_polys_raw = []
-                for p in polygons_l0:
-                    if len(p) < 3:
-                        continue
-                    try:
-                        poly = Polygon([(px / scale_factor, py / scale_factor) for px, py in p])
-                        if not poly.is_valid:
-                            poly = poly.buffer(0)
-                        scaled_polys_raw.append(poly)
-                    except Exception:
-                        continue
-
-                scaled_polys_flat = [
-                    geom_part
-                    for geom in scaled_polys_raw
-                    for geom_part in (geom.geoms if geom.geom_type == "MultiPolygon" else [geom])
-                    if geom.is_valid and geom.geom_type == "Polygon"
-                ]
-                if not scaled_polys_flat:
-                    continue
-
-                unprepared_geom = MultiPolygon(scaled_polys_flat)
-                prepared_geom = prep(unprepared_geom)
-
-                if prepared_geom.intersects(patch_polygon):
-                    try:
-                        intersection = unprepared_geom.intersection(patch_polygon)
-                        coverage = intersection.area / PATCH_AREA
-                        if coverage > threshold:
-                            logging.info(
-                                "Patch at %s DROPPED. Reason: %s coverage (%.2f) > threshold (%s).",
-                                patch_coords,
-                                cls,
-                                coverage,
-                                threshold,
-                            )
-                            should_drop = True
-                            break
-                    except shapely.errors.TopologicalError:
-                        logging.warning(
-                            "Skipping intersection check for a problematic artifact "
-                            "geometry at %s.",
-                            patch_coords,
-                        )
-                        continue
-            if should_drop:
-                patch_pil = slide.read_region(
-                    patch_coords, target_level, (window_size, window_size)
-                ).convert("RGB")
-                save_folder_img_artifact = str(path_not_cancer_folder).replace(
-                    "NOT_CANCER", "ARTIFACTS"
-                )
-                os.makedirs(save_folder_img_artifact, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                file_basename = (
-                    f"ARTIFACT_PATIENT_{patient}_{x_int}_{y_int}_"
-                    f"{random.randint(1000, 9999)}_{timestamp}.png"
-                )
-                patch_pil.save(os.path.join(save_folder_img_artifact, file_basename))
-                slide.close()
-                return "SKIPPED_ARTIFACT", None
 
         patch_pil = slide.read_region(
             patch_coords, target_level, (window_size, window_size)
@@ -220,7 +218,6 @@ def process_window(args):
             slide.close()
             return "SKIPPED_TISSUE", None
 
-        scale_factor = slide.level_downsamples[target_level]
         cancer_mask = polygons_to_mask(
             (window_size, window_size), annotations_cancer_level0, scale_factor, patch_coords
         )
@@ -263,8 +260,15 @@ def process_window(args):
             Image.fromarray((final_mask * 255).astype(np.uint8)).save(
                 os.path.join(save_folder_mask, file_basename)
             )
+            patch_record = {
+                "filename": file_basename,
+                "label": 1 if label == "CANCER" else 0,
+                "patient_id": str(patient),
+                "slide_id": os.path.splitext(os.path.basename(path_Image))[0],
+                **artifact_coverages,
+            }
             slide.close()
-            return f"SAVED_{label}", None
+            return f"SAVED_{label}", patch_record
 
         slide.close()
         return "SKIPPED_OVERLAP", None
@@ -291,22 +295,17 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             logging.warning("No valid annotations found by handler for slide %s", slide_basename)
             slide.close()
             slide = None
-            return 0, 0
+            return 0, 0, []
 
         # --- NEW: ROBUST ARTIFACT PARSING BLOCK ---
         artifact_polygons_by_class_level0 = {}
-        if (
-            kwargs.get("use_artifact_filter")
-            and kwargs.get("path_artifacts_geojson")
-            and kwargs.get("artifact_policy")
-        ):
+        if kwargs.get("use_artifact_filter") and kwargs.get("path_artifacts_geojson"):
             logging.info(f"Advanced artifact filtering is ACTIVE for {slide_basename}.")
             try:
                 with open(kwargs["path_artifacts_geojson"]) as f:
                     artifact_data = json.load(f)
 
-                # Initialize dictionaries for all classes we care about from the policy
-                for cls in kwargs["artifact_policy"]["DROP_THRESH"]:
+                for cls in ARTIFACT_CLASS_TO_COLUMN:
                     artifact_polygons_by_class_level0[cls] = []
 
                 # Safely parse the GeoJSON features
@@ -388,7 +387,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             logging.warning("No valid annotation polygons after scaling for %s", slide_basename)
             slide.close()
             slide = None
-            return 0, 0
+            return 0, 0, []
 
         combined_annotations = MultiPolygon(scaled_polys_flat)
         # Use prep for optimized geometric checks
@@ -439,7 +438,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
 
         if not filtered_coords:
             slide.close()
-            return 0, 0
+            return 0, 0, []
 
         args_list = [
             (
@@ -458,7 +457,6 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
                 annotations_cancer_level0,
                 annotations_not_cancer_level0,
                 artifact_polygons_by_class_level0,
-                kwargs.get("artifact_policy"),
                 kwargs.get("use_artifact_filter"),
             )
             for x, y in filtered_coords
@@ -470,6 +468,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
 
         cancer_count = len([r for r, _ in results if r == "SAVED_CANCER"])
         not_cancer_count = len([r for r, _ in results if r == "SAVED_NOT_CANCER"])
+        artifact_patch_records = [record for _, record in results if record is not None]
 
         errors = [msg for status, msg in results if status == "ERROR"]
         if errors:
@@ -490,7 +489,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             raise Exception(error_summary)
 
         logging.info(f"--- Finished processing slide: {slide_basename} ---")
-        return cancer_count, not_cancer_count
+        return cancer_count, not_cancer_count, artifact_patch_records
     finally:
         if slide:
             slide.close()

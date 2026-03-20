@@ -1,7 +1,7 @@
 import os
 import time
 import traceback
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -21,6 +21,7 @@ from helpers.training_data import (
     SubsetView,
     collate_batch,
     create_stratified_subset_within_patients,
+    load_artifact_coverage_lookup,
     setup_local_hdf5,
     verify_patient_separation,
 )
@@ -118,6 +119,8 @@ email_password = training_config.email_password or ""
 # Options: "FAST_DEV" (Speed prioritized) | "PAPER" (Strict Determinism)
 execution_mode = training_config.execution_mode
 smart_sampling = training_config.smart_sampling
+use_artifact_aware_loss = training_config.use_artifact_aware_loss
+artifact_index_path = training_config.artifact_index_path
 
 subset_ratio = 1.0
 use_subset = False
@@ -146,7 +149,7 @@ elif execution_mode == "PAPER":
     use_subset = False  # Force full dataset unless explicitly overridden
 
 amp_precision = training_config.amp_precision
-amp_log = ""
+amp_log: dict[str, str] = {}
 
 
 seed_everything(seed)
@@ -170,12 +173,29 @@ train_h5_path = os.path.join(local_data_dir, chosen_file_name)
 val_h5_path = os.path.join(local_data_dir, "VALIDATION.h5")
 
 print("\nCreating DataLoaders...")
+train_ds: Any = None
+val_ds: Any = None
+train_loader: Any = None
+val_loader: Any = None
 try:
     # A) Full HDF5 Wrappers
     # Note: Ensure your preprocessing script included "patient_ids" in the HDF5
     # for the leakage check below to function.
-    full_train_ds_h5 = HybridProstateDataset(train_h5_path, mode="train")
-    full_val_ds_h5 = ProstateCancerDatasetHDF5(val_h5_path, mode="val")
+    artifact_coverage_by_filename = (
+        load_artifact_coverage_lookup(str(artifact_index_path))
+        if use_artifact_aware_loss and artifact_index_path is not None
+        else None
+    )
+    full_train_ds_h5 = HybridProstateDataset(
+        train_h5_path,
+        mode="train",
+        artifact_coverage_by_filename=artifact_coverage_by_filename,
+    )
+    full_val_ds_h5 = ProstateCancerDatasetHDF5(
+        val_h5_path,
+        mode="val",
+        artifact_coverage_by_filename=artifact_coverage_by_filename,
+    )
 
     # B) Patient Leakage Check (Critical for scientific validity)
     print("Verifying data integrity...")
@@ -259,6 +279,7 @@ except Exception as e:
 
     traceback.print_exc()
     clear_gpu()
+    raise
 
 selected_architecture = training_config.architecture
 selected_encoder = training_config.encoder
@@ -383,6 +404,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         amp_precision=amp_precision,
         gpu_normalizer=gpu_normalizer,
         gpu_downscale=gpu_downscale,
+        use_artifact_aware_loss=use_artifact_aware_loss,
         run=run,
     )
     training_successful = epoch_state.training_successful
