@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import logging
+import multiprocessing as mp
+from functools import partial
+
+import cv2
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+
+def calculate_image_entropy_from_path(image_path: str, thumb: int = 128) -> tuple[str, float]:
+    """Compute fast grayscale Shannon entropy from a PNG path."""
+
+    try:
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            return image_path, 0.0
+        if thumb is not None:
+            image = cv2.resize(image, (thumb, thumb), interpolation=cv2.INTER_AREA)
+        histogram = np.bincount(image.ravel(), minlength=256).astype(np.float64)
+        total = histogram.sum()
+        if total <= 0:
+            return image_path, 0.0
+        probabilities = histogram / total
+        probabilities = probabilities[probabilities > 0]
+        entropy = float(-(probabilities * np.log2(probabilities)).sum())
+        return image_path, entropy
+    except Exception:
+        return image_path, 0.0
+
+
+def compute_all_patch_entropies(
+    df: pd.DataFrame,
+    num_workers: int,
+    chunksize: int,
+    entropy_thumbnail: int = 128,
+) -> pd.DataFrame:
+    """Compute entropy for each image path in the dataset."""
+
+    image_paths = df["image_path"].tolist()
+    logging.info(
+        "Computing patch entropies for %s images using num_workers=%s, thumb=%s...",
+        len(image_paths),
+        num_workers,
+        entropy_thumbnail,
+    )
+    worker = partial(calculate_image_entropy_from_path, thumb=entropy_thumbnail)
+    if num_workers <= 1:
+        results = [worker(path) for path in tqdm(image_paths, desc="Entropy", leave=False)]
+    else:
+        context = mp.get_context("spawn")
+        with context.Pool(processes=num_workers) as pool:
+            results = list(
+                tqdm(
+                    pool.imap(worker, image_paths, chunksize=chunksize),
+                    total=len(image_paths),
+                    desc="Entropy",
+                    leave=False,
+                )
+            )
+    return pd.DataFrame(results, columns=["image_path", "entropy"])
+
+
+def compute_patient_entropy_median(df: pd.DataFrame, entropy_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate patch entropy to one median value per patient."""
+
+    merged = df.merge(entropy_df, on="image_path", how="left")
+    merged["entropy"] = merged["entropy"].fillna(0.0)
+    return (
+        merged.groupby("patient_id")["entropy"].median().reset_index(name="patient_entropy_median")
+    )
+
+
+def score_split_by_patient_entropy_median(
+    patient_entropy_df: pd.DataFrame,
+    patient_ids: list[int],
+) -> float:
+    """Score one split from the patient-level entropy objective."""
+
+    subset = patient_entropy_df[patient_entropy_df["patient_id"].isin(patient_ids)]
+    if subset.empty:
+        return float("-inf")
+    return float(subset["patient_entropy_median"].median())

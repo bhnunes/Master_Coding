@@ -64,6 +64,16 @@ Master_Coding/
 │   │   ├── parameter_store.py
 │   │   ├── tuning_config.py
 │   │   └── tuning_pipeline.py
+│   ├── crossfold/                   # Stage 5 dataset preparation domain
+│   │   ├── config.py
+│   │   ├── discovery.py
+│   │   ├── entropy.py
+│   │   ├── io.py
+│   │   ├── logging.py
+│   │   ├── normalization.py
+│   │   ├── pipeline.py
+│   │   ├── provenance.py
+│   │   └── splitting.py
 │   ├── training/                    # Stage 8 training domain
 │   │   ├── checkpointing.py
 │   │   ├── config.py
@@ -162,7 +172,16 @@ Current Stage 2 artifact-aware behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `5_crossfold.py` | Creates patient-level stratified TRAIN/VALIDATION/TEST splits. Supports optional stain normalization (Reinhard, Macenko, Vahadane, Ruifrok). Uses entropy-based selection for optimal splits. |
+| `5_crossfold.py` | Thin Stage 5 orchestrator that loads `.env`, builds patient-level TRAIN/VALIDATION/TEST splits, optionally fits stain normalization on TRAIN only, and writes provenance artifacts. |
+
+Current Stage 5 behavior:
+
+- Loads Stage 5 settings from `.env` / `.env_example` through `helpers/crossfold/config.py`
+- Scans paired PNG patches from `CANCER`, `NOT_CANCER`, `CANCER_MASK`, and `NOT_CANCER_MASK`
+- Preserves patient-level split isolation and stratifies patients by `max(patch_label)`
+- Can evaluate many feasible patient-level splits and score them with the entropy objective before selecting the best candidate
+- Fits stain normalization on TRAIN only when a normalization method other than `NOT_NORMALIZED` is configured
+- Writes `manifest.csv`, `split_stats.csv`, `run_config.json`, and optional entropy-cache CSV artifacts for traceability
 
 ### Stage 5: Quality Assurance
 
@@ -237,7 +256,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-See `.env_example` for the current commented template, including Stage 1, Stage 2, and the Stage 8 approved training matrix.
+See `.env_example` for the current commented template, including Stage 1, Stage 2, Stage 5, and the Stage 8 approved training matrix.
 
 OpenSlide runtime rules:
 

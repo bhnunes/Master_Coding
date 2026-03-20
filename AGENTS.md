@@ -58,6 +58,9 @@ This file gives coding agents repository-specific guidance for working safely an
 - When `USE_ADVANCED_ARTIFACT_FILTERING=False`, Stage 2 should still write the same Parquet schema with zero-valued coverage columns so downstream contracts remain stable.
 - Active Stage 2 helper modules are `helpers/extraction/config.py`, `helpers/extraction/repository.py`, `helpers/extraction/artifact_index.py`, `helpers/extraction/image_reader_service.py`, `helpers/extraction/data_handlers.py`, and `helpers/extraction/patch_engine.py`.
 - `4_1_optimization_sampling.py` should stay orchestration-focused. Keep sample-size calculation, candidate ranking, overlay generation, and logging behavior in `helpers/optimization_sampling/config.py`, `helpers/optimization_sampling/sampling.py`, `helpers/optimization_sampling/overlay.py`, `helpers/optimization_sampling/pipeline.py`, and `helpers/optimization_sampling/logging.py`.
+- `5_crossfold.py` should stay orchestration-focused. Keep Stage 5 environment loading, dataset discovery, entropy scoring, split search, stain normalization, split writing, logging, and provenance behavior in `helpers/crossfold/*.py`.
+- Stage 5 must preserve patient-disjoint `TRAIN`/`VALIDATION`/`TEST` splits, patient stratification by `max(patch_label)`, exact image/mask filename pairing, and the current output/provenance artifacts (`manifest.csv`, `split_stats.csv`, `run_config.json`, optional entropy caches, and normalization stats/templates when enabled).
+- Active Stage 5 helper modules are `helpers/crossfold/config.py`, `helpers/crossfold/discovery.py`, `helpers/crossfold/entropy.py`, `helpers/crossfold/io.py`, `helpers/crossfold/logging.py`, `helpers/crossfold/normalization.py`, `helpers/crossfold/pipeline.py`, `helpers/crossfold/provenance.py`, and `helpers/crossfold/splitting.py`.
 - `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training/*.py`.
 - `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph/tuning_config.py`, `helpers/graph/contamination.py`, and `helpers/graph/tuning_pipeline.py`.
 - Stage 4.2 must preserve the current scientific workflow: human labels from `master_candidate_pool/APPROVED` and `REJECTED`, source image/mask pairing by filename stem, stratified train/test split, nested cross-validation for parameter search, F1 optimization on the `Rejected` class, and final held-out test evaluation.
@@ -281,6 +284,16 @@ MASTER_CODING:
 - `helpers/graph/parameter_store.py`
 - `helpers/graph/tuning_config.py`
 - `helpers/graph/tuning_pipeline.py`
+- `helpers/crossfold/__init__.py`
+- `helpers/crossfold/config.py`
+- `helpers/crossfold/discovery.py`
+- `helpers/crossfold/entropy.py`
+- `helpers/crossfold/io.py`
+- `helpers/crossfold/logging.py`
+- `helpers/crossfold/normalization.py`
+- `helpers/crossfold/pipeline.py`
+- `helpers/crossfold/provenance.py`
+- `helpers/crossfold/splitting.py`
 - `helpers/optimization_sampling/__init__.py`
 - `helpers/optimization_sampling/config.py`
 - `helpers/optimization_sampling/logging.py`

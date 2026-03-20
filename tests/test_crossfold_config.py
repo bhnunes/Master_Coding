@@ -1,0 +1,70 @@
+from pathlib import Path
+
+import pytest
+
+from helpers.crossfold.config import load_crossfold_config
+
+
+def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> None:
+    config = load_crossfold_config(
+        {
+            "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
+            "CROSSFOLD_NORMALIZATION_METHOD": "MACENKO",
+            "CROSSFOLD_OVERWRITE_OUTPUT_DIR": "false",
+            "CROSSFOLD_RANDOM_STATE": "7",
+            "CROSSFOLD_TEST_RATIO": "0.2",
+            "CROSSFOLD_VAL_RATIO": "0.15",
+            "CROSSFOLD_MIN_TRAIN_PATIENTS": "4",
+            "CROSSFOLD_MIN_VAL_PATIENTS": "2",
+            "CROSSFOLD_MIN_TEST_PATIENTS": "3",
+            "CROSSFOLD_ADAPTIVE": "false",
+            "CROSSFOLD_REQUIRE_TRAIN_IMAGE_DOMINANCE": "false",
+            "CROSSFOLD_REQUIRE_BOTH_CLASSES_IF_POSSIBLE": "false",
+            "CROSSFOLD_MAX_TRIES": "99",
+            "CROSSFOLD_ENABLE_OBJECTIVE": "false",
+            "CROSSFOLD_OBJECTIVE_SCORE_SPLIT": "TEST",
+            "CROSSFOLD_OBJECTIVE_MAXIMIZE": "false",
+            "CROSSFOLD_ENTROPY_NUM_WORKERS": "3",
+            "CROSSFOLD_ENTROPY_CHUNKSIZE": "64",
+            "CROSSFOLD_ENTROPY_THUMBNAIL": "256",
+            "CROSSFOLD_CALC_CHECKSUMS": "true",
+            "CROSSFOLD_SAVE_ENTROPY_CACHE_CSV": "false",
+        }
+    )
+
+    assert config.data_directory == tmp_path / "patches"
+    assert config.normalization_method == "MACENKO"
+    assert config.overwrite_output_dir is False
+    assert config.random_state == 7
+    assert config.constraints.test_ratio == 0.2
+    assert config.constraints.val_ratio == 0.15
+    assert config.constraints.min_train_patients == 4
+    assert config.constraints.min_val_patients == 2
+    assert config.constraints.min_test_patients == 3
+    assert config.constraints.adaptive is False
+    assert config.constraints.require_train_image_dominance is False
+    assert config.constraints.require_both_classes_if_possible is False
+    assert config.constraints.max_tries == 99
+    assert config.objective.enable_objective is False
+    assert config.objective.score_split == "TEST"
+    assert config.objective.maximize is False
+    assert config.objective.num_workers == 3
+    assert config.objective.chunksize == 64
+    assert config.objective.entropy_thumbnail == 256
+    assert config.calc_checksums is True
+    assert config.save_entropy_cache_csv is False
+
+
+def test_load_crossfold_config_requires_data_directory() -> None:
+    with pytest.raises(ValueError, match="CROSSFOLD_DATA_DIRECTORY"):
+        load_crossfold_config({})
+
+
+def test_load_crossfold_config_rejects_invalid_normalization_method(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="CROSSFOLD_NORMALIZATION_METHOD"):
+        load_crossfold_config(
+            {
+                "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
+                "CROSSFOLD_NORMALIZATION_METHOD": "INVALID",
+            }
+        )
