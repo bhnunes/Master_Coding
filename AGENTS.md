@@ -54,11 +54,13 @@ This file gives coding agents repository-specific guidance for working safely an
 - Stage 2 no longer drops patches using `artifact_policy.yaml` thresholds. Instead, it records per-patch artifact coverage metadata into a Parquet sidecar for downstream training.
 - Stage 2 should preserve the filename-keyed artifact metadata contract written to `PATCHES/artifact_patch_index.parquet` with columns `filename`, `label`, `patient_id`, `slide_id`, `cov_fold`, `cov_penmarking`, `cov_oof`, `cov_darkspot_foreign`, and `cov_edge_airbubble`.
 - When `USE_ADVANCED_ARTIFACT_FILTERING=False`, Stage 2 should still write the same Parquet schema with zero-valued coverage columns so downstream contracts remain stable.
-- Active Stage 2 helper modules are `helpers/extraction_config.py`, `helpers/extraction_repository.py`, and `helpers/image_reader_service.py`.
+- Active Stage 2 helper modules are `helpers/extraction_config.py`, `helpers/extraction_repository.py`, `helpers/extraction_artifact_index.py`, and `helpers/image_reader_service.py`.
+- `4_1_optimization_sampling.py` should stay orchestration-focused. Keep sample-size calculation, candidate ranking, overlay generation, and logging behavior in `helpers/optimization_sampling_config.py`, `helpers/optimization_sampling_sampling.py`, `helpers/optimization_sampling_overlay.py`, `helpers/optimization_sampling_pipeline.py`, and `helpers/optimization_sampling_logging.py`.
 - `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training_*.py`.
 - `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph_tuning_config.py`, `helpers/graph_contamination.py`, and `helpers/graph_tuning_pipeline.py`.
 - Stage 4.2 must preserve the current scientific workflow: human labels from `master_candidate_pool/APPROVED` and `REJECTED`, source image/mask pairing by filename stem, stratified train/test split, nested cross-validation for parameter search, F1 optimization on the `Rejected` class, and final held-out test evaluation.
 - Stage 4.2 graph contamination logic is now shared domain logic. Future edits must avoid re-implementing the ROI contamination metric in root scripts; reuse `helpers/graph_contamination.py` so tuning and cleaning remain aligned.
+- Stage 4.2 and Stage 4.3 share tuned-parameter persistence through `helpers/graph_parameter_store.py`; keep the on-disk parameter contract aligned between tuning and cleaning.
 - `4_3_cleaner_script.py` should be a `.env`-driven Stage 4.3 orchestrator. Keep orchestration there and keep configuration and filtering workflow in `helpers/graph_cleaning_config.py` and `helpers/graph_cleaning_pipeline.py`.
 - Stage 4.3 must reuse `helpers/graph_contamination.py` for the ROI contamination metric and load the tuned graph parameters plus `tau` through typed config so Stage 4.2 and Stage 4.3 stay scientifically aligned.
 - Stage 4.3 must preserve the current accepted/rejected move semantics: accepted files remain in place, rejected images move to `REJECTED_IMAGES`, rejected masks move to `REJECTED_MASKS`, and missing/invalid pairs are skipped with explicit logging under `/logs`.
@@ -71,9 +73,10 @@ This file gives coding agents repository-specific guidance for working safely an
 - Removed legacy helper files that should not be reintroduced without clear need: `helpers/main.py`, `helpers/wsi_tis_detect.py`, and `helpers/wsi_stain_norm.py`.
 - Use package-safe imports from `helpers...` for helper modules. Do not add new sibling-style imports such as `from data_handlers import ...`.
 - `pyproject.toml` is the only dependency source of truth for Python dependencies.
+- `helpers/runtime_platform.py` centralizes runtime and path behavior across Linux, native Windows, WSL, containers, and Colab. Reuse it instead of open-coding platform checks.
 - `setup_colab.sh` is the canonical Google Colab bootstrap. It installs system dependencies, installs `uv`, installs Python 3.12, syncs from `pyproject.toml`, and prepares `.env` when missing.
-- Current validation status: `uv run pytest` passes, and scoped checks pass for `1_artifact_detection.py`, `2_database_manager.py`, `3_1_imageReader.py`, `10_training_ensemble.py`, `helpers`, and `tests` with Ruff and MyPy. Full-repo `ruff check .` and `mypy .` still fail because of unrelated legacy root scripts.
-- `pytest-cov` is referenced by policy, but it is not currently installed in the environment. Do not claim coverage output was produced unless that dependency is added and the command is rerun.
+- `setup_windows.ps1` is the canonical native Windows bootstrap. `Dockerfile` and `.devcontainer/devcontainer.json` define the containerized development environments.
+- Current validation status: `uv run pytest` passes, `uv run pytest --cov=helpers --cov-report=term-missing` runs successfully with `pytest-cov`, and scoped checks pass for `1_artifact_detection.py`, `2_database_manager.py`, `3_1_imageReader.py`, `10_training_ensemble.py`, `helpers`, and `tests` with Ruff and MyPy. Full-repo `ruff check .` and `mypy .` still fail because of unrelated legacy root scripts, and helper coverage is still below the 90% policy target because several legacy-heavy modules remain lightly tested.
 
 ## Skills
 
@@ -239,11 +242,18 @@ MASTER_CODING:
 - `11_optimizer_ensemble.py`
 - `12_inference_ensemble.py`
 - `.env`
+- `.env_example`
 - `.gitignore`
 - `AGENTS.md`
 - `README.md`
+- `pyproject.toml`
 - `setup_colab.sh`
+- `setup_windows.ps1`
 - `colab_setup.md`
+- `Dockerfile`
+- `.devcontainer/devcontainer.json`
+- `training_model_registry.json`
+- `skills/`
 - `helpers/__init__.py`
 - `helpers/artifact_config.py`
 - `helpers/artifact_logging.py`
@@ -253,10 +263,39 @@ MASTER_CODING:
 - `helpers/artifact_processor.py`
 - `helpers/artifact_repository.py`
 - `helpers/artifact_zip.py`
+- `helpers/extraction_artifact_index.py`
+- `helpers/extraction_config.py`
+- `helpers/extraction_repository.py`
+- `helpers/image_reader_service.py`
+- `helpers/graph_cleaning_config.py`
+- `helpers/graph_cleaning_pipeline.py`
+- `helpers/graph_contamination.py`
+- `helpers/graph_parameter_store.py`
+- `helpers/graph_tuning_config.py`
+- `helpers/graph_tuning_pipeline.py`
+- `helpers/optimization_sampling_config.py`
+- `helpers/optimization_sampling_logging.py`
+- `helpers/optimization_sampling_overlay.py`
+- `helpers/optimization_sampling_pipeline.py`
+- `helpers/optimization_sampling_sampling.py`
 - `databases/`
 - `databases/database.db`
 - `helpers/data_handlers.py`
 - `helpers/patch_engine.py`
+- `helpers/runtime_platform.py`
+- `helpers/training_checkpointing.py`
+- `helpers/training_config.py`
+- `helpers/training_data.py`
+- `helpers/training_gpu.py`
+- `helpers/training_loop.py`
+- `helpers/training_losses.py`
+- `helpers/training_metrics.py`
+- `helpers/training_models.py`
+- `helpers/training_pipeline.py`
+- `helpers/training_registry.py`
+- `helpers/training_reporting.py`
+- `helpers/training_runtime.py`
+- `helpers/training_utils.py`
 - `logs/`
 - `tests/`
 

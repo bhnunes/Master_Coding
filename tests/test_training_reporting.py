@@ -91,6 +91,17 @@ def test_create_aim_run_sets_hparams() -> None:
     assert run["hparams"] == {"lr": 1e-3}
 
 
+def test_create_aim_run_returns_none_when_factory_fails() -> None:
+    run = create_aim_run(
+        run_factory=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+        experiment_name="exp",
+        repo_path="repo",
+        hparams={"lr": 1e-3},
+    )
+
+    assert run is None
+
+
 def test_track_epoch_metrics_records_train_and_validation_values() -> None:
     class DummyRun:
         def __init__(self) -> None:
@@ -115,3 +126,37 @@ def test_track_epoch_metrics_records_train_and_validation_values() -> None:
 
 def test_close_aim_run_is_safe_for_none() -> None:
     close_aim_run(None)
+
+
+def test_track_epoch_metrics_ignores_missing_run() -> None:
+    track_epoch_metrics(
+        None, epoch=1, train_loss=0.1, val_auprc=0.2, val_auroc=0.3, val_mcc_star=0.4
+    )
+
+
+def test_track_epoch_metrics_handles_logging_errors() -> None:
+    class FailingRun:
+        def track(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+            raise RuntimeError("boom")
+
+    track_epoch_metrics(
+        FailingRun(),
+        epoch=1,
+        train_loss=0.1,
+        val_auprc=0.2,
+        val_auroc=0.3,
+        val_mcc_star=0.4,
+    )
+
+
+def test_close_aim_run_closes_existing_run() -> None:
+    calls: list[str] = []
+
+    class DummyRun:
+        def close(self) -> None:
+            calls.append("closed")
+
+    close_aim_run(DummyRun())
+
+    assert calls == ["closed"]

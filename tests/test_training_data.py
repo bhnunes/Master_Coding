@@ -12,8 +12,10 @@ import torch
 
 from helpers import training_data
 from helpers.training_data import (
+    HybridProstateDataset,
     ProstateCancerDatasetHDF5,
     SubsetView,
+    _decode_filename,
     collate_batch,
     create_stratified_subset_within_patients,
     get_training_hdf5_filename,
@@ -77,6 +79,26 @@ def test_get_training_hdf5_filename_prefers_filtered_file_when_enabled(tmp_path:
     assert chosen.endswith("TRAIN_FILTERED.h5")
 
 
+def test_decode_filename_handles_bytes_and_other_values() -> None:
+    assert _decode_filename(b"file.png") == "file.png"
+    assert _decode_filename(7) == "7"
+
+
+def test_get_training_hdf5_filename_requires_existing_directory(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Missing"):
+        get_training_hdf5_filename(str(tmp_path / "missing"), smart_sampling=False)
+
+
+def test_setup_local_hdf5_rejects_missing_source_file(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    local_dir = tmp_path / "local"
+    source_dir.mkdir()
+    (source_dir / "TRAIN.h5").write_bytes(b"train")
+
+    with pytest.raises(FileNotFoundError, match="Critical data missing"):
+        setup_local_hdf5(str(source_dir), str(local_dir), smart_sampling=False)
+
+
 def test_setup_local_hdf5_copies_validation_and_selected_train_file(tmp_path: Path) -> None:
     source_dir = tmp_path / "source"
     local_dir = tmp_path / "local"
@@ -110,6 +132,7 @@ def test_prostate_dataset_reads_items_and_metadata(
     assert tuple(mask.shape) == (4, 4)
     assert dataset.get_labels().tolist() == [1, 0]
     assert dataset.get_patient_ids().tolist() == [b"p2", b"p3"]
+    assert dataset.get_class_counts() == {"CANCER": 1, "NOT_CANCER": 1}
 
 
 def test_prostate_dataset_returns_artifact_covariates_when_lookup_is_provided(
@@ -171,6 +194,123 @@ def test_subset_view_exposes_filtered_labels_and_patient_ids(
 
     assert subset.get_labels() == [0, 0]
     assert subset.get_patient_ids() == [b"p1", b"p3"]
+
+
+def test_prostate_dataset_returns_none_pair_when_transform_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN.h5"
+    _write_hdf5(hdf5_path)
+
+    class FailingTransform:
+        def __call__(
+            self, *, image: npt.NDArray[np.generic], mask: npt.NDArray[np.generic]
+        ) -> dict[str, torch.Tensor]:
+            del image, mask
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(training_data, "get_transforms", lambda mode, img_size: FailingTransform())
+    dataset = ProstateCancerDatasetHDF5(str(hdf5_path), mode="val")
+
+    assert dataset[0] == (None, None)
+
+
+def test_prostate_dataset_state_resets_open_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN.h5"
+    _write_hdf5(hdf5_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+    dataset = ProstateCancerDatasetHDF5(str(hdf5_path), mode="val")
+    _ = dataset[0]
+
+    state = dataset.__getstate__()
+    assert state["h5_file"] is None
+    assert state["_atexit_registered"] is False
+
+    dataset.__setstate__(state)
+    assert dataset.h5_file is None
+    assert dataset._opened_pid is None
+
+
+def test_hybrid_dataset_supports_ram_cache_and_class_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN.h5"
+    _write_hdf5(hdf5_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    class MemoryInfo:
+        available = 10**12
+
+    monkeypatch.setattr(training_data.psutil, "virtual_memory", lambda: MemoryInfo())
+    dataset = HybridProstateDataset(str(hdf5_path), mode="val", subset_indices=[2, 0])
+
+    image, mask = dataset[0]
+
+    assert dataset.use_ram_cache is True
+    assert tuple(image.shape) == (3, 4, 4)
+    assert tuple(mask.shape) == (4, 4)
+    assert dataset.get_class_counts() == {"CANCER": 0, "NOT_CANCER": 2}
+
+
+def test_hybrid_dataset_opens_file_in_disk_mode_and_returns_artifact_covariates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN.h5"
+    _write_hdf5(hdf5_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    class MemoryInfo:
+        available = 1
+
+    monkeypatch.setattr(training_data.psutil, "virtual_memory", lambda: MemoryInfo())
+    dataset = HybridProstateDataset(
+        str(hdf5_path),
+        mode="val",
+        subset_indices=[1],
+        artifact_coverage_by_filename={"CANCER_PATIENT_2_0_0_0002.png": (0.1, 0.2, 0.3, 0.4, 0.5)},
+    )
+
+    image, mask, artifact_covariates = dataset[0]
+
+    assert dataset.use_ram_cache is False
+    assert dataset.h5_file is not None
+    assert tuple(image.shape) == (3, 4, 4)
+    assert tuple(mask.shape) == (4, 4)
+    assert torch.allclose(artifact_covariates, torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5]))
+    dataset.close()
+    assert dataset.h5_file is None
+
+
+def test_hybrid_dataset_raises_runtime_error_when_transform_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "TRAIN.h5"
+    _write_hdf5(hdf5_path)
+
+    class MemoryInfo:
+        available = 1
+
+    class FailingTransform:
+        def __call__(
+            self, *, image: npt.NDArray[np.generic], mask: npt.NDArray[np.generic]
+        ) -> dict[str, torch.Tensor]:
+            del image, mask
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(training_data.psutil, "virtual_memory", lambda: MemoryInfo())
+    monkeypatch.setattr(training_data, "get_transforms", lambda mode, img_size: FailingTransform())
+    dataset = HybridProstateDataset(str(hdf5_path), mode="val")
+
+    with pytest.raises(RuntimeError, match="Transform failed"):
+        _ = dataset[0]
 
 
 def test_collate_batch_filters_invalid_entries() -> None:

@@ -46,7 +46,8 @@ dev = [
     "line-profiler>=4.1.0",
     "scalene>=1.5.0",
     "py-spy>=0.3.14",
-    "snakeviz>=2.2.0"
+    "snakeviz>=2.2.0",
+    "pytest-cov==7.0.0"
 ]
 
 # --- UV Magic: Fetching CUDA 12.6 specifically ---

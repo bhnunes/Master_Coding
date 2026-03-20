@@ -162,3 +162,128 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
     assert calls["load"] == str(checkpoint_path)
     assert calls["metadata"]["best_val_score"] == 0.8
     assert calls["email"][0] == "Finished: exp"
+
+
+def test_run_training_epochs_stops_when_training_step_raises() -> None:
+    health = TrainingHealthTracker(name="run")
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    state = run_training_epochs(
+        model=model,
+        optimizer=optimizer,
+        train_loader=[object()],
+        val_loader=[object()],
+        health=health,
+        start_epoch=0,
+        num_epochs=1,
+        architecture="UNET++",
+        unleashed=False,
+        train_epoch_fn=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("train failed")),
+        validate_epoch_fn=lambda **kwargs: (0.0, None),
+        early_stopping=_EarlyStoppingStub(),
+        track_epoch_metrics_fn=lambda *args, **kwargs: None,
+        loss_fn=object(),
+        device=torch.device("cpu"),
+        accumulation_steps=1,
+        amp_precision="fp16",
+        gpu_normalizer=torch.nn.Identity(),
+        gpu_downscale=torch.nn.Identity(),
+        run=None,
+    )
+
+    assert state.training_successful is False
+
+
+def test_run_training_epochs_emergency_stops_after_repeated_validation_collapse() -> None:
+    health = TrainingHealthTracker(name="run", patience_collapse=1)
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    def fake_validate(**kwargs: Any) -> tuple[float, None]:
+        del kwargs
+        health.mark_val_collapsed()
+        return 0.3, None
+
+    state = run_training_epochs(
+        model=model,
+        optimizer=optimizer,
+        train_loader=[object()],
+        val_loader=[object()],
+        health=health,
+        start_epoch=0,
+        num_epochs=2,
+        architecture="UNET++",
+        unleashed=False,
+        train_epoch_fn=lambda **kwargs: (0.4, {"amp": "ok"}),
+        validate_epoch_fn=fake_validate,
+        early_stopping=_EarlyStoppingStub(),
+        track_epoch_metrics_fn=lambda *args, **kwargs: None,
+        loss_fn=object(),
+        device=torch.device("cpu"),
+        accumulation_steps=1,
+        amp_precision="fp16",
+        gpu_normalizer=torch.nn.Identity(),
+        gpu_downscale=torch.nn.Identity(),
+        run=None,
+    )
+
+    assert state.training_successful is False
+
+
+def test_finalize_training_artifacts_uses_fallback_checkpoint(tmp_path: Path) -> None:
+    fallback_path = tmp_path / "fallback.pth"
+    fallback_path.write_bytes(b"x")
+    calls: dict[str, Any] = {}
+
+    best = BestMetricState(val_auprc=0.9, val_mcc=0.8, val_auroc=0.7, val_loss=0.2)
+    result = finalize_training_artifacts(
+        best=best,
+        metadata_best_path=str(tmp_path / "missing.pth"),
+        fallback_checkpoint_path=str(fallback_path),
+        device=torch.device("cpu"),
+        load_checkpoint_fn=lambda path, map_location: (
+            calls.setdefault("load", path) or {"epoch": 1}
+        ),
+        get_previous_metrics_fn=lambda checkpoint, a, b, c, d: (a, b, c, d),
+        save_metadata_fn=lambda **kwargs: calls.setdefault("metadata", kwargs),
+        save_metadata_kwargs={
+            "architecture": "UNET++",
+            "encoder": "resnet34",
+            "metadata_dir": "meta",
+        },
+        create_email_body_fn=lambda path, encoder, architecture: f"{path}|{encoder}|{architecture}",
+        send_email_fn=lambda *args: calls.setdefault("email", args),
+        email_sender="sender@example.com",
+        email_recipients=["a@example.com"],
+        email_password="secret",
+        experiment_name="exp",
+    )
+
+    assert result == str(fallback_path)
+    assert calls["load"] == str(fallback_path)
+
+
+def test_finalize_training_artifacts_returns_none_when_no_checkpoint_exists(tmp_path: Path) -> None:
+    result = finalize_training_artifacts(
+        best=BestMetricState(),
+        metadata_best_path=str(tmp_path / "missing.pth"),
+        fallback_checkpoint_path=None,
+        device=torch.device("cpu"),
+        load_checkpoint_fn=lambda path, map_location: {"epoch": 1},
+        get_previous_metrics_fn=lambda checkpoint, a, b, c, d: (a, b, c, d),
+        save_metadata_fn=lambda **kwargs: None,
+        save_metadata_kwargs={
+            "architecture": "UNET++",
+            "encoder": "resnet34",
+            "metadata_dir": "meta",
+        },
+        create_email_body_fn=lambda path, encoder, architecture: path,
+        send_email_fn=lambda *args: None,
+        email_sender="sender@example.com",
+        email_recipients=["a@example.com"],
+        email_password="secret",
+        experiment_name="exp",
+    )
+
+    assert result is None

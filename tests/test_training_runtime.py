@@ -1,3 +1,4 @@
+import contextlib
 import random
 
 import numpy as np
@@ -6,6 +7,8 @@ import torch
 
 from helpers.training_runtime import (
     _resolve_amp_precision,
+    autocast_ctx,
+    seed_everything,
     setup_precision,
     worker_init_fn,
 )
@@ -84,3 +87,71 @@ def test_worker_init_fn_seeds_numpy_random_and_opencv(monkeypatch: pytest.Monkey
     assert np_calls == [expected_seed]
     assert random_calls == [expected_seed]
     assert cv2_calls == [0]
+
+
+def test_seed_everything_sets_all_rngs(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(random, "seed", lambda value: calls.setdefault("random", value))
+    monkeypatch.setattr(np.random, "seed", lambda value: calls.setdefault("numpy", value))
+    monkeypatch.setattr(torch, "manual_seed", lambda value: calls.setdefault("torch", value))
+    monkeypatch.setattr(torch.cuda, "manual_seed", lambda value: calls.setdefault("cuda", value))
+    monkeypatch.setattr(
+        torch.cuda, "manual_seed_all", lambda value: calls.setdefault("cuda_all", value)
+    )
+
+    seed_everything(123)
+
+    assert calls == {
+        "random": 123,
+        "numpy": 123,
+        "torch": 123,
+        "cuda": 123,
+        "cuda_all": 123,
+    }
+
+
+def test_autocast_ctx_returns_nullcontext_on_cpu() -> None:
+    context_manager = autocast_ctx(torch.zeros(1), torch.float16)
+
+    assert isinstance(context_manager, contextlib.nullcontext)
+
+
+def test_autocast_ctx_uses_torch_autocast_for_cuda_tensor(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, torch.dtype]] = []
+
+    class FakeTensor:
+        is_cuda = True
+
+    monkeypatch.setattr(
+        torch,
+        "autocast",
+        lambda device_type, dtype: calls.append((device_type, dtype)) or contextlib.nullcontext(),
+    )
+
+    context_manager = autocast_ctx(FakeTensor(), torch.float16)  # type: ignore[arg-type]
+    assert isinstance(context_manager, contextlib.nullcontext)
+    assert calls == [("cuda", torch.float16)]
+
+
+def test_resolve_amp_precision_supports_fp32_and_fp16(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    monkeypatch.setattr(torch.cuda.amp, "GradScaler", lambda: "scaler")
+
+    fp32_dtype, fp32_scaler, fp32_log = _resolve_amp_precision("fp32", "FPN")
+    fp16_dtype, fp16_scaler, fp16_log = _resolve_amp_precision("fp16", "FPN")
+
+    assert fp32_dtype is torch.float32
+    assert fp32_scaler is None
+    assert fp32_log["amp_reason"] == "user_forced_fp32"
+    assert fp16_dtype is torch.float16
+    assert fp16_scaler == "scaler"
+    assert fp16_log["amp_reason"] == "user_forced_fp16"
+
+
+def test_resolve_amp_precision_rejects_unknown_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+
+    with pytest.raises(ValueError, match="Invalid AMP_PRECISION"):
+        _resolve_amp_precision("weird", "FPN")
