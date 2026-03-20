@@ -6,9 +6,9 @@ from typing import Any, cast
 import pytest
 import torch
 
-from helpers import training_models
-from helpers.training_models import create_model, create_optimizer, get_learning_rate
-from helpers.training_registry import get_supported_encoders
+from helpers.training import models as training_models
+from helpers.training.models import create_model, create_optimizer, get_learning_rate
+from helpers.training.registry import get_supported_encoders
 
 
 @pytest.mark.parametrize(

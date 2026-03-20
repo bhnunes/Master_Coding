@@ -34,32 +34,56 @@ Master_Coding/
 │
 ├── helpers/
 │   ├── __init__.py
-│   ├── artifact_config.py           # Stage 1 .env parsing and validation
-│   ├── artifact_logging.py          # Colorful Stage 1 console + file logging
-│   ├── artifact_model_loader.py     # Stage 1 model loading
-│   ├── artifact_paths.py            # Stage 1 path management and temp workspaces
-│   ├── artifact_pipeline.py         # Stage 1 orchestration flow helpers
-│   ├── artifact_processor.py        # Stage 1 per-slide processing
-│   ├── artifact_repository.py       # Stage 1 SQLite tracking
-│   ├── artifact_zip.py              # Stage 1 zip-backed slide access
-│   ├── extraction_config.py         # Stage 2 .env parsing and validation
-│   ├── extraction_repository.py     # Stage 2 SQLite/project state access
-│   ├── image_reader_service.py      # Stage 2 slide processing dispatch
-│   ├── data_handlers.py             # Annotation format adapters
-│   ├── patch_engine.py              # Core patch extraction logic
-│   ├── training_checkpointing.py    # Stage 8 checkpoints and resume metadata
-│   ├── training_config.py           # Stage 8 .env parsing and validation
-│   ├── training_data.py             # Stage 8 HDF5 datasets and batching
-│   ├── training_gpu.py              # Stage 8 GPU image utilities
-│   ├── training_loop.py             # Stage 8 train/validation loops
-│   ├── training_losses.py           # Stage 8 custom losses
-│   ├── training_metrics.py          # Stage 8 metric tracking helpers
-│   ├── training_models.py           # Stage 8 model and optimizer factories
-│   ├── training_pipeline.py         # Stage 8 orchestration helpers
-│   ├── training_registry.py         # Approved architecture/encoder registry loader
-│   ├── training_reporting.py        # Stage 8 Aim/email reporting helpers
-│   ├── training_runtime.py          # Stage 8 seeds, AMP, precision helpers
-│   └── training_utils.py            # Stage 8 misc runtime utilities
+│   ├── runtime_platform.py          # Cross-platform runtime/path utilities
+│   ├── artifact/                    # Stage 1 artifact detection domain
+│   │   ├── config.py
+│   │   ├── logging.py
+│   │   ├── model_loader.py
+│   │   ├── paths.py
+│   │   ├── pipeline.py
+│   │   ├── processor.py
+│   │   ├── repository.py
+│   │   └── zip.py
+│   ├── extraction/                  # Stage 2 extraction domain
+│   │   ├── artifact_index.py
+│   │   ├── config.py
+│   │   ├── data_handlers.py
+│   │   ├── image_reader_service.py
+│   │   ├── patch_engine.py
+│   │   └── repository.py
+│   ├── optimization_sampling/       # Stage 4.1 sampling domain
+│   │   ├── config.py
+│   │   ├── logging.py
+│   │   ├── overlay.py
+│   │   ├── pipeline.py
+│   │   └── sampling.py
+│   ├── graph/                       # Stage 4.2/4.3 graph cleaning domain
+│   │   ├── cleaning_config.py
+│   │   ├── cleaning_pipeline.py
+│   │   ├── contamination.py
+│   │   ├── parameter_store.py
+│   │   ├── tuning_config.py
+│   │   └── tuning_pipeline.py
+│   ├── training/                    # Stage 8 training domain
+│   │   ├── checkpointing.py
+│   │   ├── config.py
+│   │   ├── data.py
+│   │   ├── gpu.py
+│   │   ├── loop.py
+│   │   ├── losses.py
+│   │   ├── metrics.py
+│   │   ├── models.py
+│   │   ├── pipeline.py
+│   │   ├── registry.py
+│   │   ├── reporting.py
+│   │   ├── runtime.py
+│   │   └── utils.py
+│   └── wsi/                         # Shared WSI/image-processing helpers
+│       ├── colors.py
+│       ├── maps.py
+│       ├── process.py
+│       ├── slide_info.py
+│       └── tis_detect_helper_fx.py
 │
 ├── tests/                           # Test scripts
 ├── databases/                       # SQLite databases
@@ -77,6 +101,8 @@ Master_Coding/
 ## Pipeline Architecture
 
 The pipeline follows a monolithic script-driven architecture where each script performs a distinct stage of the workflow. Scripts are designed to be standalone applications that can be executed independently, with defined inputs and outputs.
+
+Helper modules are organized by domain under `helpers/<domain>/`. New domain-specific helpers should be added to the matching domain package instead of recreating a flat `helpers/*.py` layout. Only broadly shared cross-domain utilities, such as `helpers/runtime_platform.py`, remain at the top level.
 
 ### Pipeline Stages
 
@@ -114,8 +140,8 @@ Current Stage 1 behavior:
 |--------|---------|
 | `2_database_manager.py` | Orchestrates the entire processing pipeline. Manages SQLite database, handles case ingestion, and invokes the image reader for each slide. |
 | `3_1_imageReader.py` | Per-slide worker that extracts patches based on annotations. Supports multiple annotation formats via handler dispatch. |
-| `helpers/data_handlers.py` | Annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats. |
-| `helpers/patch_engine.py` | Core extraction engine: tissue detection, polygon masking, artifact coverage computation, and image/mask writing. |
+| `helpers/extraction/data_handlers.py` | Annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats. |
+| `helpers/extraction/patch_engine.py` | Core extraction engine: tissue detection, polygon masking, artifact coverage computation, and image/mask writing. |
 
 Current Stage 2 artifact-aware behavior:
 
@@ -167,7 +193,7 @@ Current Stage 2 artifact-aware behavior:
 
 Current Stage 8 behavior:
 
-- `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training_*.py`
+- `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
 - Architecture and encoder choices are validated against `training_model_registry.json`
 - Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
 - `TRAINING_MODEL_REGISTRY_PATH` can override the default registry when a controlled experiment needs a different file
@@ -336,7 +362,7 @@ The defaults for learning rate, weight decay, and allowed encoders live in `trai
 # Run all tests currently present in the repository
 uv run pytest
 
-# Run coverage after installing pytest-cov
+# Run helper coverage
 uv run pytest --cov=helpers --cov-report=term-missing
 
 # Run linting and typing on the actively maintained surfaces

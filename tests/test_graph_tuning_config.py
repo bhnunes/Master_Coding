@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.graph_tuning_config import load_graph_tuning_config
+from helpers.graph.tuning_config import load_graph_tuning_config
 
 
 def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> None:

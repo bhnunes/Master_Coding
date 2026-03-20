@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from helpers.graph_contamination import GraphContaminationParameters
+from helpers.graph.contamination import GraphContaminationParameters
 
 
 @dataclass(frozen=True)

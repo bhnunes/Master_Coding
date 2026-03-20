@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 DEFAULT_MODEL_REGISTRY_PATH = (
-    Path(__file__).resolve().parent.parent / "training_model_registry.json"
+    Path(__file__).resolve().parent.parent.parent / "training_model_registry.json"
 )
 
 

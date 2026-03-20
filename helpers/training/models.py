@@ -7,7 +7,7 @@ import segmentation_models_pytorch as smp
 import torch
 from torch import nn
 
-from helpers.training_registry import load_training_model_registry
+from helpers.training.registry import load_training_model_registry
 
 
 def get_learning_rate(architecture: str) -> tuple[float, float]:

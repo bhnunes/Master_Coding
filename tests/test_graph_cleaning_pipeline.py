@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from helpers.graph_cleaning_pipeline import GraphCleaningSummary, run_graph_cleaning_pipeline
-from helpers.graph_contamination import GraphContaminationParameters
+from helpers.graph.cleaning_pipeline import GraphCleaningSummary, run_graph_cleaning_pipeline
+from helpers.graph.contamination import GraphContaminationParameters
 
 
 def test_run_graph_cleaning_pipeline_moves_only_rejected_pairs(tmp_path: Path) -> None:

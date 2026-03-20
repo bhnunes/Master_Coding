@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from helpers.graph_cleaning_config import load_graph_cleaning_config
-from helpers.graph_contamination import GraphContaminationParameters
+from helpers.graph.cleaning_config import load_graph_cleaning_config
+from helpers.graph.contamination import GraphContaminationParameters
 
 
 def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -> None:

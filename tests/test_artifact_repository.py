@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from helpers.artifact_repository import ArtifactRepository
+from helpers.artifact.repository import ArtifactRepository
 
 
 def test_repository_initializes_schema_and_tracks_pending_members(tmp_path: Path) -> None:

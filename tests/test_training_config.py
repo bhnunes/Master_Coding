@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.training_config import load_training_ensemble_config
+from helpers.training.config import load_training_ensemble_config
 
 
 def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path) -> None:

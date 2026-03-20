@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
-from helpers.training_reporting import (
+from helpers.training.reporting import (
     close_aim_run,
     create_aim_run,
     create_email_body,
@@ -43,7 +43,7 @@ def test_send_email_uses_smtp_ssl(monkeypatch: Any) -> None:
             captured["sendmail"] = (sender, recipients, message)
 
     monkeypatch.setattr(
-        "helpers.training_reporting.smtplib.SMTP_SSL", lambda host, port: DummySmtp()
+        "helpers.training.reporting.smtplib.SMTP_SSL", lambda host, port: DummySmtp()
     )
 
     send_email("Done", "Body", "sender@example.com", ["a@example.com"], "secret")

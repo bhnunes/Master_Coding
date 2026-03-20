@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from helpers.training_metrics import (
+from helpers.training.metrics import (
     AdvancedMetricTracker,
     RunningWeightedMetric,
     TrainingHealthTracker,

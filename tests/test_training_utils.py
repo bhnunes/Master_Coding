@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 
-from helpers.training_utils import clear_gpu, get_formatted_datetime_string
+from helpers.training.utils import clear_gpu, get_formatted_datetime_string
 
 
 def test_get_formatted_datetime_string_matches_expected_pattern() -> None:

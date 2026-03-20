@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from helpers.artifact_config import ArtifactDetectionConfig
+from helpers.artifact.config import ArtifactDetectionConfig
 
 
 @dataclass(frozen=True)

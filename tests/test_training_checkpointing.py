@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from helpers.training_checkpointing import (
+from helpers.training.checkpointing import (
     EarlyStopping,
     get_previous_metrics,
     load_checkpoint_for_resume,

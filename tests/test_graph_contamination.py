@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import pytest
 
-from helpers.graph_contamination import (
+from helpers.graph.contamination import (
     GraphContaminationParameters,
     calculate_roi_contamination,
     coerce_graph_contamination_parameters,
@@ -37,7 +37,7 @@ def test_calculate_roi_contamination_returns_none_when_image_is_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        "helpers.graph_contamination.cv2.imread",
+        "helpers.graph.contamination.cv2.imread",
         lambda path, flag=None: None,
     )
 
@@ -60,7 +60,7 @@ def test_calculate_roi_contamination_returns_none_when_mask_is_missing(
             return None
         return image
 
-    monkeypatch.setattr("helpers.graph_contamination.cv2.imread", fake_imread)
+    monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
 
     result = calculate_roi_contamination(
         tmp_path / "image.png",
@@ -80,7 +80,7 @@ def test_calculate_roi_contamination_returns_nan_for_empty_initial_roi(
     def fake_imread(path: str, flag: int | None = None) -> Any:
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
-    monkeypatch.setattr("helpers.graph_contamination.cv2.imread", fake_imread)
+    monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
 
     result = calculate_roi_contamination(
         tmp_path / "image.png",
@@ -102,7 +102,7 @@ def test_calculate_roi_contamination_returns_nan_when_erosion_removes_roi(
     def fake_imread(path: str, flag: int | None = None) -> Any:
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
-    monkeypatch.setattr("helpers.graph_contamination.cv2.imread", fake_imread)
+    monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
 
     result = calculate_roi_contamination(
         tmp_path / "image.png",
@@ -141,11 +141,11 @@ def test_calculate_roi_contamination_returns_expected_rate(
             return DummySegmentator()
 
     monkeypatch.setattr(
-        "helpers.graph_contamination.cv2.imread",
+        "helpers.graph.contamination.cv2.imread",
         lambda path, flag=None: mask if flag == cv2.IMREAD_GRAYSCALE else image,
     )
     monkeypatch.setattr(
-        "helpers.graph_contamination.cv2.ximgproc",
+        "helpers.graph.contamination.cv2.ximgproc",
         type("XImgProc", (), {"segmentation": DummySegmentation})(),
     )
 
@@ -179,9 +179,9 @@ def test_calculate_roi_contamination_returns_none_on_opencv_error(
             del kwargs
             return RaisingSegmentator()
 
-    monkeypatch.setattr("helpers.graph_contamination.cv2.imread", fake_imread)
+    monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
     monkeypatch.setattr(
-        "helpers.graph_contamination.cv2.ximgproc",
+        "helpers.graph.contamination.cv2.ximgproc",
         type("XImgProc", (), {"segmentation": DummySegmentation})(),
     )
 

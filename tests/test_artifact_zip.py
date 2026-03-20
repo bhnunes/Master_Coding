@@ -1,7 +1,7 @@
 import zipfile
 from pathlib import Path
 
-from helpers.artifact_zip import SUPPORTED_WSI_EXTENSIONS, ZipSlideSource
+from helpers.artifact.zip import SUPPORTED_WSI_EXTENSIONS, ZipSlideSource
 
 
 def test_zip_slide_source_lists_supported_wsi_members_only(tmp_path: Path) -> None:

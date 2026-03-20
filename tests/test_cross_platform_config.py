@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from helpers.artifact_config import load_artifact_detection_config
-from helpers.extraction_config import load_database_manager_config
+from helpers.artifact.config import load_artifact_detection_config
+from helpers.extraction.config import load_database_manager_config
 
 
 def test_load_database_manager_config_rejects_windows_path_on_linux() -> None:

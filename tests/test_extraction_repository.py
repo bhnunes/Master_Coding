@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from helpers.extraction_repository import ExtractionRepository
+from helpers.extraction.repository import ExtractionRepository
 
 
 def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.optimization_sampling_config import load_optimization_sampling_config
+from helpers.optimization_sampling.config import load_optimization_sampling_config
 
 
 def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: Path) -> None:

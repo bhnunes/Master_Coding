@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from helpers.training_gpu import GPUDownscale, GPUNormalizer
+from helpers.training.gpu import GPUDownscale, GPUNormalizer
 
 
 def test_gpu_normalizer_normalizes_uint8_input() -> None:

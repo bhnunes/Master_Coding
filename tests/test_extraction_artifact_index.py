@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from helpers.extraction_artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
+from helpers.extraction.artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
 
 
 def test_artifact_index_writer_writes_expected_schema_and_rows(tmp_path: Path) -> None:

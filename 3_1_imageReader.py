@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from helpers.image_reader_service import (
+from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
     load_slide_runtime_settings,
     run_slide_processing,

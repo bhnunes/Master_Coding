@@ -4,9 +4,9 @@ import os
 
 from dotenv import load_dotenv
 
-from helpers.optimization_sampling_config import load_optimization_sampling_config
-from helpers.optimization_sampling_logging import configure_optimization_sampling_logger
-from helpers.optimization_sampling_pipeline import (
+from helpers.optimization_sampling.config import load_optimization_sampling_config
+from helpers.optimization_sampling.logging import configure_optimization_sampling_logger
+from helpers.optimization_sampling.pipeline import (
     build_next_steps_message,
     run_optimization_sampling,
 )

@@ -6,9 +6,9 @@ import os
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from helpers.graph_cleaning_config import load_graph_cleaning_config
-from helpers.graph_cleaning_pipeline import build_cleaning_message, run_graph_cleaning_pipeline
-from helpers.optimization_sampling_logging import configure_stage_logger
+from helpers.graph.cleaning_config import load_graph_cleaning_config
+from helpers.graph.cleaning_pipeline import build_cleaning_message, run_graph_cleaning_pipeline
+from helpers.optimization_sampling.logging import configure_stage_logger
 
 
 def main() -> None:

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.extraction_config import load_database_manager_config
+from helpers.extraction.config import load_database_manager_config
 
 
 def test_load_database_manager_config_reads_expected_environment(tmp_path: Path) -> None:

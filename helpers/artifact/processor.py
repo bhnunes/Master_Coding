@@ -6,8 +6,8 @@ from typing import Any, cast
 
 from PIL import Image
 
-from helpers.artifact_config import ArtifactDetectionConfig
-from helpers.artifact_model_loader import ArtifactModelLoader
+from helpers.artifact.config import ArtifactDetectionConfig
+from helpers.artifact.model_loader import ArtifactModelLoader
 from helpers.runtime_platform import load_openslide_module
 
 Image.MAX_IMAGE_PIXELS = 1_000_000_000
@@ -36,7 +36,7 @@ class ArtifactProcessor:
         import numpy as np
         import torch
 
-        from helpers.wsi_tis_detect_helper_fx import get_preprocessing, make_class_map
+        from helpers.wsi.tis_detect_helper_fx import get_preprocessing, make_class_map
 
         models = self.model_loader.load()
         openslide_module = load_openslide_module()
@@ -157,10 +157,10 @@ class ArtifactProcessor:
         import cv2
         import numpy as np
 
-        from helpers.wsi_colors import colors_QC7
-        from helpers.wsi_maps import make_overlay
-        from helpers.wsi_process import mask_to_geojson, slide_process_single
-        from helpers.wsi_slide_info import slide_info
+        from helpers.wsi.colors import colors_QC7
+        from helpers.wsi.maps import make_overlay
+        from helpers.wsi.process import mask_to_geojson, slide_process_single
+        from helpers.wsi.slide_info import slide_info
 
         start = timeit.default_timer()
         models = self.model_loader.load()

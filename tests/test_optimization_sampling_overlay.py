@@ -6,13 +6,13 @@ import cv2
 import numpy as np
 import pytest
 
-from helpers.optimization_sampling_overlay import (
+from helpers.optimization_sampling.overlay import (
     _process_overlay_task,
     _to_grayscale_mask,
     generate_overlay_images,
     overlay_mask_edges,
 )
-from helpers.optimization_sampling_sampling import OverlayTask
+from helpers.optimization_sampling.sampling import OverlayTask
 
 
 def test_to_grayscale_mask_uses_alpha_channel_for_rgba() -> None:
@@ -84,7 +84,7 @@ def test_overlay_mask_edges_returns_false_on_opencv_error(
     cv2.imwrite(str(image_path), np.zeros((4, 4, 3), dtype=np.uint8))
     cv2.imwrite(str(mask_path), np.zeros((4, 4), dtype=np.uint8))
     monkeypatch.setattr(
-        "helpers.optimization_sampling_overlay.cv2.findContours",
+        "helpers.optimization_sampling.overlay.cv2.findContours",
         lambda *args, **kwargs: (_ for _ in ()).throw(cv2.error("findContours", "test", "boom")),
     )
 

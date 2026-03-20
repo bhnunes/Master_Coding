@@ -10,8 +10,8 @@ import pyarrow.parquet as pq
 import pytest
 import torch
 
-from helpers import training_data
-from helpers.training_data import (
+from helpers.training import data as training_data
+from helpers.training.data import (
     HybridProstateDataset,
     ProstateCancerDatasetHDF5,
     SubsetView,

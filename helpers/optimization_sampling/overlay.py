@@ -9,7 +9,7 @@ from typing import Any
 import cv2
 from tqdm import tqdm
 
-from helpers.optimization_sampling_sampling import OverlayTask
+from helpers.optimization_sampling.sampling import OverlayTask
 
 
 def overlay_mask_edges(

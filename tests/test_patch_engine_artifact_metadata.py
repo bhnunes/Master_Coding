@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from shapely.geometry import Polygon
 
-from helpers.patch_engine import compute_artifact_coverages_for_patch, get_zero_artifact_coverages
+from helpers.extraction.patch_engine import (
+    compute_artifact_coverages_for_patch,
+    get_zero_artifact_coverages,
+)
 
 
 def test_compute_artifact_coverages_for_patch_returns_per_class_overlap_ratios() -> None:

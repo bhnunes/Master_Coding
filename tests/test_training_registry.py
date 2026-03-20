@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.training_registry import (
+from helpers.training.registry import (
     DEFAULT_MODEL_REGISTRY_PATH,
     get_model_registry_path,
     load_training_model_registry,

@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from helpers.graph_contamination import GraphContaminationParameters
-from helpers.graph_parameter_store import GraphCleaningParameterArtifact
-from helpers.graph_tuning_pipeline import (
+from helpers.graph.contamination import GraphContaminationParameters
+from helpers.graph.parameter_store import GraphCleaningParameterArtifact
+from helpers.graph.tuning_pipeline import (
     GraphTuningResult,
     GraphTuningSummary,
     build_graph_cleaning_parameter_artifact,

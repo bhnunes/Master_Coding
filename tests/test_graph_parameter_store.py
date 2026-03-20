@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from helpers.graph_contamination import GraphContaminationParameters
-from helpers.graph_parameter_store import (
+from helpers.graph.contamination import GraphContaminationParameters
+from helpers.graph.parameter_store import (
     GraphCleaningParameterArtifact,
     load_graph_cleaning_parameter_artifact,
     save_graph_cleaning_parameter_artifact,

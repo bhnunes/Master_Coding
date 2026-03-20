@@ -17,7 +17,7 @@ from PIL import Image
 from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.prepared import prep
 
-from helpers.data_handlers import BaseHandler
+from helpers.extraction.data_handlers import BaseHandler
 from helpers.runtime_platform import load_openslide_module
 
 load_dotenv(override=True)

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from helpers.training_losses import BCEDiceHybridLossPaper
+from helpers.training.losses import BCEDiceHybridLossPaper
 
 
 def test_bce_dice_hybrid_loss_accepts_class_index_masks() -> None:

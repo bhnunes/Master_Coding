@@ -4,8 +4,8 @@ from typing import cast
 
 import torch
 
-from helpers.training_loop import train_epoch, validate_epoch
-from helpers.training_metrics import TrainingHealthTracker
+from helpers.training.loop import train_epoch, validate_epoch
+from helpers.training.metrics import TrainingHealthTracker
 
 
 class IdentityModule(torch.nn.Module):

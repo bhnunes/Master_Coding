@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from helpers.artifact_pipeline import ArtifactDetectionPipeline
-from helpers.artifact_repository import ArtifactRecord
+from helpers.artifact.pipeline import ArtifactDetectionPipeline
+from helpers.artifact.repository import ArtifactRecord
 
 
 class FakeZipSource:

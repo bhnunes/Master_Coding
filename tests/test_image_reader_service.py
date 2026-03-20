@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.image_reader_service import (
+from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
     get_handler_for_files,
     run_slide_processing,
@@ -25,7 +25,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
         return (7, 3, artifact_records)
 
     monkeypatch.setattr(
-        "helpers.image_reader_service.patch_engine.run_extraction", fake_run_extraction
+        "helpers.extraction.image_reader_service.patch_engine.run_extraction", fake_run_extraction
     )
 
     request = SlideProcessingRequest(

@@ -4,14 +4,14 @@ import os
 
 from dotenv import load_dotenv
 
-from helpers.graph_parameter_store import save_graph_cleaning_parameter_artifact
-from helpers.graph_tuning_config import load_graph_tuning_config
-from helpers.graph_tuning_pipeline import (
+from helpers.graph.parameter_store import save_graph_cleaning_parameter_artifact
+from helpers.graph.tuning_config import load_graph_tuning_config
+from helpers.graph.tuning_pipeline import (
     build_graph_cleaning_parameter_artifact,
     build_recommendation_message,
     run_graph_tuning_pipeline,
 )
-from helpers.optimization_sampling_logging import configure_stage_logger
+from helpers.optimization_sampling.logging import configure_stage_logger
 
 
 def main() -> None:

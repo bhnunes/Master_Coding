@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from helpers.training_runtime import (
+from helpers.training.runtime import (
     _resolve_amp_precision,
     autocast_ctx,
     seed_everything,
@@ -78,7 +78,7 @@ def test_worker_init_fn_seeds_numpy_random_and_opencv(monkeypatch: pytest.Monkey
     monkeypatch.setattr(np.random, "seed", lambda value: np_calls.append(value))
     monkeypatch.setattr(random, "seed", lambda value: random_calls.append(value))
     monkeypatch.setattr(
-        "helpers.training_runtime.cv2.setNumThreads", lambda value: cv2_calls.append(value)
+        "helpers.training.runtime.cv2.setNumThreads", lambda value: cv2_calls.append(value)
     )
 
     worker_init_fn(worker_id=7)

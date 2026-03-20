@@ -15,8 +15,8 @@ This file gives coding agents repository-specific guidance for working safely an
 - `1_artifact_detection.py`: Generation of GeoJSON information about artifacts on the whole-slide-images.
 - `2_database_manager.py`: `.env`-driven Stage 2 orchestrator for ingestion, SQLite tracking, project setup, and per-case patch extraction.
 - `3_1_imageReader.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
-- `helpers/data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
-- `helpers/patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
+- `helpers/extraction/data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
+- `helpers/extraction/patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
 - `4_1_optimization_sampling.py`: Script responsible for selecting a subsample of cancer images for a human-in-the-loop cleaning process of incorrect annotations.
 - `4_2_tune_graph_method.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
 - `4_3_cleaner_script.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
@@ -37,43 +37,46 @@ This file gives coding agents repository-specific guidance for working safely an
 - All test scripts must be saved in `/tests`.
 - All logs generated must be saved in `/logs`.
 - All helpers should be standalone modules or classes organized by domain and saved in `/helpers`.
+- Domain-specific helpers must live inside `helpers/<domain>/` packages. If a domain package already exists, add new helper modules there instead of creating new flat modules directly under `helpers/`.
+- Only broadly shared cross-domain utilities should remain top-level in `helpers/`, such as `helpers/runtime_platform.py`.
 - Databases should be saved in `/databases`.
 
 ## Current Repository Notes
 
-- `1_artifact_detection.py` is now a `.env`-driven Stage 1 orchestrator. Keep orchestration there and keep runtime/domain behavior in `helpers/artifact_*.py`.
+- `1_artifact_detection.py` is now a `.env`-driven Stage 1 orchestrator. Keep orchestration there and keep runtime/domain behavior in `helpers/artifact/*.py`.
 - Stage 1 artifact detection reads WSI members directly from a zip archive, extracts one slide at a time to a temporary workspace, writes GeoJSON outputs, updates SQLite status, and cleans temporary files after each slide.
 - Stage 1 GeoJSON outputs are intended to be reused by Stage 2 through `GEOJSON_PATH` when advanced artifact filtering is enabled.
 - Stage 1 database tracking must preserve at least `Image_Name`, `GeoJSON_Processed`, and `Comments`. Operational metadata such as `LastUpdate` is also allowed.
-- Stage 1 logging is intentionally colorful and user-facing. Preserve the styled console + file logging pattern established in `helpers/artifact_logging.py` and inspired by `2_database_manager.py`.
-- Active Stage 1 helper modules are `helpers/artifact_config.py`, `helpers/artifact_logging.py`, `helpers/artifact_model_loader.py`, `helpers/artifact_paths.py`, `helpers/artifact_pipeline.py`, `helpers/artifact_processor.py`, `helpers/artifact_repository.py`, and `helpers/artifact_zip.py`.
-- `2_database_manager.py` is now a `.env`-driven Stage 2 orchestrator. Keep orchestration there and keep configuration, repository access, and slide-processing services in `helpers/extraction_config.py`, `helpers/extraction_repository.py`, and `helpers/image_reader_service.py`.
+- Stage 1 logging is intentionally colorful and user-facing. Preserve the styled console + file logging pattern established in `helpers/artifact/logging.py` and inspired by `2_database_manager.py`.
+- Active Stage 1 helper modules are `helpers/artifact/config.py`, `helpers/artifact/logging.py`, `helpers/artifact/model_loader.py`, `helpers/artifact/paths.py`, `helpers/artifact/pipeline.py`, `helpers/artifact/processor.py`, `helpers/artifact/repository.py`, and `helpers/artifact/zip.py`.
+- `2_database_manager.py` is now a `.env`-driven Stage 2 orchestrator. Keep orchestration there and keep configuration, repository access, and slide-processing services in `helpers/extraction/config.py`, `helpers/extraction/repository.py`, and `helpers/extraction/image_reader_service.py`.
 - Stage 2 supports two execution modes: ingestion mode with `LOADCASES=True`, and processing mode that consumes pending database cases and dispatches per-slide extraction.
 - Stage 2 initializes project folders and SQLite schema, validates optional GeoJSON sanity checks during ingestion, and records per-case extraction metadata such as status, comments, patch counts, runtime, and extraction parameters.
 - Stage 2 can attach artifact GeoJSON files generated by Stage 1 when `USE_ADVANCED_ARTIFACT_FILTERING=True` and `GEOJSON_PATH` points to the Stage 1 output folder.
 - Stage 2 no longer drops patches using `artifact_policy.yaml` thresholds. Instead, it records per-patch artifact coverage metadata into a Parquet sidecar for downstream training.
 - Stage 2 should preserve the filename-keyed artifact metadata contract written to `PATCHES/artifact_patch_index.parquet` with columns `filename`, `label`, `patient_id`, `slide_id`, `cov_fold`, `cov_penmarking`, `cov_oof`, `cov_darkspot_foreign`, and `cov_edge_airbubble`.
 - When `USE_ADVANCED_ARTIFACT_FILTERING=False`, Stage 2 should still write the same Parquet schema with zero-valued coverage columns so downstream contracts remain stable.
-- Active Stage 2 helper modules are `helpers/extraction_config.py`, `helpers/extraction_repository.py`, `helpers/extraction_artifact_index.py`, and `helpers/image_reader_service.py`.
-- `4_1_optimization_sampling.py` should stay orchestration-focused. Keep sample-size calculation, candidate ranking, overlay generation, and logging behavior in `helpers/optimization_sampling_config.py`, `helpers/optimization_sampling_sampling.py`, `helpers/optimization_sampling_overlay.py`, `helpers/optimization_sampling_pipeline.py`, and `helpers/optimization_sampling_logging.py`.
-- `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training_*.py`.
-- `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph_tuning_config.py`, `helpers/graph_contamination.py`, and `helpers/graph_tuning_pipeline.py`.
+- Active Stage 2 helper modules are `helpers/extraction/config.py`, `helpers/extraction/repository.py`, `helpers/extraction/artifact_index.py`, `helpers/extraction/image_reader_service.py`, `helpers/extraction/data_handlers.py`, and `helpers/extraction/patch_engine.py`.
+- `4_1_optimization_sampling.py` should stay orchestration-focused. Keep sample-size calculation, candidate ranking, overlay generation, and logging behavior in `helpers/optimization_sampling/config.py`, `helpers/optimization_sampling/sampling.py`, `helpers/optimization_sampling/overlay.py`, `helpers/optimization_sampling/pipeline.py`, and `helpers/optimization_sampling/logging.py`.
+- `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training/*.py`.
+- `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph/tuning_config.py`, `helpers/graph/contamination.py`, and `helpers/graph/tuning_pipeline.py`.
 - Stage 4.2 must preserve the current scientific workflow: human labels from `master_candidate_pool/APPROVED` and `REJECTED`, source image/mask pairing by filename stem, stratified train/test split, nested cross-validation for parameter search, F1 optimization on the `Rejected` class, and final held-out test evaluation.
-- Stage 4.2 graph contamination logic is now shared domain logic. Future edits must avoid re-implementing the ROI contamination metric in root scripts; reuse `helpers/graph_contamination.py` so tuning and cleaning remain aligned.
-- Stage 4.2 and Stage 4.3 share tuned-parameter persistence through `helpers/graph_parameter_store.py`; keep the on-disk parameter contract aligned between tuning and cleaning.
-- `4_3_cleaner_script.py` should be a `.env`-driven Stage 4.3 orchestrator. Keep orchestration there and keep configuration and filtering workflow in `helpers/graph_cleaning_config.py` and `helpers/graph_cleaning_pipeline.py`.
-- Stage 4.3 must reuse `helpers/graph_contamination.py` for the ROI contamination metric and load the tuned graph parameters plus `tau` through typed config so Stage 4.2 and Stage 4.3 stay scientifically aligned.
+- Stage 4.2 graph contamination logic is now shared domain logic. Future edits must avoid re-implementing the ROI contamination metric in root scripts; reuse `helpers/graph/contamination.py` so tuning and cleaning remain aligned.
+- Stage 4.2 and Stage 4.3 share tuned-parameter persistence through `helpers/graph/parameter_store.py`; keep the on-disk parameter contract aligned between tuning and cleaning.
+- `4_3_cleaner_script.py` should be a `.env`-driven Stage 4.3 orchestrator. Keep orchestration there and keep configuration and filtering workflow in `helpers/graph/cleaning_config.py` and `helpers/graph/cleaning_pipeline.py`.
+- Stage 4.3 must reuse `helpers/graph/contamination.py` for the ROI contamination metric and load the tuned graph parameters plus `tau` through typed config so Stage 4.2 and Stage 4.3 stay scientifically aligned.
 - Stage 4.3 must preserve the current accepted/rejected move semantics: accepted files remain in place, rejected images move to `REJECTED_IMAGES`, rejected masks move to `REJECTED_MASKS`, and missing/invalid pairs are skipped with explicit logging under `/logs`.
 - Stage 8 trains one model per execution, not the entire ensemble in a single run.
 - Stage 8 architecture/encoder pairs are intentionally restricted to the approved research matrix in `.env_example` and `training_model_registry.json`; do not expand support casually.
 - Stage 8 learning-rate and weight-decay defaults come from `training_model_registry.json`, optionally overridden with `TRAINING_MODEL_REGISTRY_PATH`.
 - Stage 8 can optionally load `TRAINING_ARTIFACT_INDEX_PATH` and apply artifact-aware loss discounting keyed by HDF5 `filenames`.
-- Active Stage 8 helper modules are `helpers/training_config.py`, `helpers/training_registry.py`, `helpers/training_models.py`, `helpers/training_losses.py`, `helpers/training_checkpointing.py`, `helpers/training_metrics.py`, `helpers/training_data.py`, `helpers/training_gpu.py`, `helpers/training_utils.py`, `helpers/training_loop.py`, `helpers/training_reporting.py`, `helpers/training_pipeline.py`, and `helpers/training_runtime.py`.
-- Active legacy helpers still used by extraction workflows include `helpers/data_handlers.py`, `helpers/patch_engine.py`, `helpers/wsi_colors.py`, `helpers/wsi_maps.py`, `helpers/wsi_process.py`, `helpers/wsi_slide_info.py`, and `helpers/wsi_tis_detect_helper_fx.py`.
+- Active Stage 8 helper modules are `helpers/training/config.py`, `helpers/training/registry.py`, `helpers/training/models.py`, `helpers/training/losses.py`, `helpers/training/checkpointing.py`, `helpers/training/metrics.py`, `helpers/training/data.py`, `helpers/training/gpu.py`, `helpers/training/utils.py`, `helpers/training/loop.py`, `helpers/training/reporting.py`, `helpers/training/pipeline.py`, and `helpers/training/runtime.py`.
+- Active WSI/extraction support helpers include `helpers/extraction/data_handlers.py`, `helpers/extraction/patch_engine.py`, `helpers/wsi/colors.py`, `helpers/wsi/maps.py`, `helpers/wsi/process.py`, `helpers/wsi/slide_info.py`, and `helpers/wsi/tis_detect_helper_fx.py`.
 - Removed legacy helper files that should not be reintroduced without clear need: `helpers/main.py`, `helpers/wsi_tis_detect.py`, and `helpers/wsi_stain_norm.py`.
 - Use package-safe imports from `helpers...` for helper modules. Do not add new sibling-style imports such as `from data_handlers import ...`.
 - `pyproject.toml` is the only dependency source of truth for Python dependencies.
 - `helpers/runtime_platform.py` centralizes runtime and path behavior across Linux, native Windows, WSL, containers, and Colab. Reuse it instead of open-coding platform checks.
+- During future refactors, follow the same packaging pattern: if behavior belongs to a specific domain, create or reuse `helpers/<domain>/` and place the module there. Do not add new top-level helper modules for domain logic when an existing domain package already fits.
 - `setup_colab.sh` is the canonical Google Colab bootstrap. It installs system dependencies, installs `uv`, installs Python 3.12, syncs from `pyproject.toml`, and prepares `.env` when missing.
 - `setup_windows.ps1` is the canonical native Windows bootstrap. `Dockerfile` and `.devcontainer/devcontainer.json` define the containerized development environments.
 - Current validation status: `uv run pytest` passes, `uv run pytest --cov=helpers --cov-report=term-missing` runs successfully with `pytest-cov`, and scoped checks pass for `1_artifact_detection.py`, `2_database_manager.py`, `3_1_imageReader.py`, `10_training_ensemble.py`, `helpers`, and `tests` with Ruff and MyPy. Full-repo `ruff check .` and `mypy .` still fail because of unrelated legacy root scripts, and helper coverage is still below the 90% policy target because several legacy-heavy modules remain lightly tested.
@@ -255,47 +258,58 @@ MASTER_CODING:
 - `training_model_registry.json`
 - `skills/`
 - `helpers/__init__.py`
-- `helpers/artifact_config.py`
-- `helpers/artifact_logging.py`
-- `helpers/artifact_model_loader.py`
-- `helpers/artifact_paths.py`
-- `helpers/artifact_pipeline.py`
-- `helpers/artifact_processor.py`
-- `helpers/artifact_repository.py`
-- `helpers/artifact_zip.py`
-- `helpers/extraction_artifact_index.py`
-- `helpers/extraction_config.py`
-- `helpers/extraction_repository.py`
-- `helpers/image_reader_service.py`
-- `helpers/graph_cleaning_config.py`
-- `helpers/graph_cleaning_pipeline.py`
-- `helpers/graph_contamination.py`
-- `helpers/graph_parameter_store.py`
-- `helpers/graph_tuning_config.py`
-- `helpers/graph_tuning_pipeline.py`
-- `helpers/optimization_sampling_config.py`
-- `helpers/optimization_sampling_logging.py`
-- `helpers/optimization_sampling_overlay.py`
-- `helpers/optimization_sampling_pipeline.py`
-- `helpers/optimization_sampling_sampling.py`
+- `helpers/artifact/__init__.py`
+- `helpers/artifact/config.py`
+- `helpers/artifact/logging.py`
+- `helpers/artifact/model_loader.py`
+- `helpers/artifact/paths.py`
+- `helpers/artifact/pipeline.py`
+- `helpers/artifact/processor.py`
+- `helpers/artifact/repository.py`
+- `helpers/artifact/zip.py`
+- `helpers/extraction/__init__.py`
+- `helpers/extraction/artifact_index.py`
+- `helpers/extraction/config.py`
+- `helpers/extraction/repository.py`
+- `helpers/extraction/image_reader_service.py`
+- `helpers/extraction/data_handlers.py`
+- `helpers/extraction/patch_engine.py`
+- `helpers/graph/__init__.py`
+- `helpers/graph/cleaning_config.py`
+- `helpers/graph/cleaning_pipeline.py`
+- `helpers/graph/contamination.py`
+- `helpers/graph/parameter_store.py`
+- `helpers/graph/tuning_config.py`
+- `helpers/graph/tuning_pipeline.py`
+- `helpers/optimization_sampling/__init__.py`
+- `helpers/optimization_sampling/config.py`
+- `helpers/optimization_sampling/logging.py`
+- `helpers/optimization_sampling/overlay.py`
+- `helpers/optimization_sampling/pipeline.py`
+- `helpers/optimization_sampling/sampling.py`
 - `databases/`
 - `databases/database.db`
-- `helpers/data_handlers.py`
-- `helpers/patch_engine.py`
 - `helpers/runtime_platform.py`
-- `helpers/training_checkpointing.py`
-- `helpers/training_config.py`
-- `helpers/training_data.py`
-- `helpers/training_gpu.py`
-- `helpers/training_loop.py`
-- `helpers/training_losses.py`
-- `helpers/training_metrics.py`
-- `helpers/training_models.py`
-- `helpers/training_pipeline.py`
-- `helpers/training_registry.py`
-- `helpers/training_reporting.py`
-- `helpers/training_runtime.py`
-- `helpers/training_utils.py`
+- `helpers/training/__init__.py`
+- `helpers/training/checkpointing.py`
+- `helpers/training/config.py`
+- `helpers/training/data.py`
+- `helpers/training/gpu.py`
+- `helpers/training/loop.py`
+- `helpers/training/losses.py`
+- `helpers/training/metrics.py`
+- `helpers/training/models.py`
+- `helpers/training/pipeline.py`
+- `helpers/training/registry.py`
+- `helpers/training/reporting.py`
+- `helpers/training/runtime.py`
+- `helpers/training/utils.py`
+- `helpers/wsi/__init__.py`
+- `helpers/wsi/colors.py`
+- `helpers/wsi/maps.py`
+- `helpers/wsi/process.py`
+- `helpers/wsi/slide_info.py`
+- `helpers/wsi/tis_detect_helper_fx.py`
 - `logs/`
 - `tests/`
 
@@ -320,7 +334,7 @@ Each root script listed below is a monolithic, self-contained script:
 - 11_optimizer_ensemble.py
 - 12_inference_ensemble.py
 
-These scripts perform actions independently of each other, except for `2_database_manager.py` and `3_1_imageReader.py`, which interact with each other and with `helpers/data_handlers.py` and `helpers/patch_engine.py`.
+These scripts perform actions independently of each other, except for `2_database_manager.py` and `3_1_imageReader.py`, which interact with each other and with `helpers/extraction/data_handlers.py` and `helpers/extraction/patch_engine.py`.
 
 ---
 

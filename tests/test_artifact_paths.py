@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from helpers.artifact_paths import cleanup_directory, create_slide_temp_dir, geojson_output_path
+from helpers.artifact.paths import cleanup_directory, create_slide_temp_dir, geojson_output_path
 
 
 def test_create_and_cleanup_slide_temp_dir(tmp_path: Path) -> None:

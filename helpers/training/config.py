@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.runtime_platform import resolve_env_path
-from helpers.training_registry import validate_architecture_encoder_pair
+from helpers.training.registry import validate_architecture_encoder_pair
 
 VALID_EXECUTION_MODES = {"FAST_DEV", "PAPER"}
 VALID_AMP_PRECISIONS = {"fp16", "bf16", "fp32", "auto"}

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from helpers.optimization_sampling_pipeline import run_optimization_sampling
-from helpers.optimization_sampling_sampling import (
+from helpers.optimization_sampling.pipeline import run_optimization_sampling
+from helpers.optimization_sampling.sampling import (
     OverlayTask,
     build_overlay_tasks,
     calculate_cochran_sample_size,

@@ -7,15 +7,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from helpers.extraction_artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
-from helpers.extraction_config import DatabaseManagerConfig, load_database_manager_config
-from helpers.extraction_repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
-from helpers.image_reader_service import (
+from helpers.extraction.artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
+from helpers.extraction.config import DatabaseManagerConfig, load_database_manager_config
+from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
     SlideRuntimeSettings,
     load_slide_runtime_settings,
     run_slide_processing,
 )
+from helpers.extraction.repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
 
 
 class Style:

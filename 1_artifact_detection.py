@@ -6,13 +6,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from helpers.artifact_config import ArtifactDetectionConfig, load_artifact_detection_config
-from helpers.artifact_logging import Style, banner, configure_artifact_logger
-from helpers.artifact_model_loader import ArtifactModelLoader
-from helpers.artifact_pipeline import ArtifactDetectionPipeline
-from helpers.artifact_processor import ArtifactProcessor
-from helpers.artifact_repository import ArtifactRepository
-from helpers.artifact_zip import ZipSlideSource
+from helpers.artifact.config import ArtifactDetectionConfig, load_artifact_detection_config
+from helpers.artifact.logging import Style, banner, configure_artifact_logger
+from helpers.artifact.model_loader import ArtifactModelLoader
+from helpers.artifact.pipeline import ArtifactDetectionPipeline
+from helpers.artifact.processor import ArtifactProcessor
+from helpers.artifact.repository import ArtifactRepository
+from helpers.artifact.zip import ZipSlideSource
 
 
 def main() -> None:

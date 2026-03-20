@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from helpers.training_metrics import TrainingHealthTracker
+from helpers.training.metrics import TrainingHealthTracker
 
 
 @dataclass

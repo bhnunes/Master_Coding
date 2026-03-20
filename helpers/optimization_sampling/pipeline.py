@@ -7,8 +7,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from helpers.optimization_sampling_overlay import generate_overlay_images
-from helpers.optimization_sampling_sampling import (
+from helpers.optimization_sampling.overlay import generate_overlay_images
+from helpers.optimization_sampling.sampling import (
     OverlayTask,
     build_overlay_tasks,
     discover_image_mask_pairs,

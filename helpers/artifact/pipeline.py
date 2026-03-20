@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from helpers.artifact_paths import cleanup_directory, create_slide_temp_dir, geojson_output_path
-from helpers.artifact_repository import ArtifactRecord
+from helpers.artifact.paths import cleanup_directory, create_slide_temp_dir, geojson_output_path
+from helpers.artifact.repository import ArtifactRecord
 
 
 @dataclass(frozen=True)

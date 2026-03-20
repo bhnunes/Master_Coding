@@ -14,9 +14,9 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 from skopt import gp_minimize
 from skopt.space import Integer
 
-from helpers.graph_contamination import GraphContaminationParameters, calculate_roi_contamination
-from helpers.graph_parameter_store import GraphCleaningParameterArtifact
-from helpers.optimization_sampling_sampling import ImageMaskPair, discover_image_mask_pairs
+from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
+from helpers.graph.parameter_store import GraphCleaningParameterArtifact
+from helpers.optimization_sampling.sampling import ImageMaskPair, discover_image_mask_pairs
 
 APPROVED_LABEL = "Approved"
 REJECTED_LABEL = "Rejected"

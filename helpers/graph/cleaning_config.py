@@ -5,8 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from helpers.graph_contamination import GraphContaminationParameters
-from helpers.graph_parameter_store import load_graph_cleaning_parameter_artifact
+from helpers.graph.contamination import GraphContaminationParameters
+from helpers.graph.parameter_store import load_graph_cleaning_parameter_artifact
 from helpers.runtime_platform import resolve_env_path
 
 

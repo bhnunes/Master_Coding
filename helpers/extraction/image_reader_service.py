@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from helpers import patch_engine
-from helpers.data_handlers import (
+from helpers.extraction import patch_engine
+from helpers.extraction.data_handlers import (
     BaseHandler,
     JSON_Handler,
     NDPI_NDPA_Handler,

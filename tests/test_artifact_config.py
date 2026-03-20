@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers.artifact_config import load_artifact_detection_config
+from helpers.artifact.config import load_artifact_detection_config
 
 
 def test_load_artifact_detection_config_reads_stage_one_environment(tmp_path: Path) -> None:

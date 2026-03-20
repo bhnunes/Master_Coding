@@ -13,7 +13,7 @@ from typing import cast
 
 import numpy as np
 
-from helpers.graph_contamination import GraphContaminationParameters, calculate_roi_contamination
+from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif"}
 SKIPPED_NO_MASK = "skipped_no_mask"
