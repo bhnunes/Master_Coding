@@ -24,7 +24,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - `6_sanity_checks.py`: scientific integrity and dataset consistency checks.
 - `7_pack_splits_to_hdf5.py`: converts prepared split folders into `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`.
 - `8_smart_sampler.py`: `.env`-driven smart-sampling orchestrator that filters `TRAIN.h5` into `TRAIN_FILTERED.h5` for downstream LR finding and training.
-- `9_lr_finder.py`: Used to estimate the best learning rate for training for every model.
+- `9_lr_finder.py`: `.env`-driven LR-finder orchestrator that screens approved model pairs and writes a LaTeX PDF report.
 - `10_training_ensemble.py`: Thin Stage 8 training orchestrator that trains one approved model per execution.
 - `11_optimizer_ensemble.py`: Responsible for obtaining the best parameters for the ensemble of models, organized by Transformers set (global context) and convolutional set (local context).
 - `12_inference_ensemble.py`: Responsible for generating the results on the test set.
@@ -70,6 +70,9 @@ This file gives coding agents repository-specific guidance for working safely an
 - `8_smart_sampler.py` should stay orchestration-focused. Keep Stage 8 smart-sampling configuration, HDF5 indexing, embedding extraction, per-patient selection, output writing, and optional sidecar generation in `helpers/smart_sampling/*.py`.
 - Stage 8 smart sampling must preserve downstream `TRAIN_FILTERED.h5` compatibility for `9_lr_finder.py` and `10_training_ensemble.py`, always writing datasets named exactly `images`, `masks`, `labels`, `patient_ids`, and `filenames`.
 - Active Stage 8 smart-sampling helper modules are `helpers/smart_sampling/config.py`, `helpers/smart_sampling/index.py`, `helpers/smart_sampling/embeddings.py`, `helpers/smart_sampling/selection.py`, `helpers/smart_sampling/storage.py`, `helpers/smart_sampling/writer.py`, and `helpers/smart_sampling/pipeline.py`.
+- `9_lr_finder.py` should stay orchestration-focused. Keep Stage 9 configuration, HDF5 staging, repeated LR-finder screening, curve analysis, and LaTeX/PDF reporting in `helpers/lr_finder/*.py`.
+- Stage 9 must preserve compatibility with Stage 8 smart-sampling outputs, reuse the approved architecture/encoder matrix from `training_model_registry.json`, and always emit both `report.tex` and `report.pdf` plus reproducibility sidecars.
+- Active Stage 9 helper modules are `helpers/lr_finder/config.py`, `helpers/lr_finder/data.py`, `helpers/lr_finder/search_space.py`, `helpers/lr_finder/analysis.py`, `helpers/lr_finder/runner.py`, `helpers/lr_finder/reporting.py`, and `helpers/lr_finder/pipeline.py`.
 - `10_training_ensemble.py` is now a thin Stage 8 orchestrator. Keep orchestration there and keep training configuration, registry loading, data access, GPU utilities, runtime setup, losses, metrics, checkpointing, reporting, and epoch execution in `helpers/training/*.py`.
 - `4_2_tune_graph_method.py` should be a `.env`-driven Stage 4.2 orchestrator. Keep orchestration there and keep configuration, shared contamination logic, and tuning workflow in `helpers/graph/tuning_config.py`, `helpers/graph/contamination.py`, and `helpers/graph/tuning_pipeline.py`.
 - Stage 4.2 must preserve the current scientific workflow: human labels from `master_candidate_pool/APPROVED` and `REJECTED`, source image/mask pairing by filename stem, stratified train/test split, nested cross-validation for parameter search, F1 optimization on the `Rejected` class, and final held-out test evaluation.

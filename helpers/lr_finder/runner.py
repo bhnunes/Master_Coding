@@ -1,0 +1,344 @@
+from __future__ import annotations
+
+import gc
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
+import torch
+
+from helpers.lr_finder.analysis import compute_curve_stats
+from helpers.lr_finder.config import LRFinderConfig, ModelPlan
+from helpers.lr_finder.data import build_train_loader, prepare_training_data
+from helpers.lr_finder.reporting import RunRecord
+from helpers.lr_finder.search_space import BCEDiceParams, sample_bcedice_params
+from helpers.training.gpu import GPUDownscale, GPUNormalizer
+from helpers.training.losses import BCEDiceHybridLossPaper
+from helpers.training.models import create_model
+from helpers.training.runtime import autocast_ctx, seed_everything, setup_precision
+
+matplotlib.use("Agg")
+
+
+@dataclass(frozen=True)
+class ScreeningOutputs:
+    records: list[RunRecord]
+    lhs_samples_path: Path
+    summary_all_path: Path
+    architecture_summary_paths: dict[str, Path]
+    completed_trials: int
+    failed_trials: int
+
+
+def configure_execution_mode(execution_mode: str) -> None:
+    if execution_mode == "FAST_DEV":
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
+        torch.use_deterministic_algorithms(False)
+        return
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+def clear_gpu() -> None:
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        try:
+            ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+            if callable(ipc_collect):
+                ipc_collect()
+        except Exception:
+            pass
+
+
+def run_lr_finder_once(
+    *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    criterion: torch.nn.Module,
+    train_loader: Any,
+    device: torch.device,
+    end_lr: float,
+    num_iter: int,
+    architecture: str,
+    amp_precision: str,
+    gpu_normalizer: GPUNormalizer,
+    gpu_downscale: GPUDownscale,
+) -> dict[str, npt.NDArray[np.float64]]:
+    from torch_lr_finder import LRFinder
+
+    amp_dtype, scaler, _ = setup_precision(architecture, amp_precision=amp_precision)
+    lr_finder = LRFinder(model, optimizer, criterion, device=device)
+
+    def _train_batch_patched(
+        self: Any, train_iter: Any, accumulation_steps: int, non_blocking: bool
+    ) -> float:
+        del accumulation_steps, non_blocking
+        self.model.train()
+        try:
+            batch_data = next(train_iter)
+        except StopIteration:
+            return float("nan")
+        if batch_data is None:
+            return float("nan")
+
+        images, masks = batch_data[:2]
+        images = images.to(self.device, non_blocking=True, memory_format=torch.channels_last)
+        masks = masks.to(self.device, non_blocking=True)
+        images = gpu_normalizer(images)
+        images = gpu_downscale(images)
+        self.optimizer.zero_grad(set_to_none=True)
+        try:
+            with autocast_ctx(images, amp_dtype):
+                outputs = self.model(images)
+                loss = self.criterion(outputs, masks)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(self.optimizer)
+                scaler.step(self.optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
+            return float(loss.item())
+        except Exception:
+            return float("nan")
+
+    lr_finder._train_batch = _train_batch_patched.__get__(lr_finder, LRFinder)
+    history: dict[str, Any] | None = None
+    try:
+        lr_finder.range_test(train_loader, end_lr=end_lr, num_iter=num_iter, step_mode="exp")
+        history = lr_finder.history
+    except Exception:
+        history = None
+    finally:
+        if hasattr(lr_finder, "model"):
+            lr_finder.model = None
+        if hasattr(lr_finder, "optimizer"):
+            lr_finder.optimizer = None
+        if hasattr(lr_finder, "criterion"):
+            lr_finder.criterion = None
+        del lr_finder
+
+    if history is None or "lr" not in history or "loss" not in history:
+        return {
+            "lr": np.array([], dtype=np.float64),
+            "loss": np.array([], dtype=np.float64),
+        }
+    return {
+        "lr": np.asarray(history["lr"], dtype=np.float64),
+        "loss": np.asarray(history["loss"], dtype=np.float64),
+    }
+
+
+def plot_stability_curves(
+    all_lrs: list[npt.NDArray[np.float64]],
+    all_losses: list[npt.NDArray[np.float64]],
+    *,
+    title: str,
+    out_png: Path,
+    skip_start: int = 10,
+    skip_end: int = 5,
+) -> None:
+    plt.figure(figsize=(10, 6))
+    for index, (lrs, losses) in enumerate(zip(all_lrs, all_losses, strict=True)):
+        lower_bound = skip_start
+        upper_bound = max(lower_bound + 1, len(lrs) - skip_end)
+        if lower_bound >= upper_bound:
+            continue
+        plt.plot(
+            np.log10(lrs[lower_bound:upper_bound]),
+            losses[lower_bound:upper_bound],
+            alpha=0.6,
+            linewidth=1.5,
+            label=f"Run {index + 1}",
+        )
+    plt.xlabel("log10(Learning Rate)")
+    plt.ylabel("Loss")
+    plt.title(title)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=200)
+    plt.close()
+
+
+def _run_single_loss_config(
+    config: LRFinderConfig,
+    *,
+    device: torch.device,
+    data_bundle: Any,
+    model_plan: ModelPlan,
+    params: BCEDiceParams,
+    config_index: int,
+    gpu_normalizer: GPUNormalizer,
+    gpu_downscale: GPUDownscale,
+) -> tuple[RunRecord | None, int, int]:
+    repeated_lrs: list[npt.NDArray[np.float64]] = []
+    repeated_losses: list[npt.NDArray[np.float64]] = []
+    repeated_stats = []
+    completed_trials = 0
+    failed_trials = 0
+
+    for repeat_index in range(config.num_repeats):
+        current_seed = config.seed + (config_index * 100) + repeat_index
+        seed_everything(current_seed)
+        train_loader = build_train_loader(
+            data_bundle.dataset,
+            data_bundle.sample_weights,
+            batch_size=config.batch_size,
+            workers=config.workers,
+            seed=current_seed,
+        )
+        model = None
+        optimizer = None
+        criterion = None
+        try:
+            model = create_model(model_plan.architecture, model_plan.encoder).to(device)
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=config.optimizer_start_lr,
+                weight_decay=config.optimizer_weight_decay,
+            )
+            criterion = BCEDiceHybridLossPaper(
+                alpha=params.alpha,
+                beta=params.beta,
+                gamma=params.gamma,
+            )
+            history = run_lr_finder_once(
+                model=model,
+                optimizer=optimizer,
+                criterion=criterion,
+                train_loader=train_loader,
+                device=device,
+                end_lr=config.end_lr,
+                num_iter=config.num_iter,
+                architecture=model_plan.architecture,
+                amp_precision=config.amp_precision,
+                gpu_normalizer=gpu_normalizer,
+                gpu_downscale=gpu_downscale,
+            )
+            stats = compute_curve_stats(history["lr"], history["loss"], skip_start=10, skip_end=5)
+            repeated_lrs.append(history["lr"])
+            repeated_losses.append(history["loss"])
+            repeated_stats.append(stats)
+            completed_trials += 1
+        except Exception:
+            failed_trials += 1
+        finally:
+            del train_loader
+            if criterion is not None:
+                del criterion
+            if optimizer is not None:
+                del optimizer
+            if model is not None:
+                del model
+            gc.collect()
+            clear_gpu()
+
+    if not repeated_stats:
+        return None, completed_trials, failed_trials
+
+    output_dir = config.output_dir / model_plan.architecture
+    tag_base = f"Loss_alpha_{params.alpha:.3f}_beta_{params.beta:.3f}_gamma_{params.gamma:.3f}"
+    plot_path = output_dir / f"{config_index:03d}_{tag_base}.png"
+    plot_stability_curves(
+        repeated_lrs,
+        repeated_losses,
+        title=(
+            f"{model_plan.architecture} | Stability (N={config.num_repeats})\n"
+            f"α={params.alpha:.3f}, β={params.beta:.3f}, γ={params.gamma:.3f}"
+        ),
+        out_png=plot_path,
+    )
+    min_losses = [stats.min_loss for stats in repeated_stats if np.isfinite(stats.min_loss)]
+    median_min_loss = float(np.median(min_losses)) if min_losses else float("inf")
+    record = RunRecord(
+        architecture=model_plan.architecture,
+        encoder=model_plan.encoder,
+        alpha=params.alpha,
+        beta=params.beta,
+        gamma=params.gamma,
+        median_min_loss=median_min_loss,
+        plot_path=plot_path,
+        csv_path=output_dir / f"SUMMARY_{model_plan.architecture}_STABILITY.csv",
+    )
+    return record, completed_trials, failed_trials
+
+
+def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
+    configure_execution_mode(config.execution_mode)
+    seed_everything(config.seed)
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    lhs_samples = sample_bcedice_params(config.num_lhs_samples, config.search_space, config.seed)
+    lhs_samples_path = config.output_dir / "LHS_SAMPLES.json"
+    lhs_samples_path.write_text(
+        json.dumps([asdict(sample) for sample in lhs_samples], indent=2), encoding="utf-8"
+    )
+
+    data_bundle = prepare_training_data(config)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    gpu_normalizer = GPUNormalizer(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+        device=device,
+    )
+    gpu_downscale = GPUDownscale(p=0.07).to(device)
+
+    records: list[RunRecord] = []
+    completed_trials = 0
+    failed_trials = 0
+    architecture_summary_paths: dict[str, Path] = {}
+    try:
+        for model_plan in config.model_plans:
+            for config_index, params in enumerate(lhs_samples, start=1):
+                record, ok_count, fail_count = _run_single_loss_config(
+                    config,
+                    device=device,
+                    data_bundle=data_bundle,
+                    model_plan=model_plan,
+                    params=params,
+                    config_index=config_index,
+                    gpu_normalizer=gpu_normalizer,
+                    gpu_downscale=gpu_downscale,
+                )
+                completed_trials += ok_count
+                failed_trials += fail_count
+                if record is not None:
+                    records.append(record)
+
+            architecture_records = [
+                item for item in records if item.architecture == model_plan.architecture
+            ]
+            if architecture_records:
+                architecture_summary_path = (
+                    config.output_dir
+                    / model_plan.architecture
+                    / f"SUMMARY_{model_plan.architecture}_STABILITY.csv"
+                )
+                pd.DataFrame([asdict(item) for item in architecture_records]).to_csv(
+                    architecture_summary_path,
+                    index=False,
+                )
+                architecture_summary_paths[model_plan.architecture] = architecture_summary_path
+    finally:
+        data_bundle.dataset.close()
+
+    summary_all_path = config.output_dir / "SUMMARY_ALL.csv"
+    pd.DataFrame([asdict(record) for record in records]).to_csv(summary_all_path, index=False)
+    return ScreeningOutputs(
+        records=records,
+        lhs_samples_path=lhs_samples_path,
+        summary_all_path=summary_all_path,
+        architecture_summary_paths=architecture_summary_paths,
+        completed_trials=completed_trials,
+        failed_trials=failed_trials,
+    )

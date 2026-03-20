@@ -235,13 +235,16 @@ Current Stage 8 smart-sampling behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `9_lr_finder.py` | Estimates optimal learning rate for each model using the LR Finder technique. |
+| `9_lr_finder.py` | Thin LR-finder orchestrator that loads `.env`, screens approved architecture/encoder pairs, and writes a LaTeX-generated PDF report plus CSV/JSON sidecars. |
 | `10_training_ensemble.py` | Thin training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
 | `11_optimizer_ensemble.py` | Optimizes ensemble weights using Optuna to maximize validation AUPRC. Organizes models by Transformers (global context) and convolutional (local context). |
 | `12_inference_ensemble.py` | Generates predictions on the test set using the optimized ensemble. |
 
 Current training behavior:
 
+- `9_lr_finder.py` is now orchestration-focused; Stage 9 config loading, HDF5 staging, LR screening, curve analysis, and LaTeX reporting live in `helpers/lr_finder/*.py`
+- Stage 9 derives the screened architecture/encoder plan from `training_model_registry.json` instead of hardcoded lists
+- Stage 9 writes both `report.tex` and `report.pdf`, plus `SUMMARY_ALL.csv`, per-architecture CSV summaries, `LHS_SAMPLES.json`, and `lr_finder_run_config.json`
 - `10_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
 - Architecture and encoder choices are validated against `training_model_registry.json`
 - Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
@@ -272,9 +275,14 @@ ARTIFACT_MPP_MODEL=1.5
 ARTIFACT_OVERLAY_FACTOR=10
 ARTIFACT_OVERWRITE_EXISTING=false
 
-# Stage 8 - Training
+# Stage 9 - LR Finder
+LR_FINDER_HDF5_DRIVE_DIR=./data/CAMELYON16
+LR_FINDER_OUTPUT_DIR=./reports/lr_finder
+LR_FINDER_ARCHITECTURES=FPN,SEGFORMER
+
+# Stage 10 - Training
 TRAINING_ARCHITECTURE=SEGFORMER
-TRAINING_ENCODER_NAME=mit_b5
+TRAINING_ENCODER=mit_b5
 TRAINING_MODEL_REGISTRY_PATH=
 
 # Patch extraction and later stages keep using their own .env variables
@@ -286,7 +294,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-See `.env_example` for the current commented template, including Stage 1, Stage 2, Stage 5, and the Stage 8 approved training matrix.
+See `.env_example` for the current commented template, including Stage 1, Stage 2, Stage 8 smart sampling, Stage 9 LR-finder reporting, and the approved Stage 10 training matrix.
 
 OpenSlide runtime rules:
 
