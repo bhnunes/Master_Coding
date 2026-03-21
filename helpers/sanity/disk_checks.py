@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 from pathlib import Path
+from typing import TypedDict
 
 import cv2
 import numpy as np
@@ -9,6 +11,74 @@ import pandas as pd
 from tqdm import tqdm
 
 from helpers.sanity.models import EXPECTED_MASK_VALUES, LABEL_DIR, MASK_DIR, CheckResult
+
+
+class PairInspection(TypedDict):
+    image_shape: tuple[int, ...] | None
+    mask_shape: tuple[int, ...] | None
+    mask_unique_values: tuple[int, ...] | None
+    mask_has_positive_pixels: bool | None
+
+
+_MASK_INSPECTION_CACHE: dict[str, PairInspection] = {}
+
+
+@lru_cache(maxsize=8192)
+def inspect_image_mask_pair(image_path: str, mask_path: str) -> PairInspection:
+    image = cv2.imread(image_path)
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    if image is None or mask is None:
+        result: PairInspection = {
+            "image_shape": None,
+            "mask_shape": None,
+            "mask_unique_values": None,
+            "mask_has_positive_pixels": None,
+        }
+        _MASK_INSPECTION_CACHE[mask_path] = {
+            "image_shape": None,
+            "mask_shape": None,
+            "mask_unique_values": None,
+            "mask_has_positive_pixels": None,
+        }
+        return result
+    mask_inspection: PairInspection = {
+        "image_shape": None,
+        "mask_shape": tuple(int(value) for value in mask.shape[:2]),
+        "mask_unique_values": tuple(int(value) for value in np.unique(mask).tolist()),
+        "mask_has_positive_pixels": bool((mask > 0).any()),
+    }
+    _MASK_INSPECTION_CACHE[mask_path] = mask_inspection
+    return {
+        "image_shape": tuple(int(value) for value in image.shape[:2]),
+        "mask_shape": mask_inspection["mask_shape"],
+        "mask_unique_values": mask_inspection["mask_unique_values"],
+        "mask_has_positive_pixels": mask_inspection["mask_has_positive_pixels"],
+    }
+
+
+@lru_cache(maxsize=8192)
+def inspect_mask(mask_path: str) -> PairInspection:
+    cached = _MASK_INSPECTION_CACHE.get(mask_path)
+    if cached is not None:
+        return cached
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        result: PairInspection = {
+            "image_shape": None,
+            "mask_shape": None,
+            "mask_unique_values": None,
+            "mask_has_positive_pixels": None,
+        }
+        _MASK_INSPECTION_CACHE[mask_path] = result
+        return result
+    result = {
+        "image_shape": None,
+        "mask_shape": tuple(int(value) for value in mask.shape[:2]),
+        "mask_unique_values": tuple(int(value) for value in np.unique(mask).tolist()),
+        "mask_has_positive_pixels": bool((mask > 0).any()),
+    }
+    _MASK_INSPECTION_CACHE[mask_path] = result
+    return result
 
 
 def _list_png_names(path: Path) -> set[str]:
@@ -115,12 +185,14 @@ def check_decode_and_shapes(
     for row in tqdm(
         scan_df.itertuples(index=False), total=len(scan_df), desc=f"{split}: decoding", leave=False
     ):
-        image = cv2.imread(str(base_dir / str(row.relative_path_image)))
-        mask = cv2.imread(str(base_dir / str(row.relative_path_mask)), cv2.IMREAD_GRAYSCALE)
-        if image is None or mask is None:
+        inspection = inspect_image_mask_pair(
+            str(base_dir / str(row.relative_path_image)),
+            str(base_dir / str(row.relative_path_mask)),
+        )
+        if inspection["image_shape"] is None or inspection["mask_shape"] is None:
             unreadable.append(str(row.filename))
             continue
-        if image.shape[:2] != mask.shape[:2]:
+        if inspection["image_shape"] != inspection["mask_shape"]:
             mismatches.append(str(row.filename))
     if unreadable:
         return CheckResult("FAIL", f"Unreadable image/mask pairs: {unreadable[:10]}")
@@ -155,10 +227,10 @@ def check_mask_pixel_values(
         desc=f"{split}: mask values",
         leave=False,
     ):
-        mask = cv2.imread(str(base_dir / str(row.relative_path_mask)), cv2.IMREAD_GRAYSCALE)
-        if mask is None:
+        inspection = inspect_mask(str(base_dir / str(row.relative_path_mask)))
+        if inspection["mask_unique_values"] is None:
             return CheckResult("FAIL", f"Unreadable mask encountered for {row.filename}.")
-        unexpected |= {int(value) for value in np.unique(mask).tolist()} - EXPECTED_MASK_VALUES
+        unexpected |= set(inspection["mask_unique_values"]) - EXPECTED_MASK_VALUES
         if unexpected and not full_scan:
             break
     if unexpected:

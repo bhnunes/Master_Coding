@@ -158,3 +158,34 @@ def test_write_split_hdf5_rejects_reuse_when_image_contents_change_in_place(tmp_
 
     with pytest.raises(ValueError, match="does not match the current split inputs"):
         write_split_hdf5(output_path, [sample], img_size=16, overwrite=False)
+
+
+def test_write_split_hdf5_does_not_prehash_inputs_before_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_path = tmp_path / "TRAIN" / "CANCER" / "PATIENT_1_a.png"
+    mask_path = tmp_path / "TRAIN" / "CANCER_MASK" / "PATIENT_1_a.png"
+    _write_rgb_png(image_path)
+    _write_mask_png(mask_path)
+    output_path = tmp_path / "TRAIN.h5"
+
+    monkeypatch.setattr(
+        "helpers.packaging.writer.hash_file_sha256",
+        lambda _path: (_ for _ in ()).throw(AssertionError("prehash should not be called")),
+    )
+
+    write_split_hdf5(
+        output_path,
+        [
+            SampleRecord(
+                image_path=image_path,
+                mask_path=mask_path,
+                filename="PATIENT_1_a.png",
+                label=1,
+                patient_id=1,
+            )
+        ],
+        img_size=16,
+        overwrite=True,
+    )

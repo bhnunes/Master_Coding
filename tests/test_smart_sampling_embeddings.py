@@ -75,6 +75,32 @@ def test_h5_patch_dataset_transposes_chw_images(tmp_path: Path) -> None:
     assert tuple(item.shape) == (4, 4, 3)
 
 
+def test_h5_patch_dataset_reuses_single_hdf5_handle_per_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    h5_path = tmp_path / "patches.h5"
+    _write_h5(h5_path)
+    open_calls = 0
+    original_file = h5py.File
+
+    def counting_file(*args: object, **kwargs: object) -> h5py.File:
+        nonlocal open_calls
+        open_calls += 1
+        return original_file(*args, **kwargs)
+
+    monkeypatch.setattr("helpers.smart_sampling.embeddings.h5py.File", counting_file)
+
+    dataset = H5PatchDataset(
+        str(h5_path), np.array([0, 1], dtype=np.int64), transform=cast(Any, lambda image: image)
+    )
+
+    _ = dataset[0]
+    _ = dataset[1]
+    dataset.close()
+
+    assert open_calls == 1
+
+
 def test_get_preprocessing_transforms_returns_tensor_output() -> None:
     transform = get_preprocessing_transforms(8)
     image = np.zeros((4, 4, 3), dtype=np.uint8)

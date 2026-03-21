@@ -108,6 +108,25 @@ def test_process_and_write_image_applies_normalizer_when_provided(tmp_path: Path
     assert image_dest.is_file()
 
 
+def test_process_and_write_image_copies_file_without_decoding_when_normalizer_is_absent(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    image_src = tmp_path / "src.png"
+    image_src.write_bytes(b"raw-png-bytes")
+    image_dest = tmp_path / "dest.png"
+
+    monkeypatch.setattr(
+        cv2, "imread", lambda *_args, **_kwargs: pytest.fail("imread should not be used")
+    )
+
+    success, error = process_and_write_image(str(image_src), str(image_dest), None)
+
+    assert success is True
+    assert error is None
+    assert image_dest.read_bytes() == b"raw-png-bytes"
+
+
 def test_move_file_uses_shutil_fallback_when_replace_fails(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 import pandas as pd
 from tqdm import tqdm
 
+from helpers.sanity.disk_checks import inspect_mask
 from helpers.sanity.models import CheckResult
 
 
@@ -27,10 +27,10 @@ def check_mask_label_semantics(
         desc=f"{split}: mask semantics",
         leave=False,
     ):
-        mask = cv2.imread(str(base_dir / str(row.relative_path_mask)), cv2.IMREAD_GRAYSCALE)
-        if mask is None:
+        inspection = inspect_mask(str(base_dir / str(row.relative_path_mask)))
+        has_positive_pixels = inspection["mask_has_positive_pixels"]
+        if has_positive_pixels is None:
             return CheckResult("FAIL", f"Unreadable mask encountered for {row.filename}.")
-        has_positive_pixels = bool((mask > 0).any())
         if int(row.label) == 0 and has_positive_pixels:
             positive_not_cancer.append(str(row.filename))
         if int(row.label) == 1 and not has_positive_pixels:

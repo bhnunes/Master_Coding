@@ -134,11 +134,27 @@ def select_patient_samples(
     stability_history: list[tuple[int, float]] = []
     final_embeddings: npt.NDArray[np.float32] | None = None
     candidate_pool: npt.NDArray[np.int64] = patient_indices
+    embedding_cache: dict[int, npt.NDArray[np.float32]] = {}
 
     rng = np.random.default_rng(config.seed + patient_id)
 
+    def fetch_embeddings(indices: npt.NDArray[np.int64]) -> npt.NDArray[np.float32]:
+        ordered_indices = np.asarray(indices, dtype=np.int64)
+        missing = np.asarray(
+            [index for index in ordered_indices.tolist() if int(index) not in embedding_cache],
+            dtype=np.int64,
+        )
+        if len(missing) > 0:
+            missing_embeddings = extractor.get_embeddings(h5_path, missing)
+            for index, embedding in zip(missing.tolist(), missing_embeddings, strict=False):
+                embedding_cache[int(index)] = np.asarray(embedding, dtype=np.float32)
+        return np.stack([embedding_cache[int(index)] for index in ordered_indices.tolist()]).astype(
+            np.float32,
+            copy=False,
+        )
+
     if patch_count <= int(config.n_start * 1.5):
-        final_embeddings = extractor.get_embeddings(h5_path, patient_indices)
+        final_embeddings = fetch_embeddings(patient_indices)
         candidate_pool = patient_indices
         stability_history.append((patch_count, 1.0))
     else:
@@ -146,20 +162,18 @@ def select_patient_samples(
         while step < config.max_steps:
             if n_curr >= patch_count:
                 candidate_pool = patient_indices
-                final_embeddings = extractor.get_embeddings(h5_path, candidate_pool)
+                final_embeddings = fetch_embeddings(candidate_pool)
                 break
 
             idx_s1 = np.sort(rng.choice(patient_indices, n_curr, replace=False))
             idx_s2 = np.sort(rng.choice(patient_indices, n_curr, replace=False))
-            emb_s1 = extractor.get_embeddings(h5_path, idx_s1)
-            emb_s2 = extractor.get_embeddings(h5_path, idx_s2)
-            scores = [
+            emb_s1 = fetch_embeddings(idx_s1)
+            emb_s2 = fetch_embeddings(idx_s2)
+            avg_score = float(
                 calculate_stability_score(
                     emb_s1, emb_s2, idx_s1, idx_s2, _selection_namespace(config)
                 )
-                for _ in range(config.stability_repeats)
-            ]
-            avg_score = float(np.median(scores))
+            )
             stability_history.append((n_curr, avg_score))
 
             if avg_score >= config.stability_threshold:
@@ -171,7 +185,7 @@ def select_patient_samples(
             if new_n >= config.n_max or new_n >= patch_count:
                 n_curr = min(patch_count, config.n_max)
                 candidate_pool = np.sort(rng.choice(patient_indices, n_curr, replace=False))
-                final_embeddings = extractor.get_embeddings(h5_path, candidate_pool)
+                final_embeddings = fetch_embeddings(candidate_pool)
                 break
             n_curr = new_n
             step += 1
@@ -179,7 +193,7 @@ def select_patient_samples(
     if final_embeddings is None:
         n_curr = min(patch_count, config.n_start)
         candidate_pool = np.sort(rng.choice(patient_indices, n_curr, replace=False))
-        final_embeddings = extractor.get_embeddings(h5_path, candidate_pool)
+        final_embeddings = fetch_embeddings(candidate_pool)
 
     selected_indices, k_used, method = select_diverse_samples(
         final_embeddings,

@@ -33,6 +33,11 @@ def process_and_write_image(
     """Read, optionally normalize, and write one image file."""
 
     try:
+        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+        if normalizer is None:
+            shutil.copy2(src_path, dest_path)
+            return True, None
+
         image_bgr = cv2.imread(src_path)
         if image_bgr is None:
             raise OSError(f"Could not read image: {src_path}")
@@ -42,7 +47,6 @@ def process_and_write_image(
             output_bgr = cv2.cvtColor(normalized_rgb, cv2.COLOR_RGB2BGR)
         else:
             output_bgr = image_bgr
-        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
         success = cv2.imwrite(dest_path, output_bgr)
         if not success:
             raise OSError(f"Failed writing to: {dest_path}")
