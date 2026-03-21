@@ -67,11 +67,7 @@ class ArtifactProcessor:
         tissue_overlay_path = tissue_overlay_dir / f"{slide_stem}_OVERLAY.jpg"
         image_original.save(thumbnail_path, quality=80)
 
-        image = np.array(image_original)
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-        _, image = cv2.imencode(".jpg", image, encode_param)
-        image = cv2.imdecode(image, 1)
-        thumbnail_image = Image.fromarray(image)
+        thumbnail_image = image_original.convert("RGB")
 
         width, height = thumbnail_image.size
         patch_size = self.config.model_patch_size
@@ -79,15 +75,17 @@ class ArtifactProcessor:
         tiles_y = height // patch_size
         overhang_x = width - tiles_x * patch_size
         overhang_y = height - tiles_y * patch_size
+        tile_cols = tiles_x + (1 if overhang_x > 0 else 0)
+        tile_rows = tiles_y + (1 if overhang_y > 0 else 0)
         colors = [[50, 50, 250], [128, 128, 128]]
 
-        end_image = None
-        end_image_class_map = None
+        row_masks: list[Any] = []
+        row_class_masks: list[Any] = []
         with torch.inference_mode():
-            for tile_y in range(tiles_y + 1):
-                temp_image = None
-                temp_image_class_map = None
-                for tile_x in range(tiles_x + 1):
+            for tile_y in range(tile_rows):
+                current_row_masks: list[Any] = []
+                current_row_class_masks: list[Any] = []
+                for tile_x in range(tile_cols):
                     image_work = _crop_tile(
                         thumbnail_image,
                         tile_x,
@@ -106,26 +104,26 @@ class ArtifactProcessor:
                     predictions = predictions.squeeze().cpu().numpy()
                     mask = np.argmax(predictions, axis=0).astype("int8")
                     class_mask = make_class_map(mask, colors)  # type: ignore[no-untyped-call]
-                    temp_image, temp_image_class_map = _append_horizontal_tile(
-                        temp_image,
-                        temp_image_class_map,
-                        mask,
-                        class_mask,
-                        tile_x,
-                        tiles_x,
-                        patch_size,
-                        overhang_x,
-                    )
-                end_image, end_image_class_map = _append_vertical_tile(
-                    end_image,
-                    end_image_class_map,
-                    temp_image,
-                    temp_image_class_map,
-                    tile_y,
-                    tiles_y,
-                    patch_size,
-                    overhang_y,
+                    current_row_masks.append(mask)
+                    current_row_class_masks.append(class_mask)
+                stitched_row_mask, stitched_row_class_mask = _combine_horizontal_tiles(
+                    current_row_masks,
+                    current_row_class_masks,
+                    patch_size=patch_size,
+                    overhang_x=overhang_x,
                 )
+                row_masks.append(stitched_row_mask)
+                row_class_masks.append(stitched_row_class_mask)
+
+        end_image = None
+        end_image_class_map = None
+        if row_masks and row_class_masks:
+            end_image, end_image_class_map = _combine_vertical_tiles(
+                row_masks,
+                row_class_masks,
+                patch_size=patch_size,
+                overhang_y=overhang_y,
+            )
 
         if end_image is None or end_image_class_map is None:
             raise RuntimeError(f"No tissue detection output was created for '{slide_path.name}'.")
@@ -251,6 +249,46 @@ def _crop_tile(
             (tile_x * patch_size, height - patch_size, (tile_x + 1) * patch_size, height)
         )
     return image.crop((width - patch_size, height - patch_size, width, height))
+
+
+def _combine_horizontal_tiles(
+    row_masks: list[Any],
+    row_class_masks: list[Any],
+    *,
+    patch_size: int,
+    overhang_x: int,
+) -> tuple[Any, Any]:
+    import numpy as np
+
+    if not row_masks or not row_class_masks or len(row_masks) != len(row_class_masks):
+        raise RuntimeError("Horizontal tile rows must contain matching mask and class-mask tiles.")
+
+    tiles = list(row_masks)
+    class_tiles = list(row_class_masks)
+    if len(tiles) > 1 and overhang_x > 0:
+        tiles[-1] = tiles[-1][:, patch_size - overhang_x : patch_size]
+        class_tiles[-1] = class_tiles[-1][:, patch_size - overhang_x : patch_size, :]
+    return np.concatenate(tiles, axis=1), np.concatenate(class_tiles, axis=1)
+
+
+def _combine_vertical_tiles(
+    image_rows: list[Any],
+    class_rows: list[Any],
+    *,
+    patch_size: int,
+    overhang_y: int,
+) -> tuple[Any, Any]:
+    import numpy as np
+
+    if not image_rows or not class_rows or len(image_rows) != len(class_rows):
+        raise RuntimeError("Vertical tile rows must contain matching image and class-map rows.")
+
+    tiles = list(image_rows)
+    class_tiles = list(class_rows)
+    if len(tiles) > 1 and overhang_y > 0:
+        tiles[-1] = tiles[-1][patch_size - overhang_y : patch_size, :]
+        class_tiles[-1] = class_tiles[-1][patch_size - overhang_y : patch_size, :, :]
+    return np.concatenate(tiles, axis=0), np.concatenate(class_tiles, axis=0)
 
 
 def _append_horizontal_tile(

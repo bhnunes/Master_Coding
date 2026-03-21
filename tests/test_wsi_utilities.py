@@ -13,12 +13,14 @@ from PIL import Image
 from helpers.wsi.colors import colors_QC7
 from helpers.wsi.maps import make_overlay
 from helpers.wsi.process import (
-    get_preprocessing as process_get_preprocessing,
-)
-from helpers.wsi.process import (
+    _combine_mask_rows,
+    _combine_mask_tiles,
     make_1class_map_thr,
     mask_to_geojson,
     slide_process_single,
+)
+from helpers.wsi.process import (
+    get_preprocessing as process_get_preprocessing,
 )
 from helpers.wsi.process import (
     to_tensor_x as process_to_tensor_x,
@@ -145,6 +147,22 @@ def test_make_1class_map_thr_assigns_palette_to_positive_classes() -> None:
     class_map = make_1class_map_thr(mask, [[10, 20, 30], [40, 50, 60]])
 
     assert class_map.tolist() == [[[0, 0, 0], [10, 20, 30]], [[40, 50, 60], [0, 0, 0]]]
+
+
+def test_mask_combine_helpers_join_tiles_with_overhangs() -> None:
+    mask_a = np.array([[1, 2], [3, 4]], dtype=np.uint8)
+    mask_b = np.array([[5, 6], [7, 8]], dtype=np.uint8)
+    mask_c = np.array([[9, 10], [11, 12]], dtype=np.uint8)
+
+    combined_row = _combine_mask_tiles([mask_a, mask_b, mask_c], patch_size=2, overhang_x=1)
+    assert combined_row.shape == (2, 5)
+
+    combined_mask = _combine_mask_rows(
+        [combined_row, combined_row, combined_row],
+        patch_size=2,
+        overhang_y=1,
+    )
+    assert combined_mask.shape == (5, 5)
 
 
 def test_slide_process_single_processes_tissue_and_pads_output(

@@ -40,6 +40,24 @@ def make_1class_map_thr(mask, class_colors):
     return rgb
 
 
+def _combine_mask_tiles(mask_tiles, patch_size, overhang_x):
+    tiles = list(mask_tiles)
+    if not tiles:
+        raise RuntimeError("Mask tile rows cannot be empty.")
+    if len(tiles) > 1 and overhang_x > 0:
+        tiles[-1] = tiles[-1][:, patch_size - overhang_x : patch_size]
+    return np.concatenate(tiles, axis=1)
+
+
+def _combine_mask_rows(mask_rows, patch_size, overhang_y):
+    rows = list(mask_rows)
+    if not rows:
+        raise RuntimeError("Mask row collection cannot be empty.")
+    if len(rows) > 1 and overhang_y > 0:
+        rows[-1] = rows[-1][patch_size - overhang_y : patch_size, :]
+    return np.concatenate(rows, axis=0)
+
+
 def slide_process_single(
     model,
     tis_det_map_mpp,
@@ -66,30 +84,21 @@ def slide_process_single(
     model_size = (m_p_s, m_p_s)
     preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER_MODEL_1, ENCODER_WEIGHTS)
 
-    # Start loop
+    mask_rows = []
     for he in tqdm(range(patch_n_h_l0), total=patch_n_h_l0):
         h = he * p_s + 1
         if he == 0:
             h = 0
-        # print("Current cycle ", he + 1, " of ", patch_n_h_l0)
+        row_tiles = []
         for wi in range(patch_n_w_l0):
             w = wi * p_s + 1
             if wi == 0:
                 w = 0
-            # he = 12
-            # wi = 15
             td_patch = tis_det_map_mpp[he * m_p_s : (he + 1) * m_p_s, wi * m_p_s : (wi + 1) * m_p_s]
-            if td_patch.shape != (512, 512):
-                # td_patch padding (incase td_patch does not equal (512,512))
+            if td_patch.shape != (m_p_s, m_p_s):
                 original_shape = td_patch.shape
-
-                # Desired shape
-                desired_shape = (512, 512)
-
-                # Calculate padding needed
+                desired_shape = (m_p_s, m_p_s)
                 padding = [(0, desired_shape[i] - original_shape[i]) for i in range(2)]
-
-                # Apply padding
                 td_patch_ = np.pad(td_patch, padding, mode="constant")
             else:
                 td_patch_ = td_patch
@@ -111,19 +120,13 @@ def slide_process_single(
                 mask = np.where(td_patch_ == 1, BACK_CLASS, mask_raw)
 
             else:
-                mask = np.full((512, 512), BACK_CLASS)
+                mask = np.full((m_p_s, m_p_s), BACK_CLASS)
 
-            if wi == 0:
-                temp_image = mask
+            row_tiles.append(mask)
 
-            else:
-                temp_image = np.concatenate((temp_image, mask), axis=1)
+        mask_rows.append(_combine_mask_tiles(row_tiles, m_p_s, 0))
 
-        if he == 0:
-            end_image = temp_image
-
-        else:
-            end_image = np.concatenate((end_image, temp_image), axis=0)
+    end_image = _combine_mask_rows(mask_rows, m_p_s, 0)
 
     # now get size of padded region (buffer) at Model MPP
     buffer_right_l = int((w_l0 - (patch_n_w_l0 * p_s)) * mpp / MPP_MODEL_1)

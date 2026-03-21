@@ -15,6 +15,8 @@ from helpers.artifact.processor import (
     ArtifactProcessor,
     _append_horizontal_tile,
     _append_vertical_tile,
+    _combine_horizontal_tiles,
+    _combine_vertical_tiles,
     _crop_tile,
 )
 
@@ -152,6 +154,35 @@ def test_append_vertical_tile_handles_init_full_append_and_overhang() -> None:
     assert clipped_class_map.shape == (3, 2, 3)
 
 
+def test_combine_tile_helpers_join_rows_and_columns_once() -> None:
+    row_masks = [
+        np.array([[1, 2], [3, 4]], dtype=np.uint8),
+        np.array([[5, 6], [7, 8]], dtype=np.uint8),
+        np.array([[9, 10], [11, 12]], dtype=np.uint8),
+    ]
+    row_class_masks = [np.dstack([mask, mask, mask]) for mask in row_masks]
+
+    combined_row, combined_row_class = _combine_horizontal_tiles(
+        row_masks,
+        row_class_masks,
+        patch_size=2,
+        overhang_x=1,
+    )
+
+    assert combined_row.shape == (2, 5)
+    assert combined_row_class.shape == (2, 5, 3)
+
+    combined_image, combined_class = _combine_vertical_tiles(
+        [combined_row, combined_row, combined_row],
+        [combined_row_class, combined_row_class, combined_row_class],
+        patch_size=2,
+        overhang_y=1,
+    )
+
+    assert combined_image.shape == (5, 5)
+    assert combined_class.shape == (5, 5, 3)
+
+
 def test_run_qc_processing_writes_outputs_and_geojson(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -280,7 +311,7 @@ def test_run_tissue_detection_raises_when_stitching_returns_no_output(
         lambda mask, colors: np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8),
     )
     monkeypatch.setattr(
-        "helpers.artifact.processor._append_vertical_tile", lambda *args, **kwargs: (None, None)
+        "helpers.artifact.processor._combine_vertical_tiles", lambda *args, **kwargs: (None, None)
     )
     monkeypatch.setattr(
         "sys.modules",
