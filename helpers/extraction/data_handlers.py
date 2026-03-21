@@ -26,16 +26,17 @@ def _coords_to_shapely_polygons(coord_lists: list[Any]) -> list[Polygon]:
     polygons: list[Polygon] = []
     for sublist in coord_lists:
         points_raw = sublist[0] if len(sublist) == 1 and isinstance(sublist[0], list) else sublist
-        if not points_raw or len(points_raw) < 6:
+        if not points_raw:
             continue
 
         if isinstance(points_raw[0], (int, float)):
+            if len(points_raw) < 6:
+                continue
             points = [(points_raw[i], points_raw[i + 1]) for i in range(0, len(points_raw), 2)]
         else:
+            if len(points_raw) < 3:
+                continue
             points = points_raw
-
-        if len(points) < 3:
-            continue
 
         try:
             polygon = Polygon(points)
