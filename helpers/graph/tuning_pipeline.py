@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import TypeVar
 import numpy as np
 from numpy.typing import NDArray
 from sklearn.metrics import accuracy_score, f1_score
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedGroupKFold
 from skopt import gp_minimize
 from skopt.space import Integer
 
@@ -36,6 +37,7 @@ class LabeledSourceRecord:
 
     pair: ImageMaskPair
     label: str
+    group_id: str
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,13 @@ def resolve_labeled_source_records(
             logger.warning("Source image/mask pair not found, skipping review item: %s", stem)
             missing_files = True
             continue
-        records.append(LabeledSourceRecord(pair=pair, label=label))
+        records.append(
+            LabeledSourceRecord(
+                pair=pair,
+                label=label,
+                group_id=infer_group_id_from_stem(pair.stem),
+            )
+        )
 
     if missing_files:
         logger.error(
@@ -323,6 +331,15 @@ def build_search_space(
     ]
 
 
+def infer_group_id_from_stem(stem: str) -> str:
+    match = re.search(r"PATIENT_([^_]+)", stem)
+    if match is not None:
+        candidate = match.group(1).strip("-_")
+        if candidate:
+            return candidate
+    return stem
+
+
 def _build_objective(
     *,
     train_records: Sequence[LabeledSourceRecord],
@@ -332,7 +349,13 @@ def _build_objective(
 ) -> Callable[[list[int]], float]:
     labels = np.array([record.label for record in train_records])
     record_array = np.array(train_records, dtype=object)
-    splitter = StratifiedKFold(n_splits=n_splits_inner_cv, shuffle=True, random_state=random_state)
+    groups = np.array([record.group_id for record in train_records], dtype=object)
+    cv_splits = _build_grouped_cv_splits(
+        labels=labels,
+        groups=groups,
+        n_splits_inner_cv=n_splits_inner_cv,
+        random_state=random_state,
+    )
 
     def objective(values: list[int]) -> float:
         params = GraphContaminationParameters(
@@ -342,7 +365,7 @@ def _build_objective(
             erosion_px=int(values[3]),
         )
         fold_f1_scores: list[float] = []
-        for train_indices, validation_indices in splitter.split(record_array, labels):
+        for train_indices, validation_indices in cv_splits:
             train_fold = list(record_array[train_indices])
             validation_fold = list(record_array[validation_indices])
             train_rates, train_labels = _score_records(train_fold, params, scorer)
@@ -421,17 +444,78 @@ def _score_records(
     return rates, labels
 
 
+def _build_grouped_cv_splits(
+    *,
+    labels: NDArray[np.str_],
+    groups: NDArray[np.object_],
+    n_splits_inner_cv: int,
+    random_state: int,
+) -> list[tuple[NDArray[np.int64], NDArray[np.int64]]]:
+    unique_groups = np.unique(groups)
+    max_splits = min(len(unique_groups), n_splits_inner_cv)
+    for n_splits in range(max_splits, 1, -1):
+        splitter = StratifiedGroupKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=random_state,
+        )
+        try:
+            return [
+                (train_idx.astype(np.int64), validation_idx.astype(np.int64))
+                for train_idx, validation_idx in splitter.split(
+                    np.zeros(len(labels), dtype=np.uint8),
+                    labels,
+                    groups,
+                )
+            ]
+        except ValueError:
+            continue
+    raise ValueError(
+        "Grouped cross-validation requires at least two feasible patient/slide groups per fold."
+    )
+
+
 def _split_records(
     records: Sequence[LabeledSourceRecord],
     *,
     test_set_size: float,
     random_state: int,
 ) -> tuple[list[LabeledSourceRecord], list[LabeledSourceRecord]]:
-    labels = [record.label for record in records]
-    train_records, test_records = train_test_split(
-        list(records),
-        test_size=test_set_size,
-        random_state=random_state,
-        stratify=labels,
-    )
-    return list(train_records), list(test_records)
+    labels = np.array([record.label for record in records])
+    groups = np.array([record.group_id for record in records], dtype=object)
+    unique_groups = np.unique(groups)
+    requested_splits = max(2, int(round(1.0 / test_set_size)))
+    max_splits = min(len(unique_groups), requested_splits)
+    best_split: tuple[NDArray[np.int64], NDArray[np.int64]] | None = None
+    best_ratio_delta: float | None = None
+
+    for n_splits in range(max_splits, 1, -1):
+        splitter = StratifiedGroupKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=random_state,
+        )
+        try:
+            for train_idx, test_idx in splitter.split(
+                np.zeros(len(labels), dtype=np.uint8),
+                labels,
+                groups,
+            ):
+                ratio_delta = abs((len(test_idx) / max(1, len(records))) - test_set_size)
+                if best_split is None or best_ratio_delta is None or ratio_delta < best_ratio_delta:
+                    best_split = (train_idx.astype(np.int64), test_idx.astype(np.int64))
+                    best_ratio_delta = ratio_delta
+        except ValueError:
+            continue
+
+    if best_split is None:
+        raise ValueError(
+            "Unable to create a patient-grouped train/test split. "
+            "Check class balance and group counts."
+        )
+
+    train_indices, test_indices = best_split
+    record_list = list(records)
+    train_records = [record_list[index] for index in train_indices.tolist()]
+    test_records = [record_list[index] for index in test_indices.tolist()]
+    return train_records, test_records

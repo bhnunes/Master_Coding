@@ -15,7 +15,7 @@ VALID_NORMALIZATION_METHODS = (
     "MACENKO",
     "VAHADANE",
 )
-VALID_SCORE_SPLITS = ("TRAIN", "VALIDATION", "TEST")
+VALID_SCORE_SPLITS = ("TRAIN", "VALIDATION")
 
 
 def _parse_bool(value: str | None, variable_name: str, default: bool) -> bool:
@@ -110,6 +110,7 @@ class CrossfoldConfig:
     data_directory: Path
     overwrite_output_dir: bool
     random_state: int
+    allow_destructive_move: bool
     constraints: SplitConstraints
     objective: ObjectiveConfig
     calc_checksums: bool
@@ -220,6 +221,11 @@ def load_crossfold_config(
             True,
         ),
         random_state=_parse_int(values.get("CROSSFOLD_RANDOM_STATE"), "CROSSFOLD_RANDOM_STATE", 42),
+        allow_destructive_move=_parse_bool(
+            values.get("CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE"),
+            "CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE",
+            False,
+        ),
         constraints=constraints,
         objective=objective,
         calc_checksums=_parse_bool(

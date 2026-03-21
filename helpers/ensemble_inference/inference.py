@@ -155,7 +155,7 @@ def analyze_ensemble_metrics(
         auc_pos_hist.add_(torch.bincount(flat_bins[flat_true], minlength=auc_bins))
         auc_neg_hist.add_(torch.bincount(flat_bins[~flat_true], minlength=auc_bins))
 
-        pred_gpu = (final_probs > 1e-4).to(torch.uint8)
+        pred_gpu = (final_probs > optimal_threshold).to(torch.uint8)
         conf_vec = pred_gpu.mul(2).add_(true_gpu).view(pred_gpu.size(0), -1)
         for index, patient_id in enumerate(patient_ids):
             counts = torch.bincount(conf_vec[index], minlength=4).cpu().tolist()

@@ -19,7 +19,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
-from helpers.ensemble_optimizer.splitting import build_holdout_split, build_indices_and_local_map
+from helpers.ensemble_optimizer.splitting import (
+    HoldoutSplit,
+    build_holdout_split,
+    build_indices_and_local_map,
+)
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import autocast_ctx, setup_precision
 from helpers.training.utils import clear_gpu
@@ -244,6 +248,7 @@ def run_two_stream_optimization(
     dataloader: DataLoader[Any],
     *,
     device: torch.device,
+    predefined_split: HoldoutSplit | None = None,
 ) -> OptimizationResult:
     prediction_paths, _, pids_path, total_samples, height, width, truth_memmap = (
         cache_predictions_sequential(
@@ -259,7 +264,7 @@ def run_two_stream_optimization(
         patient_map[str(patient_id)].append(index)
 
     positive_patients = _compute_positive_patients(patient_map, truth_memmap)
-    split = build_holdout_split(
+    split = predefined_split or build_holdout_split(
         [str(patient_id) for patient_id in patient_ids],
         positive_patients,
         holdout_frac=config.val_holdout_frac,

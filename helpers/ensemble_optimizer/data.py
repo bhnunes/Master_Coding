@@ -4,7 +4,7 @@ import atexit
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -37,12 +37,27 @@ def setup_validation_hdf5(
 
 
 class ValidationHDF5Dataset(Dataset[Any]):
-    def __init__(self, hdf5_path: Path) -> None:
+    def __init__(self, hdf5_path: Path, *, allowed_patients: set[str] | None = None) -> None:
         self.hdf5_path = str(hdf5_path)
         self.transform = get_transforms(mode="validation", img_size=224)
         with h5py.File(self.hdf5_path, "r") as handle:
-            self.full_pids = np.asarray(handle["patient_ids"][:])
-            self.total_len = len(self.full_pids)
+            patient_ids_dataset = handle.get("patient_ids")
+            if patient_ids_dataset is None:
+                raise KeyError("Missing patient_ids dataset in validation HDF5.")
+            patient_ids = np.asarray(cast(Any, patient_ids_dataset)[:]).astype(str)
+            self.full_pids = patient_ids
+            if allowed_patients is None:
+                self.indices = np.arange(len(self.full_pids), dtype=np.int64)
+            else:
+                self.indices = np.asarray(
+                    [
+                        index
+                        for index, patient_id in enumerate(self.full_pids.tolist())
+                        if str(patient_id) in allowed_patients
+                    ],
+                    dtype=np.int64,
+                )
+            self.total_len = int(len(self.indices))
         self.h5_file: Any = None
         self.images_dset: Any = None
         self.masks_dset: Any = None
@@ -73,9 +88,11 @@ class ValidationHDF5Dataset(Dataset[Any]):
         if self.h5_file is None:
             self._open_file()
 
-        image = self.images_dset[idx]
-        mask = self.masks_dset[idx]
-        patient_id = str(self.full_pids[idx])
+        source_index = int(self.indices[idx])
+
+        image = self.images_dset[source_index]
+        mask = self.masks_dset[source_index]
+        patient_id = str(self.full_pids[source_index])
         two_channel_mask = np.zeros((mask.shape[0], mask.shape[1], 2), dtype=np.float32)
         two_channel_mask[mask == 0, 0] = 1.0
         two_channel_mask[mask != 0, 1] = 1.0
@@ -135,8 +152,9 @@ def create_validation_dataloader(
     *,
     batch_size: int,
     workers: int,
+    allowed_patients: set[str] | None = None,
 ) -> DataLoader[Any]:
-    dataset = ValidationHDF5Dataset(hdf5_path)
+    dataset = ValidationHDF5Dataset(hdf5_path, allowed_patients=allowed_patients)
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -145,3 +163,25 @@ def create_validation_dataloader(
         collate_fn=collate_validation_batch,
         worker_init_fn=worker_init_fn,
     )
+
+
+def summarize_validation_hdf5(hdf5_path: Path) -> tuple[list[str], set[str]]:
+    ordered_patients: list[str] = []
+    positive_patients: set[str] = set()
+    seen_patients: set[str] = set()
+
+    with h5py.File(hdf5_path, "r") as handle:
+        patient_ids_dataset = handle.get("patient_ids")
+        masks_dataset = handle.get("masks")
+        if patient_ids_dataset is None or masks_dataset is None:
+            raise KeyError("Missing patient_ids or masks dataset in validation HDF5.")
+        patient_ids = np.asarray(cast(Any, patient_ids_dataset)[:]).astype(str)
+        masks = cast(Any, masks_dataset)
+        for index, patient_id in enumerate(patient_ids.tolist()):
+            if patient_id not in seen_patients:
+                ordered_patients.append(patient_id)
+                seen_patients.add(patient_id)
+            if np.any(masks[index]):
+                positive_patients.add(patient_id)
+
+    return ordered_patients, positive_patients

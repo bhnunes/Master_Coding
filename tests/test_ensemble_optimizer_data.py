@@ -105,8 +105,24 @@ def test_validation_hdf5_dataset_builds_two_channel_mask(
 
     assert tuple(image.shape) == (3, 4, 4)
     assert tuple(mask.shape) == (2, 4, 4)
-    assert patient_id == "b'p2'"
+    assert patient_id == "p2"
     assert torch.equal(mask.sum(dim=0), torch.ones((4, 4), dtype=mask.dtype))
+
+
+def test_validation_hdf5_dataset_can_filter_to_allowed_patients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hdf5_path = tmp_path / "VALIDATION.h5"
+    _write_validation_hdf5(hdf5_path)
+    monkeypatch.setattr(
+        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
+    )
+
+    dataset = optimizer_data.ValidationHDF5Dataset(hdf5_path, allowed_patients={"p2"})
+
+    assert len(dataset) == 1
+    _image, _mask, patient_id = cast(tuple[torch.Tensor, torch.Tensor, str], dataset[0])
+    assert patient_id == "p2"
 
 
 def test_validation_hdf5_dataset_permute_branch_handles_hwc_mask_output(
@@ -221,3 +237,15 @@ def test_create_validation_dataloader_uses_expected_collate_and_worker_init(
     assert loader.batch_size == 2
     assert loader.collate_fn is optimizer_data.collate_validation_batch
     assert loader.worker_init_fn is optimizer_data.worker_init_fn  # type: ignore[attr-defined]
+
+
+def test_summarize_validation_hdf5_returns_ordered_patients_and_positive_subset(
+    tmp_path: Path,
+) -> None:
+    hdf5_path = tmp_path / "VALIDATION.h5"
+    _write_validation_hdf5(hdf5_path)
+
+    ordered_patients, positive_patients = optimizer_data.summarize_validation_hdf5(hdf5_path)
+
+    assert ordered_patients == ["p1", "p2"]
+    assert positive_patients == {"p2"}

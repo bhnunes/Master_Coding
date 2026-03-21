@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -14,6 +15,38 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.index import guardrail, resolve_filename_key
 
 
+def _hash_json_payload(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _build_sampling_signature(
+    selected_indices: npt.NDArray[np.int64],
+    *,
+    source_path: Path,
+    output_filename: str,
+) -> str:
+    payload = {
+        "selected_indices": np.asarray(selected_indices, dtype=np.int64).tolist(),
+        "source_path": str(source_path),
+        "output_filename": output_filename,
+    }
+    return _hash_json_payload(payload)
+
+
+def _validate_existing_filtered_hdf5(output_path: Path, expected_signature: str) -> Path:
+    with h5py.File(output_path, "r") as handle:
+        existing_signature = handle.attrs.get("selection_signature")
+        if existing_signature != expected_signature:
+            raise ValueError(
+                f"Existing filtered HDF5 '{output_path}' does not match the current selection. "
+                "Enable overwrite or remove the stale file."
+            )
+    return output_path
+
+
 def write_filtered_hdf5(
     config: SmartSamplerConfig,
     selected_indices: npt.NDArray[np.int64],
@@ -22,25 +55,35 @@ def write_filtered_hdf5(
 ) -> Path:
     source_path = source_h5_path or config.source_h5_path
     output_path = config.output_dir / config.output_filename
+    selected_indices = np.asarray(selected_indices, dtype=np.int64)
+    selection_signature = _build_sampling_signature(
+        selected_indices,
+        source_path=source_path,
+        output_filename=config.output_filename,
+    )
     if output_path.exists() and not config.overwrite_output:
-        return output_path
+        return _validate_existing_filtered_hdf5(output_path, selection_signature)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    selected_indices = np.asarray(selected_indices, dtype=np.int64)
     total = len(selected_indices)
 
     with h5py.File(source_path, "r") as source_handle, h5py.File(output_path, "w") as dest_handle:
+        dest_handle.attrs["selection_signature"] = selection_signature
         guardrail(source_handle)
         filename_key = resolve_filename_key(source_handle)
         for key in ["images", "masks", "patient_ids", "labels", filename_key]:
             target_key = "filenames" if key == filename_key else key
-            shape = list(source_handle[key].shape)
+            source_dataset = source_handle[key]
+            shape = list(cast(Any, source_dataset).shape)
             shape[0] = total
             kwargs: dict[str, Any] = {}
             if key in {"images", "masks"}:
                 kwargs = {"compression": "gzip", "chunks": True}
             dest_handle.create_dataset(
-                target_key, shape=tuple(shape), dtype=source_handle[key].dtype, **kwargs
+                target_key,
+                shape=tuple(shape),
+                dtype=cast(Any, source_dataset).dtype,
+                **kwargs,
             )
 
         batch_size = 1000
@@ -49,9 +92,11 @@ def write_filtered_hdf5(
             batch_indices = sorted_indices[start : start + batch_size]
             for key in ["images", "masks", "patient_ids", "labels", filename_key]:
                 target_key = "filenames" if key == filename_key else key
-                dest_handle[target_key][start : start + len(batch_indices)] = source_handle[key][
-                    batch_indices
-                ]
+                dest_dataset = dest_handle[target_key]
+                source_dataset = source_handle[key]
+                cast(Any, dest_dataset)[start : start + len(batch_indices)] = cast(
+                    Any, source_dataset
+                )[batch_indices]
 
     return output_path
 

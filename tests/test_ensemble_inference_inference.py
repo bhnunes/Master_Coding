@@ -221,6 +221,57 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
     }
 
 
+def test_analyze_ensemble_metrics_uses_declared_threshold_for_hard_predictions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_summary(
+        stats_by_patient: dict[str, list[dict[str, int]]], *, seed: int
+    ) -> dict[str, Any]:
+        captured["stats"] = stats_by_patient
+        captured["seed"] = seed
+        return {}
+
+    monkeypatch.setattr(
+        inference,
+        "compute_two_stream_probabilities",
+        lambda models, meta, images, roi_threshold, roi_scale: torch.tensor(
+            [[[0.2, 0.8], [0.4, 0.6]]],
+            dtype=torch.float32,
+        ),
+    )
+    monkeypatch.setattr(inference, "summarize_patient_metrics", fake_summary)
+    monkeypatch.setattr(inference, "compute_auc_from_histograms", lambda pos, neg: 0.5)
+
+    test_loader = cast(
+        Any,
+        [
+            (
+                torch.zeros((1, 3, 2, 2), dtype=torch.uint8),
+                torch.tensor([[[0, 1], [1, 0]]], dtype=torch.uint8),
+                ["patient-threshold"],
+            ),
+        ],
+    )
+
+    inference.analyze_ensemble_metrics(
+        [nn.Identity()],
+        [{"stream_role": "semantic", "weight": 1.0}],
+        test_loader,
+        device=torch.device("cpu"),
+        optimal_threshold=0.5,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        gpu_normalizer=_IdentityNormalizer(),
+        seed=17,
+    )
+
+    assert captured["seed"] == 17
+    assert captured["stats"] == {"patient-threshold": [{"tn": 1, "fn": 1, "fp": 1, "tp": 1}]}
+
+
 def test_export_visualizations_returns_empty_for_nonpositive_sample_count(tmp_path: Path) -> None:
     output_paths = inference.export_visualizations(
         [nn.Identity()],

@@ -89,6 +89,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
             data_directory=tmp_path,
             overwrite_output_dir=True,
             random_state=42,
+            allow_destructive_move=False,
             constraints=SplitConstraints(
                 min_test_patients=1,
                 min_val_patients=1,

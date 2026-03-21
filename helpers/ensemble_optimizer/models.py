@@ -65,6 +65,18 @@ def build_loaded_model_info(selected_model: SelectedModelMetadata) -> dict[str, 
     }
 
 
+def load_single_model(selected_model: SelectedModelMetadata, device: torch.device) -> nn.Module:
+    model = create_model(
+        architecture=selected_model.architecture,
+        encoder=selected_model.encoder,
+        validation=True,
+    )
+    model = load_checkpoint_strict_without_aux(model, selected_model.checkpoint_path, device)
+    cast(Any, model).arch_name = selected_model.architecture
+    model.eval()
+    return model
+
+
 def load_ensemble_models(
     selected_models: list[SelectedModelMetadata],
     device: torch.device,
@@ -73,16 +85,7 @@ def load_ensemble_models(
     constituent_model_info: list[dict[str, Any]] = []
     for selected_model in selected_models:
         try:
-            model = create_model(
-                architecture=selected_model.architecture,
-                encoder=selected_model.encoder,
-                validation=True,
-            )
-            model = load_checkpoint_strict_without_aux(
-                model, selected_model.checkpoint_path, device
-            )
-            cast(Any, model).arch_name = selected_model.architecture
-            model.eval()
+            model = load_single_model(selected_model, device)
             ensemble_models.append(model)
             constituent_model_info.append(build_loaded_model_info(selected_model))
         except Exception as error:

@@ -15,7 +15,41 @@ from helpers.crossfold.io import (
 )
 
 
-def test_process_and_write_split_files_moves_files_in_not_normalized_mode(tmp_path: Path) -> None:
+def test_process_and_write_split_files_preserves_sources_by_default_in_not_normalized_mode(
+    tmp_path: Path,
+) -> None:
+    image_src = tmp_path / "src_image.png"
+    mask_src = tmp_path / "src_mask.png"
+    cv2.imwrite(str(image_src), np.zeros((4, 4, 3), dtype=np.uint8))
+    cv2.imwrite(str(mask_src), np.zeros((4, 4), dtype=np.uint8))
+    split_df = pd.DataFrame(
+        [
+            {
+                "label": 1,
+                "filename": "PATIENT_1_PATCH_001.png",
+                "image_path": str(image_src),
+                "mask_path": str(mask_src),
+            }
+        ]
+    )
+
+    process_and_write_split_files(
+        split_df=split_df,
+        output_dir=tmp_path / "output",
+        split_name="TRAIN",
+        normalizer=None,
+        normalization_method="NOT_NORMALIZED",
+    )
+
+    assert image_src.exists()
+    assert mask_src.exists()
+    assert (tmp_path / "output" / "TRAIN" / "CANCER" / "PATIENT_1_PATCH_001.png").is_file()
+    assert (tmp_path / "output" / "TRAIN" / "CANCER_MASK" / "PATIENT_1_PATCH_001.png").is_file()
+
+
+def test_process_and_write_split_files_moves_files_only_when_explicitly_enabled(
+    tmp_path: Path,
+) -> None:
     image_src = tmp_path / "src_image.png"
     mask_src = tmp_path / "src_mask.png"
     image_src.write_bytes(b"image")
@@ -37,6 +71,7 @@ def test_process_and_write_split_files_moves_files_in_not_normalized_mode(tmp_pa
         split_name="TRAIN",
         normalizer=None,
         normalization_method="NOT_NORMALIZED",
+        allow_destructive_move=True,
     )
 
     assert not image_src.exists()

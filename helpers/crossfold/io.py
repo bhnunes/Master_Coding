@@ -73,13 +73,15 @@ def process_and_write_split_files(
     split_name: str,
     normalizer: NormalizerProtocol | None,
     normalization_method: str,
+    *,
+    allow_destructive_move: bool = False,
 ) -> int:
     """Write one split to disk while preserving image/mask pairing."""
 
     if split_df.empty:
         logging.info("Skipping empty split: %s", split_name)
         return 0
-    destructive_mode = normalization_method == "NOT_NORMALIZED"
+    destructive_mode = normalization_method == "NOT_NORMALIZED" and allow_destructive_move
     if destructive_mode:
         logging.warning(
             "[DESTRUCTIVE MODE] NOT_NORMALIZED => moving files into split folders for %s. "

@@ -70,7 +70,7 @@ def run_optimization_sampling(
         rng=rng,
     )
     active_logger.info(
-        "Identified %s valid image-mask pairs as the total population.",
+        "Identified %s patient-aware sampling units from valid image-mask pairs.",
         selection.total_population,
     )
     active_logger.info("--- Experiment Parameters ---")
@@ -89,10 +89,12 @@ def run_optimization_sampling(
         selection.master_pool_size,
     )
     active_logger.info(
-        "Randomly selected %s pairs for the master pool.", len(selection.master_pool_stems)
+        "Randomly selected %s patient-disjoint representatives for the master pool.",
+        len(selection.master_pool_stems),
     )
     active_logger.info(
-        "Randomly selected %s pairs for the pilot sample.", len(selection.pilot_sample_stems)
+        "Randomly selected %s patient-disjoint representatives for the pilot sample.",
+        len(selection.pilot_sample_stems),
     )
 
     tasks = build_overlay_tasks(

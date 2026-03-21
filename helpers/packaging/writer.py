@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import cast
 
@@ -9,6 +11,35 @@ import numpy as np
 import numpy.typing as npt
 
 from helpers.packaging.discovery import SampleRecord
+
+
+def _build_packaging_signature(samples: list[SampleRecord], img_size: int) -> str:
+    payload = {
+        "img_size": int(img_size),
+        "samples": [
+            {
+                "image_path": str(sample.image_path),
+                "mask_path": str(sample.mask_path),
+                "filename": sample.filename,
+                "label": int(sample.label),
+                "patient_id": int(sample.patient_id),
+            }
+            for sample in samples
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_existing_hdf5(output_path: Path, expected_signature: str) -> Path:
+    with h5py.File(output_path, "r") as handle:
+        existing_signature = handle.attrs.get("source_signature")
+        if existing_signature != expected_signature:
+            raise ValueError(
+                f"Existing HDF5 '{output_path}' does not match the current split inputs. "
+                "Enable overwrite or remove the stale file."
+            )
+    return output_path
 
 
 def _load_image(image_path: Path, img_size: int) -> npt.NDArray[np.uint8]:
@@ -37,16 +68,18 @@ def write_split_hdf5(
     img_size: int,
     overwrite: bool,
 ) -> Path:
-    if output_path.exists() and not overwrite:
-        return output_path
-
     if not samples:
         raise ValueError(f"Cannot create '{output_path.name}' without any samples.")
+
+    source_signature = _build_packaging_signature(samples, img_size)
+    if output_path.exists() and not overwrite:
+        return _validate_existing_hdf5(output_path, source_signature)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     str_dtype = h5py.string_dtype(encoding="utf-8")
 
     with h5py.File(output_path, "w") as handle:
+        handle.attrs["source_signature"] = source_signature
         images = handle.create_dataset(
             "images",
             shape=(len(samples), img_size, img_size, 3),

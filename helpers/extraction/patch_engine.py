@@ -3,10 +3,9 @@
 import json
 import logging
 import os
-import random
+import re
 import time
 import traceback
-from datetime import datetime
 from itertools import islice
 from multiprocessing import Pool
 from pathlib import Path
@@ -79,6 +78,29 @@ def save_patch_outputs(
     Image.fromarray((final_mask * 255).astype(np.uint8)).save(
         str(mask_output_path),
         **get_png_save_kwargs(kind="mask"),
+    )
+
+
+def sanitize_patch_filename_component(value: object) -> str:
+    text = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
+    sanitized = text.strip("-._")
+    return sanitized or "unknown"
+
+
+def build_patch_filename(
+    *,
+    label: str,
+    patient_id: object,
+    slide_id: object,
+    x_coord: int,
+    y_coord: int,
+) -> str:
+    safe_label = sanitize_patch_filename_component(label)
+    safe_patient_id = sanitize_patch_filename_component(patient_id)
+    safe_slide_id = sanitize_patch_filename_component(slide_id)
+    return (
+        f"{safe_label}_PATIENT_{safe_patient_id}_SLIDE_{safe_slide_id}_"
+        f"X_{int(x_coord)}_Y_{int(y_coord)}.png"
     )
 
 
@@ -434,10 +456,12 @@ def _process_window_with_slide(slide, x, y):
         final_mask, patch_saved = np.zeros((window_size, window_size), dtype=np.uint8), True
 
     if patch_saved:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        file_basename = (
-            f"{label}_PATIENT_{context['patient']}_{x_int}_{y_int}_"
-            f"{random.randint(1000, 9999)}_{timestamp}.png"
+        file_basename = build_patch_filename(
+            label=label,
+            patient_id=context["patient"],
+            slide_id=context["slide_id"],
+            x_coord=x_int,
+            y_coord=y_int,
         )
         image_output_path = Path(save_folder_img) / file_basename
         mask_output_path = Path(save_folder_mask) / file_basename
@@ -595,10 +619,12 @@ def process_window(args):
             final_mask, patch_saved = np.zeros((window_size, window_size), dtype=np.uint8), True
 
         if patch_saved:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            file_basename = (
-                f"{label}_PATIENT_{patient}_{x_int}_{y_int}_"
-                f"{random.randint(1000, 9999)}_{timestamp}.png"
+            file_basename = build_patch_filename(
+                label=label,
+                patient_id=patient,
+                slide_id=os.path.splitext(os.path.basename(path_Image))[0],
+                x_coord=x_int,
+                y_coord=y_int,
             )
             patch_pil.save(os.path.join(save_folder_img, file_basename))
             Image.fromarray((final_mask * 255).astype(np.uint8)).save(

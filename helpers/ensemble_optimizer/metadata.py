@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,9 +19,8 @@ class SelectedModelMetadata:
     raw_metadata: dict[str, Any]
 
 
-def load_and_select_models(
+def load_model_candidates(
     metadata_dir: Path,
-    n_top_models: int,
     sort_metric: str,
 ) -> list[SelectedModelMetadata]:
     valid_sort_metrics = {"best_validation_DICE", "best_val_auprc_pixel_score"}
@@ -58,5 +58,24 @@ def load_and_select_models(
     if not selected:
         raise ValueError("No valid metadata loaded after filtering for sort metric.")
 
-    selected.sort(key=lambda item: item.sort_metric_value, reverse=True)
-    return selected[:n_top_models]
+    return selected
+
+
+def select_top_models(
+    candidates: list[SelectedModelMetadata],
+    *,
+    n_top_models: int,
+    score_getter: Callable[[SelectedModelMetadata], float] | None = None,
+) -> list[SelectedModelMetadata]:
+    getter = score_getter or (lambda item: item.sort_metric_value)
+    ranked = sorted(candidates, key=getter, reverse=True)
+    return ranked[:n_top_models]
+
+
+def load_and_select_models(
+    metadata_dir: Path,
+    n_top_models: int,
+    sort_metric: str,
+) -> list[SelectedModelMetadata]:
+    candidates = load_model_candidates(metadata_dir, sort_metric)
+    return select_top_models(candidates, n_top_models=n_top_models)

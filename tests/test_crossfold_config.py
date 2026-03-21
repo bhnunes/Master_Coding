@@ -22,7 +22,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
             "CROSSFOLD_REQUIRE_BOTH_CLASSES_IF_POSSIBLE": "false",
             "CROSSFOLD_MAX_TRIES": "99",
             "CROSSFOLD_ENABLE_OBJECTIVE": "false",
-            "CROSSFOLD_OBJECTIVE_SCORE_SPLIT": "TEST",
+            "CROSSFOLD_OBJECTIVE_SCORE_SPLIT": "VALIDATION",
             "CROSSFOLD_OBJECTIVE_MAXIMIZE": "false",
             "CROSSFOLD_ENTROPY_NUM_WORKERS": "3",
             "CROSSFOLD_ENTROPY_CHUNKSIZE": "64",
@@ -36,6 +36,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.normalization_method == "MACENKO"
     assert config.overwrite_output_dir is False
     assert config.random_state == 7
+    assert config.allow_destructive_move is False
     assert config.constraints.test_ratio == 0.2
     assert config.constraints.val_ratio == 0.15
     assert config.constraints.min_train_patients == 4
@@ -46,7 +47,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.constraints.require_both_classes_if_possible is False
     assert config.constraints.max_tries == 99
     assert config.objective.enable_objective is False
-    assert config.objective.score_split == "TEST"
+    assert config.objective.score_split == "VALIDATION"
     assert config.objective.maximize is False
     assert config.objective.num_workers == 3
     assert config.objective.chunksize == 64
@@ -70,6 +71,17 @@ def test_load_crossfold_config_prefers_global_log_folder(tmp_path: Path) -> None
     assert config.log_path == tmp_path / "shared_logs" / "crossfold.log"
 
 
+def test_load_crossfold_config_allows_explicit_destructive_mode(tmp_path: Path) -> None:
+    config = load_crossfold_config(
+        {
+            "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
+            "CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE": "true",
+        }
+    )
+
+    assert config.allow_destructive_move is True
+
+
 def test_load_crossfold_config_requires_data_directory() -> None:
     with pytest.raises(ValueError, match="CROSSFOLD_DATA_DIRECTORY"):
         load_crossfold_config({})
@@ -81,5 +93,15 @@ def test_load_crossfold_config_rejects_invalid_normalization_method(tmp_path: Pa
             {
                 "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
                 "CROSSFOLD_NORMALIZATION_METHOD": "INVALID",
+            }
+        )
+
+
+def test_load_crossfold_config_rejects_test_objective_split(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="CROSSFOLD_OBJECTIVE_SCORE_SPLIT"):
+        load_crossfold_config(
+            {
+                "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
+                "CROSSFOLD_OBJECTIVE_SCORE_SPLIT": "TEST",
             }
         )

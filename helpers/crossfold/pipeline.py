@@ -104,6 +104,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
             split_name=split_name,
             normalizer=normalizer,
             normalization_method=config.normalization_method,
+            allow_destructive_move=config.allow_destructive_move,
         )
         verify_split_integrity(output_dir, split_name)
     logging.info("Move fallbacks (copy+delete likely): %s", move_fallbacks)

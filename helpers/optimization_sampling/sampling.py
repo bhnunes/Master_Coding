@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,44 @@ class SampleSelection:
     master_pool_size: int
     master_pool_stems: list[str]
     pilot_sample_stems: list[str]
+
+
+def infer_sampling_group_id(stem: str) -> str:
+    """Infer a patient-aware grouping key from a patch stem."""
+
+    patient_match = re.search(r"PATIENT_([^_]+)", stem)
+    if patient_match is not None:
+        candidate = patient_match.group(1).strip("-_")
+        if candidate:
+            return candidate
+
+    slide_match = re.search(r"SLIDE_([^_]+)", stem)
+    if slide_match is not None:
+        candidate = slide_match.group(1).strip("-_")
+        if candidate:
+            return candidate
+
+    return stem
+
+
+def build_group_representatives(
+    stems: Sequence[str],
+    *,
+    rng: random.Random | None = None,
+) -> dict[str, str]:
+    """Choose one representative stem per inferred patient/slide group."""
+
+    active_rng = rng or random.Random()
+    stems_by_group: dict[str, list[str]] = {}
+    for stem in stems:
+        group_id = infer_sampling_group_id(stem)
+        stems_by_group.setdefault(group_id, []).append(stem)
+
+    representatives: dict[str, str] = {}
+    for group_id, group_stems in stems_by_group.items():
+        ordered = sorted(group_stems)
+        representatives[group_id] = active_rng.choice(ordered)
+    return representatives
 
 
 def calculate_cochran_sample_size(
@@ -90,12 +129,14 @@ def select_sample_stems(
     proportion: float,
     rng: random.Random | None = None,
 ) -> SampleSelection:
-    """Select non-overlapping master pool and pilot sample stems."""
+    """Select non-overlapping master and pilot stems with patient-aware grouping."""
 
     if not stems:
         raise ValueError("No image/mask pairs are available for sampling.")
 
-    total_population = len(stems)
+    representatives = build_group_representatives(stems, rng=rng)
+    grouped_stems = list(representatives.values())
+    total_population = len(grouped_stems)
     required_sample_size = calculate_cochran_sample_size(
         confidence_level=confidence_level,
         margin_of_error=margin_of_error,
@@ -107,7 +148,7 @@ def select_sample_stems(
             "Not enough images to create non-overlapping pilot and master pool samples."
         )
 
-    selected_stems = list(stems)
+    selected_stems = list(grouped_stems)
     active_rng = rng or random.Random()
     active_rng.shuffle(selected_stems)
     master_pool_stems = selected_stems[:master_pool_size]

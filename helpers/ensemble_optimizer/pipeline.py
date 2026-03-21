@@ -5,16 +5,31 @@ import shutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
 import torch
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
-from helpers.ensemble_optimizer.data import create_validation_dataloader, setup_validation_hdf5
-from helpers.ensemble_optimizer.metadata import load_and_select_models
-from helpers.ensemble_optimizer.models import load_ensemble_models
-from helpers.ensemble_optimizer.optimization import run_two_stream_optimization
+from helpers.ensemble_optimizer.data import (
+    create_validation_dataloader,
+    setup_validation_hdf5,
+    summarize_validation_hdf5,
+)
+from helpers.ensemble_optimizer.metadata import (
+    SelectedModelMetadata,
+    load_model_candidates,
+    select_top_models,
+)
+from helpers.ensemble_optimizer.models import load_ensemble_models, load_single_model
+from helpers.ensemble_optimizer.optimization import (
+    predict_with_tta_batched,
+    run_two_stream_optimization,
+)
 from helpers.ensemble_optimizer.reporting import build_recipe_metadata, write_recipe_metadata
+from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
+from helpers.training.gpu import GPUNormalizer
+from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
 from helpers.training.utils import get_formatted_datetime_string
 
@@ -47,6 +62,105 @@ def _serialize_config(config: EnsembleOptimizerConfig) -> dict[str, Any]:
     return payload
 
 
+def _compute_candidate_subset_score(
+    selected_model: SelectedModelMetadata,
+    dataloader: Any,
+    *,
+    sort_metric: str,
+    device: torch.device,
+) -> float:
+    model = load_single_model(selected_model, device)
+    tracker = AdvancedMetricTracker(device=device, from_logits=False)
+    normalizer = GPUNormalizer(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+        device=device,
+    )
+    tp = 0
+    fp = 0
+    fn = 0
+
+    with torch.inference_mode():
+        for batch in dataloader:
+            if batch is None:
+                continue
+            images, masks, _patient_ids = batch
+            images = normalizer(images.to(device))
+            mask_tensor = masks.to(device)
+            probabilities = predict_with_tta_batched(model, images, selected_model.architecture)
+            tracker.update_from_probs_fg(probabilities, mask_tensor)
+            pred_fg = probabilities >= 0.5
+            true_fg = mask_tensor[:, 1, :, :] > 0.5
+            tp += int((pred_fg & true_fg).sum().item())
+            fp += int((pred_fg & ~true_fg).sum().item())
+            fn += int((~pred_fg & true_fg).sum().item())
+
+    metrics = tracker.compute_and_reset()
+    model.cpu()
+
+    if sort_metric == "best_val_auprc_pixel_score":
+        if metrics is None:
+            return float("nan")
+        return float(metrics["val_auprc"])
+    if sort_metric == "best_validation_DICE":
+        denominator = (2 * tp) + fp + fn
+        return float((2 * tp) / denominator) if denominator > 0 else 0.0
+    raise ValueError(f"Unsupported optimizer sort metric: {sort_metric}")
+
+
+def _select_models_from_optimization_subset(
+    config: EnsembleOptimizerConfig,
+    validation_h5_path: Path,
+    optimization_patients: set[str],
+    device: torch.device,
+) -> tuple[list[SelectedModelMetadata], dict[str, float]]:
+    candidates = load_model_candidates(config.metadata_dir, config.sort_metric)
+    dataloader = create_validation_dataloader(
+        validation_h5_path,
+        batch_size=config.batch_size,
+        workers=config.workers,
+        allowed_patients=optimization_patients,
+    )
+    if len(cast(Any, dataloader.dataset)) == 0:
+        raise ValueError("Optimization subset is empty; cannot rank candidate models.")
+
+    subset_scores: dict[str, float] = {}
+    for candidate in candidates:
+        subset_scores[candidate.metadata_filename] = _compute_candidate_subset_score(
+            candidate,
+            dataloader,
+            sort_metric=config.sort_metric,
+            device=device,
+        )
+
+    filtered_candidates = [
+        candidate
+        for candidate in candidates
+        if np.isfinite(subset_scores.get(candidate.metadata_filename, float("nan")))
+    ]
+    if len(filtered_candidates) < 2:
+        raise ValueError("Fewer than 2 valid models remained after optimization-subset scoring.")
+
+    selected_models = select_top_models(
+        filtered_candidates,
+        n_top_models=config.top_models,
+        score_getter=lambda item: subset_scores[item.metadata_filename],
+    )
+    return selected_models, subset_scores
+
+
+def _build_validation_split(
+    config: EnsembleOptimizerConfig, validation_h5_path: Path
+) -> HoldoutSplit:
+    ordered_patients, positive_patients = summarize_validation_hdf5(validation_h5_path)
+    return build_holdout_split(
+        ordered_patients,
+        positive_patients,
+        holdout_frac=config.val_holdout_frac,
+        seed=config.seed + 123,
+    )
+
+
 def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutputs:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     seed_everything(config.seed)
@@ -55,10 +169,12 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
     )
-    selected_models = load_and_select_models(
-        config.metadata_dir,
-        n_top_models=config.top_models,
-        sort_metric=config.sort_metric,
+    split = _build_validation_split(config, validation_h5_path)
+    selected_models, subset_scores = _select_models_from_optimization_subset(
+        config,
+        validation_h5_path,
+        split.optimization_patients,
+        device,
     )
     models, _ = load_ensemble_models(selected_models, device)
     dataloader = create_validation_dataloader(
@@ -66,7 +182,13 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         batch_size=config.batch_size,
         workers=config.workers,
     )
-    optimization_result = run_two_stream_optimization(config, models, dataloader, device=device)
+    optimization_result = run_two_stream_optimization(
+        config,
+        models,
+        dataloader,
+        device=device,
+        predefined_split=split,
+    )
     timestamp = get_formatted_datetime_string()
     payload = build_recipe_metadata(
         selected_models=selected_models,
@@ -87,6 +209,8 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     run_payload.update(
         {
             "validation_h5_path": str(validation_h5_path),
+            "optimization_patients": sorted(split.optimization_patients),
+            "holdout_patients": sorted(split.holdout_patients),
             "recipe_path": str(recipe_path),
             "generated_at": timestamp,
             "selected_models": [
@@ -96,6 +220,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
                     "checkpoint_path": model.checkpoint_path,
                     "sort_metric_value": model.sort_metric_value,
                     "metadata_filename": model.metadata_filename,
+                    "optimization_subset_score": subset_scores[model.metadata_filename],
                 }
                 for model in selected_models
             ],
