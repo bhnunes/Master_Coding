@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 VALID_NORMALIZATION_METHODS = (
@@ -113,6 +114,8 @@ class CrossfoldConfig:
     objective: ObjectiveConfig
     calc_checksums: bool
     save_entropy_cache_csv: bool
+    log_folder: Path
+    log_file_name: str
 
     @property
     def output_base_dir(self) -> Path:
@@ -121,6 +124,10 @@ class CrossfoldConfig:
     @property
     def output_run_dir(self) -> Path:
         return self.output_base_dir / f"{self.normalization_method}_seed_{self.random_state}"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_crossfold_config(
@@ -225,4 +232,10 @@ def load_crossfold_config(
             "CROSSFOLD_SAVE_ENTROPY_CACHE_CSV",
             True,
         ),
+        log_folder=resolve_log_folder(
+            values,
+            system_name=system_name,
+            fallback_names=("CROSSFOLD_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("CROSSFOLD_LOG_FILE") or "data_preparation.log").strip(),
     )

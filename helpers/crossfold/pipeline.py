@@ -40,7 +40,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
                 f"Output directory exists: {output_dir} (set overwrite_output_dir=True)"
             )
     output_dir.mkdir(parents=True, exist_ok=True)
-    configure_crossfold_logging(output_dir)
+    configure_crossfold_logging(config.log_path)
     logging.info("=== Data Preparation (Refactored) ===")
     logging.info("Normalization method: %s", config.normalization_method)
     logging.info("Random state: %s", config.random_state)

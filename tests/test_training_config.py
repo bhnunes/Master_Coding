@@ -51,6 +51,7 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.unleashed is True
     assert config.use_artifact_aware_loss is True
     assert config.artifact_index_path == tmp_path / "artifact_patch_index.parquet"
+    assert config.log_path == Path("logs/training_ensemble.log")
 
 
 def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) -> None:
@@ -72,6 +73,7 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.execution_mode == "FAST_DEV"
     assert config.use_artifact_aware_loss is False
     assert config.artifact_index_path is None
+    assert config.log_path == Path("logs/training_ensemble.log")
 
 
 def test_load_training_ensemble_config_rejects_invalid_execution_mode(tmp_path: Path) -> None:

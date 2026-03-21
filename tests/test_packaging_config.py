@@ -14,6 +14,7 @@ def test_load_packaging_config_reads_defaults(tmp_path: Path) -> None:
     assert config.img_size == 224
     assert config.patient_id_regex == r"PATIENT_(\d+)_"
     assert config.overwrite_outputs is False
+    assert config.log_path == Path("logs/packaging.log")
 
 
 def test_load_packaging_config_rejects_invalid_img_size(tmp_path: Path) -> None:

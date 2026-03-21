@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from helpers.logging_utils import configure_logger
+
 
 def configure_stage_logger(
     logger_name: str,
@@ -17,25 +19,17 @@ def configure_stage_logger(
 ) -> logging.Logger:
     """Configure a named stage logger with file and console handlers."""
 
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(logger_level)
-    logger.propagate = False
-
-    if logger.handlers:
-        logger.handlers.clear()
-
-    file_handler = logging.FileHandler(log_path, mode=file_mode)
-    file_handler.setLevel(file_level)
-    file_handler.setFormatter(logging.Formatter(file_pattern))
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(console_level)
-    console_handler.setFormatter(logging.Formatter(console_pattern))
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    return logger
+    return configure_logger(
+        log_path,
+        logger_name=logger_name,
+        logger_level=logger_level,
+        file_level=file_level,
+        console_level=console_level,
+        file_mode=file_mode,
+        file_pattern=file_pattern,
+        console_pattern=console_pattern,
+        propagate=False,
+    )
 
 
 def configure_optimization_sampling_logger(log_path: Path) -> logging.Logger:

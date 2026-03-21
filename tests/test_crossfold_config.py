@@ -53,6 +53,21 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.objective.entropy_thumbnail == 256
     assert config.calc_checksums is True
     assert config.save_entropy_cache_csv is False
+    assert config.log_path == Path("logs/data_preparation.log")
+
+
+def test_load_crossfold_config_prefers_global_log_folder(tmp_path: Path) -> None:
+    config = load_crossfold_config(
+        {
+            "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
+            "LOG_FOLDER": str(tmp_path / "shared_logs"),
+            "CROSSFOLD_LOG_FOLDER": str(tmp_path / "legacy_logs"),
+            "CROSSFOLD_LOG_FILE": "crossfold.log",
+        }
+    )
+
+    assert config.log_folder == tmp_path / "shared_logs"
+    assert config.log_path == tmp_path / "shared_logs" / "crossfold.log"
 
 
 def test_load_crossfold_config_requires_data_directory() -> None:

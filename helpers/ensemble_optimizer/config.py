@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 from helpers.training.registry import load_training_model_registry
 
@@ -95,6 +96,12 @@ class EnsembleOptimizerConfig:
     spatial_patient_policy: str
     num_trials_semantic: int
     num_trials_spatial: int
+    log_folder: Path = Path("logs")
+    log_file_name: str = "ensemble_optimizer.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_ensemble_optimizer_config(
@@ -178,4 +185,10 @@ def load_ensemble_optimizer_config(
         ),
         num_trials_semantic=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC"), default=50),
         num_trials_spatial=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SPATIAL"), default=50),
+        log_folder=resolve_log_folder(
+            values,
+            system_name=system_name,
+            fallback_names=("ENSEMBLE_OPT_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("ENSEMBLE_OPT_LOG_FILE") or "ensemble_optimizer.log").strip(),
     )

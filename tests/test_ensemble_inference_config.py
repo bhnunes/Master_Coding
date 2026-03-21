@@ -20,3 +20,4 @@ def test_load_ensemble_inference_config_uses_defaults(tmp_path: Path) -> None:
     assert config.batch_size == 32
     assert config.visualization_samples == 5
     assert config.export_latex is True
+    assert config.log_path == Path("logs/ensemble_inference.log")

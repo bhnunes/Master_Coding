@@ -43,6 +43,7 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     assert config.local_data_dir == local_dir
     assert config.num_lhs_samples == 4
     assert config.num_repeats == 2
+    assert config.log_path == Path("logs/lr_finder.log")
     assert [(plan.architecture, plan.encoder) for plan in config.model_plans] == [
         ("FPN", "senet154"),
         ("SEGFORMER", "mit_b5"),

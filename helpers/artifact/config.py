@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -17,6 +18,7 @@ class ArtifactDetectionConfig:
     database_path: Path
     temp_root: Path
     log_folder: Path
+    log_file_name: str
     device: str
     tissue_detector_model_dir: Path
     tissue_detector_model_name: str
@@ -32,6 +34,10 @@ class ArtifactDetectionConfig:
     encoder_weights: str = "imagenet"
     encoder_model_td: str = "timm-efficientnet-b0"
     encoder_weights_td: str = "imagenet"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
     @property
     def qc_model_name(self) -> str:
@@ -72,11 +78,15 @@ def load_artifact_detection_config(
         "./temp/artifact_detection",
         system_name=system_name,
     )
-    log_folder = _path_with_default(
+    log_folder = resolve_log_folder(
         environment,
-        "ARTIFACT_LOG_FOLDER",
-        "./logs",
         system_name=system_name,
+        fallback_names=("ARTIFACT_LOG_FOLDER",),
+    )
+    log_file_name = _string_with_default(
+        environment,
+        "ARTIFACT_LOG_FILE",
+        "artifact_detection.log",
     )
     device = _string_with_default(environment, "ARTIFACT_DEVICE", "cuda")
     tissue_detector_model_dir = _path_with_default(
@@ -109,6 +119,7 @@ def load_artifact_detection_config(
         database_path=database_folder / database_name,
         temp_root=temp_root,
         log_folder=log_folder,
+        log_file_name=log_file_name,
         device=device,
         tissue_detector_model_dir=tissue_detector_model_dir,
         tissue_detector_model_name=tissue_detector_model_name,

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -54,6 +55,12 @@ class PackagingConfig:
     img_size: int
     patient_id_regex: str
     overwrite_outputs: bool
+    log_folder: Path = Path("logs")
+    log_file_name: str = "packaging.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_packaging_config(
@@ -76,4 +83,9 @@ def load_packaging_config(
             "PACKAGING_OVERWRITE_OUTPUTS",
             False,
         ),
+        log_folder=resolve_log_folder(
+            values,
+            fallback_names=("PACKAGING_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("PACKAGING_LOG_FILE") or "packaging.log").strip(),
     )

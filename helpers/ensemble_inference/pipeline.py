@@ -58,6 +58,7 @@ def _serialize_config(config: EnsembleInferenceConfig) -> dict[str, Any]:
     payload["hdf5_drive_dir"] = str(config.hdf5_drive_dir)
     payload["output_dir"] = str(config.output_dir) if config.output_dir is not None else None
     payload["local_data_dir"] = str(config.local_data_dir)
+    payload["log_folder"] = str(config.log_folder)
     return payload
 
 

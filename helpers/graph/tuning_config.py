@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -107,11 +108,10 @@ def load_graph_tuning_config(
             system_name=system_name,
         ),
         review_base_dir=_required_path(values, "GRAPH_TUNING_BASE_DIR", system_name=system_name),
-        log_folder=_path_with_default(
+        log_folder=resolve_log_folder(
             values,
-            "GRAPH_TUNING_LOG_FOLDER",
-            "./logs",
             system_name=system_name,
+            fallback_names=("GRAPH_TUNING_LOG_FOLDER",),
         ),
         log_file_name=_string_with_default(
             values,

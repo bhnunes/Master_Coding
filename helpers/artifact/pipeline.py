@@ -56,7 +56,9 @@ class ArtifactProcessorProtocol(Protocol):
 
 
 class ArtifactLogger(Protocol):
-    def exception(self, message: str, *args: Any) -> None: ...
+    def info(self, *args: Any, **kwargs: Any) -> None: ...
+
+    def exception(self, *args: Any, **kwargs: Any) -> None: ...
 
 
 class ArtifactDetectionPipeline:

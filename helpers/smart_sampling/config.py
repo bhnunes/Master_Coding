@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -75,6 +76,12 @@ class SmartSamplerConfig:
     selection_strategy: str
     seed: int
     num_workers: int
+    log_folder: Path = Path("logs")
+    log_file_name: str = "smart_sampler.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_smart_sampler_config(
@@ -170,4 +177,10 @@ def load_smart_sampler_config(
             0,
             int(values.get("SMART_SAMPLER_NUM_WORKERS") or 2),
         ),
+        log_folder=resolve_log_folder(
+            values,
+            system_name=None,
+            fallback_names=("SMART_SAMPLER_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("SMART_SAMPLER_LOG_FILE") or "smart_sampler.log").strip(),
     )

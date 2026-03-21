@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 VALID_CHECKSUM_MODES = ("OFF", "SAMPLE", "FULL")
@@ -64,6 +65,12 @@ class SanityConfig:
     enforce_split_stats_parity: bool
     fail_on_empty_cancer_mask: bool
     fail_on_positive_not_cancer_mask: bool
+    log_folder: Path = Path("logs")
+    log_file_name: str = "sanity_checks.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_sanity_config(
@@ -115,4 +122,10 @@ def load_sanity_config(
             "SANITY_FAIL_ON_POSITIVE_NOT_CANCER_MASK",
             True,
         ),
+        log_folder=resolve_log_folder(
+            values,
+            system_name=system_name,
+            fallback_names=("SANITY_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("SANITY_LOG_FILE") or "sanity_checks.log").strip(),
     )

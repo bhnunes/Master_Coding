@@ -60,17 +60,6 @@ WINDOW_PROFILE_PHASES = (
 FAST_PNG_COMPRESS_LEVEL = 1
 
 
-def setup_logging():
-    """Configures the logger to write to a file."""
-    log_format = "%(asctime)s - %(process)d - %(levelname)s - %(message)s"
-    logging.basicConfig(
-        filename="patch_extraction.log",
-        level=logging.INFO,
-        format=log_format,
-        filemode="a",
-    )
-
-
 def get_png_save_kwargs(kind: str) -> dict[str, object]:
     del kind
     return {

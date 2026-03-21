@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +14,7 @@ from helpers.extraction.image_reader_service import (
     load_slide_runtime_settings,
     run_slide_processing,
 )
+from helpers.logging_utils import configure_root_logger, resolve_log_folder
 from helpers.runtime_platform import load_openslide_module
 
 load_dotenv(override=True)
@@ -42,6 +46,18 @@ def main() -> None:
     """Run one slide extraction job and emit the legacy JSON contract."""
 
     load_dotenv(override=True)
+    log_folder = resolve_log_folder(os.environ, fallback_names=("EXTRACTION_LOG_FOLDER",))
+    log_file_name = (os.environ.get("IMAGE_READER_LOG_FILE") or "image_reader.log").strip()
+    configure_root_logger(
+        log_folder / log_file_name,
+        logger_level=logging.INFO,
+        file_level=logging.INFO,
+        console_level=logging.ERROR,
+        file_mode="a",
+        file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
+        console_pattern="%(message)s",
+        console_stream=sys.stderr,
+    )
     load_openslide_module()
     args = parse_args()
     runtime_settings = load_slide_runtime_settings()

@@ -1,4 +1,6 @@
+import logging
 import os
+import sys
 import time
 import traceback
 from typing import Any, cast
@@ -8,6 +10,7 @@ import torch
 from dotenv import load_dotenv
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
+from helpers.logging_utils import LoggerWriter, configure_root_logger
 from helpers.training.checkpointing import (
     EarlyStopping,
     get_previous_metrics,
@@ -46,15 +49,25 @@ from helpers.training.reporting import (
 from helpers.training.runtime import seed_everything, worker_init_fn
 from helpers.training.utils import clear_gpu, get_formatted_datetime_string
 
-print("Libraries imported.")
 load_dotenv(override=True)
 
 # =============================================================================
 # 1) Environment & Hardware
 # =============================================================================
-print("Configuring environment...")
-
 training_config = load_training_ensemble_config()
+training_logger = configure_root_logger(
+    training_config.log_path,
+    logger_level=logging.INFO,
+    file_level=logging.INFO,
+    console_level=logging.INFO,
+    file_mode="a",
+    file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
+    console_pattern="%(message)s",
+)
+sys.stdout = LoggerWriter(training_logger, logging.INFO)
+sys.stderr = LoggerWriter(training_logger, logging.ERROR)
+print("Libraries imported.")
+print("Configuring environment...")
 
 # Device (GPU if available, otherwise CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

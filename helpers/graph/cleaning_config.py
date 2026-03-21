@@ -7,6 +7,7 @@ from pathlib import Path
 
 from helpers.graph.contamination import GraphContaminationParameters
 from helpers.graph.parameter_store import load_graph_cleaning_parameter_artifact
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -115,11 +116,10 @@ def load_graph_cleaning_config(
             "GRAPH_CLEANING_OUTPUT_BASE_DIR",
             system_name=system_name,
         ),
-        log_folder=_path_with_default(
+        log_folder=resolve_log_folder(
             values,
-            "GRAPH_CLEANING_LOG_FOLDER",
-            "./logs",
             system_name=system_name,
+            fallback_names=("GRAPH_CLEANING_LOG_FOLDER",),
         ),
         log_file_name=_string_with_default(
             values,

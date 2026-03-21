@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.lr_finder.search_space import BCEDiceSearchSpace
 from helpers.runtime_platform import resolve_env_path
 from helpers.training.registry import load_training_model_registry
@@ -45,6 +46,12 @@ class LRFinderConfig:
     pdf_name: str
     search_space: BCEDiceSearchSpace
     model_plans: list[ModelPlan]
+    log_folder: Path = Path("logs")
+    log_file_name: str = "lr_finder.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def _parse_bool(value: str | None, *, default: bool) -> bool:
@@ -181,4 +188,10 @@ def load_lr_finder_config(
             gamma_log=_parse_bool(values.get("LR_FINDER_GAMMA_LOG"), default=False),
         ),
         model_plans=_build_model_plans(architecture_filter),
+        log_folder=resolve_log_folder(
+            values,
+            system_name=system_name,
+            fallback_names=("LR_FINDER_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("LR_FINDER_LOG_FILE") or "lr_finder.log").strip(),
     )

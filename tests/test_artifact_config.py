@@ -29,7 +29,25 @@ def test_load_artifact_detection_config_reads_stage_one_environment(tmp_path: Pa
     assert config.database_path == database_dir / "artifact_detection.db"
     assert config.temp_root == temp_dir
     assert config.log_folder == log_dir
+    assert config.log_file_name == "artifact_detection.log"
+    assert config.log_path == log_dir / "artifact_detection.log"
     assert config.device == "cpu"
+
+
+def test_load_artifact_detection_config_prefers_global_log_folder(tmp_path: Path) -> None:
+    zip_path = tmp_path / "slides.zip"
+    zip_path.write_bytes(b"zip")
+    shared_logs = tmp_path / "shared_logs"
+
+    config = load_artifact_detection_config(
+        {
+            "ARTIFACT_IMAGES_ZIP": str(zip_path),
+            "LOG_FOLDER": str(shared_logs),
+            "ARTIFACT_LOG_FOLDER": str(tmp_path / "legacy_logs"),
+        }
+    )
+
+    assert config.log_folder == shared_logs
 
 
 def test_load_artifact_detection_config_requires_images_zip() -> None:

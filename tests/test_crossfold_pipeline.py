@@ -52,7 +52,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
 
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.configure_crossfold_logging",
-        lambda output_dir: record(f"log:{output_dir.name}"),
+        lambda log_path: record(f"log:{log_path.name}"),
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.load_patch_dataset",
@@ -98,13 +98,15 @@ def test_run_crossfold_pipeline_executes_stage_flow(
             objective=ObjectiveConfig(enable_objective=False),
             calc_checksums=False,
             save_entropy_cache_csv=False,
+            log_folder=tmp_path / "logs",
+            log_file_name="data_preparation.log",
         )
     )
 
     assert summary.output_dir == tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
     assert summary.manifest_rows == 1
     assert calls == [
-        "log:NOT_NORMALIZED_seed_42",
+        "log:data_preparation.log",
         "load",
         "split",
         "manifest",

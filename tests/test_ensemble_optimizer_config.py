@@ -45,6 +45,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.spatial_architectures == ("FPN", "MANET")
     assert config.num_trials_semantic == 11
     assert config.num_trials_spatial == 13
+    assert config.log_path == Path("logs/ensemble_optimizer.log")
 
 
 def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -> None:

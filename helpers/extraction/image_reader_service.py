@@ -24,8 +24,6 @@ HANDLER_MAPPING: dict[tuple[str, str], type[BaseHandler]] = {
     (".svs", ".json"): JSON_Handler,
 }
 
-_PATCH_LOGGING_READY = False
-
 
 @dataclass(frozen=True)
 class SlideRuntimeSettings:
@@ -136,7 +134,6 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
     """Run patch extraction for one slide through the shared Python API."""
 
     load_openslide_module()
-    _setup_patch_logging_once()
     warnings.filterwarnings("ignore", category=UserWarning, module="PIL")
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     warnings.filterwarnings("ignore", category=FutureWarning)
@@ -193,11 +190,3 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
         not_cancer_patches_created=not_cancer_count,
         artifact_patch_records=artifact_patch_records,
     )
-
-
-def _setup_patch_logging_once() -> None:
-    global _PATCH_LOGGING_READY
-    if _PATCH_LOGGING_READY:
-        return
-    patch_engine.setup_logging()  # type: ignore[no-untyped-call]
-    _PATCH_LOGGING_READY = True

@@ -1,24 +1,22 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
+from helpers.logging_utils import configure_root_logger
 
-def configure_crossfold_logging(output_dir: Path) -> None:
-    """Configure Stage 5 file and console logging for one run directory."""
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    log_file = output_dir / "data_preparation.log"
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    if logger.hasHandlers():
-        logger.handlers.clear()
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
-    logging.info("Logging configured: %s", log_file)
+def configure_crossfold_logging(log_path: Path) -> logging.Logger:
+    """Configure Stage 5 file and console logging."""
+
+    logger = configure_root_logger(
+        log_path,
+        logger_level=logging.INFO,
+        file_level=logging.INFO,
+        console_level=logging.INFO,
+        file_mode="a",
+        file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+        console_pattern="%(asctime)s - %(levelname)s - %(message)s",
+    )
+    logger.info("Logging configured: %s", log_path)
+    return logger

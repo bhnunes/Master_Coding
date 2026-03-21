@@ -24,6 +24,7 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.seed == 42
     assert config.n_start == 512
     assert config.device in {"cpu", "cuda"}
+    assert config.log_path == Path("logs/smart_sampler.log")
 
 
 def test_load_smart_sampler_config_rejects_invalid_growth_factor(tmp_path: Path) -> None:

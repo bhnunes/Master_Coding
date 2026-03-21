@@ -7,6 +7,7 @@ import os
 import torch
 from dotenv import load_dotenv
 
+from helpers.logging_utils import configure_root_logger
 from helpers.lr_finder.config import load_lr_finder_config
 from helpers.lr_finder.pipeline import run_lr_finder_pipeline
 from helpers.training.runtime import seed_everything
@@ -17,9 +18,17 @@ def main() -> None:
 
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     load_dotenv(override=True)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     try:
         config = load_lr_finder_config(os.environ)
+        configure_root_logger(
+            config.log_path,
+            logger_level=logging.INFO,
+            file_level=logging.INFO,
+            console_level=logging.INFO,
+            file_mode="a",
+            file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+            console_pattern="%(message)s",
+        )
         seed_everything(config.seed)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -29,10 +38,15 @@ def main() -> None:
         print(f"Stage 9 LR Finder failed: {error}")
         raise SystemExit(2) from error
 
+    logging.info("Stage 9 LR Finder completed successfully")
     print("Stage 9 LR Finder completed successfully:")
+    logging.info("PDF report: %s", outputs.pdf_path)
     print(f"- PDF report: {outputs.pdf_path}")
+    logging.info("LaTeX source: %s", outputs.tex_path)
     print(f"- LaTeX source: {outputs.tex_path}")
+    logging.info("Run config JSON: %s", outputs.run_config_path)
     print(f"- Run config JSON: {outputs.run_config_path}")
+    logging.info("Summary CSV: %s", outputs.summary_all_path)
     print(f"- Summary CSV: {outputs.summary_all_path}")
     raise SystemExit(0)
 

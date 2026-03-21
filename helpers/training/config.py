@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 from helpers.training.registry import validate_architecture_encoder_pair
 
@@ -116,6 +117,12 @@ class TrainingEnsembleConfig:
     resume_checkpoint: Path | None
     use_artifact_aware_loss: bool
     artifact_index_path: Path | None
+    log_folder: Path = Path("logs")
+    log_file_name: str = "training_ensemble.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_training_ensemble_config(
@@ -248,4 +255,10 @@ def load_training_ensemble_config(
         resume_checkpoint=resume_checkpoint,
         use_artifact_aware_loss=use_artifact_aware_loss,
         artifact_index_path=artifact_index_path,
+        log_folder=resolve_log_folder(
+            values,
+            system_name=system_name,
+            fallback_names=("TRAINING_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("TRAINING_LOG_FILE") or "training_ensemble.log").strip(),
     )

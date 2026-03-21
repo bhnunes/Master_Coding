@@ -33,7 +33,14 @@ def _prepare_output_dir(config: EnsembleOptimizerConfig) -> None:
 
 def _serialize_config(config: EnsembleOptimizerConfig) -> dict[str, Any]:
     payload = asdict(config)
-    for key in ("hdf5_drive_dir", "metadata_dir", "output_dir", "local_data_dir", "pred_cache_dir"):
+    for key in (
+        "hdf5_drive_dir",
+        "metadata_dir",
+        "output_dir",
+        "local_data_dir",
+        "pred_cache_dir",
+        "log_folder",
+    ):
         payload[key] = str(payload[key])
     payload["semantic_architectures"] = list(config.semantic_architectures)
     payload["spatial_architectures"] = list(config.spatial_architectures)

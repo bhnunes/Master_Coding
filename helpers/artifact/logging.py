@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from helpers.logging_utils import configure_logger
+
 
 class Style:
     """ANSI styling and status icons for friendly terminal output."""
@@ -26,26 +28,20 @@ class Style:
     ZIP = "🗜️"
 
 
-def configure_artifact_logger(log_folder: Path) -> logging.Logger:
+def configure_artifact_logger(log_path: Path) -> logging.Logger:
     """Create the artifact detection logger with console and file handlers."""
 
-    log_folder.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("artifact_detection")
-    logger.setLevel(logging.INFO)
-    logger.handlers.clear()
-    logger.propagate = False
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
-
-    file_handler = logging.FileHandler(log_folder / "artifact_detection.log")
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-    return logger
+    return configure_logger(
+        log_path,
+        logger_name="artifact_detection",
+        logger_level=logging.INFO,
+        file_level=logging.INFO,
+        console_level=logging.INFO,
+        file_mode="a",
+        file_pattern="%(asctime)s | %(levelname)s | %(message)s",
+        console_pattern="%(message)s",
+        propagate=False,
+    )
 
 
 def banner(title: str) -> str:

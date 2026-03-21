@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -54,6 +55,8 @@ class DatabaseManagerConfig:
     use_advanced_artifact_filtering: bool
     activate_sanity_check_geojson: bool
     geojson_path: Path | None
+    log_folder: Path
+    log_file_name: str
 
     @property
     def table_name(self) -> str:
@@ -62,6 +65,10 @@ class DatabaseManagerConfig:
     @property
     def patch_base_path(self) -> Path:
         return self.base_path / "PATCHES"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
 
 
 def load_database_manager_config(
@@ -100,6 +107,11 @@ def load_database_manager_config(
     )
     assert database_path is not None
     assert base_path is not None
+    log_folder = resolve_log_folder(
+        values,
+        system_name=system_name,
+        fallback_names=("EXTRACTION_LOG_FOLDER",),
+    )
 
     return DatabaseManagerConfig(
         tag=tag,
@@ -122,6 +134,8 @@ def load_database_manager_config(
         load_cases=_parse_bool(values.get("LOADCASES")),
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
         activate_sanity_check_geojson=activate_sanity_check_geojson,
+        log_folder=log_folder,
+        log_file_name=(values.get("EXTRACTION_LOG_FILE") or "database_manager.log").strip(),
         geojson_path=(
             _parse_optional_path(
                 values.get("GEOJSON_PATH"),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from helpers.extraction.image_reader_service import (
     run_slide_processing,
 )
 from helpers.extraction.repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
+from helpers.logging_utils import configure_root_logger
 
 
 class Style:
@@ -174,6 +176,16 @@ def main_process() -> None:
 
     load_dotenv(override=True)
     config = load_database_manager_config(os.environ)
+    logger = configure_root_logger(
+        config.log_path,
+        logger_level=logging.INFO,
+        file_level=logging.INFO,
+        console_level=logging.INFO,
+        file_mode="a",
+        file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
+        console_pattern="%(message)s",
+    )
+    logger.info("Stage 2 log file: %s", config.log_path)
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
     folders, setup_needed = ensure_project_is_initialized(repository, config.base_path)
     if setup_needed:
@@ -181,6 +193,7 @@ def main_process() -> None:
         return
 
     if config.load_cases:
+        logger.info("Starting Stage 2 ingestion for tag=%s", config.tag)
         print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.CHECK} INGESTION PROCESS ---{Style.RESET}")
         svs_added = repository.ingest_new_cases(
             base_path=config.base_path,
@@ -192,6 +205,7 @@ def main_process() -> None:
         return
 
     runtime_settings = load_slide_runtime_settings(os.environ)
+    logger.info("Starting Stage 2 processing for tag=%s", config.tag)
     cases_to_process = repository.list_pending_cases()
     if not cases_to_process:
         print(f"\n{Style.INFO} No cases to process with status 'TO BE PROCESSED'.")
