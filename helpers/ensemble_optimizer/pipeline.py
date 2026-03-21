@@ -157,6 +157,7 @@ def _build_validation_split(
     return build_holdout_split(
         ordered_patients,
         positive_patients,
+        calibration_frac=config.val_calibration_frac,
         holdout_frac=config.val_holdout_frac,
         seed=config.seed + 123,
     )
@@ -173,6 +174,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     split = _build_validation_split(config, validation_h5_path)
     split_fingerprint = build_split_fingerprint(
         optimization_patients=split.optimization_patients,
+        calibration_patients=split.calibration_patients,
         holdout_patients=split.holdout_patients,
     )
     selected_models, subset_scores = _select_models_from_optimization_subset(
@@ -205,8 +207,10 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         spatial_weights=optimization_result.spatial_weights,
         roi_context_scale=config.roi_context_scale,
         roi_threshold=optimization_result.roi_threshold,
+        decision_threshold=optimization_result.decision_threshold,
         spill_penalty_lambda=config.spill_penalty_lambda,
         spatial_patient_policy=config.spatial_patient_policy,
+        calibration_metrics=optimization_result.calibration_metrics,
         holdout_metrics=optimization_result.holdout_metrics,
         generated_at=timestamp,
         compatibility_signature=compatibility_signature,
@@ -220,10 +224,14 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         {
             "validation_h5_path": str(validation_h5_path),
             "optimization_patients": sorted(split.optimization_patients),
+            "calibration_patients": sorted(split.calibration_patients),
             "holdout_patients": sorted(split.holdout_patients),
             "recipe_path": str(recipe_path),
             "generated_at": timestamp,
             "compatibility_signature": compatibility_signature,
+            "roi_threshold": optimization_result.roi_threshold,
+            "decision_threshold": optimization_result.decision_threshold,
+            "calibration_metrics": optimization_result.calibration_metrics,
             "validation_provenance": validation_provenance,
             "split_fingerprint": split_fingerprint,
             "selected_models": [

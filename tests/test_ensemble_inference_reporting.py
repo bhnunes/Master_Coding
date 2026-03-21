@@ -12,6 +12,7 @@ def _sample_recipe() -> dict[str, object]:
     return {
         "ensemble_strategy": "two_stream_spatial_gating",
         "roi_config": {"threshold": 0.33, "scale": 4},
+        "decision_config": {"threshold": 0.57},
         "model_registry": [
             {
                 "architecture": "SWIN",
@@ -55,6 +56,7 @@ def test_export_results_to_csv_writes_report(tmp_path: Path) -> None:
 
     assert csv_path.name == "FINAL_EVALUATION_REPORT_2026-03-20_12_00_00.csv"
     assert "Ensemble Composition" in csv_path.read_text(encoding="utf-8")
+    assert "Decision Threshold" in csv_path.read_text(encoding="utf-8")
 
 
 def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:
@@ -79,3 +81,4 @@ def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:
     assert tex_path.exists()
     assert pdf_path.exists()
     assert "Ensemble Final Evaluation Report" in tex_path.read_text(encoding="utf-8")
+    assert "Decision Threshold" in tex_path.read_text(encoding="utf-8")

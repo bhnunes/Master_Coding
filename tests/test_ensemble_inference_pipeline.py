@@ -69,6 +69,7 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
             {
                 "ensemble_strategy": "two_stream_spatial_gating",
                 "roi_config": {"threshold": 0.33, "scale": 4},
+                "decision_config": {"threshold": 0.57},
                 "model_registry": [
                     {
                         "architecture": "SWIN",

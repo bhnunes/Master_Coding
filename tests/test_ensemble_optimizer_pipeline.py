@@ -29,6 +29,7 @@ def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> No
         workers=1,
         top_models=4,
         sort_metric="best_val_auprc_pixel_score",
+        val_calibration_frac=0.25,
         val_holdout_frac=0.2,
         semantic_architectures=("SWIN",),
         spatial_architectures=("FPN",),
@@ -76,6 +77,7 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         workers=1,
         top_models=2,
         sort_metric="best_val_auprc_pixel_score",
+        val_calibration_frac=0.25,
         val_holdout_frac=0.2,
         semantic_architectures=("SWIN",),
         spatial_architectures=("FPN",),
@@ -121,7 +123,11 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         lambda config, validation_h5_path: type(
             "Split",
             (),
-            {"optimization_patients": {"p1", "p2"}, "holdout_patients": {"p3"}},
+            {
+                "optimization_patients": {"p1", "p2"},
+                "calibration_patients": {"p4"},
+                "holdout_patients": {"p3"},
+            },
         )(),
     )
 
@@ -158,6 +164,8 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
                 "semantic_weights": [1.0],
                 "spatial_weights": [1.0],
                 "roi_threshold": 0.4,
+                "decision_threshold": 0.6,
+                "calibration_metrics": {"Calibration_best_mcc": 0.55},
                 "holdout_metrics": {"Macro_AUPRC_in_ROI": 0.7},
             },
         )(),
@@ -176,7 +184,10 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     run_config = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert observed["optimization_patients"] == {"p1", "p2"}
     assert run_config["optimization_patients"] == ["p1", "p2"]
+    assert run_config["calibration_patients"] == ["p4"]
     assert run_config["holdout_patients"] == ["p3"]
+    assert run_config["decision_threshold"] == 0.6
+    assert run_config["calibration_metrics"] == {"Calibration_best_mcc": 0.55}
     assert run_config["selected_models"][0]["optimization_subset_score"] == 0.9
 
 
@@ -196,6 +207,7 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         workers=1,
         top_models=2,
         sort_metric="best_val_auprc_pixel_score",
+        val_calibration_frac=0.25,
         val_holdout_frac=0.2,
         semantic_architectures=("SWIN",),
         spatial_architectures=("FPN",),
@@ -260,7 +272,11 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         lambda config, validation_h5_path: type(
             "Split",
             (),
-            {"optimization_patients": {"p1", "p2"}, "holdout_patients": {"p3"}},
+            {
+                "optimization_patients": {"p1", "p2"},
+                "calibration_patients": {"p4"},
+                "holdout_patients": {"p3"},
+            },
         )(),
     )
     monkeypatch.setattr(
@@ -289,6 +305,8 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
                 "semantic_weights": [1.0],
                 "spatial_weights": [1.0],
                 "roi_threshold": 0.4,
+                "decision_threshold": 0.6,
+                "calibration_metrics": {"Calibration_best_mcc": 0.55},
                 "holdout_metrics": {"Macro_AUPRC_in_ROI": 0.7},
             },
         )(),

@@ -17,6 +17,10 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
             "CROSSFOLD_MIN_TRAIN_PATIENTS": "4",
             "CROSSFOLD_MIN_VAL_PATIENTS": "2",
             "CROSSFOLD_MIN_TEST_PATIENTS": "3",
+            "CROSSFOLD_ENFORCE_STAGE11_VALIDATION_SIZING": "true",
+            "CROSSFOLD_MIN_VALIDATION_PATIENTS_FOR_ENSEMBLE": "30",
+            "CROSSFOLD_MIN_VALIDATION_POSITIVE_PATIENTS_FOR_ENSEMBLE": "15",
+            "CROSSFOLD_MIN_VALIDATION_NEGATIVE_PATIENTS_FOR_ENSEMBLE": "15",
             "CROSSFOLD_ADAPTIVE": "false",
             "CROSSFOLD_REQUIRE_TRAIN_IMAGE_DOMINANCE": "false",
             "CROSSFOLD_REQUIRE_BOTH_CLASSES_IF_POSSIBLE": "false",
@@ -42,6 +46,10 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.constraints.min_train_patients == 4
     assert config.constraints.min_val_patients == 2
     assert config.constraints.min_test_patients == 3
+    assert config.constraints.enforce_stage11_validation_sizing is True
+    assert config.constraints.min_validation_patients_for_ensemble == 30
+    assert config.constraints.min_validation_positive_patients_for_ensemble == 15
+    assert config.constraints.min_validation_negative_patients_for_ensemble == 15
     assert config.constraints.adaptive is False
     assert config.constraints.require_train_image_dominance is False
     assert config.constraints.require_both_classes_if_possible is False
@@ -105,3 +113,16 @@ def test_load_crossfold_config_rejects_test_objective_split(tmp_path: Path) -> N
                 "CROSSFOLD_OBJECTIVE_SCORE_SPLIT": "TEST",
             }
         )
+
+
+def test_load_crossfold_config_defaults_stage11_validation_guardrails(tmp_path: Path) -> None:
+    config = load_crossfold_config(
+        {
+            "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "patches"),
+        }
+    )
+
+    assert config.constraints.enforce_stage11_validation_sizing is True
+    assert config.constraints.min_validation_patients_for_ensemble == 30
+    assert config.constraints.min_validation_positive_patients_for_ensemble == 15
+    assert config.constraints.min_validation_negative_patients_for_ensemble == 15

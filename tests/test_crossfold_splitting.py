@@ -59,6 +59,7 @@ def test_decide_split_sizes_returns_expected_counts() -> None:
             min_test_patients=1,
             min_val_patients=1,
             min_train_patients=1,
+            enforce_stage11_validation_sizing=False,
             test_ratio=0.17,
             val_ratio=0.17,
             adaptive=True,
@@ -79,6 +80,7 @@ def test_create_train_val_test_split_best_keeps_patients_disjoint() -> None:
             min_test_patients=1,
             min_val_patients=1,
             min_train_patients=1,
+            enforce_stage11_validation_sizing=False,
             test_ratio=0.25,
             val_ratio=0.25,
             require_train_image_dominance=True,
@@ -102,3 +104,35 @@ def test_create_train_val_test_split_best_keeps_patients_disjoint() -> None:
     assert not (val_patients & test_patients)
     assert len(split_data["train_df"]) > len(split_data["val_df"])
     assert len(split_data["train_df"]) > len(split_data["test_df"])
+
+
+def test_create_train_val_test_split_best_enforces_stage11_validation_minimums() -> None:
+    dataset = _build_dataset()
+
+    try:
+        create_train_val_test_split_best(
+            df=dataset,
+            random_state=42,
+            constraints=SplitConstraints(
+                min_test_patients=1,
+                min_val_patients=1,
+                min_train_patients=1,
+                enforce_stage11_validation_sizing=True,
+                min_validation_patients_for_ensemble=6,
+                min_validation_positive_patients_for_ensemble=3,
+                min_validation_negative_patients_for_ensemble=3,
+                test_ratio=0.25,
+                val_ratio=0.25,
+                require_train_image_dominance=False,
+                require_both_classes_if_possible=False,
+                max_tries=50,
+                adaptive=True,
+            ),
+            objective=ObjectiveConfig(enable_objective=False),
+            patient_entropy_df=None,
+        )
+    except ValueError as error:
+        message = str(error)
+        assert "Stage 11 validation sizing failed" in message
+    else:
+        raise AssertionError("Expected Stage 11 validation sizing enforcement to fail")

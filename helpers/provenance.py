@@ -103,12 +103,18 @@ def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
     return payload
 
 
-def build_split_fingerprint(*, optimization_patients: set[str], holdout_patients: set[str]) -> str:
+def build_split_fingerprint(
+    *,
+    optimization_patients: set[str],
+    calibration_patients: set[str],
+    holdout_patients: set[str],
+) -> str:
     """Return a deterministic fingerprint for Stage 11 patient subsets."""
 
     return hash_json_payload(
         {
             "optimization_patients": sorted(optimization_patients),
+            "calibration_patients": sorted(calibration_patients),
             "holdout_patients": sorted(holdout_patients),
         }
     )

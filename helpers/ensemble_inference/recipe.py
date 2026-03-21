@@ -22,6 +22,7 @@ class RecipeModelSpec:
 class EnsembleRecipe:
     strategy: str
     roi_threshold: float
+    decision_threshold: float
     roi_scale: int
     model_registry: list[RecipeModelSpec]
     raw_payload: dict[str, Any]
@@ -44,12 +45,20 @@ def parse_ensemble_recipe(payload: dict[str, Any]) -> EnsembleRecipe:
 
     if "roi_config" not in payload:
         raise KeyError("Recipe missing required 'roi_config'.")
+    if "decision_config" not in payload:
+        raise KeyError("Recipe missing required 'decision_config'.")
     if "model_registry" not in payload:
         raise KeyError("Recipe missing required 'model_registry'.")
 
     roi_config = payload["roi_config"]
-    roi_threshold = float(roi_config.get("threshold", 0.5))
+    if "threshold" not in roi_config:
+        raise KeyError("Recipe roi_config missing required 'threshold'.")
+    roi_threshold = float(roi_config["threshold"])
     roi_scale = max(1, int(roi_config.get("scale", 4)))
+    decision_config = payload["decision_config"]
+    if "threshold" not in decision_config:
+        raise KeyError("Recipe decision_config missing required 'threshold'.")
+    decision_threshold = float(decision_config["threshold"])
 
     model_registry: list[RecipeModelSpec] = []
     for entry in payload["model_registry"]:
@@ -80,6 +89,7 @@ def parse_ensemble_recipe(payload: dict[str, Any]) -> EnsembleRecipe:
     return EnsembleRecipe(
         strategy=strategy,
         roi_threshold=roi_threshold,
+        decision_threshold=decision_threshold,
         roi_scale=roi_scale,
         model_registry=model_registry,
         raw_payload=payload,

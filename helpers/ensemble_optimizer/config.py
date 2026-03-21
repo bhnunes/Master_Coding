@@ -85,6 +85,7 @@ class EnsembleOptimizerConfig:
     workers: int
     top_models: int
     sort_metric: str
+    val_calibration_frac: float
     val_holdout_frac: float
     semantic_architectures: tuple[str, ...]
     spatial_architectures: tuple[str, ...]
@@ -156,6 +157,9 @@ def load_ensemble_optimizer_config(
             values.get("ENSEMBLE_OPT_SORT_METRIC"),
             default="best_val_auprc_pixel_score",
             valid=VALID_SORT_METRICS,
+        ),
+        val_calibration_frac=_parse_float(
+            values.get("ENSEMBLE_OPT_VAL_CALIBRATION_FRAC"), default=0.25
         ),
         val_holdout_frac=_parse_float(values.get("ENSEMBLE_OPT_VAL_HOLDOUT_FRAC"), default=0.20),
         semantic_architectures=_parse_architecture_group(

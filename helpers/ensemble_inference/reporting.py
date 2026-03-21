@@ -82,7 +82,8 @@ def export_results_to_csv(
             "Evaluation Set",
             "Random Seed",
             "Batch Size",
-            "Optimal Ensemble Threshold",
+            "ROI Gate Threshold",
+            "Decision Threshold",
         ],
         "Value": [
             timestamp,
@@ -92,6 +93,7 @@ def export_results_to_csv(
             seed,
             batch_size,
             ensemble_recipe.get("roi_config", {}).get("threshold", "FAILED"),
+            ensemble_recipe.get("decision_config", {}).get("threshold", "FAILED"),
         ],
     }
     config_df = pd.DataFrame(config_data)
@@ -222,7 +224,8 @@ def write_ensemble_report_latex(
     neg_clean = rule6.get("neg_clean_rate", {})
     metric_order = ["dice", "iou", "tpr", "tnr", "precision", "accuracy", "fpr", "fnr"]
     comp_models = ensemble_recipe.get("model_registry", [])
-    threshold = ensemble_recipe.get("roi_config", {}).get("threshold")
+    roi_threshold = ensemble_recipe.get("roi_config", {}).get("threshold")
+    decision_threshold = ensemble_recipe.get("decision_config", {}).get("threshold")
 
     lines = [
         r"\documentclass[11pt]{article}",
@@ -242,7 +245,8 @@ def write_ensemble_report_latex(
             rf"\item Ensemble Strategy: "
             f"{_tex_escape(str(ensemble_recipe.get('ensemble_strategy', 'NA')))}"
         ),
-        rf"\item Threshold: {_fmt_float(threshold)}",
+        rf"\item ROI Gate Threshold: {_fmt_float(roi_threshold)}",
+        rf"\item Decision Threshold: {_fmt_float(decision_threshold)}",
         rf"\item AUC: {_fmt_float(auc)}",
         r"\end{itemize}",
         r"\section*{Normalization Statistics}",

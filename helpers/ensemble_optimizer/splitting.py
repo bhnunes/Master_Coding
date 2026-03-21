@@ -10,6 +10,7 @@ import numpy.typing as npt
 @dataclass(frozen=True)
 class HoldoutSplit:
     optimization_patients: set[str]
+    calibration_patients: set[str]
     holdout_patients: set[str]
     positive_patients: set[str]
     negative_patients: set[str]
@@ -21,10 +22,34 @@ def pick_n(total: int, frac: float) -> int:
     return min(max(1, int(round(total * frac))), total - 1)
 
 
+def _allocate_subset_counts(
+    total: int,
+    *,
+    calibration_frac: float,
+    holdout_frac: float,
+) -> tuple[int, int]:
+    if total <= 1:
+        return 0, 0
+    if total == 2:
+        return 1, 0
+
+    calibration_count = pick_n(total, calibration_frac)
+    remaining_after_calibration = total - calibration_count
+    if remaining_after_calibration <= 1:
+        return calibration_count, 0
+
+    holdout_count = min(int(round(total * holdout_frac)), total - calibration_count - 1)
+    if holdout_frac > 0 and total >= 4:
+        holdout_count = max(1, holdout_count)
+    holdout_count = max(0, holdout_count)
+    return calibration_count, holdout_count
+
+
 def build_holdout_split(
     patient_ids: Sequence[str],
     positive_patients: set[str],
     *,
+    calibration_frac: float,
     holdout_frac: float,
     seed: int,
 ) -> HoldoutSplit:
@@ -44,22 +69,42 @@ def build_holdout_split(
                 mixed.append(positive[index])
             if index < len(negative):
                 mixed.append(negative[index])
-        holdout_patients = {mixed[-1]} if mixed else set()
-        optimization_patients = set(mixed[:-1])
+        calibration_patients = {mixed[-1]} if mixed else set()
+        holdout_patients = {mixed[-2]} if len(mixed) >= 4 else set()
+        optimization_patients = set(mixed) - calibration_patients - holdout_patients
     else:
-        n_holdout_positive = pick_n(len(positive), holdout_frac) if positive else 0
-        n_holdout_negative = pick_n(len(negative), holdout_frac) if negative else 0
-        holdout_patients = set(positive[:n_holdout_positive] + negative[:n_holdout_negative])
-        optimization_patients = set(positive[n_holdout_positive:] + negative[n_holdout_negative:])
-
-    if len(all_patients) >= 2 and not holdout_patients:
-        raise RuntimeError(
-            "Holdout split produced 0 patients. Increase ENSEMBLE_OPT_VAL_HOLDOUT_FRAC or "
-            "use a different split policy for small-N validation."
+        n_calibration_positive, n_holdout_positive = _allocate_subset_counts(
+            len(positive),
+            calibration_frac=calibration_frac,
+            holdout_frac=holdout_frac,
         )
+        n_calibration_negative, n_holdout_negative = _allocate_subset_counts(
+            len(negative),
+            calibration_frac=calibration_frac,
+            holdout_frac=holdout_frac,
+        )
+        calibration_patients = set(
+            positive[:n_calibration_positive] + negative[:n_calibration_negative]
+        )
+        holdout_patients = set(
+            positive[n_calibration_positive : n_calibration_positive + n_holdout_positive]
+            + negative[n_calibration_negative : n_calibration_negative + n_holdout_negative]
+        )
+        optimization_patients = set(positive[n_calibration_positive + n_holdout_positive :]) | set(
+            negative[n_calibration_negative + n_holdout_negative :]
+        )
+
+    if len(all_patients) >= 3 and not calibration_patients:
+        raise RuntimeError(
+            "Validation split produced 0 calibration patients. Increase "
+            "ENSEMBLE_OPT_VAL_CALIBRATION_FRAC or use a different split policy."
+        )
+    if len(all_patients) >= 4 and not optimization_patients:
+        raise RuntimeError("Validation split produced 0 optimization patients.")
 
     return HoldoutSplit(
         optimization_patients=optimization_patients,
+        calibration_patients=calibration_patients,
         holdout_patients=holdout_patients,
         positive_patients=positive_patients,
         negative_patients=negative_patients,

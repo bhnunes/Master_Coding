@@ -85,6 +85,10 @@ class SplitConstraints:
     min_test_patients: int = 20
     min_val_patients: int = 5
     min_train_patients: int = 5
+    enforce_stage11_validation_sizing: bool = True
+    min_validation_patients_for_ensemble: int = 30
+    min_validation_positive_patients_for_ensemble: int = 15
+    min_validation_negative_patients_for_ensemble: int = 15
     test_ratio: float = 0.10
     val_ratio: float = 0.10
     require_train_image_dominance: bool = True
@@ -154,6 +158,26 @@ def load_crossfold_config(
             values.get("CROSSFOLD_MIN_TRAIN_PATIENTS"),
             "CROSSFOLD_MIN_TRAIN_PATIENTS",
             5,
+        ),
+        enforce_stage11_validation_sizing=_parse_bool(
+            values.get("CROSSFOLD_ENFORCE_STAGE11_VALIDATION_SIZING"),
+            "CROSSFOLD_ENFORCE_STAGE11_VALIDATION_SIZING",
+            True,
+        ),
+        min_validation_patients_for_ensemble=_parse_int(
+            values.get("CROSSFOLD_MIN_VALIDATION_PATIENTS_FOR_ENSEMBLE"),
+            "CROSSFOLD_MIN_VALIDATION_PATIENTS_FOR_ENSEMBLE",
+            30,
+        ),
+        min_validation_positive_patients_for_ensemble=_parse_int(
+            values.get("CROSSFOLD_MIN_VALIDATION_POSITIVE_PATIENTS_FOR_ENSEMBLE"),
+            "CROSSFOLD_MIN_VALIDATION_POSITIVE_PATIENTS_FOR_ENSEMBLE",
+            15,
+        ),
+        min_validation_negative_patients_for_ensemble=_parse_int(
+            values.get("CROSSFOLD_MIN_VALIDATION_NEGATIVE_PATIENTS_FOR_ENSEMBLE"),
+            "CROSSFOLD_MIN_VALIDATION_NEGATIVE_PATIENTS_FOR_ENSEMBLE",
+            15,
         ),
         test_ratio=_parse_float(values.get("CROSSFOLD_TEST_RATIO"), "CROSSFOLD_TEST_RATIO", 0.10),
         val_ratio=_parse_float(values.get("CROSSFOLD_VAL_RATIO"), "CROSSFOLD_VAL_RATIO", 0.10),

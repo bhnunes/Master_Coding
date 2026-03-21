@@ -20,6 +20,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_SORT_METRIC": "best_validation_DICE",
             "ENSEMBLE_OPT_STAGE_INPUT_LOCALLY": "false",
             "ENSEMBLE_OPT_OVERWRITE_OUTPUT": "false",
+            "ENSEMBLE_OPT_VAL_CALIBRATION_FRAC": "0.25",
             "ENSEMBLE_OPT_VAL_HOLDOUT_FRAC": "0.3",
             "ENSEMBLE_OPT_SEMANTIC_ARCHITECTURES": "swin, segformer",
             "ENSEMBLE_OPT_SPATIAL_ARCHITECTURES": "fpn, manet",
@@ -40,6 +41,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.sort_metric == "best_validation_DICE"
     assert config.stage_input_locally is False
     assert config.overwrite_output is False
+    assert config.val_calibration_frac == 0.25
     assert config.val_holdout_frac == 0.3
     assert config.semantic_architectures == ("SWIN", "SEGFORMER")
     assert config.spatial_architectures == ("FPN", "MANET")
@@ -62,6 +64,7 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.semantic_architectures == ("SWIN", "DPT", "SEGFORMER", "UPERNET")
     assert config.spatial_architectures == ("DEEPLABV3PLUS", "UNET++", "FPN", "MANET")
     assert config.sort_metric == "best_val_auprc_pixel_score"
+    assert config.val_calibration_frac == 0.25
     assert config.spatial_patient_policy == "all"
 
 

@@ -8,13 +8,36 @@ def test_build_holdout_split_uses_interleaved_strategy_for_small_dataset() -> No
     split = build_holdout_split(
         patient_ids,
         positive_patients,
+        calibration_frac=0.25,
         holdout_frac=0.2,
         seed=24,
     )
 
-    assert len(split.holdout_patients) == 1
+    assert len(split.calibration_patients) == 1
+    assert len(split.holdout_patients) == 0
     assert len(split.optimization_patients) == 2
+    assert split.calibration_patients.isdisjoint(split.optimization_patients)
     assert split.holdout_patients.isdisjoint(split.optimization_patients)
+
+
+def test_build_holdout_split_creates_three_way_split_for_larger_dataset() -> None:
+    patient_ids = [f"pos{i}" for i in range(1, 7)] + [f"neg{i}" for i in range(1, 7)]
+    positive_patients = {patient_id for patient_id in patient_ids if patient_id.startswith("pos")}
+
+    split = build_holdout_split(
+        patient_ids,
+        positive_patients,
+        calibration_frac=0.25,
+        holdout_frac=0.25,
+        seed=24,
+    )
+
+    assert split.optimization_patients
+    assert split.calibration_patients
+    assert split.holdout_patients
+    assert split.optimization_patients.isdisjoint(split.calibration_patients)
+    assert split.optimization_patients.isdisjoint(split.holdout_patients)
+    assert split.calibration_patients.isdisjoint(split.holdout_patients)
 
 
 def test_build_indices_and_local_map_preserves_patient_slices() -> None:

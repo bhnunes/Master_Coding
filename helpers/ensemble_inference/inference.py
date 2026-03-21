@@ -120,7 +120,8 @@ def analyze_ensemble_metrics(
     test_loader: DataLoader[Any],
     *,
     device: torch.device,
-    optimal_threshold: float,
+    roi_threshold: float,
+    decision_threshold: float,
     roi_scale: int,
     train_mean: list[float],
     train_std: list[float],
@@ -145,7 +146,7 @@ def analyze_ensemble_metrics(
             models_list,
             constituent_models_info,
             images,
-            roi_threshold=optimal_threshold,
+            roi_threshold=roi_threshold,
             roi_scale=roi_scale,
         )
 
@@ -155,7 +156,7 @@ def analyze_ensemble_metrics(
         auc_pos_hist.add_(torch.bincount(flat_bins[flat_true], minlength=auc_bins))
         auc_neg_hist.add_(torch.bincount(flat_bins[~flat_true], minlength=auc_bins))
 
-        pred_gpu = (final_probs > optimal_threshold).to(torch.uint8)
+        pred_gpu = (final_probs > decision_threshold).to(torch.uint8)
         conf_vec = pred_gpu.mul(2).add_(true_gpu).view(pred_gpu.size(0), -1)
         for index, patient_id in enumerate(patient_ids):
             counts = torch.bincount(conf_vec[index], minlength=4).cpu().tolist()
@@ -176,7 +177,8 @@ def analyze_ensemble_metrics(
     }
     summary["ensemble"] = {
         "method": "two_stream_spatial_gating",
-        "threshold": float(optimal_threshold),
+        "roi_threshold": float(roi_threshold),
+        "decision_threshold": float(decision_threshold),
         "weights": None,
     }
     return summary
@@ -188,7 +190,8 @@ def export_visualizations(
     dataloader: DataLoader[Any],
     *,
     device: torch.device,
-    threshold: float,
+    roi_threshold: float,
+    decision_threshold: float,
     roi_scale: int,
     train_mean: list[float],
     train_std: list[float],
@@ -218,10 +221,10 @@ def export_visualizations(
         models_list,
         constituent_models_info,
         images_norm,
-        roi_threshold=threshold,
+        roi_threshold=roi_threshold,
         roi_scale=roi_scale,
     )
-    pred_masks = (final_probs >= threshold).to(torch.uint8).cpu().numpy()
+    pred_masks = (final_probs > decision_threshold).to(torch.uint8).cpu().numpy()
     true_masks = mask_to_binary_indices(masks[:actual]).cpu().numpy().astype(np.uint8)
     images_np = images_norm.cpu().numpy()
     mean = np.asarray(train_mean, dtype=np.float32)

@@ -32,8 +32,10 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
         spatial_weights=[1.0],
         roi_context_scale=4,
         roi_threshold=0.33,
+        decision_threshold=0.57,
         spill_penalty_lambda=0.1,
         spatial_patient_policy="positive_only",
+        calibration_metrics={"Calibration_best_mcc": 0.61},
         holdout_metrics={"Macro_AUPRC_in_ROI": 0.7},
         generated_at="2026-03-20_10_00_00",
         compatibility_signature="compat-a",
@@ -46,8 +48,10 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
     assert output_path == tmp_path / "ENSEMBLE_TWO_STREAM_2026-03-20_10_00_00.json"
     assert payload["ensemble_strategy"] == "two_stream_spatial_gating"
     assert payload["roi_config"]["threshold"] == 0.33
+    assert payload["decision_config"]["threshold"] == 0.57
     assert payload["model_registry"][0]["stream_role"] == "semantic"
     assert payload["model_registry"][1]["stream_role"] == "spatial"
+    assert payload["calibration_metrics"] == {"Calibration_best_mcc": 0.61}
     assert "holdout_metrics" in payload
     assert payload["compatibility_signature"] == "compat-a"
     assert payload["provenance"]["validation"] == {"dataset_sha256": "val-sha"}

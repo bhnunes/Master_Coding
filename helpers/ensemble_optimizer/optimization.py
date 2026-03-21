@@ -36,6 +36,8 @@ class OptimizationResult:
     semantic_weights: list[float]
     spatial_weights: list[float]
     roi_threshold: float
+    decision_threshold: float
+    calibration_metrics: dict[str, float | int | str]
     holdout_metrics: dict[str, float | int | str]
 
 
@@ -251,6 +253,113 @@ def _compute_negative_false_positive_mass(
     return float(np.mean(patient_prediction))
 
 
+def _compute_mcc(tp: float, fp: float, fn: float, tn: float) -> float:
+    numerator = (tp * tn) - (fp * fn)
+    denominator = float((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    if denominator <= 0.0:
+        return 0.0
+    return float(numerator / np.sqrt(denominator))
+
+
+def _compute_patient_confusion_at_threshold(
+    probabilities: npt.NDArray[np.float32],
+    truth: npt.NDArray[np.uint8],
+    roi_mask: npt.NDArray[np.uint8],
+    threshold: float,
+) -> tuple[int, int, int, int]:
+    gated_probabilities = probabilities * roi_mask.astype(np.float32)
+    predictions = gated_probabilities > threshold
+    truth_bool = truth.astype(bool)
+    tn = int(np.sum(~predictions & ~truth_bool))
+    fn = int(np.sum(~predictions & truth_bool))
+    fp = int(np.sum(predictions & ~truth_bool))
+    tp = int(np.sum(predictions & truth_bool))
+    return tp, fp, fn, tn
+
+
+def _calibrate_decision_threshold(
+    *,
+    patient_ids: list[str],
+    local_map: dict[str, slice],
+    global_indices: npt.NDArray[np.int64],
+    truth_memmap: np.memmap[Any, Any],
+    prediction_memmaps: list[np.memmap[Any, Any]],
+    semantic_indices: list[int],
+    semantic_weights: list[float],
+    spatial_indices: list[int],
+    spatial_weights: list[float],
+    roi_context_scale: int,
+    roi_threshold: float,
+) -> tuple[float, dict[str, float | int | str]]:
+    if not patient_ids:
+        return 0.5, {
+            "Calibration_metric": "Patient_MCC",
+            "Calibration_threshold": 0.5,
+            "Calibration_best_mcc": 0.0,
+            "Calibration_n_patients": 0,
+            "Calibration_n_positive_patients": 0,
+            "Calibration_n_negative_patients": 0,
+        }
+
+    patient_payloads: list[
+        tuple[npt.NDArray[np.float32], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]
+    ] = []
+    positive_patients = 0
+    negative_patients = 0
+    for patient_id in patient_ids:
+        local_slice = local_map[patient_id]
+        patient_global_indices = global_indices[local_slice]
+        semantic_prediction = _weighted_ensemble_from_u16_cache(
+            [prediction_memmaps[index][patient_global_indices] for index in semantic_indices],
+            semantic_weights,
+        )
+        roi_mask = (
+            generate_roi_batch(
+                torch.from_numpy(semantic_prediction),
+                roi_context_scale,
+                roi_threshold,
+            )
+            .numpy()
+            .astype(np.uint8)
+        )
+        spatial_prediction = _weighted_ensemble_from_u16_cache(
+            [prediction_memmaps[index][patient_global_indices] for index in spatial_indices],
+            spatial_weights,
+        )
+        patient_truth = truth_memmap[patient_global_indices].astype(np.uint8)
+        if np.any(patient_truth):
+            positive_patients += 1
+        else:
+            negative_patients += 1
+        patient_payloads.append((spatial_prediction, patient_truth, roi_mask))
+
+    best_threshold = 0.5
+    best_mcc = float("-inf")
+    for threshold in np.linspace(0.05, 0.95, 19):
+        patient_scores: list[float] = []
+        for spatial_prediction, patient_truth, roi_mask in patient_payloads:
+            tp, fp, fn, tn = _compute_patient_confusion_at_threshold(
+                spatial_prediction,
+                patient_truth,
+                roi_mask,
+                float(threshold),
+            )
+            patient_scores.append(_compute_mcc(tp, fp, fn, tn))
+        mean_mcc = float(np.mean(patient_scores)) if patient_scores else 0.0
+        if mean_mcc > best_mcc:
+            best_mcc = mean_mcc
+            best_threshold = float(threshold)
+
+    return best_threshold, {
+        "Calibration_metric": "Patient_MCC",
+        "Calibration_threshold": best_threshold,
+        "Calibration_best_mcc": float(best_mcc if np.isfinite(best_mcc) else 0.0),
+        "Calibration_n_patients": len(patient_ids),
+        "Calibration_n_positive_patients": positive_patients,
+        "Calibration_n_negative_patients": negative_patients,
+    }
+
+
 def run_two_stream_optimization(
     config: EnsembleOptimizerConfig,
     models: list[nn.Module],
@@ -276,11 +385,16 @@ def run_two_stream_optimization(
     split = predefined_split or build_holdout_split(
         [str(patient_id) for patient_id in patient_ids],
         positive_patients,
+        calibration_frac=config.val_calibration_frac,
         holdout_frac=config.val_holdout_frac,
         seed=config.seed + 123,
     )
     holdout_idx, holdout_local_map, holdout_patients = build_indices_and_local_map(
         split.holdout_patients,
+        patient_map,
+    )
+    calibration_idx, calibration_local_map, calibration_patients = build_indices_and_local_map(
+        split.calibration_patients,
         patient_map,
     )
     optimization_idx, optimization_local_map, optimization_patients = build_indices_and_local_map(
@@ -450,6 +564,19 @@ def run_two_stream_optimization(
     best_spatial_weights = _normalize_weights(
         [spatial_study.best_params.get(f"w_spa_{i}", 0.0) for i in range(len(spatial_indices))]
     )
+    decision_threshold, calibration_metrics = _calibrate_decision_threshold(
+        patient_ids=calibration_patients,
+        local_map=calibration_local_map,
+        global_indices=calibration_idx,
+        truth_memmap=truth_memmap,
+        prediction_memmaps=prediction_memmaps,
+        semantic_indices=semantic_indices,
+        semantic_weights=best_semantic_weights,
+        spatial_indices=spatial_indices,
+        spatial_weights=best_spatial_weights,
+        roi_context_scale=config.roi_context_scale,
+        roi_threshold=best_roi_threshold,
+    )
 
     def compute_ensemble_iterative(
         model_indices: list[int],
@@ -553,6 +680,7 @@ def run_two_stream_optimization(
         "N_eval_negative_patients": int(evaluated_negative_patients),
         "N_pos_patients_total": int(positive_patient_count),
         "N_neg_patients_total": int(negative_patient_count),
+        "Decision_threshold": decision_threshold,
         "Spatial_patient_policy": config.spatial_patient_policy,
         "Spill_lambda": float(config.spill_penalty_lambda),
     }
@@ -562,5 +690,7 @@ def run_two_stream_optimization(
         semantic_weights=best_semantic_weights,
         spatial_weights=best_spatial_weights,
         roi_threshold=best_roi_threshold,
+        decision_threshold=decision_threshold,
+        calibration_metrics=calibration_metrics,
         holdout_metrics=holdout_metrics,
     )

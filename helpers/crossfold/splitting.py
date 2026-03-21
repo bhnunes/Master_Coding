@@ -109,9 +109,9 @@ def _build_split_return(
     score: float | None,
     score_split: str,
 ) -> dict[str, Any]:
-    train_df = df[df["patient_id"].isin(train_patients)].reset_index(drop=True)
-    val_df = df[df["patient_id"].isin(val_patients)].reset_index(drop=True)
-    test_df = df[df["patient_id"].isin(test_patients)].reset_index(drop=True)
+    train_df = df[df["patient_id"].isin(sorted(train_patients))].reset_index(drop=True)
+    val_df = df[df["patient_id"].isin(sorted(val_patients))].reset_index(drop=True)
+    test_df = df[df["patient_id"].isin(sorted(test_patients))].reset_index(drop=True)
     logging.info(
         "Split OK (attempt %s/%s, seed=%s): patients train/val/test=%s/%s/%s | "
         "images train/val/test=%s/%s/%s%s",
@@ -121,9 +121,9 @@ def _build_split_return(
         len(train_patients),
         len(val_patients),
         len(test_patients),
-        int(patient_df[patient_df["patient_id"].isin(train_patients)]["n_images"].sum()),
-        int(patient_df[patient_df["patient_id"].isin(val_patients)]["n_images"].sum()),
-        int(patient_df[patient_df["patient_id"].isin(test_patients)]["n_images"].sum()),
+        int(patient_df[patient_df["patient_id"].isin(sorted(train_patients))]["n_images"].sum()),
+        int(patient_df[patient_df["patient_id"].isin(sorted(val_patients))]["n_images"].sum()),
+        int(patient_df[patient_df["patient_id"].isin(sorted(test_patients))]["n_images"].sum()),
         f" | objective({score_split})={score:.6f}" if score is not None else "",
     )
     return {
@@ -139,6 +139,30 @@ def _build_split_return(
         "objective_score_split": score_split,
         "constraints": {**asdict(constraints), **sizing_meta, "random_state": None},
     }
+
+
+def _validation_supports_stage11(
+    patient_df: pd.DataFrame,
+    val_patients: set[int],
+    constraints: SplitConstraints,
+    *,
+    dataset_has_both_classes: bool,
+) -> bool:
+    if not constraints.enforce_stage11_validation_sizing:
+        return True
+
+    validation_rows = patient_df[patient_df["patient_id"].isin(sorted(val_patients))]
+    if len(validation_rows) < constraints.min_validation_patients_for_ensemble:
+        return False
+    if not dataset_has_both_classes:
+        return True
+
+    positive_count = int((validation_rows["patient_label"] == 1).sum())
+    negative_count = int((validation_rows["patient_label"] == 0).sum())
+    return (
+        positive_count >= constraints.min_validation_positive_patients_for_ensemble
+        and negative_count >= constraints.min_validation_negative_patients_for_ensemble
+    )
 
 
 def create_train_val_test_split_best(
@@ -158,12 +182,15 @@ def create_train_val_test_split_best(
     rng = np.random.default_rng(random_state)
 
     def image_count(patient_ids_subset: set[int]) -> int:
-        return int(patient_df[patient_df["patient_id"].isin(patient_ids_subset)]["n_images"].sum())
+        return int(
+            patient_df[patient_df["patient_id"].isin(sorted(patient_ids_subset))]["n_images"].sum()
+        )
 
     failure_counts = {
         "fail_val_strat": 0,
         "fail_overlap": 0,
         "fail_min_patients": 0,
+        "fail_stage11_validation_sizing": 0,
         "fail_train_dominance": 0,
         "fail_class_coverage": 0,
     }
@@ -216,7 +243,7 @@ def create_train_val_test_split_best(
 
             def split_has_both(patient_subset: set[int]) -> bool:
                 split_labels = set(
-                    patient_df[patient_df["patient_id"].isin(patient_subset)][
+                    patient_df[patient_df["patient_id"].isin(sorted(patient_subset))][
                         "patient_label"
                     ].tolist()
                 )
@@ -229,6 +256,14 @@ def create_train_val_test_split_best(
             ):
                 failure_counts["fail_class_coverage"] += 1
                 continue
+        if not _validation_supports_stage11(
+            patient_df,
+            val_patients,
+            constraints,
+            dataset_has_both_classes=dataset_has_both_classes,
+        ):
+            failure_counts["fail_stage11_validation_sizing"] += 1
+            continue
         train_images = image_count(train_patients)
         val_images = image_count(val_patients)
         test_images = image_count(test_patients)
@@ -306,8 +341,10 @@ def create_train_val_test_split_best(
         f"  - VAL stratification failed: {failure_counts['fail_val_strat']}\n"
         f"  - Patient leakage overlap: {failure_counts['fail_overlap']}\n"
         f"  - Minimum patient counts failed: {failure_counts['fail_min_patients']}\n"
+        "  - Stage 11 validation sizing failed: "
+        f"{failure_counts['fail_stage11_validation_sizing']}\n"
         f"  - Class coverage failed: {failure_counts['fail_class_coverage']}\n"
         f"  - Train image dominance failed: {failure_counts['fail_train_dominance']}\n"
         "Action: add patients (especially minority class), relax constraints, "
-        "or disable class-coverage.\n"
+        "disable Stage 11 validation sizing enforcement, or disable class-coverage.\n"
     )

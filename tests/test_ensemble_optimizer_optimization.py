@@ -17,6 +17,7 @@ from torch import nn
 from helpers.ensemble_optimizer import optimization
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
 from helpers.ensemble_optimizer.optimization import (
+    _calibrate_decision_threshold,
     _compute_positive_patients,
     _normalize_weights,
     _weighted_ensemble_from_u16_cache,
@@ -84,6 +85,7 @@ def optimizer_config(tmp_path: Path) -> EnsembleOptimizerConfig:
         workers=0,
         top_models=2,
         sort_metric="best_val_auprc_pixel_score",
+        val_calibration_frac=0.25,
         val_holdout_frac=0.5,
         semantic_architectures=("SWIN",),
         spatial_architectures=("FPN",),
@@ -196,6 +198,61 @@ def test_normalize_weights_returns_probabilities_summing_to_one() -> None:
 
     assert sum(normalized) == pytest.approx(1.0)
     assert normalized[0] == pytest.approx(0.5)
+
+
+def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> None:
+    truths = np.array(
+        [
+            [[1, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    cache_payload = _write_prediction_cache(
+        tmp_path / "pred-cache",
+        predictions=[
+            np.array(
+                [
+                    np.full((2, 2), 65535, dtype=np.uint16),
+                    np.zeros((2, 2), dtype=np.uint16),
+                ]
+            ),
+            np.array(
+                [
+                    np.array([[39321, 13107], [13107, 13107]], dtype=np.uint16),
+                    np.array([[26214, 26214], [26214, 26214]], dtype=np.uint16),
+                ]
+            ),
+        ],
+        truths=truths,
+        patient_ids=["p1", "p2"],
+    )
+    prediction_paths, _truth_path, _pids_path, total_samples, height, width, truth_memmap = (
+        cache_payload
+    )
+    prediction_memmaps = [
+        np.memmap(path, dtype="uint16", mode="r", shape=(total_samples, height, width))
+        for path in prediction_paths
+    ]
+
+    threshold, metrics = _calibrate_decision_threshold(
+        patient_ids=["p1", "p2"],
+        local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
+        global_indices=np.array([0, 1]),
+        truth_memmap=truth_memmap,
+        prediction_memmaps=prediction_memmaps,
+        semantic_indices=[0],
+        semantic_weights=[1.0],
+        spatial_indices=[1],
+        spatial_weights=[1.0],
+        roi_context_scale=1,
+        roi_threshold=0.5,
+    )
+
+    assert threshold == pytest.approx(0.2)
+    assert metrics["Calibration_best_mcc"] == pytest.approx(0.5)
+    assert metrics["Calibration_n_positive_patients"] == 1
+    assert metrics["Calibration_n_negative_patients"] == 1
 
 
 def test_compute_positive_patients_flags_any_patient_with_positive_pixel(tmp_path: Path) -> None:
@@ -344,8 +401,10 @@ def test_run_two_stream_optimization_falls_back_to_semantic_models_for_spatial_s
     monkeypatch.setattr(
         optimization,
         "build_holdout_split",
-        lambda patient_ids, positive_patients, holdout_frac, seed: SimpleNamespace(
-            holdout_patients={"p2"}, optimization_patients={"p1"}
+        lambda patient_ids, positive_patients, calibration_frac, holdout_frac, seed: (
+            SimpleNamespace(
+                holdout_patients={"p2"}, calibration_patients=set(), optimization_patients={"p1"}
+            )
         ),
     )
     monkeypatch.setattr(
@@ -415,17 +474,23 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
     monkeypatch.setattr(
         optimization,
         "build_holdout_split",
-        lambda patient_ids, positive_patients, holdout_frac, seed: SimpleNamespace(
-            holdout_patients={"p1"}, optimization_patients={"p2"}
+        lambda patient_ids, positive_patients, calibration_frac, holdout_frac, seed: (
+            SimpleNamespace(
+                holdout_patients={"p1"}, calibration_patients=set(), optimization_patients={"p2"}
+            )
         ),
     )
     monkeypatch.setattr(
         optimization,
         "build_indices_and_local_map",
         lambda selected_patients, patient_map: (
-            np.array([1]) if selected_patients == {"p2"} else np.array([0]),
-            {"p2": slice(0, 1)} if selected_patients == {"p2"} else {"p1": slice(0, 1)},
-            ["p2"] if selected_patients == {"p2"} else ["p1"],
+            np.array([1])
+            if selected_patients == {"p2"}
+            else (np.array([], dtype=np.int64) if not selected_patients else np.array([0])),
+            {"p2": slice(0, 1)}
+            if selected_patients == {"p2"}
+            else ({} if not selected_patients else {"p1": slice(0, 1)}),
+            ["p2"] if selected_patients == {"p2"} else ([] if not selected_patients else ["p1"]),
         ),
     )
 
@@ -458,6 +523,8 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
     assert result.semantic_indices == [0]
     assert result.spatial_indices == [1]
     assert result.roi_threshold == 0.5
+    assert result.decision_threshold == 0.5
+    assert result.calibration_metrics["Calibration_metric"] == "Patient_MCC"
     assert result.holdout_metrics["Macro_AUPRC_in_ROI"] == pytest.approx(0.75)
     assert result.holdout_metrics["Macro_Spill"] == pytest.approx(0.0)
     assert result.holdout_metrics["N_eval_patients"] == 1
@@ -494,8 +561,12 @@ def test_run_two_stream_optimization_all_policy_penalizes_negative_false_positiv
     monkeypatch.setattr(
         optimization,
         "build_holdout_split",
-        lambda patient_ids, positive_patients, holdout_frac, seed: SimpleNamespace(
-            holdout_patients={"p3", "p4"}, optimization_patients={"p1", "p2"}
+        lambda patient_ids, positive_patients, calibration_frac, holdout_frac, seed: (
+            SimpleNamespace(
+                holdout_patients={"p3", "p4"},
+                calibration_patients=set(),
+                optimization_patients={"p1", "p2"},
+            )
         ),
     )
 
