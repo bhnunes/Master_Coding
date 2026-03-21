@@ -100,12 +100,31 @@ This file gives coding agents repository-specific guidance for working safely an
 - During future refactors, follow the same packaging pattern: if behavior belongs to a specific domain, create or reuse `helpers/<domain>/` and place the module there. Do not add new top-level helper modules for domain logic when an existing domain package already fits.
 - `setup_colab.sh` is the canonical Google Colab bootstrap. It installs system dependencies, installs `uv`, installs Python 3.12, syncs from `pyproject.toml`, and prepares `.env` when missing.
 - `setup_windows.ps1` is the canonical native Windows bootstrap. `Dockerfile` and `.devcontainer/devcontainer.json` define the containerized development environments.
-- Current validation status: `uv run pytest` passes, `uv run ruff check .` passes, `uv run mypy .` passes, and `uv run pytest --cov=helpers --cov-report=term-missing` runs successfully with `pytest-cov`. Helper coverage is still below the 90% policy target and previously sat around 66%, with the biggest remaining gaps in legacy-heavy helper modules and recently refactored inference/optimizer helpers.
+- Current validation status as of 2026-03-21: `uv run pytest` passes (`333 passed`), `uv run ruff check .` passes, `uv run mypy .` passes, and `uv run pytest --cov=helpers --cov-report=term-missing` passes with overall `helpers` coverage at `72%`. Repo-wide coverage is still materially below the 90% policy target.
 - Recent targeted Stage 11/12 coverage work added focused tests in `tests/test_ensemble_inference_metrics.py`, `tests/test_ensemble_inference_data.py`, `tests/test_ensemble_inference_inference.py`, `tests/test_ensemble_optimizer_data.py`, and `tests/test_ensemble_optimizer_optimization.py`.
 - The latest targeted coverage snapshot for those five priority helpers, using `uv run coverage run -m pytest ...` followed by `uv run coverage report -m ...`, is: `helpers/ensemble_inference/metrics.py` 100%, `helpers/ensemble_inference/data.py` 95%, `helpers/ensemble_inference/inference.py` 98%, `helpers/ensemble_optimizer/data.py` 95%, and `helpers/ensemble_optimizer/optimization.py` 79%, for 90% combined coverage across those target modules.
-- Highest-priority remaining coverage work is now concentrated in `helpers/ensemble_optimizer/optimization.py`, especially the semantic objective pruning branches around lines 299-345, the spatial objective loop around lines 376-405, and the holdout ensemble branch around lines 427 and 442.
+- Highest-priority remaining coverage work is no longer Stage 11/12-first. Start with the largest repo-wide coverage draggers: zero-coverage legacy-heavy modules and very low-coverage core helpers.
 - When resuming coverage work, reuse the new lightweight patterns already added: tiny memmap caches, fake Optuna studies, CPU-only fake models, and direct monkeypatching of ROI generation and AUPRC helpers instead of real Stage 11 end-to-end runs.
-- After the Stage 11/12 helper packages, continue coverage work on older low-coverage modules such as `helpers/artifact/logging.py`, `helpers/artifact/model_loader.py`, `helpers/artifact/processor.py`, `helpers/sanity/reporting.py`, and `helpers/wsi/*.py`.
+- Current highest-priority coverage queue for the next session is:
+  - zero-coverage modules first: `helpers/artifact/logging.py`, `helpers/artifact/model_loader.py`, `helpers/artifact/processor.py`, `helpers/optimization_sampling/logging.py`, `helpers/sanity/reporting.py`, and `helpers/wsi/*.py`
+  - then very low-coverage high-impact modules: `helpers/extraction/patch_engine.py` (`20%`), `helpers/extraction/data_handlers.py` (`16%`), `helpers/lr_finder/runner.py` (`19%`), `helpers/ensemble_optimizer/models.py` (`20%`), and `helpers/smart_sampling/embeddings.py` (`37%`)
+  - then medium-priority modules still below 80% such as `helpers/ensemble_inference/pipeline.py`, `helpers/smart_sampling/selection.py`, `helpers/sanity/manifest_checks.py`, `helpers/crossfold/splitting.py`, and `helpers/sanity/disk_checks.py`
+- Latest repo-wide low-coverage snapshot from `uv run pytest --cov=helpers --cov-report=term-missing`:
+  - `helpers/artifact/logging.py` 0%
+  - `helpers/artifact/model_loader.py` 0%
+  - `helpers/artifact/processor.py` 0%
+  - `helpers/optimization_sampling/logging.py` 0%
+  - `helpers/sanity/reporting.py` 0%
+  - `helpers/wsi/colors.py` 0%
+  - `helpers/wsi/maps.py` 0%
+  - `helpers/wsi/process.py` 0%
+  - `helpers/wsi/slide_info.py` 0%
+  - `helpers/wsi/tis_detect_helper_fx.py` 0%
+  - `helpers/extraction/data_handlers.py` 16%
+  - `helpers/extraction/patch_engine.py` 20%
+  - `helpers/lr_finder/runner.py` 19%
+  - `helpers/ensemble_optimizer/models.py` 20%
+  - `helpers/smart_sampling/embeddings.py` 37%
 
 ## Skills
 
