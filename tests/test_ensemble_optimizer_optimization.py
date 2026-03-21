@@ -462,3 +462,92 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
     assert result.holdout_metrics["Macro_Spill"] == pytest.approx(0.0)
     assert result.holdout_metrics["N_eval_patients"] == 1
     assert result.holdout_metrics["N_pos_patients_total"] == 1
+
+
+def test_run_two_stream_optimization_all_policy_penalizes_negative_false_positives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    truths = np.array(
+        [
+            [[1, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+            [[1, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    high_predictions = [
+        np.full((4, 2, 2), 65535, dtype=np.uint16),
+        np.full((4, 2, 2), 65535, dtype=np.uint16),
+    ]
+    cache_payload = _write_prediction_cache(
+        tmp_path / "pred-cache",
+        predictions=high_predictions,
+        truths=truths,
+        patient_ids=["p1", "p2", "p3", "p4"],
+    )
+    monkeypatch.setattr(
+        optimization, "cache_predictions_sequential", lambda *args, **kwargs: cache_payload
+    )
+    monkeypatch.setattr(
+        optimization,
+        "build_holdout_split",
+        lambda patient_ids, positive_patients, holdout_frac, seed: SimpleNamespace(
+            holdout_patients={"p3", "p4"}, optimization_patients={"p1", "p2"}
+        ),
+    )
+
+    def fake_build_indices_and_local_map(
+        selected_patients: set[str],
+        patient_map: dict[str, list[int]],
+    ) -> tuple[npt.NDArray[np.int64], dict[str, slice], list[str]]:
+        del patient_map
+        if selected_patients == {"p1", "p2"}:
+            return np.array([0, 1]), {"p1": slice(0, 1), "p2": slice(1, 2)}, ["p1", "p2"]
+        return np.array([2, 3]), {"p3": slice(0, 1), "p4": slice(1, 2)}, ["p3", "p4"]
+
+    monkeypatch.setattr(
+        optimization, "build_indices_and_local_map", fake_build_indices_and_local_map
+    )
+
+    class _FakeTrial:
+        def suggest_float(self, name: str, low: float, high: float) -> float:
+            del low, high
+            return 1.0 if name.startswith("w_") else 0.5
+
+    class _FakeStudy:
+        def __init__(self, best_params: dict[str, float]) -> None:
+            self.best_params = best_params
+
+        def optimize(self, objective: Any, n_trials: int) -> None:
+            del n_trials
+            objective(_FakeTrial())
+
+    studies = iter([_FakeStudy({"w_sem_0": 1.0, "roi_thresh": 0.5}), _FakeStudy({"w_spa_0": 1.0})])
+    optuna_module = optimization.optuna  # type: ignore[attr-defined]
+    monkeypatch.setattr(optuna_module, "create_study", lambda direction, sampler: next(studies))
+    monkeypatch.setattr(
+        optimization,
+        "generate_roi_batch",
+        lambda probabilities, context_scale, threshold: torch.ones_like(probabilities),
+    )
+    monkeypatch.setattr(
+        optimization, "compute_patient_auprc_in_roi", lambda y_true, y_pred, roi_mask: 0.8
+    )
+
+    result = run_two_stream_optimization(
+        replace(optimizer_config, spatial_patient_policy="all"),
+        [_ConstantBinaryModel(0.0, arch_name="SWIN"), _TupleTwoClassModel(arch_name="FPN")],
+        cast(Any, _ListLoader(4, [])),
+        device=torch.device("cpu"),
+    )
+
+    assert result.holdout_metrics["Spatial_patient_policy"] == "all"
+    assert result.holdout_metrics["N_eval_patients"] == 2
+    assert result.holdout_metrics["N_eval_negative_patients"] == 1
+    assert result.holdout_metrics["Macro_AUPRC_in_ROI_Positive"] == pytest.approx(0.8)
+    assert result.holdout_metrics["Macro_Negative_FP"] == pytest.approx(1.0)
+    assert result.holdout_metrics["Macro_Spill_All"] == pytest.approx(0.0)
+    assert result.holdout_metrics["Objective_Composite"] == pytest.approx(0.7)

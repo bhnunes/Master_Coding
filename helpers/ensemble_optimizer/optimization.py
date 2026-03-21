@@ -242,6 +242,15 @@ def _compute_positive_patients(
     return positive_patients
 
 
+def _compute_negative_false_positive_mass(
+    patient_prediction: npt.NDArray[np.float32],
+    patient_truth: npt.NDArray[np.uint8],
+) -> float:
+    if np.any(patient_truth):
+        return 0.0
+    return float(np.mean(patient_prediction))
+
+
 def run_two_stream_optimization(
     config: EnsembleOptimizerConfig,
     models: list[nn.Module],
@@ -381,9 +390,12 @@ def run_two_stream_optimization(
         weights = _normalize_weights(
             [trial.suggest_float(f"w_spa_{i}", 0.0, 1.0) for i in range(len(spatial_indices))]
         )
-        auprc_total = 0.0
+        positive_auprc_total = 0.0
         spill_total = 0.0
         evaluated_patients = 0
+        evaluated_positive_patients = 0
+        negative_fp_total = 0.0
+        evaluated_negative_patients = 0
         for patient_id in optimization_patients:
             local_slice = optimization_local_map[patient_id]
             patient_truth = optimization_truth[local_slice]
@@ -394,20 +406,41 @@ def run_two_stream_optimization(
             global_indices = optimization_idx[local_slice]
             patient_u16 = [prediction_memmaps[index][global_indices] for index in spatial_indices]
             patient_prediction = _weighted_ensemble_from_u16_cache(patient_u16, weights)
-            auprc_total += compute_patient_auprc_in_roi(
-                patient_truth.ravel(),
-                patient_prediction.ravel(),
-                patient_roi.ravel(),
-            )
+            if is_positive_patient:
+                positive_auprc_total += compute_patient_auprc_in_roi(
+                    patient_truth.ravel(),
+                    patient_prediction.ravel(),
+                    patient_roi.ravel(),
+                )
+                evaluated_positive_patients += 1
+            else:
+                negative_fp_total += _compute_negative_false_positive_mass(
+                    patient_prediction,
+                    patient_truth,
+                )
+                evaluated_negative_patients += 1
             mass_total = float(np.sum(patient_prediction) + 1e-7)
             mass_outside = float(np.sum(patient_prediction * (1 - patient_roi)))
             spill_total += mass_outside / mass_total
             evaluated_patients += 1
         if evaluated_patients == 0:
             return 0.0
-        macro_auprc = auprc_total / evaluated_patients
+        macro_positive_auprc = (
+            positive_auprc_total / evaluated_positive_patients
+            if evaluated_positive_patients > 0
+            else 0.0
+        )
         macro_spill = spill_total / evaluated_patients
-        return float(macro_auprc - (config.spill_penalty_lambda * macro_spill))
+        macro_negative_fp = (
+            negative_fp_total / evaluated_negative_patients
+            if evaluated_negative_patients > 0
+            else 0.0
+        )
+        return float(
+            macro_positive_auprc
+            - (config.spill_penalty_lambda * macro_spill)
+            - (config.spill_penalty_lambda * macro_negative_fp)
+        )
 
     spatial_study = optuna.create_study(
         direction="maximize",
@@ -434,9 +467,12 @@ def run_two_stream_optimization(
             accumulator += chunk.astype(np.float32) * (weight / 65535.0)
         return accumulator
 
-    auprc_total = 0.0
+    positive_auprc_total = 0.0
     spill_total = 0.0
     evaluated_patients = 0
+    evaluated_positive_patients = 0
+    negative_fp_total = 0.0
+    evaluated_negative_patients = 0
     positive_patient_count = 0
     negative_patient_count = 0
     for patient_id in tqdm(holdout_patients, desc="Eval Holdout"):
@@ -470,24 +506,51 @@ def run_two_stream_optimization(
             negative_patient_count += 1
         if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
             continue
-        auprc_total += compute_patient_auprc_in_roi(
-            patient_truth.ravel(),
-            spatial_prediction.ravel(),
-            roi_mask.ravel(),
-        )
+        if is_positive_patient:
+            positive_auprc_total += compute_patient_auprc_in_roi(
+                patient_truth.ravel(),
+                spatial_prediction.ravel(),
+                roi_mask.ravel(),
+            )
+            evaluated_positive_patients += 1
+        else:
+            negative_fp_total += _compute_negative_false_positive_mass(
+                spatial_prediction,
+                patient_truth,
+            )
+            evaluated_negative_patients += 1
         mass_total = float(np.sum(spatial_prediction) + 1e-7)
         mass_outside = float(np.sum(spatial_prediction * (1 - roi_mask)))
         spill_total += mass_outside / mass_total
         evaluated_patients += 1
 
-    macro_auprc = float(auprc_total / evaluated_patients) if evaluated_patients > 0 else 0.0
+    macro_positive_auprc = (
+        float(positive_auprc_total / evaluated_positive_patients)
+        if evaluated_positive_patients > 0
+        else 0.0
+    )
     macro_spill = float(spill_total / evaluated_patients) if evaluated_patients > 0 else 0.0
-    holdout_objective = float(macro_auprc - (config.spill_penalty_lambda * macro_spill))
+    macro_negative_fp = (
+        float(negative_fp_total / evaluated_negative_patients)
+        if evaluated_negative_patients > 0
+        else 0.0
+    )
+    holdout_objective = float(
+        macro_positive_auprc
+        - (config.spill_penalty_lambda * macro_spill)
+        - (config.spill_penalty_lambda * macro_negative_fp)
+    )
     holdout_metrics: dict[str, float | int | str] = {
-        "Macro_AUPRC_in_ROI": macro_auprc,
+        "Macro_AUPRC_in_ROI": macro_positive_auprc,
+        "Macro_AUPRC_in_ROI_Positive": macro_positive_auprc,
         "Macro_Spill": macro_spill,
+        "Macro_Spill_All": macro_spill,
+        "Macro_Negative_FP": macro_negative_fp,
         "Objective_AUPRC_minus_lambdaSpill": holdout_objective,
+        "Objective_Composite": holdout_objective,
         "N_eval_patients": int(evaluated_patients),
+        "N_eval_positive_patients": int(evaluated_positive_patients),
+        "N_eval_negative_patients": int(evaluated_negative_patients),
         "N_pos_patients_total": int(positive_patient_count),
         "N_neg_patients_total": int(negative_patient_count),
         "Spatial_patient_policy": config.spatial_patient_policy,

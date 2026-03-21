@@ -62,6 +62,21 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.semantic_architectures == ("SWIN", "DPT", "SEGFORMER", "UPERNET")
     assert config.spatial_architectures == ("DEEPLABV3PLUS", "UNET++", "FPN", "MANET")
     assert config.sort_metric == "best_val_auprc_pixel_score"
+    assert config.spatial_patient_policy == "all"
+
+
+def test_load_ensemble_optimizer_config_allows_explicit_positive_only_policy(
+    tmp_path: Path,
+) -> None:
+    config = load_ensemble_optimizer_config(
+        {
+            "ENSEMBLE_OPT_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+            "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+            "ENSEMBLE_OPT_SPATIAL_PATIENT_POLICY": "positive_only",
+        }
+    )
+
+    assert config.spatial_patient_policy == "positive_only"
 
 
 def test_load_ensemble_optimizer_config_rejects_unknown_group_architecture(tmp_path: Path) -> None:

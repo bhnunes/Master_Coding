@@ -180,7 +180,7 @@ def load_ensemble_optimizer_config(
         ),
         spatial_patient_policy=_parse_choice(
             values.get("ENSEMBLE_OPT_SPATIAL_PATIENT_POLICY"),
-            default="positive_only",
+            default="all",
             valid=VALID_SPATIAL_PATIENT_POLICIES,
         ),
         num_trials_semantic=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC"), default=50),
