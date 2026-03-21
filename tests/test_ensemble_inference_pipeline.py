@@ -50,4 +50,6 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
     payload = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert payload["batch_size"] == 8
     assert payload["visualization_samples"] == 3
+    assert "runtime_environment" in payload
+    assert "git_commit" in payload["runtime_environment"]
     assert outputs.recipe_copy_path.name == "recipe.json"

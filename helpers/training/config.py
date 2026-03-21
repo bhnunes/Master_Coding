@@ -167,7 +167,7 @@ def load_training_ensemble_config(
     execution_mode = _parse_choice(
         values.get("TRAINING_EXECUTION_MODE"),
         "TRAINING_EXECUTION_MODE",
-        default="FAST_DEV",
+        default="PAPER",
         valid_values=VALID_EXECUTION_MODES,
         normalize=True,
     )

@@ -20,6 +20,7 @@ from helpers.ensemble_inference.reporting import (
     save_confusion_matrix_png,
     write_ensemble_report_latex,
 )
+from helpers.provenance import collect_runtime_environment
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import seed_everything
 from helpers.training.utils import get_formatted_datetime_string
@@ -160,6 +161,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
     run_payload.update(
         {
             "generated_at": timestamp,
+            "runtime_environment": collect_runtime_environment(),
             "test_h5_path": str(test_h5_path),
             "output_dir": str(output_dir),
             "recipe_copy_path": str(recipe_copy_path),
@@ -196,5 +198,6 @@ def run_ensemble_inference_pipeline(
         return outputs
     payload = _serialize_config(config)
     payload["output_dir"] = str(output_dir)
+    payload["runtime_environment"] = collect_runtime_environment()
     outputs.run_config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return outputs

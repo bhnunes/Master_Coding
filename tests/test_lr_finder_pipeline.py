@@ -90,3 +90,5 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
     assert run_config["pdf_name"] == "report.pdf"
     assert run_config["completed_trials"] == 2
     assert run_config["failed_trials"] == 0
+    assert "runtime_environment" in run_config
+    assert "git_commit" in run_config["runtime_environment"]

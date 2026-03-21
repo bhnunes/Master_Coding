@@ -140,14 +140,14 @@ def summarize_patient_metrics(
     macro_dice_pos_only_ci = [np.nan, np.nan]
     macro_neg_clean_rate_ci = [np.nan, np.nan]
     if run_bootstrap:
-        np.random.seed(seed)
+        rng = np.random.default_rng(seed)
         boot_micro = {key: np.zeros(n_bootstrap_samples, dtype=np.float64) for key in metric_keys}
         boot_macro = {key: np.zeros(n_bootstrap_samples, dtype=np.float64) for key in metric_keys}
         boot_dice_pos_only = np.zeros(n_bootstrap_samples, dtype=np.float64)
         boot_neg_clean = np.zeros(n_bootstrap_samples, dtype=np.float64)
 
         for index in range(n_bootstrap_samples):
-            resampled_pids = np.random.choice(unique_patient_ids, size=n_patients, replace=True)
+            resampled_pids = rng.choice(unique_patient_ids, size=n_patients, replace=True)
             resampled_stats = [stat for pid in resampled_pids for stat in stats_by_patient[pid]]
             metrics = calculate_metrics(
                 tp=sum(item["tp"] for item in resampled_stats),
@@ -158,7 +158,7 @@ def summarize_patient_metrics(
             for key in metric_keys:
                 boot_micro[key][index] = metrics[key]
 
-            sampled_indices = np.random.choice(range(n_patients), size=n_patients, replace=True)
+            sampled_indices = rng.choice(n_patients, size=n_patients, replace=True)
             for key in metric_keys:
                 boot_macro[key][index] = np.nanmean(per_patient_scores[key][sampled_indices])
             boot_dice_pos_only[index] = np.nanmean(dice_pos_only[sampled_indices])

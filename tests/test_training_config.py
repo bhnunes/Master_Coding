@@ -70,7 +70,7 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.resume_checkpoint is None
     assert config.email_recipients == ()
     assert config.amp_precision == "fp16"
-    assert config.execution_mode == "FAST_DEV"
+    assert config.execution_mode == "PAPER"
     assert config.use_artifact_aware_loss is False
     assert config.artifact_index_path is None
     assert config.log_path == Path("logs/training_ensemble.log")

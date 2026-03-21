@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -226,3 +227,40 @@ def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
     contents = meta_path.read_text(encoding="utf-8")
     assert '"best_model_epoch": 5' in contents
     assert '"architecture": "UNET++"' in contents
+    assert '"runtime_environment"' in contents
+
+
+def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
+    save_metadata(
+        best_val_score=0.9,
+        checkpoint={"epoch": 5},
+        encoder="resnet34",
+        architecture="UNET++",
+        metadata_best_path=str(tmp_path / "best_model.pth"),
+        val_loss=0.2,
+        val_mcc=0.7,
+        val_auroc=0.8,
+        metadata_dir=str(tmp_path),
+        amp_log={"precision": "fp32"},
+        base_learning_rate=1e-3,
+        weight_decay=1e-4,
+        batch_size=8,
+        num_epochs=10,
+        workers=2,
+        seed=7,
+        dataset="demo",
+        patience=3,
+        optimizer_name="AdamW",
+        alpha_bce=0.6,
+        beta_dice_bg=0.2,
+        gamma_dice_fg=0.8,
+        execution_mode="PAPER",
+        artifact_index_path="artifact.parquet",
+        resume_checkpoint="resume.pth",
+    )
+
+    payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
+    assert payload["execution_mode"] == "PAPER"
+    assert payload["artifact_index_path"] == "artifact.parquet"
+    assert payload["resume_checkpoint"] == "resume.pth"
+    assert "git_commit" in payload["runtime_environment"]

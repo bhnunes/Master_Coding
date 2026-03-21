@@ -155,7 +155,7 @@ def load_lr_finder_config(
         smart_sampling=_parse_bool(values.get("LR_FINDER_SMART_SAMPLING"), default=True),
         execution_mode=_parse_choice(
             values.get("LR_FINDER_EXECUTION_MODE"),
-            default="FAST_DEV",
+            default="PAPER",
             valid=VALID_EXECUTION_MODES,
             upper=True,
         ),

@@ -11,6 +11,7 @@ from typing import Any
 from helpers.lr_finder.config import LRFinderConfig
 from helpers.lr_finder.reporting import build_latex_report
 from helpers.lr_finder.runner import ScreeningOutputs, run_lr_finder_screening
+from helpers.provenance import collect_runtime_environment
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ def run_lr_finder_pipeline(
             "completed_trials": screening_outputs.completed_trials,
             "failed_trials": screening_outputs.failed_trials,
             "generated_at": meta["timestamp"],
+            "runtime_environment": collect_runtime_environment(),
             "summary_all_path": str(screening_outputs.summary_all_path),
             "lhs_samples_path": str(screening_outputs.lhs_samples_path),
             "tex_path": str(tex_path),

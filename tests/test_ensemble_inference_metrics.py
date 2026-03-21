@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+from typing import Any, cast
 
+import numpy as np
 import pytest
 import torch
 
@@ -149,3 +151,20 @@ def test_summarize_patient_metrics_with_bootstrap_populates_confidence_intervals
     assert len(summary["macro_averaged_metrics"]["ci"]["dice"]) == 2
     assert not math.isnan(summary["macro_dice_rule6_split"]["dice_pos_only"]["ci"][0])
     assert not math.isnan(summary["macro_dice_rule6_split"]["neg_clean_rate"]["ci"][0])
+
+
+def test_summarize_patient_metrics_does_not_mutate_global_numpy_rng_state() -> None:
+    stats_by_patient = {
+        f"patient_{index}": [
+            {"tp": 1, "fp": 0, "fn": 0, "tn": 3}
+            if index % 2 == 0
+            else {"tp": 0, "fp": 0, "fn": 0, "tn": 4}
+        ]
+        for index in range(20)
+    }
+    np_before = cast(tuple[str, Any, int, int, float], np.random.get_state())
+
+    summarize_patient_metrics(stats_by_patient, seed=7, n_bootstrap_samples=4)
+
+    np_after = cast(tuple[str, Any, int, int, float], np.random.get_state())
+    assert np_before[1].tolist() == np_after[1].tolist()

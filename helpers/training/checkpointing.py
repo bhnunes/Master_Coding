@@ -6,6 +6,8 @@ from typing import Any, cast
 
 import torch
 
+from helpers.provenance import collect_runtime_environment
+
 
 class EarlyStopping:
     """Save the single best checkpoint and stop after patience is exhausted."""
@@ -250,6 +252,9 @@ def save_metadata(
     alpha_bce: float,
     beta_dice_bg: float,
     gamma_dice_fg: float,
+    execution_mode: str | None = None,
+    artifact_index_path: str | os.PathLike[str] | None = None,
+    resume_checkpoint: str | os.PathLike[str] | None = None,
 ) -> None:
     """Persist model metadata next to the best checkpoint."""
 
@@ -267,6 +272,14 @@ def save_metadata(
         "checkpoint_path": metadata_best_path,
         "encoder": encoder,
         "architecture": architecture,
+        "runtime_environment": collect_runtime_environment(),
+        "execution_mode": execution_mode,
+        "artifact_index_path": (
+            os.fspath(artifact_index_path) if artifact_index_path is not None else None
+        ),
+        "resume_checkpoint": os.fspath(resume_checkpoint)
+        if resume_checkpoint is not None
+        else None,
         "hyperparameters": {
             "amp_precision": amp_log,
             "Learning_rate": base_learning_rate,
