@@ -28,6 +28,7 @@ from helpers.ensemble_optimizer.optimization import (
 )
 from helpers.ensemble_optimizer.reporting import build_recipe_metadata, write_recipe_metadata
 from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
+from helpers.provenance import build_split_fingerprint, collect_hdf5_provenance
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
@@ -170,6 +171,10 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         stage_input_locally=config.stage_input_locally,
     )
     split = _build_validation_split(config, validation_h5_path)
+    split_fingerprint = build_split_fingerprint(
+        optimization_patients=split.optimization_patients,
+        holdout_patients=split.holdout_patients,
+    )
     selected_models, subset_scores = _select_models_from_optimization_subset(
         config,
         validation_h5_path,
@@ -190,6 +195,8 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         predefined_split=split,
     )
     timestamp = get_formatted_datetime_string()
+    compatibility_signature = str(selected_models[0].raw_metadata["compatibility_signature"])
+    validation_provenance = collect_hdf5_provenance(validation_h5_path)
     payload = build_recipe_metadata(
         selected_models=selected_models,
         semantic_indices=optimization_result.semantic_indices,
@@ -202,6 +209,9 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         spatial_patient_policy=config.spatial_patient_policy,
         holdout_metrics=optimization_result.holdout_metrics,
         generated_at=timestamp,
+        compatibility_signature=compatibility_signature,
+        validation_provenance=validation_provenance,
+        split_fingerprint=split_fingerprint,
     )
     recipe_path = write_recipe_metadata(payload, config.output_dir, timestamp)
     run_config_path = config.output_dir / "ensemble_optimizer_run_config.json"
@@ -213,6 +223,9 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             "holdout_patients": sorted(split.holdout_patients),
             "recipe_path": str(recipe_path),
             "generated_at": timestamp,
+            "compatibility_signature": compatibility_signature,
+            "validation_provenance": validation_provenance,
+            "split_fingerprint": split_fingerprint,
             "selected_models": [
                 {
                     "architecture": model.architecture,

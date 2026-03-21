@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
+from helpers.provenance import hash_file_sha256, hash_json_payload
 
 
 def build_recipe_metadata(
@@ -22,6 +23,9 @@ def build_recipe_metadata(
     spatial_patient_policy: str,
     holdout_metrics: dict[str, float | int | str],
     generated_at: str,
+    compatibility_signature: str,
+    validation_provenance: dict[str, Any],
+    split_fingerprint: str,
 ) -> dict[str, Any]:
     final_semantic_weights = np.zeros(len(selected_models), dtype=np.float64)
     for index, global_index in enumerate(semantic_indices):
@@ -48,6 +52,18 @@ def build_recipe_metadata(
                 "architecture": selected_model.architecture,
                 "encoder": selected_model.encoder,
                 "checkpoint_path": selected_model.checkpoint_path,
+                "checkpoint_sha256": (
+                    hash_file_sha256(selected_model.checkpoint_path)
+                    if Path(selected_model.checkpoint_path).exists()
+                    else None
+                ),
+                "metadata_path": selected_model.raw_metadata.get("_metadata_path"),
+                "metadata_sha256": (
+                    hash_file_sha256(str(selected_model.raw_metadata["_metadata_path"]))
+                    if selected_model.raw_metadata.get("_metadata_path")
+                    and Path(str(selected_model.raw_metadata["_metadata_path"])).exists()
+                    else None
+                ),
                 "stream_role": stream_role,
                 "weight": weight,
                 "original_index_in_optimizer": index,
@@ -64,15 +80,20 @@ def build_recipe_metadata(
                 "Optimizer": raw_hyperparameters.get("Optimizer"),
                 "Seed": raw_hyperparameters.get("Seed"),
                 "Loss_Function": raw_hyperparameters.get("Loss_Function"),
+                "compatibility_signature": selected_model.raw_metadata.get(
+                    "compatibility_signature"
+                ),
+                "training_provenance": selected_model.raw_metadata.get("provenance"),
             }
         )
 
     stream_order = {"semantic": 0, "spatial": 1, "none": 2}
     model_registry.sort(key=lambda item: (stream_order[item["stream_role"]], -item["weight"]))
-    return {
+    payload = {
         "experiment_id": f"two_stream_opt_{generated_at}",
         "datetime": generated_at,
         "ensemble_strategy": "two_stream_spatial_gating",
+        "compatibility_signature": compatibility_signature,
         "roi_config": {
             "method": "lowpass_upsample_threshold",
             "scale": roi_context_scale,
@@ -84,7 +105,13 @@ def build_recipe_metadata(
         },
         "model_registry": model_registry,
         "holdout_metrics": holdout_metrics,
+        "provenance": {
+            "validation": validation_provenance,
+            "split_fingerprint": split_fingerprint,
+        },
     }
+    payload["recipe_signature"] = hash_json_payload(payload)
+    return payload
 
 
 def write_recipe_metadata(payload: dict[str, Any], output_dir: Path, timestamp: str) -> Path:

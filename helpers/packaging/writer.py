@@ -11,6 +11,7 @@ import numpy as np
 import numpy.typing as npt
 
 from helpers.packaging.discovery import SampleRecord
+from helpers.provenance import hash_file_sha256
 
 
 def _build_packaging_signature(samples: list[SampleRecord], img_size: int) -> str:
@@ -20,6 +21,8 @@ def _build_packaging_signature(samples: list[SampleRecord], img_size: int) -> st
             {
                 "image_path": str(sample.image_path),
                 "mask_path": str(sample.mask_path),
+                "image_sha256": hash_file_sha256(sample.image_path),
+                "mask_sha256": hash_file_sha256(sample.mask_path),
                 "filename": sample.filename,
                 "label": int(sample.label),
                 "patient_id": int(sample.patient_id),

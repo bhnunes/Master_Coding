@@ -20,7 +20,12 @@ from helpers.ensemble_inference.reporting import (
     save_confusion_matrix_png,
     write_ensemble_report_latex,
 )
-from helpers.provenance import collect_runtime_environment
+from helpers.provenance import (
+    collect_hdf5_provenance,
+    collect_runtime_environment,
+    hash_file_sha256,
+    hash_json_payload,
+)
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import seed_everything
 from helpers.training.utils import get_formatted_datetime_string
@@ -65,11 +70,19 @@ def _serialize_config(config: EnsembleInferenceConfig) -> dict[str, Any]:
 
 def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutputs:
     output_dir = _resolve_output_dir(config)
+    output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = get_formatted_datetime_string()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     seed_everything(config.seed)
 
     recipe_payload = load_recipe_payload(config.recipe_path)
+    expected_recipe_signature = recipe_payload.get("recipe_signature")
+    if isinstance(expected_recipe_signature, str) and expected_recipe_signature.strip():
+        observed_recipe_signature = hash_json_payload(
+            {key: value for key, value in recipe_payload.items() if key != "recipe_signature"}
+        )
+        if observed_recipe_signature != expected_recipe_signature:
+            raise ValueError("Recipe provenance mismatch: recipe_signature does not match payload.")
     recipe = parse_ensemble_recipe(recipe_payload)
     recipe_copy_path = output_dir / config.recipe_path.name
     if config.recipe_path.resolve() != recipe_copy_path.resolve():
@@ -82,6 +95,21 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
     )
+    observed_checkpoint_hashes: dict[str, str] = {}
+    for entry in recipe_payload.get("model_registry", []):
+        checkpoint_path = Path(str(entry.get("checkpoint_path", "")).strip())
+        expected_checkpoint_hash = entry.get("checkpoint_sha256")
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Recipe checkpoint does not exist: {checkpoint_path}")
+        observed_hash = hash_file_sha256(checkpoint_path)
+        observed_checkpoint_hashes[str(checkpoint_path)] = observed_hash
+        if expected_checkpoint_hash is not None and observed_hash != expected_checkpoint_hash:
+            raise ValueError(
+                f"Checkpoint provenance mismatch for '{checkpoint_path}'. "
+                "The on-disk checkpoint content no longer matches the recipe."
+            )
+
+    test_h5_provenance = collect_hdf5_provenance(test_h5_path)
     test_loader = create_test_dataloader(
         test_h5_path,
         batch_size=config.batch_size,
@@ -163,8 +191,11 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
             "generated_at": timestamp,
             "runtime_environment": collect_runtime_environment(),
             "test_h5_path": str(test_h5_path),
+            "test_h5_provenance": test_h5_provenance,
             "output_dir": str(output_dir),
             "recipe_copy_path": str(recipe_copy_path),
+            "recipe_sha256": hash_file_sha256(recipe_copy_path),
+            "observed_checkpoint_hashes": observed_checkpoint_hashes,
             "metrics_json_path": str(metrics_json_path),
             "confusion_matrix_path": str(confusion_matrix_path),
             "csv_report_path": str(csv_report_path) if csv_report_path is not None else None,

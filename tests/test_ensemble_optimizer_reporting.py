@@ -36,6 +36,9 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
         spatial_patient_policy="positive_only",
         holdout_metrics={"Macro_AUPRC_in_ROI": 0.7},
         generated_at="2026-03-20_10_00_00",
+        compatibility_signature="compat-a",
+        validation_provenance={"dataset_sha256": "val-sha"},
+        split_fingerprint="split-sha",
     )
 
     output_path = write_recipe_metadata(payload, tmp_path, "2026-03-20_10_00_00")
@@ -46,3 +49,6 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
     assert payload["model_registry"][0]["stream_role"] == "semantic"
     assert payload["model_registry"][1]["stream_role"] == "spatial"
     assert "holdout_metrics" in payload
+    assert payload["compatibility_signature"] == "compat-a"
+    assert payload["provenance"]["validation"] == {"dataset_sha256": "val-sha"}
+    assert payload["provenance"]["split_fingerprint"] == "split-sha"

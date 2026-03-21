@@ -11,6 +11,7 @@ import numpy.typing as npt
 import pandas as pd
 from tqdm.auto import tqdm
 
+from helpers.provenance import collect_hdf5_provenance
 from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.index import guardrail, resolve_filename_key
 
@@ -28,9 +29,11 @@ def _build_sampling_signature(
     source_path: Path,
     output_filename: str,
 ) -> str:
+    source_provenance = collect_hdf5_provenance(source_path)
     payload = {
         "selected_indices": np.asarray(selected_indices, dtype=np.int64).tolist(),
         "source_path": str(source_path),
+        "source_provenance": source_provenance,
         "output_filename": output_filename,
     }
     return _hash_json_payload(payload)
@@ -69,6 +72,7 @@ def write_filtered_hdf5(
 
     with h5py.File(source_path, "r") as source_handle, h5py.File(output_path, "w") as dest_handle:
         dest_handle.attrs["selection_signature"] = selection_signature
+        dest_handle.attrs["source_hdf5_sha256"] = collect_hdf5_provenance(source_path)["sha256"]
         guardrail(source_handle)
         filename_key = resolve_filename_key(source_handle)
         for key in ["images", "masks", "patient_ids", "labels", filename_key]:

@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from helpers.ensemble_inference.config import EnsembleInferenceConfig
 from helpers.ensemble_inference.pipeline import (
     EnsembleInferenceOutputs,
+    _execute_pipeline,
     run_ensemble_inference_pipeline,
 )
 
@@ -53,3 +56,55 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
     assert "runtime_environment" in payload
     assert "git_commit" in payload["runtime_environment"]
     assert outputs.recipe_copy_path.name == "recipe.json"
+
+
+def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_path = tmp_path / "model.pth"
+    checkpoint_path.write_bytes(b"model-v2")
+    recipe_path = tmp_path / "recipe.json"
+    recipe_path.write_text(
+        json.dumps(
+            {
+                "ensemble_strategy": "two_stream_spatial_gating",
+                "roi_config": {"threshold": 0.33, "scale": 4},
+                "model_registry": [
+                    {
+                        "architecture": "SWIN",
+                        "encoder": "enc-a",
+                        "checkpoint_path": str(checkpoint_path),
+                        "stream_role": "semantic",
+                        "weight": 1.0,
+                        "checkpoint_sha256": "wrong-hash",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = EnsembleInferenceConfig(
+        recipe_path=recipe_path,
+        hdf5_drive_dir=tmp_path / "dataset",
+        output_dir=tmp_path / "reports",
+        local_data_dir=tmp_path / "cache",
+        stage_input_locally=False,
+        overwrite_output=True,
+        batch_size=8,
+        workers=1,
+        seed=24,
+        visualization_samples=0,
+        export_csv=False,
+        export_latex=False,
+        export_visualizations=False,
+    )
+    assert config.output_dir is not None
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.setup_test_hdf5",
+        lambda *args, **kwargs: tmp_path / "dataset" / "TEST.h5",
+    )
+
+    with pytest.raises(ValueError, match="Checkpoint provenance mismatch"):
+        _execute_pipeline(config)

@@ -197,6 +197,9 @@ def test_load_checkpoint_for_resume_ignores_optimizer_restore_errors(
 
 
 def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "TRAIN.h5"
+    dataset_path.write_bytes(b"dataset-v1")
+
     save_metadata(
         best_val_score=0.9,
         checkpoint={"epoch": 5},
@@ -214,7 +217,7 @@ def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
         num_epochs=10,
         workers=2,
         seed=7,
-        dataset="demo",
+        dataset=str(dataset_path),
         patience=3,
         optimizer_name="AdamW",
         alpha_bce=0.6,
@@ -231,6 +234,11 @@ def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
 
 
 def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "TRAIN.h5"
+    dataset_path.write_bytes(b"dataset-v1")
+    artifact_index_path = tmp_path / "artifact.parquet"
+    artifact_index_path.write_bytes(b"artifact-v1")
+
     save_metadata(
         best_val_score=0.9,
         checkpoint={"epoch": 5},
@@ -248,19 +256,61 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
         num_epochs=10,
         workers=2,
         seed=7,
-        dataset="demo",
+        dataset=str(dataset_path),
         patience=3,
         optimizer_name="AdamW",
         alpha_bce=0.6,
         beta_dice_bg=0.2,
         gamma_dice_fg=0.8,
         execution_mode="PAPER",
-        artifact_index_path="artifact.parquet",
+        artifact_index_path=artifact_index_path,
         resume_checkpoint="resume.pth",
     )
 
     payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
     assert payload["execution_mode"] == "PAPER"
-    assert payload["artifact_index_path"] == "artifact.parquet"
+    assert payload["artifact_index_path"] == str(artifact_index_path)
     assert payload["resume_checkpoint"] == "resume.pth"
     assert "git_commit" in payload["runtime_environment"]
+
+
+def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "TRAIN_FILTERED.h5"
+    dataset_path.write_bytes(b"dataset-v1")
+    artifact_index_path = tmp_path / "artifact.parquet"
+    artifact_index_path.write_bytes(b"artifact-v1")
+
+    save_metadata(
+        best_val_score=0.9,
+        checkpoint={"epoch": 5},
+        encoder="resnet34",
+        architecture="UNET++",
+        metadata_best_path=str(tmp_path / "best_model.pth"),
+        val_loss=0.2,
+        val_mcc=0.7,
+        val_auroc=0.8,
+        metadata_dir=str(tmp_path),
+        amp_log={"precision": "fp32"},
+        base_learning_rate=1e-3,
+        weight_decay=1e-4,
+        batch_size=8,
+        num_epochs=10,
+        workers=2,
+        seed=7,
+        dataset=str(dataset_path),
+        patience=3,
+        optimizer_name="AdamW",
+        alpha_bce=0.6,
+        beta_dice_bg=0.2,
+        gamma_dice_fg=0.8,
+        execution_mode="PAPER",
+        artifact_index_path=artifact_index_path,
+        resume_checkpoint="resume.pth",
+    )
+
+    payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
+    provenance = payload["provenance"]
+    assert payload["compatibility_signature"]
+    assert provenance["dataset"]["sha256"]
+    assert provenance["artifact_aware_loss"]["enabled"] is True
+    assert provenance["artifact_aware_loss"]["artifact_index_sha256"]

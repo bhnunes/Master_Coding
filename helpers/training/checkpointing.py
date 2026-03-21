@@ -6,7 +6,100 @@ from typing import Any, cast
 
 import torch
 
-from helpers.provenance import collect_runtime_environment
+from helpers.provenance import (
+    collect_hdf5_provenance,
+    collect_runtime_environment,
+    hash_file_sha256,
+    hash_json_payload,
+)
+
+
+def _build_dataset_provenance(dataset: str) -> dict[str, Any]:
+    dataset_path = Path(dataset)
+    if not dataset_path.exists():
+        raise FileNotFoundError(
+            "Training dataset path "
+            f"'{dataset_path}' does not exist; cannot write fail-closed provenance."
+        )
+
+    dataset_provenance = collect_hdf5_provenance(dataset_path)
+    return {
+        "path": dataset_provenance["path"],
+        "sha256": dataset_provenance["sha256"],
+        "source_signature": dataset_provenance.get("source_signature"),
+        "selection_signature": dataset_provenance.get("selection_signature"),
+        "smart_sampling_enabled": dataset_provenance.get("selection_signature") is not None,
+    }
+
+
+def _build_artifact_loss_provenance(
+    artifact_index_path: str | os.PathLike[str] | None,
+) -> dict[str, Any]:
+    artifact_path_str = os.fspath(artifact_index_path) if artifact_index_path is not None else None
+    artifact_sha256 = None
+    if artifact_path_str is not None:
+        artifact_path = Path(artifact_path_str)
+        if not artifact_path.exists():
+            raise FileNotFoundError(
+                "Artifact-aware loss index "
+                f"'{artifact_path}' does not exist; cannot write provenance."
+            )
+        artifact_sha256 = hash_file_sha256(artifact_path)
+    return {
+        "enabled": artifact_path_str is not None,
+        "artifact_index_path": artifact_path_str,
+        "artifact_index_sha256": artifact_sha256,
+    }
+
+
+def _build_training_provenance(
+    dataset: str,
+    artifact_index_path: str | os.PathLike[str] | None,
+    resume_checkpoint: str | os.PathLike[str] | None,
+) -> tuple[dict[str, Any], str]:
+    dataset_provenance = _build_dataset_provenance(dataset)
+    artifact_loss_provenance = _build_artifact_loss_provenance(artifact_index_path)
+    resume_path_str = os.fspath(resume_checkpoint) if resume_checkpoint is not None else None
+    resume_sha256 = None
+    if resume_path_str is not None and Path(resume_path_str).exists():
+        resume_sha256 = hash_file_sha256(resume_path_str)
+
+    provenance = {
+        "schema_version": 1,
+        "dataset": dataset_provenance,
+        "split_lineage": {
+            "dataset_sha256": dataset_provenance["sha256"],
+            "source_signature": dataset_provenance["source_signature"],
+        },
+        "packaging_lineage": {
+            "dataset_sha256": dataset_provenance["sha256"],
+            "source_signature": dataset_provenance["source_signature"],
+        },
+        "normalization_lineage": {
+            "dataset_sha256": dataset_provenance["sha256"],
+        },
+        "smart_sampling_lineage": {
+            "enabled": dataset_provenance["smart_sampling_enabled"],
+            "selection_signature": dataset_provenance["selection_signature"],
+        },
+        "artifact_aware_loss": artifact_loss_provenance,
+        "resume_checkpoint": {
+            "path": resume_path_str,
+            "sha256": resume_sha256,
+        },
+    }
+    compatibility_contract = {
+        key: provenance[key]
+        for key in (
+            "schema_version",
+            "split_lineage",
+            "packaging_lineage",
+            "normalization_lineage",
+            "smart_sampling_lineage",
+            "artifact_aware_loss",
+        )
+    }
+    return provenance, hash_json_payload(cast(dict[str, Any], compatibility_contract))
 
 
 class EarlyStopping:
@@ -262,6 +355,11 @@ def save_metadata(
 
     meta_filename = os.path.join(metadata_dir, os.path.basename(metadata_best_path))
     meta_filename = meta_filename.replace(".pth", "_meta.json")
+    provenance, compatibility_signature = _build_training_provenance(
+        dataset,
+        artifact_index_path,
+        resume_checkpoint,
+    )
 
     metadata = {
         "best_val_auprc_pixel_score": best_val_score,
@@ -274,6 +372,8 @@ def save_metadata(
         "architecture": architecture,
         "runtime_environment": collect_runtime_environment(),
         "execution_mode": execution_mode,
+        "compatibility_signature": compatibility_signature,
+        "provenance": provenance,
         "artifact_index_path": (
             os.fspath(artifact_index_path) if artifact_index_path is not None else None
         ),

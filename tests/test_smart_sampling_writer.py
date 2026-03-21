@@ -1,7 +1,9 @@
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
+import pytest
 
 from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.writer import write_filtered_hdf5
@@ -59,10 +61,12 @@ def test_write_filtered_hdf5_writes_plural_filenames_for_legacy_input(tmp_path: 
     result = write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
 
     with h5py.File(result, "r") as handle:
+        filenames = cast(h5py.Dataset, handle["filenames"])
+        patient_ids = cast(h5py.Dataset, handle["patient_ids"])
         assert set(handle.keys()) == {"filenames", "images", "labels", "masks", "patient_ids"}
         assert handle.attrs["selection_signature"]
-        assert handle["filenames"][0].decode("utf-8") == "PATIENT_1_b.png"
-        assert handle["patient_ids"][:].tolist() == [1, 2]
+        assert cast(bytes, filenames[0]).decode("utf-8") == "PATIENT_1_b.png"
+        assert patient_ids[:].tolist() == [1, 2]
 
 
 def test_write_filtered_hdf5_reuses_existing_output_when_selection_matches(tmp_path: Path) -> None:
@@ -150,3 +154,49 @@ def test_write_filtered_hdf5_rejects_existing_output_when_selection_mismatches(
         assert "does not match the current selection" in str(error)
     else:
         raise AssertionError("Expected stale smart-sampling output to be rejected.")
+
+
+def test_write_filtered_hdf5_rejects_reuse_when_source_contents_change_in_place(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_source_hdf5(source_path)
+
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=output_dir,
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=None,
+        stage_input_locally=False,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+    )
+    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    reuse_config = SmartSamplerConfig(**{**config.__dict__, "overwrite_output": False})
+
+    with h5py.File(source_path, "a") as handle:
+        labels = cast(h5py.Dataset, handle["labels"])
+        labels[0] = 1
+
+    with pytest.raises(ValueError, match="does not match the current selection"):
+        write_filtered_hdf5(reuse_config, np.array([1, 2], dtype=np.int64))
