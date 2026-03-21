@@ -4,3 +4,4 @@
 *.pyc
 credentials.json
 token.json
+.env

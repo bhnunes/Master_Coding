@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+from typing import Any, cast
+
+import pytest
+
+from helpers.extraction import patch_engine
+
+
+def test_chunk_coordinates_groups_work_into_stable_batches() -> None:
+    chunk_coordinates = cast(
+        Callable[..., Iterator[list[tuple[int, int]]]],
+        patch_engine.chunk_coordinates,
+    )
+    batches = list(chunk_coordinates([(1, 2), (3, 4), (5, 6)], batch_size=2))
+
+    assert batches == [[(1, 2), (3, 4)], [(5, 6)]]
+
+
+def test_process_window_batch_reuses_single_slide_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened_paths: list[str] = []
+    closed_slides: list[str] = []
+
+    class FakeSlide:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def close(self) -> None:
+            closed_slides.append(self.path)
+
+    class FakeOpenSlideModule:
+        def OpenSlide(self, path: str) -> FakeSlide:
+            opened_paths.append(path)
+            return FakeSlide(path)
+
+    monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
+    monkeypatch.setattr(
+        patch_engine,
+        "_process_window_with_slide",
+        lambda slide, x, y: (f"SAVED_{x}_{y}", {"slide": slide.path, "coords": (x, y)}),
+    )
+    monkeypatch.setattr(
+        patch_engine,
+        "_WORKER_CONTEXT",
+        {"path_Image": "/tmp/sample.svs"},
+    )
+
+    process_window_batch = cast(
+        Callable[[list[tuple[int, int]]], list[tuple[str, dict[str, Any]]]],
+        patch_engine.process_window_batch,
+    )
+    results = process_window_batch([(10, 20), (30, 40)])
+
+    assert opened_paths == ["/tmp/sample.svs"]
+    assert closed_slides == ["/tmp/sample.svs"]
+    assert results == [
+        ("SAVED_10_20", {"slide": "/tmp/sample.svs", "coords": (10, 20)}),
+        ("SAVED_30_40", {"slide": "/tmp/sample.svs", "coords": (30, 40)}),
+    ]
+
+
+def test_iter_window_results_flattens_batch_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_process_window_batch(batch: list[tuple[int, int]]) -> list[tuple[str, dict[str, Any]]]:
+        return [(f"SAVED_{x}_{y}", {"coords": (x, y)}) for x, y in batch]
+
+    class FakePool:
+        def __init__(self, *, processes: int, initializer: Any, initargs: tuple[Any, ...]) -> None:
+            assert processes == 2
+            initializer(*initargs)
+
+        def __enter__(self) -> FakePool:
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+        def imap_unordered(
+            self, func: Any, batches: Iterator[list[tuple[int, int]]], chunksize: int
+        ) -> Iterator[list[tuple[str, dict[str, Any]]]]:
+            assert func is fake_process_window_batch
+            assert chunksize == 1
+            for batch in batches:
+                yield func(batch)
+
+    monkeypatch.setattr(patch_engine, "Pool", FakePool)
+    monkeypatch.setattr(patch_engine, "process_window_batch", fake_process_window_batch)
+
+    worker_state: dict[str, Any] = {}
+    iter_window_results = cast(
+        Callable[..., Iterator[tuple[str, dict[str, Any]]]], patch_engine.iter_window_results
+    )
+    results = list(
+        iter_window_results(
+            filtered_coords=[(1, 1), (2, 2), (3, 3)],
+            num_workers=2,
+            worker_state=worker_state,
+            batch_size=2,
+        )
+    )
+
+    assert results == [
+        ("SAVED_1_1", {"coords": (1, 1)}),
+        ("SAVED_2_2", {"coords": (2, 2)}),
+        ("SAVED_3_3", {"coords": (3, 3)}),
+    ]
