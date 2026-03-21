@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 import torch
 
+from helpers.provenance import hash_file_sha256
 from helpers.training import data as training_data
 from helpers.training.data import (
     HybridProstateDataset,
@@ -96,12 +97,26 @@ class _IdentityTransform:
 
 
 def test_get_training_hdf5_filename_prefers_filtered_file_when_enabled(tmp_path: Path) -> None:
-    (tmp_path / "TRAIN.h5").write_bytes(b"train")
-    (tmp_path / "TRAIN_FILTERED.h5").write_bytes(b"filtered")
+    train_path = tmp_path / "TRAIN.h5"
+    train_path.write_bytes(b"train")
+    with h5py.File(tmp_path / "TRAIN_FILTERED.h5", "w") as handle:
+        handle.attrs["source_hdf5_sha256"] = hash_file_sha256(train_path)
+        handle.attrs["selection_signature"] = "sig-123"
 
     chosen = get_training_hdf5_filename(str(tmp_path), smart_sampling=True)
 
     assert chosen.endswith("TRAIN_FILTERED.h5")
+
+
+def test_get_training_hdf5_filename_rejects_stale_filtered_file(tmp_path: Path) -> None:
+    train_path = tmp_path / "TRAIN.h5"
+    train_path.write_bytes(b"train-v2")
+    with h5py.File(tmp_path / "TRAIN_FILTERED.h5", "w") as handle:
+        handle.attrs["source_hdf5_sha256"] = "stale-source-sha"
+        handle.attrs["selection_signature"] = "sig-123"
+
+    with pytest.raises(ValueError, match="TRAIN_FILTERED.h5"):
+        get_training_hdf5_filename(str(tmp_path), smart_sampling=True)
 
 
 def test_decode_filename_handles_bytes_and_other_values() -> None:
@@ -129,14 +144,18 @@ def test_setup_local_hdf5_copies_validation_and_selected_train_file(tmp_path: Pa
     local_dir = tmp_path / "local"
     source_dir.mkdir()
     (source_dir / "VALIDATION.h5").write_bytes(b"validation")
-    (source_dir / "TRAIN.h5").write_bytes(b"train")
-    (source_dir / "TRAIN_FILTERED.h5").write_bytes(b"filtered")
+    train_path = source_dir / "TRAIN.h5"
+    train_path.write_bytes(b"train")
+    with h5py.File(source_dir / "TRAIN_FILTERED.h5", "w") as handle:
+        handle.attrs["source_hdf5_sha256"] = hash_file_sha256(train_path)
+        handle.attrs["selection_signature"] = "sig-123"
 
     chosen_name = setup_local_hdf5(str(source_dir), str(local_dir), smart_sampling=True)
 
     assert chosen_name == "TRAIN_FILTERED.h5"
     assert (local_dir / "VALIDATION.h5").read_bytes() == b"validation"
-    assert (local_dir / "TRAIN_FILTERED.h5").read_bytes() == b"filtered"
+    with h5py.File(local_dir / "TRAIN_FILTERED.h5", "r") as handle:
+        assert handle.attrs["selection_signature"] == "sig-123"
 
 
 def test_prostate_dataset_reads_items_and_metadata(

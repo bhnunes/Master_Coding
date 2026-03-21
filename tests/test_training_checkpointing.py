@@ -6,6 +6,7 @@ import torch
 
 from helpers.training.checkpointing import (
     EarlyStopping,
+    build_training_compatibility_signature,
     get_previous_metrics,
     load_checkpoint_for_resume,
     save_metadata,
@@ -94,6 +95,58 @@ def test_load_checkpoint_for_resume_restores_model_optimizer_and_score(tmp_path:
     assert early_stopping._current_best_checkpoint_on_disk_path == str(checkpoint_path)
     for expected, restored in zip(saved_model.parameters(), model.parameters(), strict=True):
         assert torch.equal(expected, restored)
+
+
+def test_load_checkpoint_for_resume_rejects_incompatible_provenance(tmp_path: Path) -> None:
+    saved_model = torch.nn.Linear(2, 2)
+    saved_optimizer = torch.optim.SGD(saved_model.parameters(), lr=0.1)
+    checkpoint_path = tmp_path / "resume.pth"
+    torch.save(
+        {
+            "epoch": 4,
+            "model_state_dict": saved_model.state_dict(),
+            "optimizer_state_dict": saved_optimizer.state_dict(),
+            "best_val_score": 0.91,
+        },
+        checkpoint_path,
+    )
+    meta_path = tmp_path / "resume_meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {
+                "compatibility_signature": "old-lineage",
+                "provenance": {
+                    "dataset": {},
+                    "validation_dataset": {},
+                    "split_lineage": {},
+                    "packaging_lineage": {},
+                    "normalization_lineage": {},
+                    "smart_sampling_lineage": {},
+                    "artifact_aware_loss": {},
+                    "validation_lineage": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    early_stopping = EarlyStopping(
+        patience=2,
+        verbose=False,
+        output_best_model_path=str(tmp_path / "best_model.pth"),
+    )
+
+    with pytest.raises(ValueError, match="incompatible provenance"):
+        load_checkpoint_for_resume(
+            model=model,
+            optimizer=optimizer,
+            early_stopping=early_stopping,
+            checkpoint_path=str(checkpoint_path),
+            device=torch.device("cpu"),
+            expected_compatibility_signature="current-lineage",
+        )
 
 
 def test_get_previous_metrics_returns_checkpoint_metrics() -> None:
@@ -198,7 +251,9 @@ def test_load_checkpoint_for_resume_ignores_optimizer_restore_errors(
 
 def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
     dataset_path = tmp_path / "TRAIN.h5"
+    validation_path = tmp_path / "VALIDATION.h5"
     dataset_path.write_bytes(b"dataset-v1")
+    validation_path.write_bytes(b"validation-v1")
 
     save_metadata(
         best_val_score=0.9,
@@ -218,6 +273,7 @@ def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
         workers=2,
         seed=7,
         dataset=str(dataset_path),
+        validation_dataset=str(validation_path),
         patience=3,
         optimizer_name="AdamW",
         alpha_bce=0.6,
@@ -235,7 +291,9 @@ def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
 
 def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
     dataset_path = tmp_path / "TRAIN.h5"
+    validation_path = tmp_path / "VALIDATION.h5"
     dataset_path.write_bytes(b"dataset-v1")
+    validation_path.write_bytes(b"validation-v1")
     artifact_index_path = tmp_path / "artifact.parquet"
     artifact_index_path.write_bytes(b"artifact-v1")
 
@@ -257,6 +315,7 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
         workers=2,
         seed=7,
         dataset=str(dataset_path),
+        validation_dataset=str(validation_path),
         patience=3,
         optimizer_name="AdamW",
         alpha_bce=0.6,
@@ -277,6 +336,8 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
 def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> None:
     dataset_path = tmp_path / "TRAIN_FILTERED.h5"
     dataset_path.write_bytes(b"dataset-v1")
+    validation_path = tmp_path / "VALIDATION.h5"
+    validation_path.write_bytes(b"validation-v1")
     artifact_index_path = tmp_path / "artifact.parquet"
     artifact_index_path.write_bytes(b"artifact-v1")
 
@@ -298,6 +359,7 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
         workers=2,
         seed=7,
         dataset=str(dataset_path),
+        validation_dataset=str(validation_path),
         patience=3,
         optimizer_name="AdamW",
         alpha_bce=0.6,
@@ -312,5 +374,31 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
     provenance = payload["provenance"]
     assert payload["compatibility_signature"]
     assert provenance["dataset"]["sha256"]
+    assert provenance["validation_dataset"]["sha256"]
+    assert provenance["validation_lineage"]["dataset_sha256"]
     assert provenance["artifact_aware_loss"]["enabled"] is True
     assert provenance["artifact_aware_loss"]["artifact_index_sha256"]
+
+
+def test_build_training_compatibility_signature_changes_with_validation_dataset(
+    tmp_path: Path,
+) -> None:
+    train_path = tmp_path / "TRAIN.h5"
+    validation_a_path = tmp_path / "VALIDATION_A.h5"
+    validation_b_path = tmp_path / "VALIDATION_B.h5"
+    train_path.write_bytes(b"train-v1")
+    validation_a_path.write_bytes(b"validation-a")
+    validation_b_path.write_bytes(b"validation-b")
+
+    signature_a = build_training_compatibility_signature(
+        dataset=str(train_path),
+        validation_dataset=str(validation_a_path),
+        artifact_index_path=None,
+    )
+    signature_b = build_training_compatibility_signature(
+        dataset=str(train_path),
+        validation_dataset=str(validation_b_path),
+        artifact_index_path=None,
+    )
+
+    assert signature_a != signature_b

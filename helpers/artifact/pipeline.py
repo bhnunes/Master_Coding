@@ -21,13 +21,15 @@ class ArtifactPipelineSummary:
 class ArtifactZipSource(Protocol):
     def list_slide_members(self) -> list[str]: ...
 
+    def list_slide_members_with_signatures(self) -> list[tuple[str, str]]: ...
+
     def extract_member(self, member_name: str, destination: Path) -> Path: ...
 
 
 class ArtifactRepositoryProtocol(Protocol):
     def initialize(self) -> None: ...
 
-    def sync_members(self, members: list[str]) -> None: ...
+    def sync_members(self, members: list[tuple[str, str]]) -> None: ...
 
     def list_pending(self) -> list[ArtifactRecord]: ...
 
@@ -87,8 +89,9 @@ class ArtifactDetectionPipeline:
         self.geojson_output.mkdir(parents=True, exist_ok=True)
 
         self.repository.initialize()
-        members = self.zip_source.list_slide_members()
-        self.repository.sync_members(members)
+        members_with_signatures = self.zip_source.list_slide_members_with_signatures()
+        self.repository.sync_members(members_with_signatures)
+        members = [member_name for member_name, _signature in members_with_signatures]
         pending_records = self.repository.list_pending()
 
         processed = 0

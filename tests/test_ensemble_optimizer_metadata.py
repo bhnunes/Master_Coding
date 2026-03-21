@@ -32,6 +32,7 @@ def _write_candidate(
                 "compatibility_signature": compatibility_signature,
                 "provenance": {
                     "dataset": {"sha256": "dataset-sha", "path": "TRAIN.h5"},
+                    "validation_dataset": {"sha256": "validation-sha", "path": "VALIDATION.h5"},
                     "split_lineage": {"dataset_sha256": "dataset-sha", "source_signature": None},
                     "packaging_lineage": {
                         "dataset_sha256": "dataset-sha",
@@ -46,6 +47,10 @@ def _write_candidate(
                         "enabled": False,
                         "artifact_index_path": None,
                         "artifact_index_sha256": None,
+                    },
+                    "validation_lineage": {
+                        "dataset_sha256": "validation-sha",
+                        "source_signature": None,
                     },
                 },
             }
@@ -167,6 +172,35 @@ def test_load_model_candidates_rejects_missing_provenance_fields(tmp_path: Path)
     )
 
     with pytest.raises(ValueError, match="fail-closed provenance"):
+        load_model_candidates(metadata_dir, "best_val_auprc_pixel_score")
+
+
+def test_load_model_candidates_rejects_missing_validation_lineage(tmp_path: Path) -> None:
+    metadata_dir = tmp_path / "metadata"
+    metadata_dir.mkdir()
+    payload = {
+        "architecture": "FPN",
+        "encoder": "enc",
+        "checkpoint_path": "a.ckpt",
+        "best_val_auprc_pixel_score": 0.5,
+        "compatibility_signature": "compat-a",
+        "provenance": {
+            "dataset": {"sha256": "dataset-sha", "path": "TRAIN.h5"},
+            "validation_dataset": {"sha256": "validation-sha", "path": "VALIDATION.h5"},
+            "split_lineage": {"dataset_sha256": "dataset-sha", "source_signature": None},
+            "packaging_lineage": {"dataset_sha256": "dataset-sha", "source_signature": None},
+            "normalization_lineage": {"dataset_sha256": "dataset-sha"},
+            "smart_sampling_lineage": {"enabled": False, "selection_signature": None},
+            "artifact_aware_loss": {
+                "enabled": False,
+                "artifact_index_path": None,
+                "artifact_index_sha256": None,
+            },
+        },
+    }
+    (metadata_dir / "bad_meta.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="validation_lineage"):
         load_model_candidates(metadata_dir, "best_val_auprc_pixel_score")
 
 

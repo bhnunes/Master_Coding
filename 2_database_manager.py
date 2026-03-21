@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from helpers.extraction.artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
+from helpers.extraction.artifact_lookup import build_processing_signature, resolve_geojson_for_slide
 from helpers.extraction.config import DatabaseManagerConfig, load_database_manager_config
 from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
@@ -135,8 +136,7 @@ def resolve_artifacts_geojson(
 
     if not config.use_advanced_artifact_filtering or config.geojson_path is None:
         return None
-    candidate = config.geojson_path / f"{case.image_path.stem}.geojson"
-    return candidate if candidate.exists() else None
+    return resolve_geojson_for_slide(config.geojson_path, case.image_path)
 
 
 def build_slide_request(
@@ -206,6 +206,38 @@ def main_process() -> None:
 
     runtime_settings = load_slide_runtime_settings(os.environ)
     logger.info("Starting Stage 2 processing for tag=%s", config.tag)
+    stale_cases = repository.list_stale_cases()
+    if stale_cases:
+        stale_names = ", ".join(case.image_path.name for case in stale_cases[:5])
+        raise ValueError(
+            "Stage 2 detected stale extraction inputs for existing cases. "
+            "Clear stale patch outputs and reprocess before continuing. "
+            f"Examples: {stale_names}"
+        )
+    stale_processed_cases = []
+    for case in repository.list_completed_cases():
+        if case.annotation_path is None or case.processing_signature is None:
+            continue
+        expected_processing_signature = build_processing_signature(
+            image_path=case.image_path,
+            annotation_path=case.annotation_path,
+            artifacts_geojson_path=resolve_artifacts_geojson(case, config),
+            window_size=config.window_size,
+            stride=config.stride,
+            match_percentage=config.match_percentage,
+            tissue_percentage=config.tissue_percentage,
+            target_level=runtime_settings.target_level,
+            use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+        )
+        if expected_processing_signature != case.processing_signature:
+            stale_processed_cases.append(case.image_path.name)
+    if stale_processed_cases:
+        examples = ", ".join(stale_processed_cases[:5])
+        raise ValueError(
+            "Stage 2 detected completed slides whose processing inputs or settings changed. "
+            "Clear stale patch outputs and reprocess before continuing. "
+            f"Examples: {examples}"
+        )
     cases_to_process = repository.list_pending_cases()
     if not cases_to_process:
         print(f"\n{Style.INFO} No cases to process with status 'TO BE PROCESSED'.")
@@ -248,6 +280,17 @@ def main_process() -> None:
                 result = run_slide_processing(
                     build_slide_request(case, config, runtime_settings, patch_folders)
                 )
+                processing_signature = build_processing_signature(
+                    image_path=case.image_path,
+                    annotation_path=case.annotation_path,
+                    artifacts_geojson_path=resolve_artifacts_geojson(case, config),
+                    window_size=config.window_size,
+                    stride=config.stride,
+                    match_percentage=config.match_percentage,
+                    tissue_percentage=config.tissue_percentage,
+                    target_level=runtime_settings.target_level,
+                    use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+                )
                 artifact_index_writer.append_records(
                     [ArtifactPatchRecord(**record) for record in result.artifact_patch_records]
                 )
@@ -264,6 +307,7 @@ def main_process() -> None:
                         stride=config.stride,
                         match_percentage=config.match_percentage,
                         tissue_percentage=config.tissue_percentage,
+                        processing_signature=processing_signature,
                     ),
                 )
                 progress_bar.update(1)

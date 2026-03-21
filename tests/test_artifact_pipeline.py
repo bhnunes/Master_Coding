@@ -11,6 +11,9 @@ class FakeZipSource:
     def list_slide_members(self) -> list[str]:
         return ["case_1.svs", "case_2.ndpi"]
 
+    def list_slide_members_with_signatures(self) -> list[tuple[str, str]]:
+        return [("case_1.svs", "sig-1"), ("case_2.ndpi", "sig-2")]
+
     def extract_member(self, member_name: str, destination: Path) -> Path:
         self.extracted.append(member_name)
         path = destination / Path(member_name).name
@@ -32,6 +35,7 @@ class FakeRepository:
                 error_type=None,
                 processing_time_seconds=None,
                 last_update="",
+                member_signature="sig-1",
             ),
             ArtifactRecord(
                 record_id=2,
@@ -44,6 +48,7 @@ class FakeRepository:
                 error_type=None,
                 processing_time_seconds=None,
                 last_update="",
+                member_signature="sig-2",
             ),
         ]
         self.synced_members: list[str] = []
@@ -53,8 +58,8 @@ class FakeRepository:
     def initialize(self) -> None:
         return None
 
-    def sync_members(self, members: list[str]) -> None:
-        self.synced_members = members
+    def sync_members(self, members: list[tuple[str, str]]) -> None:
+        self.synced_members = [member for member, _signature in members]
 
     def list_pending(self) -> list[ArtifactRecord]:
         return self.records

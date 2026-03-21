@@ -19,6 +19,7 @@ class ArtifactRecord:
     error_type: str | None
     processing_time_seconds: float | None
     last_update: str
+    member_signature: str | None
 
 
 class ArtifactRepository:
@@ -49,20 +50,71 @@ class ArtifactRepository:
                 """
             )
             connection.commit()
+            self._ensure_column(connection, "Member_Signature", "TEXT")
 
-    def sync_members(self, members: list[str]) -> None:
+    def sync_members(self, members: list[str] | list[tuple[str, str]]) -> None:
         """Insert new slide members into the repository without duplication."""
 
-        payload = [(member, member) for member in members]
         with self._connect() as connection:
-            connection.executemany(
-                """
-                INSERT OR IGNORE INTO artifact_detection (Image_Name, Zip_Member_Path)
-                VALUES (?, ?)
-                """,
-                payload,
-            )
+            for entry in members:
+                if isinstance(entry, tuple):
+                    member_name, member_signature = entry
+                else:
+                    member_name = entry
+                    member_signature = entry
+
+                existing = connection.execute(
+                    "SELECT ID, Member_Signature FROM artifact_detection WHERE Zip_Member_Path = ?",
+                    (member_name,),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        """
+                        INSERT INTO artifact_detection (
+                            Image_Name,
+                            Zip_Member_Path,
+                            Member_Signature
+                        )
+                        VALUES (?, ?, ?)
+                        """,
+                        (member_name, member_name, member_signature),
+                    )
+                    continue
+
+                previous_signature = str(existing["Member_Signature"] or "")
+                if previous_signature != str(member_signature):
+                    connection.execute(
+                        """
+                        UPDATE artifact_detection
+                        SET Member_Signature = ?,
+                            GeoJSON_Processed = 0,
+                            GeoJSON_Path = NULL,
+                            Status = 'PENDING',
+                            Error_Type = 'STALE_INPUT',
+                            Comments = ?,
+                            Processing_Time_Seconds = NULL,
+                            LastUpdate = CURRENT_TIMESTAMP
+                        WHERE ID = ?
+                        """,
+                        (
+                            member_signature,
+                            "Zip member content changed; artifact GeoJSON must be regenerated.",
+                            int(existing["ID"]),
+                        ),
+                    )
             connection.commit()
+
+    def _ensure_column(
+        self, connection: sqlite3.Connection, column_name: str, column_sql: str
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(artifact_detection)").fetchall()
+        }
+        if column_name not in columns:
+            connection.execute(
+                f"ALTER TABLE artifact_detection ADD COLUMN {column_name} {column_sql}"
+            )
 
     def list_pending(self) -> list[ArtifactRecord]:
         """Return slides that still need processing."""
@@ -170,4 +222,5 @@ class ArtifactRepository:
             if row["Processing_Time_Seconds"] is not None
             else None,
             last_update=str(row["LastUpdate"]),
+            member_signature=str(row["Member_Signature"]) if row["Member_Signature"] else None,
         )

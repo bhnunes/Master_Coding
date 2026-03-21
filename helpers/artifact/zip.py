@@ -4,6 +4,8 @@ import shutil
 import zipfile
 from pathlib import Path
 
+from helpers.provenance import hash_json_payload
+
 SUPPORTED_WSI_EXTENSIONS = frozenset({".svs", ".ndpi", ".tiff", ".tif"})
 
 
@@ -16,14 +18,33 @@ class ZipSlideSource:
     def list_slide_members(self) -> list[str]:
         """Return supported WSI members without extracting the full archive."""
 
+        return [
+            member_name for member_name, _signature in self.list_slide_members_with_signatures()
+        ]
+
+    def list_slide_members_with_signatures(self) -> list[tuple[str, str]]:
+        """Return supported WSI members with content-aware zip signatures."""
+
         with zipfile.ZipFile(self.zip_path, "r") as archive:
             members = [
-                member.filename
+                (
+                    member.filename,
+                    hash_json_payload(
+                        {
+                            "zip_path": str(self.zip_path),
+                            "member": member.filename,
+                            "crc": member.CRC,
+                            "file_size": member.file_size,
+                            "compress_size": member.compress_size,
+                            "date_time": member.date_time,
+                        }
+                    ),
+                )
                 for member in archive.infolist()
                 if not member.is_dir()
                 and Path(member.filename).suffix.lower() in SUPPORTED_WSI_EXTENSIONS
             ]
-        return sorted(members)
+        return sorted(members, key=lambda item: item[0])
 
     def extract_member(self, member_name: str, destination: Path) -> Path:
         """Extract one slide member into the destination directory."""

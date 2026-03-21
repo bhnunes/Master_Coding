@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -25,4 +26,6 @@ def cleanup_directory(path: Path) -> None:
 def geojson_output_path(output_root: Path, zip_member_name: str) -> Path:
     """Build the GeoJSON output path for a slide zip member."""
 
-    return output_root / f"{Path(zip_member_name).stem}.geojson"
+    stem = Path(zip_member_name).stem
+    member_digest = hashlib.sha256(zip_member_name.encode("utf-8")).hexdigest()[:12]
+    return output_root / f"{stem}__{member_digest}.geojson"

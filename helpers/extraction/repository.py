@@ -4,6 +4,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.provenance import hash_file_sha256, hash_json_payload
+
 
 @dataclass(frozen=True)
 class ExtractionCaseRecord:
@@ -26,6 +28,8 @@ class ExtractionCaseRecord:
     match_percentage: str | None
     tissue_percentage: str | None
     last_update: str | None
+    input_signature: str | None
+    processing_signature: str | None
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,7 @@ class CaseUpdate:
     stride: int
     match_percentage: float
     tissue_percentage: float
+    processing_signature: str | None = None
 
 
 class ExtractionRepository:
@@ -89,7 +94,39 @@ class ExtractionRepository:
                 )
                 """
             )
+            self._ensure_column(connection, "INPUT_SIGNATURE", "TEXT")
+            self._ensure_column(connection, "PROCESSING_SIGNATURE", "TEXT")
             connection.commit()
+
+    def _ensure_column(
+        self, connection: sqlite3.Connection, column_name: str, column_sql: str
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute(f"PRAGMA table_info({self.table_name})").fetchall()
+        }
+        if column_name not in columns:
+            connection.execute(
+                f"ALTER TABLE {self.table_name} ADD COLUMN {column_name} {column_sql}"
+            )
+
+    def _build_input_signature(
+        self,
+        image_path: Path,
+        annotation_path: Path | None,
+    ) -> str:
+        return hash_json_payload(
+            {
+                "image_path": str(image_path),
+                "image_sha256": hash_file_sha256(image_path),
+                "annotation_path": str(annotation_path) if annotation_path is not None else None,
+                "annotation_sha256": (
+                    hash_file_sha256(annotation_path)
+                    if annotation_path is not None and annotation_path.exists()
+                    else None
+                ),
+            }
+        )
 
     def ingest_new_cases(
         self,
@@ -129,23 +166,46 @@ class ExtractionRepository:
         svs_files_added = False
         with self._connect() as connection:
             existing_data = connection.execute(
-                f"SELECT IMAGEPATH, PATIENT FROM {self.table_name}"
+                f"SELECT ID, IMAGEPATH, PATIENT, INPUT_SIGNATURE FROM {self.table_name}"
             ).fetchall()
-            existing_basenames = {Path(str(row["IMAGEPATH"])).name for row in existing_data}
+            existing_by_basename = {Path(str(row["IMAGEPATH"])).name: row for row in existing_data}
             existing_patients = {
                 int(str(row["PATIENT"])) for row in existing_data if str(row["PATIENT"]).isdigit()
             }
 
             next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
-            payload: list[tuple[str, str | None, str, str, str]] = []
+            payload: list[tuple[str, str | None, str, str, str, str]] = []
             for image_path in image_files:
-                if image_path.name in existing_basenames:
+                annotation_path = annotation_lookup.get(image_path.stem)
+                input_signature = self._build_input_signature(
+                    image_path,
+                    Path(annotation_path) if annotation_path is not None else None,
+                )
+                existing_row = existing_by_basename.get(image_path.name)
+                if existing_row is not None:
+                    previous_signature = str(existing_row["INPUT_SIGNATURE"] or "")
+                    if previous_signature and previous_signature != input_signature:
+                        connection.execute(
+                            f"""
+                            UPDATE {self.table_name}
+                            SET STATUS = 'STALE',
+                                COMMENTS = ?,
+                                INPUT_SIGNATURE = ?,
+                                LastUpdate = CURRENT_TIMESTAMP
+                            WHERE ID = ?
+                            """,
+                            (
+                                "Input files changed for an existing case. "
+                                "Clear stale patch outputs and reprocess this slide.",
+                                input_signature,
+                                int(existing_row["ID"]),
+                            ),
+                        )
                     continue
 
                 if image_path.suffix.lower() == ".svs":
                     svs_files_added = True
 
-                annotation_path = annotation_lookup.get(image_path.stem)
                 status = "TO BE PROCESSED"
                 comments = ""
                 if annotation_path is None:
@@ -164,6 +224,7 @@ class ExtractionRepository:
                         str(next_patient_id),
                         status,
                         comments,
+                        input_signature,
                     )
                 )
                 next_patient_id += 1
@@ -172,12 +233,12 @@ class ExtractionRepository:
                 connection.executemany(
                     f"""
                     INSERT INTO {self.table_name}
-                    (IMAGEPATH, ANNOTATIONPATH, PATIENT, STATUS, COMMENTS)
-                    VALUES (?, ?, ?, ?, ?)
+                    (IMAGEPATH, ANNOTATIONPATH, PATIENT, STATUS, COMMENTS, INPUT_SIGNATURE)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     payload,
                 )
-                connection.commit()
+            connection.commit()
 
         return svs_files_added
 
@@ -187,6 +248,24 @@ class ExtractionRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 f"SELECT * FROM {self.table_name} WHERE STATUS = 'TO BE PROCESSED' ORDER BY ID ASC"
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def list_stale_cases(self) -> list[ExtractionCaseRecord]:
+        """Return all cases explicitly marked stale due to changed inputs."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM {self.table_name} WHERE STATUS = 'STALE' ORDER BY ID ASC"
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def list_completed_cases(self) -> list[ExtractionCaseRecord]:
+        """Return all completed cases to validate processing lineage."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM {self.table_name} WHERE STATUS = 'COMPLETED' ORDER BY ID ASC"
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
@@ -220,6 +299,7 @@ class ExtractionRepository:
                     STRIDE = ?,
                     MATCH_PERCENTAGE = ?,
                     TISSUE_PERCENTAGE = ?,
+                    PROCESSING_SIGNATURE = ?,
                     LastUpdate = CURRENT_TIMESTAMP
                 WHERE ID = ?
                 """,
@@ -233,6 +313,7 @@ class ExtractionRepository:
                     update.stride,
                     str(update.match_percentage),
                     str(update.tissue_percentage),
+                    update.processing_signature,
                     case_id,
                 ),
             )
@@ -266,4 +347,8 @@ class ExtractionRepository:
             match_percentage=str(row["MATCH_PERCENTAGE"]) if row["MATCH_PERCENTAGE"] else None,
             tissue_percentage=str(row["TISSUE_PERCENTAGE"]) if row["TISSUE_PERCENTAGE"] else None,
             last_update=str(row["LastUpdate"]) if row["LastUpdate"] else None,
+            input_signature=str(row["INPUT_SIGNATURE"]) if row["INPUT_SIGNATURE"] else None,
+            processing_signature=(
+                str(row["PROCESSING_SIGNATURE"]) if row["PROCESSING_SIGNATURE"] else None
+            ),
         )

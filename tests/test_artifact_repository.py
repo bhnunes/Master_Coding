@@ -29,3 +29,19 @@ def test_repository_marks_success_and_failure(tmp_path: Path) -> None:
     assert records[1].geojson_processed is False
     assert records[1].status == "FAILED"
     assert records[1].comments == "boom"
+
+
+def test_repository_requeues_processed_member_when_signature_changes(tmp_path: Path) -> None:
+    repository = ArtifactRepository(tmp_path / "artifact_detection.db")
+    repository.initialize()
+    repository.sync_members([("nested/case_1.svs", "sig-a")])
+
+    record = repository.list_pending()[0]
+    repository.mark_success(record.record_id, "/tmp/case_1.geojson")
+    repository.sync_members([("nested/case_1.svs", "sig-b")])
+
+    refreshed = repository.list_pending()[0]
+    assert refreshed.zip_member_path == "nested/case_1.svs"
+    assert refreshed.geojson_processed is False
+    assert refreshed.status == "PENDING"
+    assert "must be regenerated" in refreshed.comments

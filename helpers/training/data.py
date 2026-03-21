@@ -18,6 +18,8 @@ from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataloader import default_collate
 
+from helpers.provenance import hash_file_sha256
+
 NumericArray = npt.NDArray[np.generic]
 ArtifactCoverageLookup = dict[str, tuple[float, float, float, float, float]]
 ZERO_ARTIFACT_COVERAGE = (0.0, 0.0, 0.0, 0.0, 0.0)
@@ -142,6 +144,23 @@ def get_training_hdf5_filename(drive_dir: str, smart_sampling: bool) -> str:
     if not os.path.exists(drive_dir):
         raise FileNotFoundError(f"Missing {drive_dir}")
     if smart_sampling and os.path.exists(original_src) and os.path.exists(filtered_src):
+        with h5py.File(filtered_src, "r") as handle:
+            expected_source_sha = handle.attrs.get("source_hdf5_sha256")
+            selection_signature = handle.attrs.get("selection_signature")
+        if isinstance(expected_source_sha, bytes):
+            expected_source_sha = expected_source_sha.decode("utf-8")
+        if isinstance(selection_signature, bytes):
+            selection_signature = selection_signature.decode("utf-8")
+        if not expected_source_sha or not selection_signature:
+            raise ValueError(
+                "TRAIN_FILTERED.h5 is missing fail-closed smart-sampling provenance metadata."
+            )
+        observed_source_sha = hash_file_sha256(original_src)
+        if observed_source_sha != expected_source_sha:
+            raise ValueError(
+                "TRAIN_FILTERED.h5 does not match the current TRAIN.h5 content. "
+                "Regenerate TRAIN_FILTERED.h5 before continuing."
+            )
         return filtered_src
     return original_src
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -32,6 +33,11 @@ def _build_dataset_provenance(dataset: str) -> dict[str, Any]:
     }
 
 
+def _metadata_path_for_checkpoint(checkpoint_path: str | os.PathLike[str]) -> Path:
+    checkpoint = Path(checkpoint_path)
+    return checkpoint.with_name(f"{checkpoint.stem}_meta.json")
+
+
 def _build_artifact_loss_provenance(
     artifact_index_path: str | os.PathLike[str] | None,
 ) -> dict[str, Any]:
@@ -54,10 +60,12 @@ def _build_artifact_loss_provenance(
 
 def _build_training_provenance(
     dataset: str,
+    validation_dataset: str,
     artifact_index_path: str | os.PathLike[str] | None,
     resume_checkpoint: str | os.PathLike[str] | None,
 ) -> tuple[dict[str, Any], str]:
     dataset_provenance = _build_dataset_provenance(dataset)
+    validation_dataset_provenance = _build_dataset_provenance(validation_dataset)
     artifact_loss_provenance = _build_artifact_loss_provenance(artifact_index_path)
     resume_path_str = os.fspath(resume_checkpoint) if resume_checkpoint is not None else None
     resume_sha256 = None
@@ -67,6 +75,7 @@ def _build_training_provenance(
     provenance = {
         "schema_version": 1,
         "dataset": dataset_provenance,
+        "validation_dataset": validation_dataset_provenance,
         "split_lineage": {
             "dataset_sha256": dataset_provenance["sha256"],
             "source_signature": dataset_provenance["source_signature"],
@@ -82,6 +91,10 @@ def _build_training_provenance(
             "enabled": dataset_provenance["smart_sampling_enabled"],
             "selection_signature": dataset_provenance["selection_signature"],
         },
+        "validation_lineage": {
+            "dataset_sha256": validation_dataset_provenance["sha256"],
+            "source_signature": validation_dataset_provenance["source_signature"],
+        },
         "artifact_aware_loss": artifact_loss_provenance,
         "resume_checkpoint": {
             "path": resume_path_str,
@@ -96,10 +109,28 @@ def _build_training_provenance(
             "packaging_lineage",
             "normalization_lineage",
             "smart_sampling_lineage",
+            "validation_lineage",
             "artifact_aware_loss",
         )
     }
     return provenance, hash_json_payload(cast(dict[str, Any], compatibility_contract))
+
+
+def build_training_compatibility_signature(
+    *,
+    dataset: str,
+    validation_dataset: str,
+    artifact_index_path: str | os.PathLike[str] | None,
+) -> str:
+    """Build the fail-closed compatibility signature for a training run."""
+
+    _provenance, compatibility_signature = _build_training_provenance(
+        dataset,
+        validation_dataset,
+        artifact_index_path,
+        resume_checkpoint=None,
+    )
+    return compatibility_signature
 
 
 class EarlyStopping:
@@ -233,6 +264,7 @@ def load_checkpoint_for_resume(
     early_stopping: EarlyStopping,
     checkpoint_path: str | None,
     device: torch.device,
+    expected_compatibility_signature: str | None = None,
 ) -> int:
     """Restore model, optimizer, and early-stopping state from a checkpoint."""
 
@@ -252,6 +284,20 @@ def load_checkpoint_for_resume(
         print(f"Resume checkpoint not found at {checkpoint_path}. Training from scratch.")
         early_stopping.set_initial_best_checkpoint_path(None)
         return start_epoch
+
+    if expected_compatibility_signature is not None:
+        metadata_path = _metadata_path_for_checkpoint(checkpoint_path)
+        if not metadata_path.exists():
+            raise ValueError(
+                "Resume checkpoint has no metadata sidecar; cannot verify compatible provenance. "
+                f"Expected metadata at '{metadata_path}'."
+            )
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        observed_signature = str(payload.get("compatibility_signature", "")).strip()
+        if observed_signature != expected_compatibility_signature:
+            raise ValueError(
+                "Resume checkpoint has incompatible provenance for the current training inputs."
+            )
 
     print(f"\n*** Resuming from checkpoint: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -340,6 +386,7 @@ def save_metadata(
     workers: int,
     seed: int,
     dataset: str,
+    validation_dataset: str,
     patience: int,
     optimizer_name: str,
     alpha_bce: float,
@@ -351,12 +398,11 @@ def save_metadata(
 ) -> None:
     """Persist model metadata next to the best checkpoint."""
 
-    import json
-
     meta_filename = os.path.join(metadata_dir, os.path.basename(metadata_best_path))
     meta_filename = meta_filename.replace(".pth", "_meta.json")
     provenance, compatibility_signature = _build_training_provenance(
         dataset,
+        validation_dataset,
         artifact_index_path,
         resume_checkpoint,
     )

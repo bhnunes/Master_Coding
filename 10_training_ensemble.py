@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from helpers.logging_utils import LoggerWriter, configure_root_logger
 from helpers.training.checkpointing import (
     EarlyStopping,
+    build_training_compatibility_signature,
     get_previous_metrics,
     load_checkpoint_for_resume,
     save_metadata,
@@ -373,6 +374,11 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
     full_resume_checkpoint_path = (
         os.path.join(checkpoint_path, resume_checkpoint_path) if resume_checkpoint_path else None
     )
+    expected_compatibility_signature = build_training_compatibility_signature(
+        dataset=train_h5_path,
+        validation_dataset=val_h5_path,
+        artifact_index_path=artifact_index_path,
+    )
 
     start_epoch = load_checkpoint_for_resume(
         model=model,
@@ -380,6 +386,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         early_stopping=early_stopping,
         checkpoint_path=full_resume_checkpoint_path,
         device=device,
+        expected_compatibility_signature=expected_compatibility_signature,
     )
 
     if early_stopping._current_best_checkpoint_on_disk_path:
@@ -463,7 +470,8 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
                 "num_epochs": num_epochs,
                 "workers": workers,
                 "seed": seed,
-                "dataset": hdf5_drive_dir,
+                "dataset": train_h5_path,
+                "validation_dataset": val_h5_path,
                 "patience": patience,
                 "optimizer_name": optimizer_name,
                 "alpha_bce": alpha_bce,
@@ -484,6 +492,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
     except Exception as e:
         print(f"Test/Visu Err: {e}")
         traceback.print_exc()
+        raise
 
     close_aim_run(run)
 

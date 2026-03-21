@@ -66,3 +66,43 @@ def test_repository_lists_pending_cases_in_id_order(tmp_path: Path) -> None:
 
     pending_ids = [case.record_id for case in repository.list_pending_cases()]
     assert pending_ids == [1, 2]
+
+
+def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path) -> None:
+    base_path = tmp_path / "project"
+    repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
+
+    images_dir, annotations_dir, _geojson_dir = repository.ensure_case_directories(base_path)
+    repository.initialize()
+
+    image_path = images_dir / "case_a.svs"
+    annotation_path = annotations_dir / "case_a.xml"
+    image_path.write_text("slide-v1")
+    annotation_path.write_text("annotation-v1")
+
+    repository.ingest_new_cases(
+        base_path=base_path,
+        activate_sanity_check=False,
+        use_advanced_filtering=False,
+        geojson_path=None,
+    )
+
+    annotation_path.write_text("annotation-v2")
+    repository.ingest_new_cases(
+        base_path=base_path,
+        activate_sanity_check=False,
+        use_advanced_filtering=False,
+        geojson_path=None,
+    )
+
+    with sqlite3.connect(tmp_path / "database.db") as connection:
+        row = connection.execute(
+            "SELECT STATUS, COMMENTS FROM DATABASE_TEST WHERE IMAGEPATH = ?",
+            (str(image_path),),
+        ).fetchone()
+
+    assert row == (
+        "STALE",
+        "Input files changed for an existing case. "
+        "Clear stale patch outputs and reprocess this slide.",
+    )

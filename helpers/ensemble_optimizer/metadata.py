@@ -34,11 +34,13 @@ def _validate_fail_closed_provenance(payload: dict[str, Any], metadata_file: Pat
 
     required_sections = {
         "dataset",
+        "validation_dataset",
         "split_lineage",
         "packaging_lineage",
         "normalization_lineage",
         "smart_sampling_lineage",
         "artifact_aware_loss",
+        "validation_lineage",
     }
     missing_sections = sorted(section for section in required_sections if section not in provenance)
     if missing_sections:
