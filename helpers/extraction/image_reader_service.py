@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from helpers.extraction import patch_engine
 from helpers.extraction.data_handlers import (
@@ -61,6 +61,7 @@ class SlideProcessingRequest:
     num_workers: int
     use_advanced_artifact_filtering: bool
     artifacts_geojson_path: Path | None = None
+    profile_output_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -166,9 +167,13 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             path_artifacts_geojson=str(request.artifacts_geojson_path)
             if request.artifacts_geojson_path is not None
             else None,
+            profile_output_path=str(request.profile_output_path)
+            if request.profile_output_path is not None
+            else None,
             use_artifact_filter=request.use_advanced_artifact_filtering,
             num_workers=request.num_workers,
         )
+        artifact_patch_records = cast(list[dict[str, Any]], artifact_patch_records)
     except Exception as error:
         logging.exception("Critical failure while processing %s", request.image_path.name)
         return SlideProcessingResult(

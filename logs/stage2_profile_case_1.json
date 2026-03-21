@@ -1,0 +1,91 @@
+{
+  "accepted_patches": 7,
+  "candidate_windows": 94,
+  "errors": 0,
+  "phases": [
+    {
+      "avg_seconds": 0.023184,
+      "calls": 94,
+      "name": "read_region",
+      "share_of_runtime": 0.462386,
+      "total_seconds": 2.179313
+    },
+    {
+      "avg_seconds": 0.03426,
+      "calls": 7,
+      "name": "image_save",
+      "share_of_runtime": 0.050882,
+      "total_seconds": 0.239817
+    },
+    {
+      "avg_seconds": 0.00186,
+      "calls": 83,
+      "name": "not_cancer_mask",
+      "share_of_runtime": 0.032755,
+      "total_seconds": 0.154379
+    },
+    {
+      "avg_seconds": 0.000852,
+      "calls": 94,
+      "name": "tissue_check",
+      "share_of_runtime": 0.016999,
+      "total_seconds": 0.080118
+    },
+    {
+      "avg_seconds": 0.000326,
+      "calls": 94,
+      "name": "artifact_coverage",
+      "share_of_runtime": 0.006509,
+      "total_seconds": 0.030676
+    },
+    {
+      "avg_seconds": 0.001145,
+      "calls": 7,
+      "name": "mask_save",
+      "share_of_runtime": 0.0017,
+      "total_seconds": 0.008014
+    },
+    {
+      "avg_seconds": 2e-05,
+      "calls": 83,
+      "name": "cancer_mask",
+      "share_of_runtime": 0.00035,
+      "total_seconds": 0.001651
+    }
+  ],
+  "skipped_overlap": 76,
+  "skipped_tissue": 11,
+  "slide_name": "HHHA-2017-02502 A2 80-100.svs",
+  "slide_phases": {
+    "build_indexes": {
+      "seconds": 0.020208,
+      "share_of_runtime": 0.004287
+    },
+    "candidate_filter": {
+      "seconds": 0.081781,
+      "share_of_runtime": 0.017351
+    },
+    "load_annotations": {
+      "seconds": 0.116976,
+      "share_of_runtime": 0.024819
+    },
+    "load_artifacts": {
+      "seconds": 0.012348,
+      "share_of_runtime": 0.00262
+    },
+    "open_slide": {
+      "seconds": 1.216222,
+      "share_of_runtime": 0.258046
+    },
+    "parallel_processing": {
+      "seconds": 3.258002,
+      "share_of_runtime": 0.691252
+    }
+  },
+  "status_counts": {
+    "SAVED_NOT_CANCER": 7,
+    "SKIPPED_OVERLAP": 76,
+    "SKIPPED_TISSUE": 11
+  },
+  "total_runtime_seconds": 4.713188
+}

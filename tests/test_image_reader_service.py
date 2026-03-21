@@ -46,6 +46,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
         num_workers=2,
         use_advanced_artifact_filtering=False,
         artifacts_geojson_path=None,
+        profile_output_path=tmp_path / "profile.json",
     )
 
     result = run_slide_processing(request)
@@ -57,3 +58,4 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert captured["path_Image"] == str(tmp_path / "slide.svs")
     assert captured["patient"] == "100001"
     assert captured["window_size"] == 224
+    assert captured["profile_output_path"] == str(tmp_path / "profile.json")

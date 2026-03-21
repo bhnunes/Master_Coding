@@ -4,10 +4,12 @@ import json
 import logging
 import os
 import random
+import time
 import traceback
 from datetime import datetime
 from itertools import islice
 from multiprocessing import Pool
+from pathlib import Path
 from typing import cast
 
 import cv2
@@ -20,6 +22,14 @@ from shapely.prepared import prep
 from shapely.strtree import STRtree
 
 from helpers.extraction.data_handlers import BaseHandler
+from helpers.extraction.profiling import (
+    PhaseStats,
+    build_profile_summary,
+    create_phase_stats,
+    merge_phase_stats,
+    record_phase,
+    write_profile_summary,
+)
 from helpers.runtime_platform import load_openslide_module
 
 load_dotenv(override=True)
@@ -38,6 +48,16 @@ ARTIFACT_CLASS_TO_COLUMN = {
 }
 
 _WORKER_CONTEXT = {}
+WINDOW_PROFILE_PHASES = (
+    "artifact_coverage",
+    "read_region",
+    "tissue_check",
+    "cancer_mask",
+    "not_cancer_mask",
+    "image_save",
+    "mask_save",
+)
+FAST_PNG_COMPRESS_LEVEL = 1
 
 
 def setup_logging():
@@ -48,6 +68,28 @@ def setup_logging():
         level=logging.INFO,
         format=log_format,
         filemode="a",
+    )
+
+
+def get_png_save_kwargs(kind: str) -> dict[str, object]:
+    del kind
+    return {
+        "format": "PNG",
+        "compress_level": FAST_PNG_COMPRESS_LEVEL,
+        "optimize": False,
+    }
+
+
+def save_patch_outputs(
+    patch_pil: Image.Image,
+    final_mask: np.ndarray,
+    image_output_path: Path,
+    mask_output_path: Path,
+) -> None:
+    patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
+    Image.fromarray((final_mask * 255).astype(np.uint8)).save(
+        str(mask_output_path),
+        **get_png_save_kwargs(kind="mask"),
     )
 
 
@@ -306,6 +348,8 @@ def _initialize_worker(worker_context):
 
 def _process_window_with_slide(slide, x, y):
     context = _WORKER_CONTEXT
+    profile_enabled = bool(context.get("profile_output_path"))
+    window_phase_stats = create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
     x_int, y_int = int(x), int(y)
     patch_coords = (x_int, y_int)
     window_size = context["window_size"]
@@ -321,26 +365,57 @@ def _process_window_with_slide(slide, x, y):
     artifact_coverages = get_zero_artifact_coverages()
     artifact_geometry_index = context.get("artifact_geometry_index")
     if context.get("use_artifact_filter") and artifact_geometry_index:
+        artifact_started_at = time.perf_counter()
         artifact_coverages = compute_artifact_coverages_from_index(
             artifact_geometry_index=artifact_geometry_index,
             patch_polygon=patch_polygon,
             patch_area=PATCH_AREA,
         )
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats,
+                "artifact_coverage",
+                time.perf_counter() - artifact_started_at,
+            )
 
+    read_started_at = time.perf_counter()
     patch_pil = slide.read_region(
         patch_coords, context["target_level"], (window_size, window_size)
     ).convert("RGB")
     patch_np = np.array(patch_pil)
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "read_region", time.perf_counter() - read_started_at)
 
-    if not check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"]):
-        return "SKIPPED_TISSUE", None
+    tissue_started_at = time.perf_counter()
+    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
+    if not tissue_ok:
+        return (
+            ("SKIPPED_TISSUE", None, window_phase_stats)
+            if window_phase_stats is not None
+            else ("SKIPPED_TISSUE", None)
+        )
 
+    cancer_mask_started_at = time.perf_counter()
     cancer_mask = polygons_to_mask_with_index(
         (window_size, window_size), context["cancer_polygon_index"], patch_coords
     )
+    if window_phase_stats is not None:
+        record_phase(
+            window_phase_stats, "cancer_mask", time.perf_counter() - cancer_mask_started_at
+        )
+
+    non_cancer_mask_started_at = time.perf_counter()
     non_cancer_mask = polygons_to_mask_with_index(
         (window_size, window_size), context["not_cancer_polygon_index"], patch_coords
     )
+    if window_phase_stats is not None:
+        record_phase(
+            window_phase_stats,
+            "not_cancer_mask",
+            time.perf_counter() - non_cancer_mask_started_at,
+        )
 
     cancer_overlap = np.count_nonzero(cancer_mask) / PATCH_AREA
     non_cancer_overlap = np.count_nonzero(non_cancer_mask) / PATCH_AREA
@@ -375,10 +450,25 @@ def _process_window_with_slide(slide, x, y):
             f"{label}_PATIENT_{context['patient']}_{x_int}_{y_int}_"
             f"{random.randint(1000, 9999)}_{timestamp}.png"
         )
-        patch_pil.save(os.path.join(save_folder_img, file_basename))
+        image_output_path = Path(save_folder_img) / file_basename
+        mask_output_path = Path(save_folder_mask) / file_basename
+
+        image_save_started_at = time.perf_counter()
+        patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats, "image_save", time.perf_counter() - image_save_started_at
+            )
+
+        mask_save_started_at = time.perf_counter()
         Image.fromarray((final_mask * 255).astype(np.uint8)).save(
-            os.path.join(save_folder_mask, file_basename)
+            str(mask_output_path),
+            **get_png_save_kwargs(kind="mask"),
         )
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats, "mask_save", time.perf_counter() - mask_save_started_at
+            )
         patch_record = {
             "filename": file_basename,
             "label": 1 if label == "CANCER" else 0,
@@ -386,18 +476,29 @@ def _process_window_with_slide(slide, x, y):
             "slide_id": context["slide_id"],
             **artifact_coverages,
         }
-        return f"SAVED_{label}", patch_record
+        return (
+            (f"SAVED_{label}", patch_record, window_phase_stats)
+            if window_phase_stats is not None
+            else (f"SAVED_{label}", patch_record)
+        )
 
-    return "SKIPPED_OVERLAP", None
+    return (
+        ("SKIPPED_OVERLAP", None, window_phase_stats)
+        if window_phase_stats is not None
+        else ("SKIPPED_OVERLAP", None)
+    )
 
 
 def process_window_batch(coord_batch):
     slide = None
     openslide_module = load_openslide_module()
+    profile_enabled = bool(_WORKER_CONTEXT.get("profile_output_path"))
     try:
         slide = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
         return [_process_window_with_slide(slide, x, y) for x, y in coord_batch]
     except Exception:
+        if profile_enabled:
+            return [("ERROR", traceback.format_exc(), create_phase_stats(WINDOW_PROFILE_PHASES))]
         return [("ERROR", traceback.format_exc())]
     finally:
         if slide:
@@ -535,12 +636,27 @@ def process_window(args):
 def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
     slide = None
     openslide_module = load_openslide_module()
+    slide_started_at = time.perf_counter()
+    slide_phase_seconds = {
+        "open_slide": 0.0,
+        "load_annotations": 0.0,
+        "load_artifacts": 0.0,
+        "candidate_filter": 0.0,
+        "build_indexes": 0.0,
+        "parallel_processing": 0.0,
+    }
+    profile_output_path = kwargs.get("profile_output_path")
+    profile_enabled = bool(profile_output_path)
     try:
         slide_basename = os.path.basename(path_Image)
         logging.info(f"--- Starting processing for slide: {slide_basename} ---")
+        open_slide_started_at = time.perf_counter()
         slide = openslide_module.OpenSlide(path_Image)
+        slide_phase_seconds["open_slide"] = time.perf_counter() - open_slide_started_at
 
+        load_annotations_started_at = time.perf_counter()
         annotation_data = handler.load_annotations(slide, **kwargs)
+        slide_phase_seconds["load_annotations"] = time.perf_counter() - load_annotations_started_at
         annotations_cancer_level0 = annotation_data["cancer_polygons"]
         annotations_not_cancer_level0 = annotation_data["not_cancer_polygons"]
         all_polygons_level0 = annotations_cancer_level0 + annotations_not_cancer_level0
@@ -553,6 +669,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
 
         # --- NEW: ROBUST ARTIFACT PARSING BLOCK ---
         artifact_polygons_by_class_level0 = {}
+        load_artifacts_started_at = time.perf_counter()
         if kwargs.get("use_artifact_filter") and kwargs.get("path_artifacts_geojson"):
             logging.info(f"Advanced artifact filtering is ACTIVE for {slide_basename}.")
             try:
@@ -616,6 +733,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
                     e,
                 )
                 artifact_polygons_by_class_level0 = {}
+        slide_phase_seconds["load_artifacts"] = time.perf_counter() - load_artifacts_started_at
 
         scale_factor = slide.level_downsamples[kwargs["target_level"]]
         target_width, target_height = slide.level_dimensions[kwargs["target_level"]]
@@ -680,12 +798,14 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
 
         # The rest of the code now operates on a much smaller grid of candidate coordinates.
         # Note the use of the 'prepared_annotations' object for the faster 'contains' check.
+        candidate_filter_started_at = time.perf_counter()
         filtered_coords = [
             (int(x), int(y))
             for x in x_coords
             for y in y_coords
             if prepared_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW))
         ]
+        slide_phase_seconds["candidate_filter"] = time.perf_counter() - candidate_filter_started_at
 
         # The number of candidate windows will now be much more reasonable.
         logging.info(f"Found {len(filtered_coords)} candidate windows after optimization.")
@@ -694,6 +814,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             slide.close()
             return 0, 0, []
 
+        build_indexes_started_at = time.perf_counter()
         cancer_polygon_index = build_scaled_polygon_index(annotations_cancer_level0, scale_factor)
         not_cancer_polygon_index = build_scaled_polygon_index(
             annotations_not_cancer_level0, scale_factor
@@ -702,6 +823,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             artifact_polygons_by_class_level0,
             scale_factor,
         )
+        slide_phase_seconds["build_indexes"] = time.perf_counter() - build_indexes_started_at
 
         batch_size = max(8, min(64, len(filtered_coords) // max(1, kwargs["num_workers"] * 4) or 8))
         worker_state = {
@@ -717,6 +839,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             "patient": kwargs["patient"],
             "slide_id": os.path.splitext(os.path.basename(path_Image))[0],
             "use_artifact_filter": kwargs.get("use_artifact_filter"),
+            "profile_output_path": profile_output_path,
             "cancer_polygon_index": cancer_polygon_index,
             "not_cancer_polygon_index": not_cancer_polygon_index,
             "artifact_geometry_index": artifact_geometry_index,
@@ -727,6 +850,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             kwargs["num_workers"],
             batch_size,
         )
+        parallel_started_at = time.perf_counter()
         results = list(
             iter_window_results(
                 filtered_coords=filtered_coords,
@@ -735,12 +859,30 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
                 batch_size=batch_size,
             )
         )
+        slide_phase_seconds["parallel_processing"] = time.perf_counter() - parallel_started_at
 
-        cancer_count = len([r for r, _ in results if r == "SAVED_CANCER"])
-        not_cancer_count = len([r for r, _ in results if r == "SAVED_NOT_CANCER"])
-        artifact_patch_records = [record for _, record in results if record is not None]
+        status_counts = {}
+        artifact_patch_records = []
+        errors = []
+        window_phase_stats: dict[str, PhaseStats] | None = (
+            create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
+        )
+        for result in results:
+            status = result[0]
+            payload = result[1]
+            if profile_enabled and len(result) == 3 and window_phase_stats is not None:
+                profile_result = cast(tuple[str, object, dict[str, PhaseStats]], result)
+                result_phase_stats = profile_result[2]
+                merge_phase_stats(window_phase_stats, result_phase_stats)
 
-        errors = [msg for status, msg in results if status == "ERROR"]
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status == "ERROR":
+                errors.append(payload)
+            elif payload is not None:
+                artifact_patch_records.append(payload)
+
+        cancer_count = status_counts.get("SAVED_CANCER", 0)
+        not_cancer_count = status_counts.get("SAVED_NOT_CANCER", 0)
         if errors:
             logging.error(
                 "Encountered %s errors during parallel processing for %s.",
@@ -757,6 +899,17 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
                 "for detailed tracebacks."
             )
             raise Exception(error_summary)
+
+        if profile_enabled and window_phase_stats is not None:
+            profile_summary = build_profile_summary(
+                slide_name=slide_basename,
+                total_runtime_seconds=time.perf_counter() - slide_started_at,
+                candidate_windows=len(filtered_coords),
+                status_counts=status_counts,
+                phase_stats=window_phase_stats,
+                slide_phase_seconds=slide_phase_seconds,
+            )
+            write_profile_summary(Path(profile_output_path), profile_summary)
 
         logging.info(f"--- Finished processing slide: {slide_basename} ---")
         return cancer_count, not_cancer_count, artifact_patch_records
