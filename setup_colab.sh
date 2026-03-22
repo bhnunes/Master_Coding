@@ -43,11 +43,6 @@ uv python install 3.12
 print_step "Syncing project dependencies from pyproject.toml"
 uv sync --python 3.12
 
-if [ ! -f .env ] && [ -f .env_example ]; then
-  print_step "Creating .env from .env_example"
-  cp .env_example .env
-fi
-
 print_step "Verifying critical imports"
 uv run --python 3.12 python - <<'PY'
 from __future__ import annotations
@@ -71,4 +66,3 @@ printf '%s\n' "Next steps:"
 printf '  1. Edit .env with your dataset and model paths.\n'
 printf '  2. Mount Google Drive if your zip file or models live there.\n'
 printf '  3. Run scripts with: uv run --python 3.12 python <script>.py\n'
-printf '  4. Example: uv run --python 3.12 python 1_artifact_detection.py\n'
