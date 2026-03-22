@@ -178,7 +178,8 @@ def clip_geometry_to_patch_coords(geometry, *, patch_x, patch_y, mask_width, mas
     for geom in geoms:
         if geom.geom_type != "Polygon" or geom.is_empty:
             continue
-        coords_raw = np.asarray(geom.exterior.coords, dtype=np.float64)
+        polygon = cast(Polygon, geom)
+        coords_raw = np.asarray(polygon.exterior.coords, dtype=np.float64)
         coords = np.column_stack(
             (
                 np.round(np.clip(coords_raw[:, 0] - patch_x, 0, mask_width - 1)),
@@ -380,42 +381,6 @@ def _process_window_with_slide(slide, x, y):
     x_int, y_int = int(x), int(y)
     patch_coords = (x_int, y_int)
     window_size = context["window_size"]
-    patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
-
-    artifact_coverages = get_zero_artifact_coverages()
-    artifact_geometry_index = context.get("artifact_geometry_index")
-    if context.get("use_artifact_filter") and artifact_geometry_index:
-        artifact_started_at = time.perf_counter()
-        artifact_coverages = compute_artifact_coverages_from_index(
-            artifact_geometry_index=artifact_geometry_index,
-            patch_polygon=patch_polygon,
-            patch_area=PATCH_AREA,
-        )
-        if window_phase_stats is not None:
-            record_phase(
-                window_phase_stats,
-                "artifact_coverage",
-                time.perf_counter() - artifact_started_at,
-            )
-
-    read_started_at = time.perf_counter()
-    patch_pil = slide.read_region(
-        patch_coords, context["target_level"], (window_size, window_size)
-    ).convert("RGB")
-    patch_np = np.array(patch_pil)
-    if window_phase_stats is not None:
-        record_phase(window_phase_stats, "read_region", time.perf_counter() - read_started_at)
-
-    tissue_started_at = time.perf_counter()
-    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
-    if window_phase_stats is not None:
-        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
-    if not tissue_ok:
-        return (
-            ("SKIPPED_TISSUE", None, window_phase_stats)
-            if window_phase_stats is not None
-            else ("SKIPPED_TISSUE", None)
-        )
 
     cancer_mask_started_at = time.perf_counter()
     cancer_mask = polygons_to_mask_with_index(
@@ -464,50 +429,81 @@ def _process_window_with_slide(slide, x, y):
         )
         final_mask, patch_saved = np.zeros((window_size, window_size), dtype=np.uint8), True
 
-    if patch_saved:
-        file_basename = build_patch_filename(
-            label=label,
-            patient_id=context["patient"],
-            slide_id=context["slide_id"],
-            x_coord=x_int,
-            y_coord=y_int,
-        )
-        image_output_path = Path(save_folder_img) / file_basename
-        mask_output_path = Path(save_folder_mask) / file_basename
-
-        image_save_started_at = time.perf_counter()
-        patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
-        if window_phase_stats is not None:
-            record_phase(
-                window_phase_stats, "image_save", time.perf_counter() - image_save_started_at
-            )
-
-        mask_save_started_at = time.perf_counter()
-        Image.fromarray((final_mask * 255).astype(np.uint8)).save(
-            str(mask_output_path),
-            **get_png_save_kwargs(kind="mask"),
-        )
-        if window_phase_stats is not None:
-            record_phase(
-                window_phase_stats, "mask_save", time.perf_counter() - mask_save_started_at
-            )
-        patch_record = {
-            "filename": file_basename,
-            "label": 1 if label == "CANCER" else 0,
-            "patient_id": str(context["patient"]),
-            "slide_id": context["slide_id"],
-            **artifact_coverages,
-        }
+    if not patch_saved:
         return (
-            (f"SAVED_{label}", patch_record, window_phase_stats)
+            ("SKIPPED_OVERLAP", None, window_phase_stats)
             if window_phase_stats is not None
-            else (f"SAVED_{label}", patch_record)
+            else ("SKIPPED_OVERLAP", None)
         )
 
+    read_started_at = time.perf_counter()
+    patch_pil = slide.read_region(
+        patch_coords, context["target_level"], (window_size, window_size)
+    ).convert("RGB")
+    patch_np = np.array(patch_pil)
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "read_region", time.perf_counter() - read_started_at)
+
+    tissue_started_at = time.perf_counter()
+    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
+    if not tissue_ok:
+        return (
+            ("SKIPPED_TISSUE", None, window_phase_stats)
+            if window_phase_stats is not None
+            else ("SKIPPED_TISSUE", None)
+        )
+
+    artifact_coverages = get_zero_artifact_coverages()
+    artifact_geometry_index = context.get("artifact_geometry_index")
+    if context.get("use_artifact_filter") and artifact_geometry_index:
+        artifact_started_at = time.perf_counter()
+        artifact_coverages = compute_artifact_coverages_from_index(
+            artifact_geometry_index=artifact_geometry_index,
+            patch_polygon=shapely.box(x_int, y_int, x_int + window_size, y_int + window_size),
+            patch_area=PATCH_AREA,
+        )
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats,
+                "artifact_coverage",
+                time.perf_counter() - artifact_started_at,
+            )
+
+    file_basename = build_patch_filename(
+        label=label,
+        patient_id=context["patient"],
+        slide_id=context["slide_id"],
+        x_coord=x_int,
+        y_coord=y_int,
+    )
+    image_output_path = Path(save_folder_img) / file_basename
+    mask_output_path = Path(save_folder_mask) / file_basename
+
+    image_save_started_at = time.perf_counter()
+    patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "image_save", time.perf_counter() - image_save_started_at)
+
+    mask_save_started_at = time.perf_counter()
+    Image.fromarray((final_mask * 255).astype(np.uint8)).save(
+        str(mask_output_path),
+        **get_png_save_kwargs(kind="mask"),
+    )
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "mask_save", time.perf_counter() - mask_save_started_at)
+    patch_record = {
+        "filename": file_basename,
+        "label": 1 if label == "CANCER" else 0,
+        "patient_id": str(context["patient"]),
+        "slide_id": context["slide_id"],
+        **artifact_coverages,
+    }
     return (
-        ("SKIPPED_OVERLAP", None, window_phase_stats)
+        (f"SAVED_{label}", patch_record, window_phase_stats)
         if window_phase_stats is not None
-        else ("SKIPPED_OVERLAP", None)
+        else (f"SAVED_{label}", patch_record)
     )
 
 

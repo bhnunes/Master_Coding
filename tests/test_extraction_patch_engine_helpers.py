@@ -251,14 +251,26 @@ def test_process_window_with_slide_skips_tissue_and_records_profile_stats(
             return Image.new("RGB", (4, 4), color=(10, 20, 30))
 
     monkeypatch.setattr(patch_engine, "check_tissue_percentage_robust", lambda patch, req: False)
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
+    not_cancer_index = patch_engine.build_scaled_polygon_index(
+        [[(0, 0), (4, 0), (4, 4), (0, 4)]],
+        scale_factor=1.0,
+    )
     patch_engine._WORKER_CONTEXT = {
         "profile_output_path": "/tmp/profile.json",
         "window_size": 4,
         "use_artifact_filter": False,
         "target_level": 0,
         "tissue_percentage_req": 0.1,
+        "match_percentage_req": 0.1,
         "cancer_polygon_index": ([], None),
-        "not_cancer_polygon_index": ([], None),
+        "not_cancer_polygon_index": not_cancer_index,
+        "path_cancer_folder": "/tmp/CANCER",
+        "path_cancer_mask_folder": "/tmp/CANCER_MASK",
+        "path_not_cancer_folder": "/tmp/NOT_CANCER",
+        "path_not_cancer_mask_folder": "/tmp/NOT_CANCER_MASK",
+        "patient": "p1",
+        "slide_id": "slide",
     }
 
     result = patch_engine._process_window_with_slide(FakeSlide(), 1, 2)
@@ -326,6 +338,34 @@ def test_process_window_with_slide_saves_not_cancer_patch_with_artifact_coverage
     assert result[1]["cov_fold"] == 0.25
     assert any((tmp_path / "NOT_CANCER").iterdir())
     assert any((tmp_path / "NOT_CANCER_MASK").iterdir())
+
+
+def test_process_window_with_slide_skips_overlap_before_reading_slide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSlide:
+        def read_region(
+            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+        ) -> Image.Image:
+            raise AssertionError("read_region should not be called for overlap-skipped windows")
+
+    patch_engine._WORKER_CONTEXT = {
+        "profile_output_path": "/tmp/profile.json",
+        "window_size": 4,
+        "use_artifact_filter": False,
+        "target_level": 0,
+        "tissue_percentage_req": 0.1,
+        "match_percentage_req": 1.0,
+        "cancer_polygon_index": ([], None),
+        "not_cancer_polygon_index": ([], None),
+    }
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
+
+    result = patch_engine._process_window_with_slide(FakeSlide(), 0, 0)
+
+    assert result[0] == "SKIPPED_OVERLAP"
+    assert result[1] is None
+    assert result[2]["read_region"].calls == 0
 
 
 def test_process_window_batch_returns_profiled_error_when_worker_fails(
