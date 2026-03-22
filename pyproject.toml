@@ -18,7 +18,7 @@ dependencies = [
     "tiatoolbox",
     "shapely>=2.0.0",
     "albumentations",
-    "segmentation-models-pytorch==0.3.1",
+    "segmentation-models-pytorch",
     "h5py",
     "tqdm==4.66.4",
     "numba>=0.60.0",
