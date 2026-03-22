@@ -92,6 +92,22 @@ def test_polygons_to_mask_with_index_fills_matching_polygon() -> None:
     assert np.count_nonzero(mask) >= 4
 
 
+def test_clip_geometry_to_patch_coords_handles_multipolygon_result() -> None:
+    geometry = Polygon([(0, 0), (6, 0), (6, 2), (4, 2), (4, 4), (6, 4), (6, 6), (0, 6)])
+
+    clipped = patch_engine.clip_geometry_to_patch_coords(
+        geometry,
+        patch_x=1,
+        patch_y=1,
+        mask_width=4,
+        mask_height=4,
+    )
+
+    assert len(clipped) >= 1
+    assert all(coords.dtype == np.int32 for coords in clipped)
+    assert all(coords.shape[1] == 2 for coords in clipped)
+
+
 def test_process_window_saves_cancer_patch_and_returns_artifact_record(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

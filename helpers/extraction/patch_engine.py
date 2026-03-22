@@ -16,7 +16,8 @@ import numpy as np
 import shapely
 from dotenv import load_dotenv
 from PIL import Image
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.ops import clip_by_rect
 from shapely.prepared import prep
 from shapely.strtree import STRtree
 
@@ -146,25 +147,47 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
         if not prep_win.intersects(anno_poly_l0):
             continue
         try:
-            intersection = win_poly_l0.intersection(anno_poly_l0)
+            coords_list = clip_geometry_to_patch_coords(
+                anno_poly_l0,
+                patch_x=patch_x_l0,
+                patch_y=patch_y_l0,
+                mask_width=mask_shape[1] * scale_factor,
+                mask_height=mask_shape[0] * scale_factor,
+            )
         except shapely.errors.TopologicalError:
             continue
-        if intersection.is_empty:
-            continue
-        geoms = intersection.geoms if isinstance(intersection, MultiPolygon) else [intersection]
-        for geom in geoms:
-            if geom.geom_type == "Polygon" and not geom.is_empty:
-                polygon = cast(Polygon, geom)
-                coords = np.array(polygon.exterior.coords)
-                coords[:, 0] = (coords[:, 0] - patch_x_l0) / scale_factor
-                coords[:, 1] = (coords[:, 1] - patch_y_l0) / scale_factor
-                coords = np.round(np.clip(coords, 0, mask_shape[1] - 1)).astype(np.int32)
-                coords[:, 1] = np.round(np.clip(coords[:, 1], 0, mask_shape[0] - 1)).astype(
-                    np.int32
-                )
-                if len(coords) >= 3:
-                    cv2.fillPoly(mask, [coords], (1,))
+        if coords_list:
+            scaled_coords_list = []
+            for coords in coords_list:
+                scaled_coords = coords.astype(np.float64)
+                scaled_coords[:, 0] = np.round(scaled_coords[:, 0] / scale_factor)
+                scaled_coords[:, 1] = np.round(scaled_coords[:, 1] / scale_factor)
+                scaled_coords[:, 0] = np.clip(scaled_coords[:, 0], 0, mask_shape[1] - 1)
+                scaled_coords[:, 1] = np.clip(scaled_coords[:, 1], 0, mask_shape[0] - 1)
+                scaled_coords_list.append(scaled_coords.astype(np.int32))
+            cv2.fillPoly(mask, scaled_coords_list, (1,))
     return mask
+
+
+def clip_geometry_to_patch_coords(geometry, *, patch_x, patch_y, mask_width, mask_height):
+    clipped = clip_by_rect(geometry, patch_x, patch_y, patch_x + mask_width, patch_y + mask_height)
+    if clipped.is_empty:
+        return []
+    geoms = clipped.geoms if isinstance(clipped, MultiPolygon) else [clipped]
+    coords_list = []
+    for geom in geoms:
+        if geom.geom_type != "Polygon" or geom.is_empty:
+            continue
+        coords_raw = np.asarray(geom.exterior.coords, dtype=np.float64)
+        coords = np.column_stack(
+            (
+                np.round(np.clip(coords_raw[:, 0] - patch_x, 0, mask_width - 1)),
+                np.round(np.clip(coords_raw[:, 1] - patch_y, 0, mask_height - 1)),
+            )
+        ).astype(np.int32)
+        if len(coords) >= 3:
+            coords_list.append(coords)
+    return coords_list
 
 
 def get_zero_artifact_coverages():
@@ -322,24 +345,17 @@ def polygons_to_mask_with_index(mask_shape, polygon_index, patch_coords):
         if not prep_win.intersects(polygon):
             continue
         try:
-            intersection = win_poly.intersection(polygon)
+            coords_list = clip_geometry_to_patch_coords(
+                polygon,
+                patch_x=patch_x,
+                patch_y=patch_y,
+                mask_width=mask_shape[1],
+                mask_height=mask_shape[0],
+            )
         except shapely.errors.TopologicalError:
             continue
-        if intersection.is_empty:
-            continue
-        geoms = intersection.geoms if isinstance(intersection, MultiPolygon) else [intersection]
-        for geom in geoms:
-            if geom.geom_type != "Polygon" or geom.is_empty:
-                continue
-            coords_raw = np.asarray(geom.exterior.coords, dtype=np.float64)
-            coords = np.column_stack(
-                (
-                    np.round(np.clip(coords_raw[:, 0] - patch_x, 0, mask_shape[1] - 1)),
-                    np.round(np.clip(coords_raw[:, 1] - patch_y, 0, mask_shape[0] - 1)),
-                )
-            ).astype(np.int32)
-            if len(coords) >= 3:
-                cv2.fillPoly(mask, [coords], (1,))
+        if coords_list:
+            cv2.fillPoly(mask, coords_list, (1,))
     return mask
 
 
@@ -364,14 +380,7 @@ def _process_window_with_slide(slide, x, y):
     x_int, y_int = int(x), int(y)
     patch_coords = (x_int, y_int)
     window_size = context["window_size"]
-    patch_polygon = Polygon(
-        [
-            (x_int, y_int),
-            (x_int + window_size, y_int),
-            (x_int + window_size, y_int + window_size),
-            (x_int, y_int + window_size),
-        ]
-    )
+    patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
 
     artifact_coverages = get_zero_artifact_coverages()
     artifact_geometry_index = context.get("artifact_geometry_index")
@@ -754,9 +763,9 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         target_width, target_height = slide.level_dimensions[kwargs["target_level"]]
 
         scaled_polys_raw = []
-        for p in all_polygons_level0:
+        for polygon_points in all_polygons_level0:
             try:
-                poly = Polygon([(x / scale_factor, y / scale_factor) for x, y in p])
+                poly = Polygon([(x / scale_factor, y / scale_factor) for x, y in polygon_points])
                 if not poly.is_valid:
                     poly = poly.buffer(0)
                 scaled_polys_raw.append(poly)
@@ -777,13 +786,11 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             return 0, 0, []
 
         combined_annotations = MultiPolygon(scaled_polys_flat)
-        # Use prep for optimized geometric checks
-        prepared_annotations = prep(combined_annotations)
-
-        # --- OPTIMIZATION: Bounding Box Pre-filtering ---
-        # Get the bounding box of all annotations.
-        # The .bounds property returns (minx, miny, maxx, maxy).
         min_x, min_y, max_x, max_y = combined_annotations.bounds
+        x_start = max(0, int(min_x))
+        y_start = max(0, int(min_y))
+        x_end = min(int(max_x) + kwargs["window_size"], target_width)
+        y_end = min(int(max_y) + kwargs["window_size"], target_height)
 
         logging.info(
             "Annotations bounding box (L%s): [(%s, %s), (%s, %s)]",
@@ -793,32 +800,29 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             int(max_x),
             int(max_y),
         )
+        logging.info(f"Optimized scan area: [({x_start}, {y_start}), ({x_end}, {y_end})]")
 
-        # Start the grid at the beginning of the bounding box.
-        # Use max(0, ...) to ensure we don't start with negative coordinates if bounds are weird.
-        x_start = max(0, int(min_x))
-        y_start = max(0, int(min_y))
-
-        # End the grid at the end of the bounding box, but ensure it does not exceed
-        # the slide's actual dimensions.
-        # This is where target_width and target_height are now critically important.
-        x_end = min(int(max_x) + kwargs["window_size"], target_width)
-        y_end = min(int(max_y) + kwargs["window_size"], target_height)
-
+        candidate_filter_started_at = time.perf_counter()
         x_coords = np.arange(x_start, x_end - kwargs["window_size"] + 1, kwargs["stride"])
         y_coords = np.arange(y_start, y_end - kwargs["window_size"] + 1, kwargs["stride"])
-
-        logging.info(f"Optimized scan area: [({x_start}, {y_start}), ({x_end}, {y_end})]")
-        # --- END OF OPTIMIZATION ---
-
-        # The rest of the code now operates on a much smaller grid of candidate coordinates.
-        # Note the use of the 'prepared_annotations' object for the faster 'contains' check.
-        candidate_filter_started_at = time.perf_counter()
+        center_x = x_coords + (kwargs["window_size"] // 2)
+        center_y = y_coords + (kwargs["window_size"] // 2)
+        center_grid_x, center_grid_y = np.meshgrid(center_x, center_y, indexing="ij")
+        contains_mask = shapely.contains_xy(
+            combined_annotations,
+            center_grid_x.ravel(),
+            center_grid_y.ravel(),
+        )
+        coord_grid = np.column_stack(
+            (
+                np.repeat(x_coords, len(y_coords)),
+                np.tile(y_coords, len(x_coords)),
+            )
+        )
         filtered_coords = [
-            (int(x), int(y))
-            for x in x_coords
-            for y in y_coords
-            if prepared_annotations.contains(Point(x + HALF_WINDOW, y + HALF_WINDOW))
+            (int(x_coord), int(y_coord))
+            for (x_coord, y_coord), keep in zip(coord_grid, contains_mask, strict=False)
+            if keep
         ]
         slide_phase_seconds["candidate_filter"] = time.perf_counter() - candidate_filter_started_at
 
@@ -866,23 +870,18 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             batch_size,
         )
         parallel_started_at = time.perf_counter()
-        results = list(
-            iter_window_results(
-                filtered_coords=filtered_coords,
-                num_workers=kwargs["num_workers"],
-                worker_state=worker_state,
-                batch_size=batch_size,
-            )
-        )
-        slide_phase_seconds["parallel_processing"] = time.perf_counter() - parallel_started_at
-
         status_counts = {}
         artifact_patch_records = []
         errors = []
         window_phase_stats: dict[str, PhaseStats] | None = (
             create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
         )
-        for result in results:
+        for result in iter_window_results(
+            filtered_coords=filtered_coords,
+            num_workers=kwargs["num_workers"],
+            worker_state=worker_state,
+            batch_size=batch_size,
+        ):
             status = result[0]
             payload = result[1]
             if profile_enabled and len(result) == 3 and window_phase_stats is not None:
@@ -895,6 +894,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
                 errors.append(payload)
             elif payload is not None:
                 artifact_patch_records.append(payload)
+        slide_phase_seconds["parallel_processing"] = time.perf_counter() - parallel_started_at
 
         cancer_count = status_counts.get("SAVED_CANCER", 0)
         not_cancer_count = status_counts.get("SAVED_NOT_CANCER", 0)
