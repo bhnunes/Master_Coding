@@ -12,3 +12,4 @@ zarr==2.16.1
 rasterio==1.4.3
 imagecodecs==2024.12.30
 python-dotenv==1.2.2
+openslide-python
