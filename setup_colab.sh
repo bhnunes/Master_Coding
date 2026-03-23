@@ -10,7 +10,7 @@ EXTRA_ARGS=""
 if [ "$MODE" == "grandqc" ]; then
     echo "!!! Configuring for GrandQC (Legacy Python 3.10) !!!"
     PYTHON_VERSION="3.10"
-
+else
     echo "--- Configuring for Master Project (Python 3.12) ---"
     PYTHON_VERSION="3.12"
   
