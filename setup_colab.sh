@@ -10,9 +10,6 @@ EXTRA_ARGS=""
 if [ "$MODE" == "grandqc" ]; then
     echo "!!! Configuring for GrandQC (Legacy Python 3.10) !!!"
     PYTHON_VERSION="3.10"
-    # --no-all-groups: Crucial! Tells uv NOT to resolve other groups like 'research'
-    # --group grandqc: Install only this group
-    # --no-install-project: (Optional) If you don't want the main project 'master-project' installed as a package
     EXTRA_ARGS="--group grandqc --no-group research --no-group dev"
 else
     echo "--- Configuring for Master Project (Python 3.12) ---"
