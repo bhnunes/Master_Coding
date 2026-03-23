@@ -2,7 +2,7 @@
 name = "master-project"
 version = "0.1.0"
 description = "High-performance medical imaging experiments"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10,<3.13" # Expanded to allow 3.10
 dependencies = [
     "torch==2.8.0",
     "torchvision==0.23.0",
@@ -48,6 +48,22 @@ dev = [
     "py-spy>=0.3.14",
     "snakeviz>=2.2.0",
     "pytest-cov==7.0.0"
+]
+
+grandqc = [
+    "numpy==1.26.4",
+    "opencv-python-headless==4.7.0.72",
+    "Pillow==10.4.0",
+    "scipy==1.14.1",
+    "segmentation-models-pytorch==0.3.1",
+    "scikit-image==0.21.0",
+    "six==1.16.0",
+    "tifffile==2023.4.12",
+    "torch==2.0.1",
+    "tqdm==4.65.0",
+    "zarr==2.16.1",
+    "rasterio==1.4.3",
+    "imagecodecs==2024.12.30"
 ]
 
 # --- UV Magic: Fetching CUDA 12.6 specifically ---
