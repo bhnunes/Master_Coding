@@ -72,23 +72,9 @@ else
     EXEC_CMD="uv run --python $PYTHON_VERSION python"
 fi
 
-$EXEC_CMD - <<'PY'
-from __future__ import annotations
 
-import cv2
-import segmentation_models_pytorch as smp
-import torch
-
-print(f"torch={torch.__version__}")
-print(f"cuda_available={torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"cuda_device={torch.cuda.get_device_name(0)}")
-print(f"opencv={cv2.__version__}")
-print(f"smp={smp.__version__}")
-PY
 
 print_step "Setup complete"
 printf '%s\n' "Next steps:"
 printf '  1. Edit .env with your dataset and model paths.\n'
 printf '  2. Mount Google Drive if your zip file or models live there.\n'
-printf '  3. Run scripts with: uv run --python "$PYTHON_VERSION" python <script>.py\n'
