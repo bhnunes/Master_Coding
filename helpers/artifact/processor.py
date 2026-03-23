@@ -174,9 +174,10 @@ class ArtifactProcessor:
             tissue_detection_map = tissue_detection_map.convert("RGB")  # type: ignore[assignment]
         target_width = max(1, int(width_l0 * mpp / self.config.mpp_model))
         target_height = max(1, int(height_l0 * mpp / self.config.mpp_model))
-        tissue_detection_map_mpp = np.array(
-            tissue_detection_map.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        tissue_detection_map = tissue_detection_map.resize(  # type: ignore[assignment]
+            (target_width, target_height), Image.Resampling.LANCZOS
         )
+        tissue_detection_map_mpp = np.array(tissue_detection_map.convert("L"))
         colors = colors_QC7
         map_image, full_mask = slide_process_single(  # type: ignore[no-untyped-call]
             models.qc_model,
