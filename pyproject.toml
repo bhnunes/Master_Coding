@@ -5,28 +5,20 @@ description = "High-performance medical imaging experiments"
 requires-python = ">=3.10,<3.13" # Expanded to allow 3.10
 # Only keep packages that DON'T conflict or use flexible versioning here
 dependencies = [
-    "torch",
-    "torchvision",
-    "torchaudio",
     "numpy",
     "pandas",
     "openslide-python",
     "tiatoolbox",
-    "shapely>=2.0.0",
-    "albumentations",
-    "segmentation-models-pytorch",
     "h5py",
     "tqdm",
-    "python-dotenv==1.2.2",
-    "PyYAML",
-    "psutil",
-    "pyarrow",
-    "orjson",
 ]
 
 [dependency-groups]
 # Master Project Research Group (Python 3.12)
 research = [
+    "torch",
+    "torchvision",
+    "torchaudio",
     "scikit-learn==1.4.2",
     "scikit-image==0.23.2",
     "scikit-optimize==0.10.2",
@@ -40,6 +32,14 @@ research = [
     "numba>=0.60.0",
     "joblib>=1.4.0",
     "matplotlib",
+    "shapely>=2.0.0",
+    "albumentations",
+    "segmentation-models-pytorch",
+    "PyYAML",
+    "psutil",
+    "pyarrow",
+    "orjson",
+    "python-dotenv==1.2.2"
 ]
 
 dev = [
@@ -69,7 +69,8 @@ grandqc = [
     "tqdm==4.65.0",
     "zarr==2.16.1",
     "rasterio==1.4.3",
-    "imagecodecs==2024.12.30"
+    "imagecodecs==2024.12.30",
+    "python-dotenv==1.2.2"
 ]
 
 # --- UV Magic: Fetching CUDA 12.6 specifically ---

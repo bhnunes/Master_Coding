@@ -10,10 +10,14 @@ EXTRA_ARGS=""
 if [ "$MODE" == "grandqc" ]; then
     echo "!!! Configuring for GrandQC (Legacy Python 3.10) !!!"
     PYTHON_VERSION="3.10"
-    # Sync ONLY the grandqc group and exclude default project dependencies to avoid conflicts
-    EXTRA_ARGS="--group grandqc --no-default-groups"
+    # --no-all-groups: Crucial! Tells uv NOT to resolve other groups like 'research'
+    # --group grandqc: Install only this group
+    # --no-install-project: (Optional) If you don't want the main project 'master-project' installed as a package
+    EXTRA_ARGS="--group grandqc --no-all-groups"
 else
     echo "--- Configuring for Master Project (Python 3.12) ---"
+    PYTHON_VERSION="3.12"
+    EXTRA_ARGS="--group research --no-all-groups"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
