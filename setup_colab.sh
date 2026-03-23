@@ -58,14 +58,21 @@ print_step "Installing dependencies (Python $PYTHON_VERSION)"
 
 if [ "$MODE" == "grandqc" ]; then
     uv venv --python "$PYTHON_VERSION"
-    source .venv/bin/activate
-    uv pip install -r requirements-grandqc.txt
+    # Force uv to install into this specific venv, bypassing the pyproject.toml constraints
+    uv pip install --python .venv -r requirements-grandqc.txt
 else
     uv sync --python "$PYTHON_VERSION"
 fi
 
 print_step "Verifying critical imports"
-uv run --python "$PYTHON_VERSION" python - <<'PY'
+
+if [ "$MODE" == "grandqc" ]; then
+    EXEC_CMD=".venv/bin/python"
+else
+    EXEC_CMD="uv run --python $PYTHON_VERSION python"
+fi
+
+$EXEC_CMD - <<'PY'
 from __future__ import annotations
 
 import cv2
