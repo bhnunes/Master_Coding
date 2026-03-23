@@ -170,6 +170,8 @@ class ArtifactProcessor:
             self.config.mpp_model,
         )
         tissue_detection_map = Image.open(tissue_outputs["tissue_mask_path"])
+        if tissue_detection_map.mode != "RGB":
+            tissue_detection_map = tissue_detection_map.convert("RGB")  # type: ignore[assignment]
         target_width = max(1, int(width_l0 * mpp / self.config.mpp_model))
         target_height = max(1, int(height_l0 * mpp / self.config.mpp_model))
         tissue_detection_map_mpp = np.array(
