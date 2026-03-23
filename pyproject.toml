@@ -3,41 +3,45 @@ name = "master-project"
 version = "0.1.0"
 description = "High-performance medical imaging experiments"
 requires-python = ">=3.10,<3.13" # Expanded to allow 3.10
+# Only keep packages that DON'T conflict or use flexible versioning here
 dependencies = [
-    "torch==2.8.0",
-    "torchvision==0.23.0",
-    "torchaudio==2.8.0",
-    "numpy==1.26.4",
-    "pandas==2.2.2",
-    "scikit-learn==1.4.2",
-    "scikit-image==0.23.2",
-    "scikit-optimize==0.10.2",
-    "opencv-contrib-python==4.9.0.80",
-    "Pillow>=10.4.0",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "numpy",
+    "pandas",
     "openslide-python",
     "tiatoolbox",
     "shapely>=2.0.0",
     "albumentations",
     "segmentation-models-pytorch",
     "h5py",
-    "tqdm==4.66.4",
-    "numba>=0.60.0",
-    "joblib>=1.4.0",
-    "matplotlib",
+    "tqdm",
     "python-dotenv==1.2.2",
     "PyYAML",
-    "torch-lr-finder==0.2.2",
-    "seaborn==0.13.2",
-    "torchmetrics==1.9.0",
-    "optuna==4.8.0",
-    "schedulefree==1.4.1",
-    "aim",
     "psutil",
     "pyarrow",
     "orjson",
 ]
 
 [dependency-groups]
+# Master Project Research Group (Python 3.12)
+research = [
+    "scikit-learn==1.4.2",
+    "scikit-image==0.23.2",
+    "scikit-optimize==0.10.2",
+    "opencv-contrib-python==4.9.0.80",
+    "torch-lr-finder==0.2.2",
+    "seaborn==0.13.2",
+    "torchmetrics==1.9.0",
+    "optuna==4.8.0",
+    "schedulefree==1.4.1",
+    "aim",
+    "numba>=0.60.0",
+    "joblib>=1.4.0",
+    "matplotlib",
+]
+
 dev = [
     "pytest>=8.0.0",
     "ruff==0.15.5",
@@ -50,8 +54,10 @@ dev = [
     "pytest-cov==7.0.0"
 ]
 
+# GrandQC Group (Python 3.10)
 grandqc = [
     "numpy==1.26.4",
+    "torch==2.0.1", # Strict legacy version
     "opencv-python-headless==4.7.0.72",
     "Pillow==10.4.0",
     "scipy==1.14.1",
