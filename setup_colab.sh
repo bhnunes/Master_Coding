@@ -13,11 +13,11 @@ if [ "$MODE" == "grandqc" ]; then
     # --no-all-groups: Crucial! Tells uv NOT to resolve other groups like 'research'
     # --group grandqc: Install only this group
     # --no-install-project: (Optional) If you don't want the main project 'master-project' installed as a package
-    EXTRA_ARGS="--group grandqc --no-all-groups"
+    EXTRA_ARGS="--group grandqc --no-group research --no-group dev"
 else
     echo "--- Configuring for Master Project (Python 3.12) ---"
     PYTHON_VERSION="3.12"
-    EXTRA_ARGS="--group research --no-all-groups"
+    EXTRA_ARGS="--group research --no-group grandqc --no-group dev"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
