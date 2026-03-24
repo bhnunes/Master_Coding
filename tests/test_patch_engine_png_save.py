@@ -22,7 +22,7 @@ def test_save_patch_outputs_passes_fast_png_kwargs(tmp_path: Path, monkeypatch: 
     final_mask = np.zeros((4, 4), dtype=np.uint8)
     captured: list[tuple[str, dict[str, Any]]] = []
 
-    def fake_save(self: Image.Image, fp: str, **kwargs: Any) -> None:
+    def fake_save(_self: Image.Image, fp: str, **kwargs: Any) -> None:
         captured.append((fp, kwargs))
 
     monkeypatch.setattr(Image.Image, "save", fake_save)

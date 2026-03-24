@@ -106,6 +106,32 @@ def configure_root_logger(
     )
 
 
+def configure_stage_logger(
+    logger_name: str,
+    log_path: Path,
+    *,
+    logger_level: int = logging.INFO,
+    file_level: int = logging.INFO,
+    console_level: int = logging.WARNING,
+    file_mode: str = "a",
+    file_pattern: str = "%(asctime)s - %(process)d - %(levelname)s - %(message)s",
+    console_pattern: str = "%(levelname)s: %(message)s",
+) -> logging.Logger:
+    """Configure a named stage logger with file and console handlers."""
+
+    return configure_logger(
+        log_path,
+        logger_name=logger_name,
+        logger_level=logger_level,
+        file_level=file_level,
+        console_level=console_level,
+        file_mode=file_mode,
+        file_pattern=file_pattern,
+        console_pattern=console_pattern,
+        propagate=False,
+    )
+
+
 class LoggerWriter:
     """File-like adapter that forwards writes to a logger."""
 

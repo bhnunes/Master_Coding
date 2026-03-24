@@ -172,7 +172,7 @@ def test_get_embeddings_stacks_batches_and_uses_cpu_pin_memory(
 
     observed: dict[str, Any] = {}
 
-    def fake_dataloader(dataset: object, **kwargs: object) -> list[torch.Tensor]:
+    def fake_dataloader(_dataset: object, **kwargs: object) -> list[torch.Tensor]:
         observed.update(kwargs)
         return [
             torch.zeros((2, 3, 4, 4), dtype=torch.float32),

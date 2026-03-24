@@ -42,7 +42,7 @@ def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets
 
     class FakeExtractor:
         def get_embeddings(
-            self, h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
+            self, _h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
         ) -> np.ndarray[Any, np.dtype[np.float32]]:
             requested_indices.append(indices.tolist())
             values = indices.astype(np.float32).reshape(-1, 1)
@@ -79,7 +79,7 @@ def test_select_patient_samples_computes_stability_once_when_repeats_are_determi
 ) -> None:
     stability_calls = 0
 
-    def fake_stability(*args: object, **kwargs: object) -> float:
+    def fake_stability(*_args: object, **_kwargs: object) -> float:
         nonlocal stability_calls
         stability_calls += 1
         return 1.0
@@ -90,7 +90,7 @@ def test_select_patient_samples_computes_stability_once_when_repeats_are_determi
 
     class FakeExtractor:
         def get_embeddings(
-            self, h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
+            self, _h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
         ) -> np.ndarray[Any, np.dtype[np.float32]]:
             values = indices.astype(np.float32).reshape(-1, 1)
             return np.concatenate([values, values + 1.0], axis=1)

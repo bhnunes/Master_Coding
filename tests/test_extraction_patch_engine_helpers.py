@@ -118,9 +118,8 @@ def test_process_window_saves_cancer_patch_and_returns_artifact_record(
             self.closed = False
 
         def read_region(
-            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+            self, _coords: tuple[int, int], _level: int, _size: tuple[int, int]
         ) -> Image.Image:
-            del coords, level, size
             return Image.new(
                 "RGB", (patch_engine.WINDOW_SIZE, patch_engine.WINDOW_SIZE), color=(1, 2, 3)
             )
@@ -345,7 +344,7 @@ def test_process_window_with_slide_skips_overlap_before_reading_slide(
 ) -> None:
     class FakeSlide:
         def read_region(
-            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+            self, _coords: tuple[int, int], _level: int, _size: tuple[int, int]
         ) -> Image.Image:
             raise AssertionError("read_region should not be called for overlap-skipped windows")
 

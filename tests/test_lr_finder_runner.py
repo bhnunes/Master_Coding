@@ -210,7 +210,7 @@ def test_run_lr_finder_screening_writes_summaries(
     monkeypatch.setattr("helpers.lr_finder.runner.torch.cuda.is_available", lambda: False)
     monkeypatch.setattr("helpers.lr_finder.runner.torch.device", lambda device_type: device_type)
 
-    def fake_run_single(*args: object, **kwargs: object) -> tuple[RunRecord | None, int, int]:
+    def fake_run_single(*_args: object, **_kwargs: object) -> tuple[RunRecord | None, int, int]:
         call_count["value"] += 1
         if call_count["value"] == 1:
             return (

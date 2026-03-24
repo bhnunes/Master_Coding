@@ -49,25 +49,6 @@ def _validate_existing_hdf5(output_path: Path, expected_signature: str) -> Path:
     return output_path
 
 
-def _load_image(image_path: Path, img_size: int) -> npt.NDArray[np.uint8]:
-    image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-    if image is None:
-        raise ValueError(f"Could not read image file: {image_path}")
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return cast(
-        npt.NDArray[np.uint8],
-        cv2.resize(image, (img_size, img_size), interpolation=cv2.INTER_LINEAR),
-    )
-
-
-def _load_mask(mask_path: Path, img_size: int) -> npt.NDArray[np.uint8]:
-    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-    if mask is None:
-        raise ValueError(f"Could not read mask file: {mask_path}")
-    resized = cv2.resize(mask, (img_size, img_size), interpolation=cv2.INTER_NEAREST)
-    return cast(npt.NDArray[np.uint8], np.where(resized > 0, 1, 0).astype(np.uint8))
-
-
 def _read_file_bytes(path: Path) -> bytes:
     data = path.read_bytes()
     if not data:

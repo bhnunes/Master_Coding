@@ -3,7 +3,7 @@
 import numpy as np
 
 
-def to_tensor_x(x, **kwargs):
+def to_tensor_x(x, **_kwargs):
     return x.transpose(2, 0, 1).astype("float32")
 
 

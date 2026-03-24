@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pandas as pd
 
 from helpers.sanity.config import SanityConfig
@@ -17,8 +19,8 @@ def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None
                 "label": 1,
                 "patient_id": 1,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_path_image": "TRAIN/CANCER/PATIENT_1_PATCH_001.png",
-                "relative_path_mask": "TRAIN/CANCER_MASK/PATIENT_1_PATCH_001.png",
+                "relative_hdf5_path": "TRAIN.h5",
+                "hdf5_row_index": 0,
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
             },
@@ -28,8 +30,8 @@ def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None
                 "label": 1,
                 "patient_id": 2,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_path_image": "TEST/CANCER/PATIENT_1_PATCH_001.png",
-                "relative_path_mask": "TEST/CANCER_MASK/PATIENT_1_PATCH_001.png",
+                "relative_hdf5_path": "TEST.h5",
+                "hdf5_row_index": 0,
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
             },
@@ -38,6 +40,13 @@ def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None
     manifest_df.to_csv(output_dir / "manifest.csv", index=False)
     pd.DataFrame().to_csv(output_dir / "split_stats.csv", index=False)
     (output_dir / "run_config.json").write_text(json.dumps({}), encoding="utf-8")
+    for split_name in ("TRAIN", "TEST"):
+        with h5py.File(output_dir / f"{split_name}.h5", "w") as handle:
+            handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+            handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+            handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+            handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
+            handle.create_dataset("filenames", data=np.array([b"PATIENT_1_PATCH_001.png"]))
 
     report = run_sanity_pipeline(
         SanityConfig(

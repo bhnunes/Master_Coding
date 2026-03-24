@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-from helpers.sanity.disk_checks import inspect_hdf5_row, inspect_mask
+from helpers.sanity.disk_checks import inspect_hdf5_row
 from helpers.sanity.models import CheckResult
 
 
@@ -19,7 +19,6 @@ def check_mask_label_semantics(
 ) -> CheckResult:
     if manifest_split.empty:
         return CheckResult("PASS", "Split is empty; nothing to check.")
-    use_hdf5 = {"relative_hdf5_path", "hdf5_row_index"}.issubset(manifest_split.columns)
     positive_not_cancer: list[str] = []
     empty_cancer: list[str] = []
     for row in tqdm(
@@ -28,13 +27,9 @@ def check_mask_label_semantics(
         desc=f"{split}: mask semantics",
         leave=False,
     ):
-        if use_hdf5:
-            inspection = inspect_hdf5_row(
-                str(base_dir / str(row.relative_hdf5_path)),
-                int(row.hdf5_row_index),
-            )
-        else:
-            inspection = inspect_mask(str(base_dir / str(row.relative_path_mask)))
+        inspection = inspect_hdf5_row(
+            str(base_dir / str(row.relative_hdf5_path)), int(row.hdf5_row_index)
+        )
         has_positive_pixels = inspection["mask_has_positive_pixels"]
         if has_positive_pixels is None:
             return CheckResult("FAIL", f"Unreadable mask encountered for {row.filename}.")

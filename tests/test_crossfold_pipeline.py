@@ -38,10 +38,8 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     manifest_df = pd.DataFrame(
         [
             {
-                "abs_image_path": str(tmp_path / "TRAIN" / "CANCER" / "PATIENT_1_PATCH_001.png"),
-                "abs_mask_path": str(
-                    tmp_path / "TRAIN" / "CANCER_MASK" / "PATIENT_1_PATCH_001.png"
-                ),
+                "relative_hdf5_path": "TRAIN.h5",
+                "hdf5_row_index": 0,
             }
         ]
     )
@@ -86,7 +84,6 @@ def test_run_crossfold_pipeline_executes_stage_flow(
             source_hdf5_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
-            allow_destructive_move=False,
             constraints=SplitConstraints(
                 min_test_patients=1,
                 min_val_patients=1,

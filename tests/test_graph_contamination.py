@@ -56,7 +56,7 @@ def test_calculate_roi_contamination_returns_none_when_mask_is_missing(
 ) -> None:
     image = np.zeros((2, 2, 3), dtype=np.uint8)
 
-    def fake_imread(path: str, flag: int | None = None) -> Any:
+    def fake_imread(_path: str, flag: int | None = None) -> Any:
         if flag == cv2.IMREAD_GRAYSCALE:
             return None
         return image
@@ -78,7 +78,7 @@ def test_calculate_roi_contamination_returns_nan_for_empty_initial_roi(
     image = np.zeros((2, 2, 3), dtype=np.uint8)
     mask = np.zeros((2, 2), dtype=np.uint8)
 
-    def fake_imread(path: str, flag: int | None = None) -> Any:
+    def fake_imread(_path: str, flag: int | None = None) -> Any:
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
     monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
@@ -100,7 +100,7 @@ def test_calculate_roi_contamination_returns_nan_when_erosion_removes_roi(
     mask = np.zeros((3, 3), dtype=np.uint8)
     mask[1, 1] = 255
 
-    def fake_imread(path: str, flag: int | None = None) -> Any:
+    def fake_imread(_path: str, flag: int | None = None) -> Any:
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
     monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
@@ -166,7 +166,7 @@ def test_calculate_roi_contamination_returns_none_on_opencv_error(
     image = np.zeros((2, 2, 3), dtype=np.uint8)
     mask = np.ones((2, 2), dtype=np.uint8) * 255
 
-    def fake_imread(path: str, flag: int | None = None) -> Any:
+    def fake_imread(_path: str, flag: int | None = None) -> Any:
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
     class RaisingSegmentator:

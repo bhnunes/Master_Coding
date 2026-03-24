@@ -30,11 +30,6 @@ def _parse_bool(value: str | None, variable_name: str, default: bool) -> bool:
     raise ValueError(f"The '{variable_name}' environment variable must be a boolean value.")
 
 
-def _parse_splits(value: str | None) -> tuple[str, ...]:
-    del value
-    raise ValueError("Stage 7 no longer accepts split-folder packaging input.")
-
-
 def _required_path(variable_value: str | None, variable_name: str) -> Path:
     path = resolve_env_path(variable_value, variable_name, required=True)
     assert path is not None

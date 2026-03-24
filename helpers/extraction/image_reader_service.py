@@ -85,7 +85,7 @@ class SlideProcessingResult:
 def load_slide_runtime_settings(
     env: Mapping[str, str | None] | None = None,
     *,
-    system_name: str | None = None,
+    _system_name: str | None = None,
 ) -> SlideRuntimeSettings:
     """Load patch extraction settings from environment values."""
 

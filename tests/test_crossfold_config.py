@@ -40,7 +40,6 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.normalization_method == "MACENKO"
     assert config.overwrite_output_dir is False
     assert config.random_state == 7
-    assert config.allow_destructive_move is False
     assert config.constraints.test_ratio == 0.2
     assert config.constraints.val_ratio == 0.15
     assert config.constraints.min_train_patients == 4
@@ -80,17 +79,16 @@ def test_load_crossfold_config_prefers_global_log_folder(tmp_path: Path) -> None
 
 
 def test_load_crossfold_config_allows_explicit_destructive_mode(tmp_path: Path) -> None:
-    config = load_crossfold_config(
-        {
-            "CROSSFOLD_SOURCE_HDF5_PATH": str(tmp_path / "SOURCE_DATASET.h5"),
-            "CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE": "true",
-        }
-    )
+    with pytest.raises(ValueError, match="CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE"):
+        load_crossfold_config(
+            {
+                "CROSSFOLD_SOURCE_HDF5_PATH": str(tmp_path / "SOURCE_DATASET.h5"),
+                "CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE": "true",
+            }
+        )
 
-    assert config.allow_destructive_move is True
 
-
-def test_load_crossfold_config_requires_data_directory() -> None:
+def test_load_crossfold_config_requires_source_hdf5_path() -> None:
     with pytest.raises(ValueError, match="CROSSFOLD_SOURCE_HDF5_PATH"):
         load_crossfold_config({})
 
@@ -126,13 +124,3 @@ def test_load_crossfold_config_defaults_stage11_validation_guardrails(tmp_path: 
     assert config.constraints.min_validation_patients_for_ensemble == 30
     assert config.constraints.min_validation_positive_patients_for_ensemble == 15
     assert config.constraints.min_validation_negative_patients_for_ensemble == 15
-
-
-def test_load_crossfold_config_still_accepts_legacy_directory_variable(tmp_path: Path) -> None:
-    config = load_crossfold_config(
-        {
-            "CROSSFOLD_DATA_DIRECTORY": str(tmp_path / "legacy_patches"),
-        }
-    )
-
-    assert config.source_hdf5_path == tmp_path / "legacy_patches"

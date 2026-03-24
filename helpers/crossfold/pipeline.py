@@ -10,18 +10,11 @@ import pandas as pd
 from helpers.crossfold.config import CrossfoldConfig
 from helpers.crossfold.discovery import load_patch_dataset
 from helpers.crossfold.entropy import compute_all_patch_entropies, compute_patient_entropy_median
-from helpers.crossfold.io import (
-    ensure_split_output_directories,
-    process_and_write_split_files,
-    verify_split_hdf5_integrity,
-    verify_split_integrity,
-    write_split_hdf5,
-)
+from helpers.crossfold.io import verify_split_hdf5_integrity, write_split_hdf5
 from helpers.crossfold.logging import configure_crossfold_logging
 from helpers.crossfold.normalization import fit_normalizer_on_train_set, save_normalizer_stats
 from helpers.crossfold.provenance import (
     build_hdf5_manifest_from_split_dfs,
-    build_manifest_from_split_dfs,
     write_manifest_and_log_stats,
 )
 from helpers.crossfold.splitting import create_train_val_test_split_best
@@ -31,7 +24,6 @@ from helpers.crossfold.splitting import create_train_val_test_split_best
 class CrossfoldRunSummary:
     output_dir: Path
     manifest_rows: int
-    move_fallbacks: int
 
 
 def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
@@ -79,24 +71,13 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     )
     split_data["constraints"]["random_state"] = config.random_state
     run_id = f"{config.normalization_method}_seed_{config.random_state}"
-    hdf5_native = config.source_hdf5_path.suffix.lower() == ".h5"
-    if hdf5_native:
-        manifest_df = build_hdf5_manifest_from_split_dfs(
-            output_dir=output_dir,
-            run_id=run_id,
-            normalization_method=config.normalization_method,
-            is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
-            split_data=split_data,
-        )
-    else:
-        manifest_df = build_manifest_from_split_dfs(
-            output_dir=output_dir,
-            run_id=run_id,
-            normalization_method=config.normalization_method,
-            is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
-            split_data=split_data,
-        )
-        ensure_split_output_directories(output_dir)
+    manifest_df = build_hdf5_manifest_from_split_dfs(
+        output_dir=output_dir,
+        run_id=run_id,
+        normalization_method=config.normalization_method,
+        is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
+        split_data=split_data,
+    )
 
     normalizer = None
     template_paths: list[str] | None = None
@@ -108,35 +89,22 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         )
         save_normalizer_stats(normalizer, config.normalization_method, output_dir, template_paths)
 
-    move_fallbacks = 0
     for split_name, split_df in (
         ("TRAIN", split_data["train_df"]),
         ("VALIDATION", split_data["val_df"]),
         ("TEST", split_data["test_df"]),
     ):
-        if hdf5_native:
-            if split_df.empty:
-                continue
-            output_path = write_split_hdf5(
-                split_df=split_df,
-                source_hdf5_path=config.source_hdf5_path,
-                output_path=output_dir / f"{split_name}.h5",
-                normalizer=normalizer,
-                normalization_method=config.normalization_method,
-                overwrite=True,
-            )
-            verify_split_hdf5_integrity(output_path, split_df)
-        else:
-            move_fallbacks += process_and_write_split_files(
-                split_df=split_df,
-                output_dir=output_dir,
-                split_name=split_name,
-                normalizer=normalizer,
-                normalization_method=config.normalization_method,
-                allow_destructive_move=config.allow_destructive_move,
-            )
-            verify_split_integrity(output_dir, split_name)
-    logging.info("Move fallbacks (copy+delete likely): %s", move_fallbacks)
+        if split_df.empty:
+            continue
+        output_path = write_split_hdf5(
+            split_df=split_df,
+            source_hdf5_path=config.source_hdf5_path,
+            output_path=output_dir / f"{split_name}.h5",
+            normalizer=normalizer,
+            normalization_method=config.normalization_method,
+            overwrite=True,
+        )
+        verify_split_hdf5_integrity(output_path, split_df)
 
     extra: dict[str, object] = {}
     if patient_entropy_df is not None and split_data.get("objective_score") is not None:
@@ -153,7 +121,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         run_id=run_id,
         normalization_method=config.normalization_method,
         is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
-        data_directory=config.source_hdf5_path,
+        source_hdf5_path=config.source_hdf5_path,
         split_data=split_data,
         manifest_df=manifest_df,
         calc_checksums=config.calc_checksums,
@@ -163,5 +131,4 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     return CrossfoldRunSummary(
         output_dir=output_dir,
         manifest_rows=len(manifest_df),
-        move_fallbacks=move_fallbacks,
     )

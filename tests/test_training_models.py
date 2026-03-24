@@ -131,7 +131,7 @@ def test_create_model_disables_encoder_weights_for_validation(
     assert recorder.calls[0][1]["decoder_readout"] == "ignore"
 
 
-def test_create_optimizer_supports_adamw(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_optimizer_supports_adamw() -> None:
     model = torch.nn.Linear(2, 1)
 
     optimizer = create_optimizer(model, "AdamW", 1e-3, 1e-4)

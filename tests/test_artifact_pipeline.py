@@ -64,12 +64,13 @@ class FakeRepository:
     def list_pending(self) -> list[ArtifactRecord]:
         return self.records
 
-    def mark_processing(self, record_id: int) -> None:
+    def mark_processing(self, _record_id: int) -> None:
         return None
 
     def mark_success(
         self, record_id: int, geojson_path: str, processing_time_seconds: float | None = None
     ) -> None:
+        del geojson_path, processing_time_seconds
         self.success_ids.append(record_id)
 
     def mark_failure(
@@ -79,6 +80,7 @@ class FakeRepository:
         comments: str,
         processing_time_seconds: float | None = None,
     ) -> None:
+        del processing_time_seconds
         self.failures.append((record_id, error_type, comments))
 
 
@@ -87,7 +89,7 @@ class FakeProcessor:
         self.calls: list[str] = []
 
     def process_slide(
-        self, slide_path: Path, zip_member_name: str, geojson_output_path: Path
+        self, _slide_path: Path, zip_member_name: str, geojson_output_path: Path
     ) -> None:
         self.calls.append(zip_member_name)
         if zip_member_name == "case_2.ndpi":
@@ -96,16 +98,16 @@ class FakeProcessor:
 
 
 class FakeLogger:
-    def info(self, message: str, *args: object) -> None:
+    def info(self, _message: str, *_args: object) -> None:
         return None
 
-    def warning(self, message: str, *args: object) -> None:
+    def warning(self, _message: str, *_args: object) -> None:
         return None
 
-    def error(self, message: str, *args: object) -> None:
+    def error(self, _message: str, *_args: object) -> None:
         return None
 
-    def exception(self, message: str, *args: object) -> None:
+    def exception(self, _message: str, *_args: object) -> None:
         return None
 
 

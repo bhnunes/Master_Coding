@@ -11,7 +11,6 @@ from helpers.sanity.contracts import (
     check_filename_uniqueness,
 )
 from helpers.sanity.disk_checks import (
-    check_checksums,
     check_decode_and_shapes,
     check_manifest_disk_parity,
     check_mask_pixel_values,
@@ -98,13 +97,6 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
             "Patient Class Balance": check_patient_level_balance(split_df),
             "Split Class Presence": check_split_class_presence(split_df),
             "Patches/Patient": check_patches_per_patient_stats(split_df),
-            "Checksums": check_checksums(
-                split_df,
-                base_dir,
-                split_name,
-                mode=config.checksum_mode,
-                sample_n=min(200, config.sample_pairs),
-            ),
         }
 
     all_statuses = [result.status for result in dataset_checks.values()]

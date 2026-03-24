@@ -114,7 +114,6 @@ class CrossfoldConfig:
     source_hdf5_path: Path
     overwrite_output_dir: bool
     random_state: int
-    allow_destructive_move: bool
     constraints: SplitConstraints
     objective: ObjectiveConfig
     calc_checksums: bool
@@ -124,16 +123,7 @@ class CrossfoldConfig:
 
     @property
     def output_base_dir(self) -> Path:
-        parent = (
-            self.source_hdf5_path.parent
-            if self.source_hdf5_path.suffix.lower() == ".h5"
-            else self.source_hdf5_path
-        )
-        return parent / self.normalization_method
-
-    @property
-    def data_directory(self) -> Path:
-        return self.source_hdf5_path
+        return self.source_hdf5_path.parent / self.normalization_method
 
     @property
     def output_run_dir(self) -> Path:
@@ -152,6 +142,24 @@ def load_crossfold_config(
     """Load and validate Stage 5 crossfold configuration from `.env`."""
 
     values = env if env is not None else os.environ
+    source_hdf5_path = _required_path(
+        values,
+        "CROSSFOLD_SOURCE_HDF5_PATH",
+        system_name=system_name,
+    )
+    if source_hdf5_path.suffix.lower() != ".h5":
+        raise ValueError(
+            "The 'CROSSFOLD_SOURCE_HDF5_PATH' environment variable must point to a .h5 file."
+        )
+    if _parse_bool(
+        values.get("CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE"),
+        "CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE",
+        False,
+    ):
+        raise ValueError(
+            "The 'CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE' environment variable is not "
+            "supported in HDF5-native Stage 5."
+        )
     constraints = SplitConstraints(
         min_test_patients=_parse_int(
             values.get("CROSSFOLD_MIN_TEST_PATIENTS"),
@@ -240,14 +248,6 @@ def load_crossfold_config(
         ),
     )
 
-    source_path = values.get("CROSSFOLD_SOURCE_HDF5_PATH") or values.get("CROSSFOLD_DATA_DIRECTORY")
-    source_variable_name = (
-        "CROSSFOLD_SOURCE_HDF5_PATH"
-        if values.get("CROSSFOLD_SOURCE_HDF5_PATH") is not None
-        or values.get("CROSSFOLD_DATA_DIRECTORY") is None
-        else "CROSSFOLD_DATA_DIRECTORY"
-    )
-
     return CrossfoldConfig(
         normalization_method=_parse_choice(
             values.get("CROSSFOLD_NORMALIZATION_METHOD"),
@@ -255,22 +255,13 @@ def load_crossfold_config(
             default="NOT_NORMALIZED",
             allowed=VALID_NORMALIZATION_METHODS,
         ),
-        source_hdf5_path=_required_path(
-            {source_variable_name: source_path},
-            source_variable_name,
-            system_name=system_name,
-        ),
+        source_hdf5_path=source_hdf5_path,
         overwrite_output_dir=_parse_bool(
             values.get("CROSSFOLD_OVERWRITE_OUTPUT_DIR"),
             "CROSSFOLD_OVERWRITE_OUTPUT_DIR",
             True,
         ),
         random_state=_parse_int(values.get("CROSSFOLD_RANDOM_STATE"), "CROSSFOLD_RANDOM_STATE", 42),
-        allow_destructive_move=_parse_bool(
-            values.get("CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE"),
-            "CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE",
-            False,
-        ),
         constraints=constraints,
         objective=objective,
         calc_checksums=_parse_bool(

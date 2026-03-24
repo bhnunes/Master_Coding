@@ -21,7 +21,7 @@ class ArtifactProcessor:
         self.model_loader = model_loader
 
     def process_slide(
-        self, slide_path: Path, zip_member_name: str, geojson_output_path: Path
+        self, slide_path: Path, _zip_member_name: str, geojson_output_path: Path
     ) -> None:
         """Run tissue detection and QC processing for one slide."""
 

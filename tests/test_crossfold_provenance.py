@@ -2,14 +2,10 @@ import json
 from pathlib import Path
 
 import pandas as pd
-from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold.provenance import (
     build_hdf5_manifest_from_split_dfs,
-    build_manifest_from_split_dfs,
     build_split_stats_dataframe,
-    fill_manifest_checksums_inplace,
-    get_git_commit_hash,
     write_manifest_and_log_stats,
 )
 
@@ -46,22 +42,6 @@ def _split_data() -> dict[str, object]:
         "objective_score": None,
         "objective_score_split": "TRAIN",
     }
-
-
-def test_build_manifest_from_split_dfs_sorts_rows_stably(tmp_path: Path) -> None:
-    manifest_df = build_manifest_from_split_dfs(
-        output_dir=tmp_path,
-        run_id="run-1",
-        normalization_method="NOT_NORMALIZED",
-        is_normalized=False,
-        split_data=_split_data(),
-    )
-
-    assert manifest_df["filename"].tolist() == [
-        "PATIENT_2_PATCH_001.png",
-        "PATIENT_1_PATCH_001.png",
-    ]
-    assert {"abs_image_path", "abs_mask_path"}.issubset(manifest_df.columns)
 
 
 def test_build_hdf5_manifest_from_split_dfs_tracks_relative_hdf5_rows(tmp_path: Path) -> None:
@@ -113,7 +93,7 @@ def test_build_split_stats_dataframe_summarizes_each_non_empty_split() -> None:
 
 def test_write_manifest_and_log_stats_writes_expected_artifacts(tmp_path: Path) -> None:
     split_data = _split_data()
-    manifest_df = build_manifest_from_split_dfs(
+    manifest_df = build_hdf5_manifest_from_split_dfs(
         output_dir=tmp_path,
         run_id="run-1",
         normalization_method="NOT_NORMALIZED",
@@ -126,7 +106,7 @@ def test_write_manifest_and_log_stats_writes_expected_artifacts(tmp_path: Path) 
         run_id="run-1",
         normalization_method="NOT_NORMALIZED",
         is_normalized=False,
-        data_directory=tmp_path,
+        source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
         split_data=split_data,
         manifest_df=manifest_df,
         calc_checksums=False,
@@ -138,35 +118,9 @@ def test_write_manifest_and_log_stats_writes_expected_artifacts(tmp_path: Path) 
     assert (tmp_path / "run_config.json").is_file()
 
 
-def test_fill_manifest_checksums_inplace_hashes_existing_files(tmp_path: Path) -> None:
-    image_path = tmp_path / "image.png"
-    mask_path = tmp_path / "mask.png"
-    image_path.write_bytes(b"image")
-    mask_path.write_bytes(b"mask")
-    manifest_df = pd.DataFrame(
-        [{"abs_image_path": str(image_path), "abs_mask_path": str(mask_path)}]
-    )
-
-    result = fill_manifest_checksums_inplace(manifest_df, num_workers=1)
-
-    assert result["sha256_image"].iloc[0]
-    assert result["sha256_mask"].iloc[0]
-
-
-def test_get_git_commit_hash_returns_none_when_git_command_fails(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "helpers.crossfold.provenance.subprocess.check_output",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("git unavailable")),
-    )
-
-    assert get_git_commit_hash() is None
-
-
 def test_run_config_json_uses_safe_json_encoding(tmp_path: Path) -> None:
     split_data = _split_data()
-    manifest_df = build_manifest_from_split_dfs(
+    manifest_df = build_hdf5_manifest_from_split_dfs(
         output_dir=tmp_path,
         run_id="run-1",
         normalization_method="NOT_NORMALIZED",
@@ -179,7 +133,7 @@ def test_run_config_json_uses_safe_json_encoding(tmp_path: Path) -> None:
         run_id="run-1",
         normalization_method="NOT_NORMALIZED",
         is_normalized=False,
-        data_directory=tmp_path,
+        source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
         split_data=split_data,
         manifest_df=manifest_df,
         calc_checksums=False,
@@ -188,3 +142,32 @@ def test_run_config_json_uses_safe_json_encoding(tmp_path: Path) -> None:
 
     payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
     assert payload["extra"]["value"] == 1
+
+
+def test_write_manifest_and_log_stats_rejects_checksum_mode_for_hdf5_manifests(
+    tmp_path: Path,
+) -> None:
+    split_data = _split_data()
+    manifest_df = build_hdf5_manifest_from_split_dfs(
+        output_dir=tmp_path,
+        run_id="run-1",
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
+        split_data=split_data,
+    )
+
+    try:
+        write_manifest_and_log_stats(
+            output_dir=tmp_path,
+            run_id="run-1",
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
+            source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=True,
+        )
+    except ValueError as error:
+        assert "HDF5-native" in str(error)
+    else:
+        raise AssertionError("Expected HDF5 checksum request to be rejected.")

@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from helpers.graph.cleaning_config import load_graph_cleaning_config
 from helpers.graph.cleaning_pipeline import build_cleaning_message, run_graph_cleaning_pipeline
-from helpers.optimization_sampling.logging import configure_stage_logger
+from helpers.logging_utils import configure_stage_logger
 
 
 def main() -> None:

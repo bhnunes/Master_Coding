@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from helpers.crossfold.provenance import recompute_split_stats_from_manifest
 from helpers.sanity.models import SPLITS, CheckResult
 
 REQUIRED_MANIFEST_COLUMNS = {
@@ -15,9 +16,9 @@ REQUIRED_MANIFEST_COLUMNS = {
     "filename",
     "normalization_method",
     "is_normalized",
+    "relative_hdf5_path",
+    "hdf5_row_index",
 }
-PNG_MANIFEST_COLUMNS = {"relative_path_image", "relative_path_mask"}
-HDF5_MANIFEST_COLUMNS = {"relative_hdf5_path", "hdf5_row_index"}
 SPLIT_STATS_COLUMNS = (
     "n_patients",
     "n_pos_patients",
@@ -45,16 +46,6 @@ def check_manifest_schema(manifest_df: pd.DataFrame) -> CheckResult:
                 "Re-generate dataset with updated Stage 5."
             ),
         )
-    has_png_columns = PNG_MANIFEST_COLUMNS.issubset(manifest_df.columns)
-    has_hdf5_columns = HDF5_MANIFEST_COLUMNS.issubset(manifest_df.columns)
-    if not has_png_columns and not has_hdf5_columns:
-        return CheckResult(
-            "FAIL",
-            (
-                "Manifest must contain either PNG path columns or HDF5 row columns. "
-                "Re-generate dataset with updated Stage 5."
-            ),
-        )
     invalid_splits = sorted(set(manifest_df["split"].dropna()) - set(SPLITS))
     if invalid_splits:
         return CheckResult("FAIL", f"Manifest contains invalid split names: {invalid_splits}")
@@ -63,15 +54,14 @@ def check_manifest_schema(manifest_df: pd.DataFrame) -> CheckResult:
         return CheckResult(
             "FAIL", f"Manifest contains invalid labels (expected 0/1): {invalid_labels}"
         )
+    invalid_row_indices = manifest_df.loc[
+        manifest_df["hdf5_row_index"].astype(int) < 0, "hdf5_row_index"
+    ].tolist()
+    if invalid_row_indices:
+        return CheckResult("FAIL", "Manifest contains negative HDF5 row indices.")
     run_ids = manifest_df["run_id"].dropna().unique().tolist()
     if len(run_ids) != 1:
         return CheckResult("WARN", f"Expected a single run_id; found {len(run_ids)}: {run_ids[:5]}")
-    if has_hdf5_columns:
-        invalid_row_indices = manifest_df.loc[
-            manifest_df["hdf5_row_index"].astype(int) < 0, "hdf5_row_index"
-        ].tolist()
-        if invalid_row_indices:
-            return CheckResult("FAIL", "Manifest contains negative HDF5 row indices.")
     return CheckResult("PASS", "Manifest schema and basic values look valid.")
 
 
@@ -92,8 +82,7 @@ def check_patient_leakage(manifest_df: pd.DataFrame) -> CheckResult:
     leaking = counts[counts > 1].index.tolist()
     if leaking:
         return CheckResult(
-            "FAIL",
-            f"Patient leakage detected for {len(leaking)} patients: {leaking[:50]}",
+            "FAIL", f"Patient leakage detected for {len(leaking)} patients: {leaking[:50]}"
         )
     return CheckResult("PASS", "No patient leakage detected across TRAIN/VALIDATION/TEST.")
 
@@ -110,7 +99,7 @@ def check_split_patient_lists_against_run_config(
             "WARN", "run_config.json missing key 'patients'; cannot cross-check patient lists."
         )
     train_list = patients.get("train")
-    val_list = patients.get("validation", patients.get("val"))
+    val_list = patients.get("validation")
     test_list = patients.get("test")
     if train_list is None or val_list is None or test_list is None:
         return CheckResult(
@@ -137,8 +126,7 @@ def check_split_patient_lists_against_run_config(
             )
     if diffs:
         return CheckResult(
-            "FAIL",
-            "Patient lists in manifest do not match run_config.json. " + " || ".join(diffs),
+            "FAIL", "Patient lists in manifest do not match run_config.json. " + " || ".join(diffs)
         )
     return CheckResult("PASS", "Patient lists match run_config.json for all splits.")
 
@@ -179,38 +167,6 @@ def check_split_constraints_from_run_config(
     return CheckResult("PASS", "Split patient minima satisfy constraints in run_config.json.")
 
 
-def _recompute_split_stats(manifest_df: pd.DataFrame) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
-    for split_name in SPLITS:
-        split_df = manifest_df.loc[manifest_df["split"] == split_name].copy()
-        if split_df.empty:
-            continue
-        patient_labels = split_df.groupby("patient_id")["label"].max()
-        per_patient = split_df.groupby("patient_id").size()
-        rows.append(
-            {
-                "run_id": split_df["run_id"].iloc[0],
-                "split": split_name,
-                "n_patients": int(split_df["patient_id"].nunique()),
-                "n_pos_patients": int(patient_labels.sum()),
-                "n_neg_patients": int(len(patient_labels) - patient_labels.sum()),
-                "n_images": int(len(split_df)),
-                "patches_per_patient_mean": float(per_patient.mean()),
-                "patches_per_patient_std": float(per_patient.std(ddof=1))
-                if len(per_patient) > 1
-                else 0.0,
-                "patches_per_patient_min": int(per_patient.min()),
-                "patches_per_patient_q1": float(per_patient.quantile(0.25)),
-                "patches_per_patient_median": float(per_patient.quantile(0.50)),
-                "patches_per_patient_q3": float(per_patient.quantile(0.75)),
-                "patches_per_patient_max": int(per_patient.max()),
-                "n_images_neg": int((split_df["label"] == 0).sum()),
-                "n_images_pos": int((split_df["label"] == 1).sum()),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
 def _count_unique_patients(manifest_df: pd.DataFrame, split_name: str) -> int:
     split_df = manifest_df.loc[manifest_df["split"] == split_name].copy()
     return int(split_df["patient_id"].nunique()) if not split_df.empty else 0
@@ -224,7 +180,7 @@ def check_split_stats_against_manifest(
         return CheckResult(
             "WARN", "split_stats.csv not found; cannot cross-check manifest-derived statistics."
         )
-    recomputed_df = _recompute_split_stats(manifest_df)
+    recomputed_df = recompute_split_stats_from_manifest(manifest_df)
     if recomputed_df.empty and split_stats_df.empty:
         return CheckResult("PASS", "split_stats.csv matches an empty manifest.")
     split_stats_indexed = split_stats_df.set_index("split")

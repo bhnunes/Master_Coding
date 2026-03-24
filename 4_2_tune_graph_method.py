@@ -11,7 +11,7 @@ from helpers.graph.tuning_pipeline import (
     build_recommendation_message,
     run_graph_tuning_pipeline,
 )
-from helpers.optimization_sampling.logging import configure_stage_logger
+from helpers.logging_utils import configure_stage_logger
 
 
 def main() -> None:

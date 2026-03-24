@@ -229,7 +229,7 @@ def test_slide_process_single_uses_background_when_tissue_is_absent(
     slide = FakeSlide()
 
     class FakeModel:
-        def predict(self, tensor: object) -> None:
+        def predict(self, _tensor: object) -> None:
             raise AssertionError("predict should not be called")
 
     monkeypatch.setattr(

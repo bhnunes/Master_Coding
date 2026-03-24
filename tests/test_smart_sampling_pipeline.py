@@ -46,7 +46,7 @@ class _DummyEmbeddingExtractor:
         self.config = config
 
     def get_embeddings(
-        self, h5_path: str, indices: np.ndarray[tuple[int], np.dtype[np.int64]]
+        self, _h5_path: str, indices: np.ndarray[tuple[int], np.dtype[np.int64]]
     ) -> np.ndarray[tuple[int, int], np.dtype[np.float32]]:
         values = indices.astype(np.float32).reshape(-1, 1)
         return np.concatenate([values, values + 0.5], axis=1)
