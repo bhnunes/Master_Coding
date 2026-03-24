@@ -64,6 +64,35 @@ def test_load_database_manager_config_prefers_global_log_folder(tmp_path: Path) 
     assert config.log_path == tmp_path / "shared_logs" / "extract.log"
 
 
+def test_load_database_manager_config_reads_local_slide_cache_settings(tmp_path: Path) -> None:
+    config = load_database_manager_config(
+        {
+            "TAG": "TCGA",
+            "SQLITE_DB_PATH": str(tmp_path / "databases" / "cases.db"),
+            "PROJECTS_BASE_PATH": str(tmp_path / "projects"),
+            "STAGE2_COPY_WSI_TO_LOCAL_CACHE": "true",
+            "STAGE2_LOCAL_SLIDE_CACHE_DIR": str(tmp_path / "local_cache"),
+        }
+    )
+
+    assert config.copy_wsi_to_local_cache is True
+    assert config.local_slide_cache_dir == tmp_path / "local_cache"
+
+
+def test_load_database_manager_config_requires_cache_dir_when_staging_enabled(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="STAGE2_LOCAL_SLIDE_CACHE_DIR"):
+        load_database_manager_config(
+            {
+                "TAG": "TCGA",
+                "SQLITE_DB_PATH": str(tmp_path / "databases" / "cases.db"),
+                "PROJECTS_BASE_PATH": str(tmp_path / "projects"),
+                "STAGE2_COPY_WSI_TO_LOCAL_CACHE": "true",
+            }
+        )
+
+
 def test_load_database_manager_config_requires_tag() -> None:
     with pytest.raises(ValueError, match="TAG"):
         load_database_manager_config({})

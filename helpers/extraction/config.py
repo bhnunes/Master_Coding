@@ -55,6 +55,8 @@ class DatabaseManagerConfig:
     use_advanced_artifact_filtering: bool
     activate_sanity_check_geojson: bool
     geojson_path: Path | None
+    copy_wsi_to_local_cache: bool
+    local_slide_cache_dir: Path | None
     log_folder: Path
     log_file_name: str
 
@@ -92,6 +94,7 @@ def load_database_manager_config(
         default=True,
     )
     activate_sanity_check_geojson = _parse_bool(values.get("ACTIVATE_SANITY_CHECK_GEOJSON"))
+    copy_wsi_to_local_cache = _parse_bool(values.get("STAGE2_COPY_WSI_TO_LOCAL_CACHE"))
 
     database_path = resolve_env_path(
         values.get("SQLITE_DB_PATH"),
@@ -107,6 +110,16 @@ def load_database_manager_config(
     )
     assert database_path is not None
     assert base_path is not None
+    local_slide_cache_dir = _parse_optional_path(
+        values.get("STAGE2_LOCAL_SLIDE_CACHE_DIR"),
+        "STAGE2_LOCAL_SLIDE_CACHE_DIR",
+        system_name=system_name,
+    )
+    if copy_wsi_to_local_cache and local_slide_cache_dir is None:
+        raise ValueError(
+            "The 'STAGE2_LOCAL_SLIDE_CACHE_DIR' environment variable is required when "
+            "'STAGE2_COPY_WSI_TO_LOCAL_CACHE=True'."
+        )
     log_folder = resolve_log_folder(
         values,
         system_name=system_name,
@@ -134,6 +147,8 @@ def load_database_manager_config(
         load_cases=_parse_bool(values.get("LOADCASES")),
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
         activate_sanity_check_geojson=activate_sanity_check_geojson,
+        copy_wsi_to_local_cache=copy_wsi_to_local_cache,
+        local_slide_cache_dir=local_slide_cache_dir,
         log_folder=log_folder,
         log_file_name=(values.get("EXTRACTION_LOG_FILE") or "database_manager.log").strip(),
         geojson_path=(

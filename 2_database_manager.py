@@ -18,6 +18,7 @@ from helpers.extraction.image_reader_service import (
     run_slide_processing,
 )
 from helpers.extraction.repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
+from helpers.extraction.staging import stage_wsi_locally
 from helpers.logging_utils import configure_root_logger
 
 
@@ -144,6 +145,8 @@ def build_slide_request(
     config: DatabaseManagerConfig,
     runtime_settings: SlideRuntimeSettings,
     patch_folders: tuple[Path, Path, Path, Path],
+    *,
+    image_path: Path | None = None,
 ) -> SlideProcessingRequest:
     """Build the shared slide-processing request for one case."""
 
@@ -151,7 +154,7 @@ def build_slide_request(
     if case.annotation_path is None:
         raise ValueError(f"Case {case.record_id} is missing an annotation path.")
     return SlideProcessingRequest(
-        image_path=case.image_path,
+        image_path=image_path or case.image_path,
         annotation_path=case.annotation_path,
         cancer_folder=cancer_folder,
         not_cancer_folder=not_cancer_folder,
@@ -277,9 +280,22 @@ def main_process() -> None:
 
                 repository.mark_processing(case.record_id)
                 started_at = time.perf_counter()
-                result = run_slide_processing(
-                    build_slide_request(case, config, runtime_settings, patch_folders)
-                )
+                with stage_wsi_locally(
+                    source_path=case.image_path,
+                    cache_dir=(
+                        config.local_slide_cache_dir if config.copy_wsi_to_local_cache else None
+                    ),
+                    patient_id=case.patient,
+                ) as staged_image_path:
+                    result = run_slide_processing(
+                        build_slide_request(
+                            case,
+                            config,
+                            runtime_settings,
+                            patch_folders,
+                            image_path=staged_image_path,
+                        )
+                    )
                 processing_signature = build_processing_signature(
                     image_path=case.image_path,
                     annotation_path=case.annotation_path,
