@@ -20,9 +20,9 @@ This file gives coding agents repository-specific guidance for working safely an
 - `4_1_optimization_sampling.py`: Script responsible for selecting a subsample of cancer images for a human-in-the-loop cleaning process of incorrect annotations.
 - `4_2_tune_graph_method.py`: Script responsible for detecting the best parameters to be used on a graph segmentation method that will be used to remove incorrectly annotated images.
 - `4_3_cleaner_script.py`: responsible for applying the graph segmentation method with the parameters obtained to remove incorrectly annotated images from cancer folder.
-- `5_crossfold.py`: patient-level dataset split creation plus optional stain normalization, operating on HDF5 patch datasets.
-- `6_sanity_checks.py`: scientific integrity and dataset consistency checks for HDF5-based split artifacts.
-- `7_pack_splits_to_hdf5.py`: packages the cleaned post-Stage-4.3 patch pool into one source HDF5 dataset consumed by Stage 5.
+- `5_pack_splits_to_hdf5.py`: packages the cleaned post-Stage-4.3 patch pool into one source HDF5 dataset consumed by Stage 6.
+- `6_crossfold.py`: patient-level dataset split creation plus optional stain normalization, operating on HDF5 patch datasets.
+- `7_sanity_checks.py`: scientific integrity and dataset consistency checks for HDF5-based split artifacts.
 - `8_smart_sampler.py`: `.env`-driven smart-sampling orchestrator that filters `TRAIN.h5` into `TRAIN_FILTERED.h5` for downstream LR finding and training.
 - `9_lr_finder.py`: `.env`-driven LR-finder orchestrator that screens approved model pairs and writes a LaTeX PDF report.
 - `10_training_ensemble.py`: Thin Stage 8 training orchestrator that trains one approved model per execution.
@@ -65,17 +65,17 @@ This file gives coding agents repository-specific guidance for working safely an
 - Active Stage 2 helper modules are `helpers/extraction/config.py`, `helpers/extraction/repository.py`, `helpers/extraction/artifact_index.py`, `helpers/extraction/image_reader_service.py`, `helpers/extraction/data_handlers.py`, and `helpers/extraction/patch_engine.py`.
 - `4_1_optimization_sampling.py` should stay orchestration-focused. Keep sample-size calculation, candidate ranking, overlay generation, and logging behavior in `helpers/optimization_sampling/config.py`, `helpers/optimization_sampling/sampling.py`, `helpers/optimization_sampling/overlay.py`, `helpers/optimization_sampling/pipeline.py`, and `helpers/optimization_sampling/logging.py`.
 - `helpers/optimization_sampling/logging.py` is now a thin domain wrapper over shared stage-logger infrastructure in `helpers/logging_utils.py`. Put generic stage logger behavior in `helpers/logging_utils.py`, not back into optimization-sampling-specific modules.
-- `5_crossfold.py` should stay orchestration-focused. Keep Stage 5 environment loading, HDF5 dataset discovery, entropy scoring, split search, stain normalization, split writing, logging, and provenance behavior in `helpers/crossfold/*.py`.
-- Stage 5 now targets an HDF5-native workflow with no PNG backward-compatibility path. It should read one cleaned source HDF5 dataset produced after Stage 4.3, create patient-disjoint `TRAIN`/`VALIDATION`/`TEST` splits, fit stain normalization parameters on `TRAIN` only, apply that frozen normalizer to `TRAIN`/`VALIDATION`/`TEST`, and write final split HDF5 artifacts for downstream stages.
-- Stage 5 must preserve patient stratification by `max(patch_label)`, deterministic `filename` identity, exact image/mask row alignment, and the current provenance artifacts (`manifest.csv`, `split_stats.csv`, `run_config.json`, optional entropy caches, and normalization stats/templates when enabled), even though provenance will now reference HDF5 artifacts and row identity instead of PNG-relative paths.
-- Active Stage 5 helper modules are `helpers/crossfold/config.py`, `helpers/crossfold/discovery.py`, `helpers/crossfold/entropy.py`, `helpers/crossfold/io.py`, `helpers/crossfold/logging.py`, `helpers/crossfold/normalization.py`, `helpers/crossfold/pipeline.py`, `helpers/crossfold/provenance.py`, and `helpers/crossfold/splitting.py`.
-- `6_sanity_checks.py` should stay orchestration-focused. Keep Stage 6 configuration, provenance loading, manifest checks, HDF5 contract checks, semantic mask checks, reporting, and orchestration in `helpers/sanity/*.py`.
-- Stage 6 is now HDF5-only with no PNG backward-compatibility path. It must preserve the reviewer-grade scientific validation goal under the HDF5-native split workflow: detect patient leakage, manifest/provenance drift, filename contract violations, HDF5 dataset parity issues, unreadable or shape-mismatched image/mask rows, invalid mask values, and label-mask semantic contradictions before Stage 8 training.
-- Active Stage 6 helper modules are `helpers/sanity/config.py`, `helpers/sanity/contracts.py`, `helpers/sanity/disk_checks.py`, `helpers/sanity/manifest_checks.py`, `helpers/sanity/models.py`, `helpers/sanity/pipeline.py`, `helpers/sanity/provenance.py`, `helpers/sanity/reporting.py`, and `helpers/sanity/semantic_checks.py`.
-- `7_pack_splits_to_hdf5.py` should stay orchestration-focused. Keep Stage 7 environment loading, cleaned-patch-pool discovery, pairing checks, and HDF5 writing in `helpers/packaging/*.py`.
-- Stage 7 now sits logically after Stage 4.3 and before Stage 5. Its responsibility is to package the cleaned accepted patch pool into one single source HDF5 dataset, not to package pre-made split folders.
-- The Stage 7 source HDF5 must preserve a stable row-wise contract centered on `images`, `masks`, `labels`, `patient_ids`, and `filenames`. Additional provenance metadata is allowed, but do not break the downstream filename-keyed joins or row alignment assumptions required by Stage 5, Stage 8, and artifact-aware training.
-- Active Stage 7 helper modules are `helpers/packaging/config.py`, `helpers/packaging/discovery.py`, `helpers/packaging/pipeline.py`, and `helpers/packaging/writer.py`.
+- `5_pack_splits_to_hdf5.py` should stay orchestration-focused. Keep Stage 5 environment loading, cleaned-patch-pool discovery, pairing checks, and HDF5 writing in `helpers/packaging/*.py`.
+- Stage 5 now sits logically after Stage 4.3 and before Stage 6. Its responsibility is to package the cleaned accepted patch pool into one single source HDF5 dataset, not to package pre-made split folders.
+- The Stage 5 source HDF5 must preserve a stable row-wise contract centered on `images`, `masks`, `labels`, `patient_ids`, and `filenames`. Additional provenance metadata is allowed, but do not break the downstream filename-keyed joins or row alignment assumptions required by Stage 6, Stage 8, and artifact-aware training.
+- Active Stage 5 helper modules are `helpers/packaging/config.py`, `helpers/packaging/discovery.py`, `helpers/packaging/pipeline.py`, and `helpers/packaging/writer.py`.
+- `6_crossfold.py` should stay orchestration-focused. Keep Stage 6 environment loading, HDF5 dataset discovery, entropy scoring, split search, stain normalization, split writing, logging, and provenance behavior in `helpers/crossfold/*.py`.
+- Stage 6 now targets an HDF5-native workflow with no PNG backward-compatibility path. It should read one cleaned source HDF5 dataset produced after Stage 4.3, create patient-disjoint `TRAIN`/`VALIDATION`/`TEST` splits, fit stain normalization parameters on `TRAIN` only, apply that frozen normalizer to `TRAIN`/`VALIDATION`/`TEST`, and write final split HDF5 artifacts for downstream stages.
+- Stage 6 must preserve patient stratification by `max(patch_label)`, deterministic `filename` identity, exact image/mask row alignment, and the current provenance artifacts (`manifest.csv`, `split_stats.csv`, `run_config.json`, optional entropy caches, and normalization stats/templates when enabled), even though provenance will now reference HDF5 artifacts and row identity instead of PNG-relative paths.
+- Active Stage 6 helper modules are `helpers/crossfold/config.py`, `helpers/crossfold/discovery.py`, `helpers/crossfold/entropy.py`, `helpers/crossfold/io.py`, `helpers/crossfold/logging.py`, `helpers/crossfold/normalization.py`, `helpers/crossfold/pipeline.py`, `helpers/crossfold/provenance.py`, and `helpers/crossfold/splitting.py`.
+- `7_sanity_checks.py` should stay orchestration-focused. Keep Stage 7 configuration, provenance loading, manifest checks, HDF5 contract checks, semantic mask checks, reporting, and orchestration in `helpers/sanity/*.py`.
+- Stage 7 is now HDF5-only with no PNG backward-compatibility path. It must preserve the reviewer-grade scientific validation goal under the HDF5-native split workflow: detect patient leakage, manifest/provenance drift, filename contract violations, HDF5 dataset parity issues, unreadable or shape-mismatched image/mask rows, invalid mask values, and label-mask semantic contradictions before Stage 8 training.
+- Active Stage 7 helper modules are `helpers/sanity/config.py`, `helpers/sanity/contracts.py`, `helpers/sanity/disk_checks.py`, `helpers/sanity/manifest_checks.py`, `helpers/sanity/models.py`, `helpers/sanity/pipeline.py`, `helpers/sanity/provenance.py`, `helpers/sanity/reporting.py`, and `helpers/sanity/semantic_checks.py`.
 - `8_smart_sampler.py` should stay orchestration-focused. Keep Stage 8 smart-sampling configuration, HDF5 indexing, embedding extraction, per-patient selection, output writing, and optional sidecar generation in `helpers/smart_sampling/*.py`.
 - Stage 8 smart sampling must preserve downstream `TRAIN_FILTERED.h5` compatibility for `9_lr_finder.py` and `10_training_ensemble.py`, always writing datasets named exactly `images`, `masks`, `labels`, `patient_ids`, and `filenames`.
 - Active Stage 8 smart-sampling helper modules are `helpers/smart_sampling/config.py`, `helpers/smart_sampling/index.py`, `helpers/smart_sampling/embeddings.py`, `helpers/smart_sampling/selection.py`, `helpers/smart_sampling/storage.py`, `helpers/smart_sampling/writer.py`, and `helpers/smart_sampling/pipeline.py`.
@@ -105,7 +105,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - `4_3_cleaner_script.py` should be a `.env`-driven Stage 4.3 orchestrator. Keep orchestration there and keep configuration and filtering workflow in `helpers/graph/cleaning_config.py` and `helpers/graph/cleaning_pipeline.py`.
 - Stage 4.3 must reuse `helpers/graph/contamination.py` for the ROI contamination metric and load the tuned graph parameters plus `tau` through typed config so Stage 4.2 and Stage 4.3 stay scientifically aligned.
 - Stage 4.3 must preserve the current accepted/rejected move semantics: accepted files remain in place, rejected images move to `REJECTED_IMAGES`, rejected masks move to `REJECTED_MASKS`, and missing/invalid pairs are skipped with explicit logging under `/logs`.
-- The current planned migration boundary is: keep PNG-based patch handling through Stage 4.3, then convert the cleaned accepted patch pool into one single source HDF5 dataset in Stage 7, and keep Stage 5 and Stage 6 fully HDF5-native after that boundary.
+- The current planned migration boundary is: keep PNG-based patch handling through Stage 4.3, then convert the cleaned accepted patch pool into one single source HDF5 dataset in Stage 5, and keep Stage 6 and Stage 7 fully HDF5-native after that boundary.
 - Stage 8 trains one model per execution, not the entire ensemble in a single run.
 - Stage 8 architecture/encoder pairs are intentionally restricted to the approved research matrix in `.env_example` and `training_model_registry.json`; do not expand support casually.
 - Stage 8 learning-rate and weight-decay defaults come from `training_model_registry.json`, optionally overridden with `TRAINING_MODEL_REGISTRY_PATH`.
@@ -136,9 +136,9 @@ This file gives coding agents repository-specific guidance for working safely an
   - Stage 4.1 optimization sampling is patient-aware rather than patch-naive.
   - Training and LR finder now default to `PAPER` execution mode instead of `FAST_DEV`.
   - Shared runtime provenance now flows through `helpers/provenance.py` into Stage 9, Stage 10 metadata, and Stage 12 run configs.
-  - The forward migration plan is now: Stage 2 may stage one external-SSD WSI at a time into local SSD temp storage for processing; Stage 4.3 remains the last PNG-based stage; Stage 7 is being repurposed to build one cleaned source HDF5 dataset immediately after Stage 4.3; Stage 5 and Stage 6 are intended to be HDF5-native downstream of that boundary.
-  - Under the HDF5-native Stage 5 design, stain normalization remains scientifically train-fitted only: entropy-based template selection and parameter fitting must use `TRAIN` rows only, and the resulting frozen normalizer must be applied to `TRAIN`, `VALIDATION`, and `TEST`.
-- Recent cleanup follow-up completed the documentation-aligned HDF5 simplification for downstream data preparation: Stage 5 and Stage 6 no longer carry PNG-era backward-compatibility branches, split-stat recomputation is centralized in `helpers/crossfold/provenance.py`, and shared stage logger setup now lives in `helpers/logging_utils.py`.
+  - The forward migration plan is now: Stage 2 may stage one external-SSD WSI at a time into local SSD temp storage for processing; Stage 4.3 remains the last PNG-based stage; Stage 5 builds one cleaned source HDF5 dataset immediately after Stage 4.3; Stage 6 and Stage 7 are intended to be HDF5-native downstream of that boundary.
+  - Under the HDF5-native Stage 6 design, stain normalization remains scientifically train-fitted only: entropy-based template selection and parameter fitting must use `TRAIN` rows only, and the resulting frozen normalizer must be applied to `TRAIN`, `VALIDATION`, and `TEST`.
+- Recent cleanup follow-up completed the documentation-aligned HDF5 simplification for downstream data preparation: Stage 6 and Stage 7 no longer carry PNG-era backward-compatibility branches, split-stat recomputation is centralized in `helpers/crossfold/provenance.py`, and shared stage logger setup now lives in `helpers/logging_utils.py`.
 - Important remaining scientific risks after the remediation pass, and the best starting points for the next session, are:
   - Highest remaining Stage 11 risk is no longer validation reuse by itself; Stage 11 is development-only. The highest remaining Stage 11 risk is unfair candidate mixing if provenance-compatible candidate gating is not enforced. Start in `helpers/ensemble_optimizer/metadata.py`, `helpers/ensemble_optimizer/pipeline.py`, and `helpers/training/checkpointing.py`.
   - Highest remaining Stage 12 risk is no longer threshold-semantic ambiguity; that redesign is now in place. The highest remaining Stage 12 risk is invisible stale-artifact reuse across Stage 7 packaging, Stage 8 smart sampling, Stage 11 recipe generation, and Stage 12 inference handoff when file paths remain stable but contents change. Strengthen content-based provenance checks in `helpers/packaging/writer.py`, `helpers/smart_sampling/writer.py`, `helpers/ensemble_optimizer/reporting.py`, and `helpers/ensemble_inference/pipeline.py`.
@@ -325,9 +325,9 @@ MASTER_CODING:
 - `4_1_optimization_sampling.py`
 - `4_2_tune_graph_method.py`
 - `4_3_cleaner_script.py`
-- `5_crossfold.py`
-- `6_sanity_checks.py`
-- `7_pack_splits_to_hdf5.py`
+- `5_pack_splits_to_hdf5.py`
+- `6_crossfold.py`
+- `7_sanity_checks.py`
 - `8_smart_sampler.py`
 - `9_lr_finder.py`
 - `10_training_ensemble.py`
@@ -424,9 +424,9 @@ Each root script listed below is a monolithic, self-contained script:
 - 4_1_optimization_sampling.py
 - 4_2_tune_graph_method.py
 - 4_3_cleaner_script.py
-- 5_crossfold.py
-- 6_sanity_checks.py
-- 7_pack_splits_to_hdf5.py
+- 5_pack_splits_to_hdf5.py
+- 6_crossfold.py
+- 7_sanity_checks.py
 - 8_smart_sampler.py
 - 9_lr_finder.py
 - 10_training_ensemble.py

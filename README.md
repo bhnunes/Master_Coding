@@ -23,9 +23,9 @@ Master_Coding/
 ├── 4_1_optimization_sampling.py     # Select samples for human-in-the-loop cleaning
 ├── 4_2_tune_graph_method.py         # Tune graph segmentation parameters
 ├── 4_3_cleaner_script.py            # Apply cleaning to remove incorrect annotations
-├── 5_crossfold.py                   # HDF5-native patient-level dataset splitting
-├── 6_sanity_checks.py               # HDF5-native scientific integrity checks
-├── 7_pack_splits_to_hdf5.py         # Package cleaned patches into source HDF5
+├── 5_pack_splits_to_hdf5.py         # Package cleaned patches into source HDF5
+├── 6_crossfold.py                   # HDF5-native patient-level dataset splitting
+├── 7_sanity_checks.py               # HDF5-native scientific integrity checks
 ├── 8_smart_sampler.py               # Select most informative training samples
 ├── 9_lr_finder.py                   # Find optimal learning rates
 ├── 10_training_ensemble.py          # Train one approved model per execution
@@ -171,9 +171,9 @@ Helper modules are organized by domain under `helpers/<domain>/`. New domain-spe
 | 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using a `.env`-driven Stage 1 pipeline. Output: GeoJSON files with artifact annotations and SQLite processing status |
 | 2 | `2_database_manager.py` + `3_1_imageReader.py` | Extract PNG patches from WSIs based on annotations. Output: image/mask patches and artifact coverage Parquet metadata |
 | 4.1-4.3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script.py` | Human-in-the-loop review plus graph-based cleaning of cancer patches |
-| 7 | `7_pack_splits_to_hdf5.py` | Package the cleaned post-Stage-4.3 patch pool into one source HDF5 dataset |
-| 5 | `5_crossfold.py` | Create patient-level TRAIN/VALIDATION/TEST HDF5 splits and fit stain normalization on `TRAIN` only |
-| 6 | `6_sanity_checks.py` | Validate HDF5 split integrity, provenance, leakage, and mask/label semantics |
+| 5 | `5_pack_splits_to_hdf5.py` | Package the cleaned post-Stage-4.3 patch pool into one source HDF5 dataset |
+| 6 | `6_crossfold.py` | Create patient-level TRAIN/VALIDATION/TEST HDF5 splits and fit stain normalization on `TRAIN` only |
+| 7 | `7_sanity_checks.py` | Validate HDF5 split integrity, provenance, leakage, and mask/label semantics |
 | 8 | `8_smart_sampler.py` | Select the most informative training samples from `TRAIN.h5` into `TRAIN_FILTERED.h5` (optional) |
 | 9-12 | `9_lr_finder.py` → `10_training_ensemble.py` → `11_optimizer_ensemble.py` → `12_inference_ensemble.py` | Tune LR, train one approved model per run, optimize the ensemble recipe, and generate final test predictions |
 
@@ -222,12 +222,12 @@ Current Stage 2 artifact-aware behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `5_crossfold.py` | Thin Stage 5 orchestrator that loads `.env`, reads the Stage 7 source HDF5, builds patient-level TRAIN/VALIDATION/TEST splits, optionally fits stain normalization on TRAIN only, and writes provenance artifacts. |
+| `6_crossfold.py` | Thin Stage 6 orchestrator that loads `.env`, reads the Stage 5 source HDF5, builds patient-level TRAIN/VALIDATION/TEST splits, optionally fits stain normalization on TRAIN only, and writes provenance artifacts. |
 
-Current Stage 5 behavior:
+Current Stage 6 behavior:
 
-- Loads Stage 5 settings from `.env` / `.env_example` through `helpers/crossfold/config.py`
-- Reads one cleaned source HDF5 dataset produced after Stage 4.3 and packaged by Stage 7
+- Loads Stage 6 settings from `.env` / `.env_example` through `helpers/crossfold/config.py`
+- Reads one cleaned source HDF5 dataset produced after Stage 4.3 and packaged by Stage 5
 - Preserves patient-level split isolation and stratifies patients by `max(patch_label)`
 - Can evaluate many feasible patient-level splits and score them with the entropy objective before selecting the best candidate
 - Fits stain normalization on TRAIN only when a normalization method other than `NOT_NORMALIZED` is configured
@@ -238,11 +238,11 @@ Current Stage 5 behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `6_sanity_checks.py` | Thin Stage 6 orchestrator that loads `.env`, validates Stage 5 provenance and HDF5 split artifacts, and prints a reviewer-facing PASS/WARN/FAIL report. |
+| `7_sanity_checks.py` | Thin Stage 7 orchestrator that loads `.env`, validates Stage 6 provenance and HDF5 split artifacts, and prints a reviewer-facing PASS/WARN/FAIL report. |
 
-Current Stage 6 behavior:
+Current Stage 7 behavior:
 
-- Loads Stage 6 settings from `.env` / `.env_example` through `helpers/sanity/config.py`
+- Loads Stage 7 settings from `.env` / `.env_example` through `helpers/sanity/config.py`
 - Uses `manifest.csv` as the source of truth and cross-checks `run_config.json` and `split_stats.csv`
 - Fails on patient leakage, duplicate manifest rows, filename-contract violations, and manifest/disk mismatches
 - Verifies HDF5 dataset parity, readable rows, image/mask shape agreement, and valid mask pixel values
@@ -253,15 +253,15 @@ Current Stage 6 behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `7_pack_splits_to_hdf5.py` | Thin Stage 7 orchestrator that loads `.env`, scans the cleaned accepted patch pool, and writes the source HDF5 dataset consumed by Stage 5. |
+| `5_pack_splits_to_hdf5.py` | Thin Stage 5 orchestrator that loads `.env`, scans the cleaned accepted patch pool, and writes the source HDF5 dataset consumed by Stage 6. |
 
-Current Stage 7 behavior:
+Current Stage 5 behavior:
 
-- Loads Stage 7 settings from `.env` / `.env_example` through `helpers/packaging/config.py`
+- Loads Stage 5 settings from `.env` / `.env_example` through `helpers/packaging/config.py`
 - Scans the cleaned accepted patch pool produced after Stage 4.3, not pre-made split folders
 - Requires exact filename parity between image and mask inputs before packing
 - Writes a single source HDF5 with datasets `images`, `masks`, `labels`, `patient_ids`, and `filenames`
-- Preserves stable row alignment and filename identity for downstream Stage 5, Stage 8, and artifact-aware joins
+- Preserves stable row alignment and filename identity for downstream Stage 6, Stage 8, and artifact-aware joins
 
 ### Stage 8: Smart Sampling
 
@@ -348,7 +348,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 5/6 HDF5-native preparation, Stage 8 smart sampling, Stage 9 LR-finder reporting, the Stage 10 training matrix, and Stage 11 ensemble-optimizer settings.
+See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 5/6/7 HDF5-native preparation, Stage 8 smart sampling, Stage 9 LR-finder reporting, the Stage 10 training matrix, and Stage 11 ensemble-optimizer settings.
 
 OpenSlide runtime rules:
 
@@ -435,13 +435,13 @@ uv run --python 3.12 python 4_2_tune_graph_method.py
 uv run --python 3.12 python 4_3_cleaner_script.py
 
 # 4. Package cleaned patches into one source HDF5
-uv run --python 3.12 python 7_pack_splits_to_hdf5.py
+uv run --python 3.12 python 5_pack_splits_to_hdf5.py
 
 # 5. Create HDF5 TRAIN/VALIDATION/TEST splits
-uv run --python 3.12 python 5_crossfold.py
+uv run --python 3.12 python 6_crossfold.py
 
 # 6. Run HDF5-native sanity checks
-uv run --python 3.12 python 6_sanity_checks.py
+uv run --python 3.12 python 7_sanity_checks.py
 
 # 8-12. Training & Inference (typically run on a GPU machine)
 uv run --python 3.12 python 9_lr_finder.py
@@ -486,7 +486,7 @@ uv run mypy 1_artifact_detection.py 2_database_manager.py 3_1_imageReader.py 10_
 
 Recent targeted validation highlights:
 
-- Stage 5/6 HDF5 migration suites passed (`49 passed` on targeted packaging/crossfold/sanity tests)
+- Stage 5/6/7 HDF5 migration suites passed (`49 passed` on targeted packaging/crossfold/sanity tests)
 - Additional cleanup-focused targeted tests passed (`72 passed` and `9 passed` on focused subsets)
 - `uv run ruff check . --select ARG001,ARG002,F401,F841` passed during the unused-code cleanup pass
 - Ruff and MyPy passed on touched files during the documentation-aligned cleanup wave
@@ -508,8 +508,8 @@ The pipeline produces these standardized folders and artifacts:
 - `NOT_CANCER/` - Non-cancer patch images
 - `CANCER_MASK/` - Cancer segmentation masks
 - `NOT_CANCER_MASK/` - Non-cancer segmentation masks
-- Stage 7 source HDF5 - cleaned accepted patch pool packaged for Stage 5
-- `TRAIN.h5`, `VALIDATION.h5`, `TEST.h5` - Stage 5 HDF5 split artifacts
+- Stage 5 source HDF5 - cleaned accepted patch pool packaged for Stage 6
+- `TRAIN.h5`, `VALIDATION.h5`, `TEST.h5` - Stage 6 HDF5 split artifacts
 - `TRAIN_FILTERED.h5` - optional Stage 8 smart-sampled training set
 
 ## Dependencies
