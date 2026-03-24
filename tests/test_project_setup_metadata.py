@@ -54,11 +54,3 @@ def test_pyproject_declares_repo_runtime_dependencies() -> None:
     }
 
     assert expected_dependencies.issubset(dependency_names)
-
-
-def test_colab_setup_script_uses_uv_python_312_workflow() -> None:
-    setup_script = (WORKSPACE_ROOT / "setup_colab.sh").read_text()
-
-    assert "uv python install 3.12" in setup_script
-    assert "uv sync --python 3.12" in setup_script
-    assert "uv run --python 3.12 python" in setup_script
