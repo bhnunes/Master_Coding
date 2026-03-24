@@ -13,11 +13,11 @@ REQUIRED_MANIFEST_COLUMNS = {
     "label",
     "patient_id",
     "filename",
-    "relative_path_image",
-    "relative_path_mask",
     "normalization_method",
     "is_normalized",
 }
+PNG_MANIFEST_COLUMNS = {"relative_path_image", "relative_path_mask"}
+HDF5_MANIFEST_COLUMNS = {"relative_hdf5_path", "hdf5_row_index"}
 SPLIT_STATS_COLUMNS = (
     "n_patients",
     "n_pos_patients",
@@ -45,6 +45,16 @@ def check_manifest_schema(manifest_df: pd.DataFrame) -> CheckResult:
                 "Re-generate dataset with updated Stage 5."
             ),
         )
+    has_png_columns = PNG_MANIFEST_COLUMNS.issubset(manifest_df.columns)
+    has_hdf5_columns = HDF5_MANIFEST_COLUMNS.issubset(manifest_df.columns)
+    if not has_png_columns and not has_hdf5_columns:
+        return CheckResult(
+            "FAIL",
+            (
+                "Manifest must contain either PNG path columns or HDF5 row columns. "
+                "Re-generate dataset with updated Stage 5."
+            ),
+        )
     invalid_splits = sorted(set(manifest_df["split"].dropna()) - set(SPLITS))
     if invalid_splits:
         return CheckResult("FAIL", f"Manifest contains invalid split names: {invalid_splits}")
@@ -56,6 +66,12 @@ def check_manifest_schema(manifest_df: pd.DataFrame) -> CheckResult:
     run_ids = manifest_df["run_id"].dropna().unique().tolist()
     if len(run_ids) != 1:
         return CheckResult("WARN", f"Expected a single run_id; found {len(run_ids)}: {run_ids[:5]}")
+    if has_hdf5_columns:
+        invalid_row_indices = manifest_df.loc[
+            manifest_df["hdf5_row_index"].astype(int) < 0, "hdf5_row_index"
+        ].tolist()
+        if invalid_row_indices:
+            return CheckResult("FAIL", "Manifest contains negative HDF5 row indices.")
     return CheckResult("PASS", "Manifest schema and basic values look valid.")
 
 

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from helpers.sanity.manifest_checks import check_split_stats_against_manifest
+from helpers.sanity.manifest_checks import check_manifest_schema, check_split_stats_against_manifest
 
 
 def test_check_split_stats_against_manifest_fails_when_counts_drift() -> None:
@@ -36,3 +36,25 @@ def test_check_split_stats_against_manifest_fails_when_counts_drift() -> None:
 
     assert result.status == "FAIL"
     assert "n_images" in result.details
+
+
+def test_check_manifest_schema_accepts_hdf5_native_manifest_columns() -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "split": "TRAIN",
+                "label": 1,
+                "patient_id": 1,
+                "filename": "PATIENT_1_PATCH_001.png",
+                "normalization_method": "NOT_NORMALIZED",
+                "is_normalized": False,
+                "relative_hdf5_path": "TRAIN.h5",
+                "hdf5_row_index": 0,
+            }
+        ]
+    )
+
+    result = check_manifest_schema(manifest_df)
+
+    assert result.status == "PASS"

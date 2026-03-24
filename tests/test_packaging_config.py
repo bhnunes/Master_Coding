@@ -10,7 +10,7 @@ def test_load_packaging_config_reads_defaults(tmp_path: Path) -> None:
 
     assert config.base_dir == tmp_path
     assert config.output_dir == tmp_path
-    assert config.splits == ("TRAIN", "VALIDATION", "TEST")
+    assert config.output_filename == "SOURCE_DATASET.h5"
     assert config.img_size == 224
     assert config.patient_id_regex == r"PATIENT_(\d+)_"
     assert config.overwrite_outputs is False

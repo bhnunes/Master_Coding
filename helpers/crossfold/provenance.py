@@ -164,6 +164,50 @@ def build_manifest_from_split_dfs(
     ).reset_index(drop=True)
 
 
+def build_hdf5_manifest_from_split_dfs(
+    output_dir: Path,
+    run_id: str,
+    normalization_method: str,
+    is_normalized: bool,
+    split_data: dict[str, Any],
+) -> pd.DataFrame:
+    """Build a deterministic manifest for HDF5-native split outputs."""
+
+    rows: list[dict[str, Any]] = []
+
+    def add_rows(split_name: str, split_df: pd.DataFrame) -> None:
+        if split_df.empty:
+            return
+        relative_hdf5_path = f"{split_name}.h5"
+        for row_index, row in enumerate(split_df.itertuples(index=False)):
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "split": split_name,
+                    "label": int(row.label),
+                    "patient_id": int(row.patient_id),
+                    "filename": row.filename,
+                    "normalization_method": normalization_method,
+                    "is_normalized": bool(is_normalized),
+                    "relative_hdf5_path": relative_hdf5_path,
+                    "hdf5_row_index": row_index,
+                    "source_row_index": int(getattr(row, "source_row_index", row_index)),
+                    "source_image_path": getattr(row, "image_path", ""),
+                    "source_mask_path": getattr(row, "mask_path", ""),
+                    "abs_hdf5_path": str(output_dir / relative_hdf5_path),
+                }
+            )
+
+    add_rows("TRAIN", split_data["train_df"])
+    add_rows("VALIDATION", split_data["val_df"])
+    add_rows("TEST", split_data["test_df"])
+    manifest_df = pd.DataFrame(rows)
+    return manifest_df.sort_values(
+        by=["split", "label", "patient_id", "filename"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
 def build_split_stats_dataframe(split_data: dict[str, Any], run_id: str) -> pd.DataFrame:
     """Compute split-level descriptive statistics from in-memory dataframes."""
 

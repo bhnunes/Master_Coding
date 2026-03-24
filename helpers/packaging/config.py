@@ -31,14 +31,8 @@ def _parse_bool(value: str | None, variable_name: str, default: bool) -> bool:
 
 
 def _parse_splits(value: str | None) -> tuple[str, ...]:
-    if value is None or value.strip() == "":
-        return ("TRAIN", "VALIDATION", "TEST")
-    splits = tuple(part.strip().upper() for part in value.split(",") if part.strip())
-    if not splits:
-        raise ValueError(
-            "The 'PACKAGING_SPLITS' environment variable must contain at least one split."
-        )
-    return splits
+    del value
+    raise ValueError("Stage 7 no longer accepts split-folder packaging input.")
 
 
 def _required_path(variable_value: str | None, variable_name: str) -> Path:
@@ -51,12 +45,16 @@ def _required_path(variable_value: str | None, variable_name: str) -> Path:
 class PackagingConfig:
     base_dir: Path
     output_dir: Path
-    splits: tuple[str, ...]
+    output_filename: str
     img_size: int
     patient_id_regex: str
     overwrite_outputs: bool
     log_folder: Path = Path("logs")
     log_file_name: str = "packaging.log"
+
+    @property
+    def output_path(self) -> Path:
+        return self.output_dir / self.output_filename
 
     @property
     def log_path(self) -> Path:
@@ -75,7 +73,7 @@ def load_packaging_config(
     return PackagingConfig(
         base_dir=base_dir,
         output_dir=output_dir,
-        splits=_parse_splits(values.get("PACKAGING_SPLITS")),
+        output_filename=(values.get("PACKAGING_OUTPUT_FILENAME") or "SOURCE_DATASET.h5").strip(),
         img_size=_parse_positive_int(values.get("PACKAGING_IMG_SIZE"), "PACKAGING_IMG_SIZE", 224),
         patient_id_regex=patient_id_regex,
         overwrite_outputs=_parse_bool(

@@ -10,6 +10,7 @@ from helpers.crossfold.pipeline import run_crossfold_pipeline
 def test_run_crossfold_pipeline_executes_stage_flow(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
     dataset = pd.DataFrame(
         [
             {
@@ -63,20 +64,16 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         lambda **kwargs: record("split", split_data),
     )
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.build_manifest_from_split_dfs",
+        "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
         lambda **kwargs: record("manifest", manifest_df),
     )
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.ensure_split_output_directories",
-        lambda output_dir: record(f"dirs:{output_dir.name}"),
+        "helpers.crossfold.pipeline.write_split_hdf5",
+        lambda **kwargs: record(f"write:{kwargs['output_path'].name}", kwargs["output_path"]),
     )
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.process_and_write_split_files",
-        lambda **kwargs: record(f"write:{kwargs['split_name']}", 0),
-    )
-    monkeypatch.setattr(
-        "helpers.crossfold.pipeline.verify_split_integrity",
-        lambda output_dir, split_name: record(f"verify:{split_name}"),
+        "helpers.crossfold.pipeline.verify_split_hdf5_integrity",
+        lambda output_path, split_df: record(f"verify:{output_path.name}"),
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
@@ -86,7 +83,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     summary = run_crossfold_pipeline(
         CrossfoldConfig(
             normalization_method="NOT_NORMALIZED",
-            data_directory=tmp_path,
+            source_hdf5_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
             allow_destructive_move=False,
@@ -111,12 +108,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         "load",
         "split",
         "manifest",
-        "dirs:NOT_NORMALIZED_seed_42",
-        "write:TRAIN",
-        "verify:TRAIN",
-        "write:VALIDATION",
-        "verify:VALIDATION",
-        "write:TEST",
-        "verify:TEST",
+        "write:TRAIN.h5",
+        "verify:TRAIN.h5",
         "provenance",
     ]

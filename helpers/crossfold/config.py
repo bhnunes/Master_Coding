@@ -111,7 +111,7 @@ class ObjectiveConfig:
 @dataclass(frozen=True)
 class CrossfoldConfig:
     normalization_method: str
-    data_directory: Path
+    source_hdf5_path: Path
     overwrite_output_dir: bool
     random_state: int
     allow_destructive_move: bool
@@ -124,7 +124,16 @@ class CrossfoldConfig:
 
     @property
     def output_base_dir(self) -> Path:
-        return self.data_directory / self.normalization_method
+        parent = (
+            self.source_hdf5_path.parent
+            if self.source_hdf5_path.suffix.lower() == ".h5"
+            else self.source_hdf5_path
+        )
+        return parent / self.normalization_method
+
+    @property
+    def data_directory(self) -> Path:
+        return self.source_hdf5_path
 
     @property
     def output_run_dir(self) -> Path:
@@ -231,6 +240,14 @@ def load_crossfold_config(
         ),
     )
 
+    source_path = values.get("CROSSFOLD_SOURCE_HDF5_PATH") or values.get("CROSSFOLD_DATA_DIRECTORY")
+    source_variable_name = (
+        "CROSSFOLD_SOURCE_HDF5_PATH"
+        if values.get("CROSSFOLD_SOURCE_HDF5_PATH") is not None
+        or values.get("CROSSFOLD_DATA_DIRECTORY") is None
+        else "CROSSFOLD_DATA_DIRECTORY"
+    )
+
     return CrossfoldConfig(
         normalization_method=_parse_choice(
             values.get("CROSSFOLD_NORMALIZATION_METHOD"),
@@ -238,7 +255,11 @@ def load_crossfold_config(
             default="NOT_NORMALIZED",
             allowed=VALID_NORMALIZATION_METHODS,
         ),
-        data_directory=_required_path(values, "CROSSFOLD_DATA_DIRECTORY", system_name=system_name),
+        source_hdf5_path=_required_path(
+            {source_variable_name: source_path},
+            source_variable_name,
+            system_name=system_name,
+        ),
         overwrite_output_dir=_parse_bool(
             values.get("CROSSFOLD_OVERWRITE_OUTPUT_DIR"),
             "CROSSFOLD_OVERWRITE_OUTPUT_DIR",

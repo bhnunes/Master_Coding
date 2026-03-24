@@ -5,6 +5,7 @@ import pandas as pd
 from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold.provenance import (
+    build_hdf5_manifest_from_split_dfs,
     build_manifest_from_split_dfs,
     build_split_stats_dataframe,
     fill_manifest_checksums_inplace,
@@ -61,6 +62,29 @@ def test_build_manifest_from_split_dfs_sorts_rows_stably(tmp_path: Path) -> None
         "PATIENT_1_PATCH_001.png",
     ]
     assert {"abs_image_path", "abs_mask_path"}.issubset(manifest_df.columns)
+
+
+def test_build_hdf5_manifest_from_split_dfs_tracks_relative_hdf5_rows(tmp_path: Path) -> None:
+    manifest_df = build_hdf5_manifest_from_split_dfs(
+        output_dir=tmp_path,
+        run_id="run-1",
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
+        split_data=_split_data(),
+    )
+
+    assert manifest_df[["split", "relative_hdf5_path", "hdf5_row_index"]].to_dict("records") == [
+        {
+            "split": "TRAIN",
+            "relative_hdf5_path": "TRAIN.h5",
+            "hdf5_row_index": 0,
+        },
+        {
+            "split": "TRAIN",
+            "relative_hdf5_path": "TRAIN.h5",
+            "hdf5_row_index": 1,
+        },
+    ]
 
 
 def test_build_split_stats_dataframe_summarizes_each_non_empty_split() -> None:

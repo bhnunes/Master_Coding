@@ -11,7 +11,7 @@ from helpers.packaging.pipeline import run_packaging_pipeline
 
 
 def main() -> None:
-    """Pack Stage 5 split folders into the minimal HDF5 contract used by training."""
+    """Pack the cleaned post-Stage-4.3 patch pool into one source HDF5 dataset."""
 
     load_dotenv(override=True)
 
@@ -26,16 +26,15 @@ def main() -> None:
             file_pattern="%(asctime)s - %(levelname)s - %(message)s",
             console_pattern="%(message)s",
         )
-        outputs = run_packaging_pipeline(config)
+        output_path = run_packaging_pipeline(config)
     except Exception as error:
         print(f"Stage 7 packaging failed: {error}")
         raise SystemExit(2) from error
 
     logging.info("Stage 7 packaging completed successfully")
+    logging.info("SOURCE_DATASET: %s", output_path)
     print("Stage 7 packaging completed successfully:")
-    for split_name, path in outputs.items():
-        logging.info("%s: %s", split_name, path)
-        print(f"- {split_name}: {path}")
+    print(f"- SOURCE_DATASET: {output_path}")
     raise SystemExit(0)
 
 

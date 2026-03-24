@@ -120,7 +120,7 @@ def _build_packaging_signature_from_rows(
     return _signature_hexdigest({"img_size": int(img_size), "samples": rows})
 
 
-def write_split_hdf5(
+def write_patch_dataset_hdf5(
     output_path: Path,
     samples: list[SampleRecord],
     *,
@@ -151,6 +151,12 @@ def write_split_hdf5(
         labels = handle.create_dataset("labels", shape=(len(samples),), dtype="uint8")
         patient_ids = handle.create_dataset("patient_ids", shape=(len(samples),), dtype="int32")
         filenames = handle.create_dataset("filenames", shape=(len(samples),), dtype=str_dtype)
+        source_image_paths = handle.create_dataset(
+            "source_image_paths", shape=(len(samples),), dtype=str_dtype
+        )
+        source_mask_paths = handle.create_dataset(
+            "source_mask_paths", shape=(len(samples),), dtype=str_dtype
+        )
         signature_rows: list[dict[str, Any]] = []
 
         for index, sample in enumerate(samples):
@@ -161,6 +167,8 @@ def write_split_hdf5(
             labels[index] = sample.label
             patient_ids[index] = sample.patient_id
             filenames[index] = sample.filename
+            source_image_paths[index] = str(sample.image_path)
+            source_mask_paths[index] = str(sample.mask_path)
             signature_rows.append(
                 _sample_signature_entry(
                     sample,

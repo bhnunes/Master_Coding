@@ -22,21 +22,18 @@ def _list_png_names(folder: Path) -> list[str]:
     )
 
 
-def _build_source_specs(split_name: str) -> tuple[tuple[str, str, int], ...]:
+def _build_source_specs() -> tuple[tuple[str, str, int], ...]:
     return (
-        (f"{split_name}/CANCER", f"{split_name}/CANCER_MASK", 1),
-        (f"{split_name}/NOT_CANCER", f"{split_name}/NOT_CANCER_MASK", 0),
+        ("CANCER", "CANCER_MASK", 1),
+        ("NOT_CANCER", "NOT_CANCER_MASK", 0),
     )
 
 
-def discover_split_samples(
-    base_dir: Path, split_name: str, patient_id_regex: str
-) -> list[SampleRecord]:
-    split = split_name.upper()
+def discover_patch_pool_samples(base_dir: Path, patient_id_regex: str) -> list[SampleRecord]:
     patient_pattern = re.compile(patient_id_regex)
     samples: list[SampleRecord] = []
 
-    for image_dir_name, mask_dir_name, label in _build_source_specs(split):
+    for image_dir_name, mask_dir_name, label in _build_source_specs():
         image_dir = base_dir / image_dir_name
         mask_dir = base_dir / mask_dir_name
         image_names = _list_png_names(image_dir)
@@ -44,7 +41,9 @@ def discover_split_samples(
         if not image_names and not mask_names:
             continue
         if image_names != mask_names:
-            raise ValueError(f"Image/mask filename mismatch for {split} source '{image_dir_name}'.")
+            raise ValueError(
+                f"Image/mask filename mismatch for patch pool source '{image_dir_name}'."
+            )
         for filename in image_names:
             patient_match = patient_pattern.search(filename)
             if patient_match is None:

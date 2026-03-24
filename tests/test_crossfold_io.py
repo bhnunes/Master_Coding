@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import cv2
+import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -11,7 +12,9 @@ from helpers.crossfold.io import (
     move_file,
     process_and_write_image,
     process_and_write_split_files,
+    verify_split_hdf5_integrity,
     verify_split_integrity,
+    write_split_hdf5,
 )
 
 
@@ -146,3 +149,51 @@ def test_move_file_uses_shutil_fallback_when_replace_fails(
 
 def test_verify_split_integrity_skips_missing_split_dir(tmp_path: Path) -> None:
     verify_split_integrity(tmp_path, "TRAIN")
+
+
+def test_write_split_hdf5_writes_split_contract_from_source_rows(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset(
+            "images",
+            data=np.array(
+                [np.zeros((4, 4, 3), dtype=np.uint8), np.full((4, 4, 3), 20, dtype=np.uint8)]
+            ),
+        )
+        handle.create_dataset(
+            "masks",
+            data=np.array([np.zeros((4, 4), dtype=np.uint8), np.ones((4, 4), dtype=np.uint8)]),
+        )
+        handle.create_dataset("labels", data=np.array([0, 1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([10, 20], dtype=np.int32))
+        handle.create_dataset(
+            "filenames",
+            data=np.array([b"PATIENT_10_PATCH_001.png", b"PATIENT_20_PATCH_001.png"]),
+        )
+
+    split_df = pd.DataFrame(
+        [
+            {
+                "label": 1,
+                "patient_id": 20,
+                "filename": "PATIENT_20_PATCH_001.png",
+                "source_row_index": 1,
+            }
+        ]
+    )
+
+    output_path = write_split_hdf5(
+        split_df=split_df,
+        source_hdf5_path=source_path,
+        output_path=tmp_path / "TRAIN.h5",
+        normalizer=None,
+        normalization_method="NOT_NORMALIZED",
+        overwrite=True,
+    )
+
+    with h5py.File(output_path, "r") as handle:
+        assert handle["labels"][:].tolist() == [1]
+        assert handle["patient_ids"][:].tolist() == [20]
+        assert handle["filenames"][:].tolist() == [b"PATIENT_20_PATCH_001.png"]
+
+    verify_split_hdf5_integrity(output_path, split_df)
