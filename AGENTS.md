@@ -121,6 +121,23 @@ This file gives coding agents repository-specific guidance for working safely an
 - `setup_colab.sh` is the canonical Google Colab bootstrap. It installs system dependencies, installs `uv`, installs Python 3.12, syncs from `pyproject.toml`, and prepares `.env` when missing.
 - `setup_windows.ps1` is the canonical native Windows bootstrap. `Dockerfile` and `.devcontainer/devcontainer.json` define the containerized development environments.
 - Current validation status after the Stage 5/6 HDF5 cleanup pass: targeted packaging/crossfold/sanity migration tests passed (`49 passed`), additional cleanup-focused tests passed (`72 passed` and `9 passed` on targeted subsets), `uv run ruff check . --select ARG001,ARG002,F401,F841` passed during the unused-code cleanup, and Ruff/MyPy passed on touched files. The earlier full-suite validation baseline from the prior remediation pass was `uv run pytest` passing (`362 passed`). The earlier full-coverage baseline before this remediation wave was `uv run pytest --cov=helpers --cov-report=term-missing` passing with overall `helpers` coverage at `72%`; coverage should be re-measured again before the next coverage-first session.
+- A code-grounded Elsevier double-column manuscript draft was created under `reports/main.tex` and compiled successfully to `reports/main.pdf`, with section-to-source traceability recorded in `reports/method_sources.md`.
+- The publisher template used for manuscript drafting lives under `latex_template/` and should be treated as authoritative for paper-format work. Use the double-column class `cas-dc` from `latex_template/cas-dc-template.tex` when the user asks for submission-style manuscript output.
+- When generating manuscript text from this repository, prefer code-grounded Methods / Experimental Setup / Reproducibility content over speculative claims. The current repository supports detailed scientific writing for Stages 1-12, but results, cohort statistics, hardware details, exact final checkpoints, and final recipe thresholds must come from run artifacts rather than code inspection alone.
+- The safe manuscript placeholders already established in `reports/main.tex` are: frontmatter identity fields, dataset/cohort statistics, final quantitative results, discussion claims that depend on evidence, and submission-ready bibliography entries.
+- Important code-grounded manuscript facts already verified during the paper-writing pass include:
+  - Stage 1 reads WSI members directly from a zip archive, processes one slide at a time, and exports GeoJSON artifact polygons for selected artifact classes.
+  - Stage 2 is database-backed, supports heterogeneous annotation formats, writes deterministic PNG patch names, and records per-patch artifact coverage to `PATCHES/artifact_patch_index.parquet` instead of rejecting patches by artifact threshold.
+  - Stage 4.1 is patient-aware review sampling, Stage 4.2 tunes a graph-based ROI contamination metric with grouped splitting and Bayesian optimization, and Stage 4.3 applies the tuned rejection rule to the cancer patch pool.
+  - Stage 5 packages cleaned PNG patches into one source HDF5 with stable row-aligned datasets `images`, `masks`, `labels`, `patient_ids`, and `filenames`.
+  - Stage 6 creates patient-disjoint HDF5 splits and fits stain normalization on `TRAIN` only before applying the frozen normalizer to all splits.
+  - Stage 7 is a scientific gate that checks manifest parity, patient leakage, HDF5 integrity, and label-mask semantics before training.
+  - Stage 8 smart sampling is patient-wise and embedding-based, writing `TRAIN_FILTERED.h5` with the same core dataset contract.
+  - Stage 9 performs repeated LR-range screening and loss-weight search over the approved architecture/encoder registry rather than final model training.
+  - Stage 10 trains one model per execution, uses a BCE+Dice hybrid loss, weighted random sampling, augmentation via Albumentations, validation AUPRC for early stopping, and optional artifact-aware loss discounting.
+  - Stage 11 is development-only ensemble optimization on `VALIDATION`, using provenance-compatible candidate gating plus a two-stream spatial-gating recipe with separate ROI and final decision thresholds.
+  - Stage 12 is the claim-bearing endpoint on `TEST`, validating recipe integrity and checkpoint hashes before frozen ensemble inference.
+- If future work resumes manuscript writing, start from `reports/main.tex` instead of regenerating from scratch unless the user explicitly asks for a new structure or journal format.
 - Recent scientific-validity remediation work completed a 10-phase hardening pass across Stage 4.1, 4.2, 5, 7, 8, 10, 11, and 12. When resuming scientific review or follow-up implementation, assume the following are now intentionally true unless the user explicitly requests otherwise:
   - Stage 12 hard predictions now use the declared recipe threshold instead of a hidden fixed threshold.
   - Stage 5 is non-destructive by default; destructive move behavior requires explicit opt-in.
@@ -177,6 +194,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - Use `skills/scientific-validation-review/SKILL.md` when reviewing training, evaluation, splitting, preprocessing, or other research code for threats to scientific validity, leakage, bias, or irreproducibility.
 - Use `skills/python-performance-optimization/SKILL.md` when profiling or optimizing Python performance, especially for scientific workloads, heavy loops, pandas/NumPy code, or parallel execution.
 - For optimization work, prefer representative samples located under `PROJECTS_BASE_PATH` from `.env` for profiling and benchmarking whenever those project samples are available.
+- For future manuscript requests, inspect `reports/main.tex`, `reports/method_sources.md`, and `latex_template/` first, then extend the existing manuscript conservatively instead of rewriting methodology from memory.
 
 ## Naming Conventions
 
