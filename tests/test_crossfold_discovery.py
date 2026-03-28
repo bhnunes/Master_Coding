@@ -44,7 +44,9 @@ def test_load_patch_dataset_reads_hdf5_source_dataset(tmp_path: Path) -> None:
     ]
 
 
-def test_load_patch_dataset_requires_source_paths_in_hdf5_dataset(tmp_path) -> None:
+def test_load_patch_dataset_synthesizes_logical_source_refs_when_paths_are_absent(
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
     with h5py.File(source_path, "w") as handle:
         handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
@@ -53,9 +55,16 @@ def test_load_patch_dataset_requires_source_paths_in_hdf5_dataset(tmp_path) -> N
         handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
 
-    try:
-        load_patch_dataset(source_path)
-    except ValueError as error:
-        assert "source_image_paths" in str(error)
-    else:
-        raise AssertionError("Expected HDF5 dataset without source paths to be rejected.")
+    dataset = load_patch_dataset(source_path)
+
+    assert dataset.to_dict("records") == [
+        {
+            "patient_id": 11,
+            "image_path": f"{source_path}::images[0]",
+            "mask_path": f"{source_path}::masks[0]",
+            "label": 1,
+            "filename": "PATIENT_11_PATCH_001.png",
+            "source_row_index": 0,
+            "source_hdf5_path": str(source_path),
+        }
+    ]

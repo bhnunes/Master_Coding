@@ -82,6 +82,34 @@ def save_patch_outputs(
     )
 
 
+def build_patch_record(
+    *,
+    filename: str,
+    label: str,
+    patient_id: object,
+    slide_id: object,
+    artifact_coverages: dict[str, float],
+    patch_np: np.ndarray,
+    final_mask: np.ndarray,
+    image_output_path: Path | None,
+    mask_output_path: Path | None,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "filename": filename,
+        "label": 1 if label == "CANCER" else 0,
+        "patient_id": str(patient_id),
+        "slide_id": str(slide_id),
+        "_image_array": patch_np.astype(np.uint8, copy=False),
+        "_mask_array": final_mask.astype(np.uint8, copy=False),
+        **artifact_coverages,
+    }
+    if image_output_path is not None:
+        record["_png_image_export_path"] = str(image_output_path)
+    if mask_output_path is not None:
+        record["_png_mask_export_path"] = str(mask_output_path)
+    return record
+
+
 def sanitize_patch_filename_component(value: object) -> str:
     text = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
     sanitized = text.strip("-._")
@@ -480,26 +508,37 @@ def _process_window_with_slide(slide, x, y):
     )
     image_output_path = Path(save_folder_img) / file_basename
     mask_output_path = Path(save_folder_mask) / file_basename
+    export_png_patches = context.get("export_png_patches", True)
+    exported_image_path = image_output_path if export_png_patches else None
+    exported_mask_path = mask_output_path if export_png_patches else None
+    if export_png_patches:
+        image_save_started_at = time.perf_counter()
+        patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats, "image_save", time.perf_counter() - image_save_started_at
+            )
 
-    image_save_started_at = time.perf_counter()
-    patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
-    if window_phase_stats is not None:
-        record_phase(window_phase_stats, "image_save", time.perf_counter() - image_save_started_at)
-
-    mask_save_started_at = time.perf_counter()
-    Image.fromarray((final_mask * 255).astype(np.uint8)).save(
-        str(mask_output_path),
-        **get_png_save_kwargs(kind="mask"),
+        mask_save_started_at = time.perf_counter()
+        Image.fromarray((final_mask * 255).astype(np.uint8)).save(
+            str(mask_output_path),
+            **get_png_save_kwargs(kind="mask"),
+        )
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats, "mask_save", time.perf_counter() - mask_save_started_at
+            )
+    patch_record = build_patch_record(
+        filename=file_basename,
+        label=label,
+        patient_id=context["patient"],
+        slide_id=context["slide_id"],
+        artifact_coverages=artifact_coverages,
+        patch_np=patch_np,
+        final_mask=final_mask,
+        image_output_path=exported_image_path,
+        mask_output_path=exported_mask_path,
     )
-    if window_phase_stats is not None:
-        record_phase(window_phase_stats, "mask_save", time.perf_counter() - mask_save_started_at)
-    patch_record = {
-        "filename": file_basename,
-        "label": 1 if label == "CANCER" else 0,
-        "patient_id": str(context["patient"]),
-        "slide_id": context["slide_id"],
-        **artifact_coverages,
-    }
     return (
         (f"SAVED_{label}", patch_record, window_phase_stats)
         if window_phase_stats is not None
@@ -858,6 +897,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             "cancer_polygon_index": cancer_polygon_index,
             "not_cancer_polygon_index": not_cancer_polygon_index,
             "artifact_geometry_index": artifact_geometry_index,
+            "export_png_patches": kwargs.get("export_png_patches", True),
         }
 
         logging.info(

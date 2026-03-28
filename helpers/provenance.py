@@ -79,6 +79,7 @@ def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
         "sha256": hash_file_sha256(resolved),
         "source_signature": None,
         "selection_signature": None,
+        "attrs": {},
     }
     try:
         import h5py
@@ -86,9 +87,14 @@ def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
         with h5py.File(resolved, "r") as handle:
             source_signature = handle.attrs.get("source_signature")
             selection_signature = handle.attrs.get("selection_signature")
+            attrs = {
+                str(key): (value.decode("utf-8") if isinstance(value, bytes) else value)
+                for key, value in handle.attrs.items()
+            }
     except Exception:
         source_signature = None
         selection_signature = None
+        attrs = {}
 
     payload["source_signature"] = (
         source_signature.decode("utf-8")
@@ -100,6 +106,7 @@ def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
         if isinstance(selection_signature, bytes)
         else selection_signature
     )
+    payload["attrs"] = attrs
     return payload
 
 

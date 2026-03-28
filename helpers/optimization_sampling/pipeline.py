@@ -11,7 +11,7 @@ from helpers.optimization_sampling.overlay import generate_overlay_images
 from helpers.optimization_sampling.sampling import (
     OverlayTask,
     build_overlay_tasks,
-    discover_image_mask_pairs,
+    discover_hdf5_image_mask_pairs,
     ensure_manual_labeling_directories,
     select_sample_stems,
 )
@@ -36,8 +36,7 @@ class OptimizationSamplingSummary:
 
 def run_optimization_sampling(
     *,
-    image_folder: Path,
-    mask_folder: Path,
+    source_hdf5_path: Path,
     output_base: Path,
     confidence_level: float,
     margin_of_error: float,
@@ -56,10 +55,8 @@ def run_optimization_sampling(
 
     active_logger = logger or logging.getLogger("optimization_sampling")
     active_logger.info("--- Experiment Setup Initiated: On-the-Fly Generation ---")
-    active_logger.info("Scanning for images in: %s", image_folder)
-    active_logger.info("Scanning for masks in: %s", mask_folder)
-
-    pairs = discover_image_mask_pairs(image_folder, mask_folder)
+    active_logger.info("Scanning for candidates in HDF5 source: %s", source_hdf5_path)
+    pairs = discover_hdf5_image_mask_pairs(source_hdf5_path)
     selection = select_sample_stems(
         list(pairs),
         pilot_sample_size=pilot_sample_size,

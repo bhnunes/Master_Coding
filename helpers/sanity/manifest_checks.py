@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
+import h5py
 import pandas as pd
 
 from helpers.crossfold.provenance import recompute_split_stats_from_manifest
@@ -209,3 +211,69 @@ def check_split_stats_against_manifest(
                     ),
                 )
     return CheckResult("PASS", "split_stats.csv matches manifest-derived statistics.")
+
+
+def check_stage4_cleaning_lineage(
+    manifest_df: pd.DataFrame,
+    run_cfg: dict[str, Any] | None,
+    base_dir: Path,
+) -> CheckResult:
+    if not run_cfg:
+        return CheckResult(
+            "N/A", "run_config.json not found; skipping Stage 4.3 cleaning lineage check."
+        )
+    source_provenance = run_cfg.get("source_hdf5_provenance")
+    if not isinstance(source_provenance, dict):
+        return CheckResult(
+            "WARN",
+            (
+                "run_config.json missing source_hdf5_provenance; cannot verify "
+                "Stage 4.3 cleaning lineage."
+            ),
+        )
+    attrs = source_provenance.get("attrs")
+    if not isinstance(attrs, dict):
+        return CheckResult(
+            "WARN",
+            (
+                "run_config.json missing source_hdf5_provenance.attrs; cannot verify "
+                "Stage 4.3 cleaning lineage."
+            ),
+        )
+
+    expected_manifest_path = attrs.get("stage4_cleaning_manifest_path")
+    expected_manifest_sha = attrs.get("stage4_cleaning_manifest_sha256")
+    if expected_manifest_path is None and expected_manifest_sha is None:
+        return CheckResult("PASS", "No Stage 4.3 cleaning lineage recorded in source provenance.")
+    if not expected_manifest_path or not expected_manifest_sha:
+        return CheckResult(
+            "FAIL",
+            (
+                "Stage 4.3 cleaning lineage is incomplete in run_config.json; "
+                "expected both manifest path and sha256."
+            ),
+        )
+
+    relative_paths = sorted(
+        {str(path) for path in manifest_df["relative_hdf5_path"].dropna().tolist()}
+    )
+    mismatches: list[str] = []
+    for relative_path in relative_paths:
+        hdf5_path = base_dir / relative_path
+        if not hdf5_path.is_file():
+            continue
+        with h5py.File(hdf5_path, "r") as handle:
+            observed_path = handle.attrs.get("stage4_cleaning_manifest_path")
+            observed_sha = handle.attrs.get("stage4_cleaning_manifest_sha256")
+        if observed_path != expected_manifest_path or observed_sha != expected_manifest_sha:
+            mismatches.append(relative_path)
+    if mismatches:
+        return CheckResult(
+            "FAIL",
+            "Split HDF5 artifacts do not match Stage 4.3 cleaning lineage from run_config.json: "
+            f"{mismatches[:10]}",
+        )
+    return CheckResult(
+        "PASS",
+        "Stage 4.3 cleaning lineage matches run_config.json across split HDF5 artifacts.",
+    )

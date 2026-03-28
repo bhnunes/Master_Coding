@@ -4,6 +4,8 @@ import random
 from collections.abc import Sequence
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
 
 from helpers.optimization_sampling.pipeline import run_optimization_sampling
@@ -12,6 +14,7 @@ from helpers.optimization_sampling.sampling import (
     build_group_representatives,
     build_overlay_tasks,
     calculate_cochran_sample_size,
+    discover_hdf5_image_mask_pairs,
     discover_image_mask_pairs,
     infer_sampling_group_id,
     select_sample_stems,
@@ -115,7 +118,15 @@ def test_select_sample_stems_rejects_small_population() -> None:
 
 
 def test_build_overlay_tasks_preserves_output_folder_contract(tmp_path: Path) -> None:
-    pairs = discover_image_mask_pairs(_build_dataset(tmp_path, 4), tmp_path / "masks")
+    image_dir = tmp_path / "images"
+    mask_dir = tmp_path / "masks"
+    image_dir.mkdir()
+    mask_dir.mkdir()
+    for index in range(4):
+        filename = f"case_{index}.png"
+        (image_dir / filename).write_bytes(b"image")
+        (mask_dir / filename).write_bytes(b"mask")
+    pairs = discover_image_mask_pairs(image_dir, mask_dir)
 
     tasks = build_overlay_tasks(
         pairs=pairs,
@@ -132,10 +143,34 @@ def test_build_overlay_tasks_preserves_output_folder_contract(tmp_path: Path) ->
     assert tmp_path / "output" / "pilot_sample" / "case_2.png" in output_paths
 
 
+def test_discover_hdf5_image_mask_pairs_reads_canonical_dataset(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"PATIENT_7_PATCH_001.png"]))
+
+    pairs = discover_hdf5_image_mask_pairs(source_path)
+
+    assert list(pairs) == ["PATIENT_7_PATCH_001"]
+    assert pairs["PATIENT_7_PATCH_001"].output_name == "PATIENT_7_PATCH_001.png"
+    assert str(pairs["PATIENT_7_PATCH_001"].image_path).endswith("::images[0]")
+
+
 def test_run_optimization_sampling_creates_manual_review_folders(tmp_path: Path) -> None:
-    image_dir = _build_dataset(tmp_path, 1100)
-    mask_dir = tmp_path / "masks"
+    source_path = tmp_path / "SOURCE_DATASET.h5"
     output_dir = tmp_path / "output"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1100, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1100, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.ones((1100,), dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.arange(1, 1101, dtype=np.int32))
+        handle.create_dataset(
+            "filenames",
+            data=np.array([f"case_{index}.png".encode() for index in range(1100)]),
+        )
     created_outputs: list[Path] = []
 
     def fake_overlay_runner(tasks: Sequence[OverlayTask], num_processes: int) -> list[bool]:
@@ -148,8 +183,7 @@ def test_run_optimization_sampling_creates_manual_review_folders(tmp_path: Path)
         return [True] * len(tasks)
 
     summary = run_optimization_sampling(
-        image_folder=image_dir,
-        mask_folder=mask_dir,
+        source_hdf5_path=source_path,
         output_base=output_dir,
         confidence_level=0.95,
         margin_of_error=0.05,
@@ -172,13 +206,46 @@ def test_run_optimization_sampling_creates_manual_review_folders(tmp_path: Path)
     assert (output_dir / "master_candidate_pool" / "REJECTED").is_dir()
 
 
-def _build_dataset(tmp_path: Path, count: int) -> Path:
-    image_dir = tmp_path / "images"
-    mask_dir = tmp_path / "masks"
-    image_dir.mkdir(exist_ok=True)
-    mask_dir.mkdir(exist_ok=True)
-    for index in range(count):
-        filename = f"case_{index}.png"
-        (image_dir / filename).write_bytes(b"image")
-        (mask_dir / filename).write_bytes(b"mask")
-    return image_dir
+def test_run_optimization_sampling_accepts_hdf5_source(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    output_dir = tmp_path / "output"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1200, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1200, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.ones((1200,), dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.arange(1, 1201, dtype=np.int32))
+        handle.create_dataset(
+            "filenames",
+            data=np.array(
+                [f"CANCER_PATIENT_{index}_PATCH_001.png".encode() for index in range(1, 1201)]
+            ),
+        )
+    created_outputs: list[Path] = []
+
+    def fake_overlay_runner(tasks: Sequence[OverlayTask], num_processes: int) -> list[bool]:
+        del num_processes
+        for task in tasks:
+            task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            task.output_path.write_bytes(b"overlay")
+            created_outputs.append(task.output_path)
+        return [True] * len(tasks)
+
+    summary = run_optimization_sampling(
+        source_hdf5_path=source_path,
+        output_base=output_dir,
+        confidence_level=0.95,
+        margin_of_error=0.05,
+        proportion=0.5,
+        pilot_sample_size=100,
+        master_pool_fraction=0.10,
+        overlay_color=(0, 0, 255),
+        overlay_thickness=2,
+        overlay_alpha=1.0,
+        num_processes=2,
+        rng=random.Random(3),
+        overlay_runner=fake_overlay_runner,
+    )
+
+    assert summary.total_population == 1200
+    assert summary.generated_overlay_count == len(created_outputs)
+    assert created_outputs[0].suffix == ".png"

@@ -21,6 +21,10 @@ def _decode_string(value: object) -> str:
     return str(value)
 
 
+def _build_logical_hdf5_ref(source_path: Path, dataset_name: str, row_index: int) -> str:
+    return f"{source_path}::{dataset_name}[{row_index}]"
+
+
 def _load_hdf5_patch_dataset(source_path: Path) -> pd.DataFrame:
     logging.info("Loading Stage 5 data from source HDF5 %s", source_path)
     rows: list[dict[str, object]] = []
@@ -30,20 +34,26 @@ def _load_hdf5_patch_dataset(source_path: Path) -> pd.DataFrame:
         patient_ids = handle["patient_ids"]
         source_image_paths = handle.get("source_image_paths")
         source_mask_paths = handle.get("source_mask_paths")
-        if source_image_paths is None or source_mask_paths is None:
-            raise ValueError(
-                "Source HDF5 dataset is missing required 'source_image_paths' "
-                "or 'source_mask_paths' datasets."
-            )
         for index in range(len(filenames)):
+            image_path = (
+                _decode_string(source_image_paths[index])
+                if source_image_paths is not None
+                else _build_logical_hdf5_ref(source_path, "images", index)
+            )
+            mask_path = (
+                _decode_string(source_mask_paths[index])
+                if source_mask_paths is not None
+                else _build_logical_hdf5_ref(source_path, "masks", index)
+            )
             rows.append(
                 {
                     "patient_id": int(patient_ids[index]),
-                    "image_path": _decode_string(source_image_paths[index]),
-                    "mask_path": _decode_string(source_mask_paths[index]),
+                    "image_path": image_path,
+                    "mask_path": mask_path,
                     "label": int(labels[index]),
                     "filename": _decode_string(filenames[index]),
                     "source_row_index": index,
+                    "source_hdf5_path": str(source_path),
                 }
             )
     if not rows:

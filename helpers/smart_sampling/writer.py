@@ -73,6 +73,16 @@ def write_filtered_hdf5(
     with h5py.File(source_path, "r") as source_handle, h5py.File(output_path, "w") as dest_handle:
         dest_handle.attrs["selection_signature"] = selection_signature
         dest_handle.attrs["source_hdf5_sha256"] = collect_hdf5_provenance(source_path)["sha256"]
+        for attr_name in (
+            "source_signature",
+            "upstream_source_signature",
+            "stage4_cleaning_manifest_path",
+            "stage4_cleaning_manifest_sha256",
+            "stage4_cleaning_selected_rows",
+        ):
+            attr_value = source_handle.attrs.get(attr_name)
+            if attr_value is not None:
+                dest_handle.attrs[attr_name] = attr_value
         guardrail(source_handle)
         filename_key = resolve_filename_key(source_handle)
         for key in ["images", "masks", "patient_ids", "labels", filename_key]:

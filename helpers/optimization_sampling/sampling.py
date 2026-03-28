@@ -6,6 +6,9 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
+
+import h5py
 
 SUPPORTED_CONFIDENCE_LEVELS: dict[float, float] = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
 
@@ -15,16 +18,17 @@ class ImageMaskPair:
     """A matched image and mask pair keyed by shared stem."""
 
     stem: str
-    image_path: Path
-    mask_path: Path
+    image_path: Path | str
+    mask_path: Path | str
+    output_name: str
 
 
 @dataclass(frozen=True)
 class OverlayTask:
     """A single overlay generation task."""
 
-    image_path: Path
-    mask_path: Path
+    image_path: Path | str
+    mask_path: Path | str
     output_path: Path
     color: tuple[int, int, int]
     thickness: int
@@ -114,9 +118,42 @@ def discover_image_mask_pairs(image_folder: Path, mask_folder: Path) -> dict[str
         )
 
     return {
-        stem: ImageMaskPair(stem=stem, image_path=image_files[stem], mask_path=mask_files[stem])
+        stem: ImageMaskPair(
+            stem=stem,
+            image_path=image_files[stem],
+            mask_path=mask_files[stem],
+            output_name=image_files[stem].name,
+        )
         for stem in common_stems
     }
+
+
+def discover_hdf5_image_mask_pairs(source_hdf5_path: Path) -> dict[str, ImageMaskPair]:
+    """Discover image/mask pairs from a canonical HDF5 dataset."""
+
+    if not source_hdf5_path.is_file():
+        raise FileNotFoundError(f"HDF5 source does not exist: {source_hdf5_path}")
+
+    pairs: dict[str, ImageMaskPair] = {}
+    with h5py.File(source_hdf5_path, "r") as handle:
+        filenames = cast(h5py.Dataset, handle["filenames"])
+        for index in range(len(filenames)):
+            filename_value = filenames[index]
+            filename = (
+                filename_value.decode("utf-8")
+                if isinstance(filename_value, bytes)
+                else str(filename_value)
+            )
+            stem = Path(filename).stem
+            pairs[stem] = ImageMaskPair(
+                stem=stem,
+                image_path=f"{source_hdf5_path}::images[{index}]",
+                mask_path=f"{source_hdf5_path}::masks[{index}]",
+                output_name=filename,
+            )
+    if not pairs:
+        raise ValueError(f"No rows found in HDF5 source: {source_hdf5_path}")
+    return pairs
 
 
 def select_sample_stems(
@@ -186,7 +223,7 @@ def build_overlay_tasks(
             OverlayTask(
                 image_path=pair.image_path,
                 mask_path=pair.mask_path,
-                output_path=master_output / pair.image_path.name,
+                output_path=master_output / pair.output_name,
                 color=color,
                 thickness=thickness,
                 alpha=alpha,
@@ -199,7 +236,7 @@ def build_overlay_tasks(
             OverlayTask(
                 image_path=pair.image_path,
                 mask_path=pair.mask_path,
-                output_path=pilot_output / pair.image_path.name,
+                output_path=pilot_output / pair.output_name,
                 color=color,
                 thickness=thickness,
                 alpha=alpha,

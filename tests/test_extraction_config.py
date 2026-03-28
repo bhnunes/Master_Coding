@@ -32,6 +32,7 @@ def test_load_database_manager_config_reads_expected_environment(tmp_path: Path)
     assert config.load_cases is True
     assert config.use_advanced_artifact_filtering is True
     assert config.activate_sanity_check_geojson is True
+    assert config.export_png_patches is False
     assert config.geojson_path == tmp_path / "geojson"
     assert config.log_path == Path("logs/database_manager.log")
 
@@ -96,3 +97,16 @@ def test_load_database_manager_config_requires_cache_dir_when_staging_enabled(
 def test_load_database_manager_config_requires_tag() -> None:
     with pytest.raises(ValueError, match="TAG"):
         load_database_manager_config({})
+
+
+def test_load_database_manager_config_allows_disabling_png_patch_exports(tmp_path: Path) -> None:
+    config = load_database_manager_config(
+        {
+            "TAG": "TCGA",
+            "SQLITE_DB_PATH": str(tmp_path / "databases" / "cases.db"),
+            "PROJECTS_BASE_PATH": str(tmp_path / "projects"),
+            "STAGE2_EXPORT_PNG_PATCHES": "false",
+        }
+    )
+
+    assert config.export_png_patches is False

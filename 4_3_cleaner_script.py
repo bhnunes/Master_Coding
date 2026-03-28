@@ -26,8 +26,7 @@ def main() -> None:
         file_pattern="%(asctime)s - %(processName)s - %(levelname)s - %(message)s",
     )
     summary = run_graph_cleaning_pipeline(
-        source_image_dir=config.source_image_dir,
-        source_mask_dir=config.source_mask_dir,
+        source_hdf5_path=config.source_hdf5_path,
         output_base_dir=config.output_base_dir,
         graph_params=config.graph_params,
         tau=config.tau,

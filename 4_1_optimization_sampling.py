@@ -19,8 +19,7 @@ def main() -> None:
     config = load_optimization_sampling_config(os.environ)
     logger = configure_optimization_sampling_logger(config.log_path)
     summary = run_optimization_sampling(
-        image_folder=config.image_folder,
-        mask_folder=config.mask_folder,
+        source_hdf5_path=config.source_hdf5_path,
         output_base=config.output_base,
         confidence_level=config.confidence_level,
         margin_of_error=config.margin_of_error,

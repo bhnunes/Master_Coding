@@ -169,9 +169,9 @@ Helper modules are organized by domain under `helpers/<domain>/`. New domain-spe
 | Stage | Script(s) | Description |
 |-------|-----------|-------------|
 | 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using a `.env`-driven Stage 1 pipeline. Output: GeoJSON files with artifact annotations and SQLite processing status |
-| 2 | `2_database_manager.py` + `3_1_imageReader.py` | Extract PNG patches from WSIs based on annotations. Output: image/mask patches and artifact coverage Parquet metadata |
-| 4.1-4.3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script.py` | Human-in-the-loop review plus graph-based cleaning of cancer patches |
-| 5 | `5_pack_splits_to_hdf5.py` | Package the cleaned post-Stage-4.3 patch pool into one source HDF5 dataset |
+| 2 | `2_database_manager.py` + `3_1_imageReader.py` | Extract canonical HDF5 patch shards from WSIs based on annotations. Output: HDF5 patch data, artifact coverage Parquet metadata, and optional PNG exports when explicitly enabled |
+| 4.1-4.3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script.py` | HDF5-backed human-in-the-loop review plus graph-based cleaning, with PNG retained only for review/export workflows |
+| 5 | `5_pack_splits_to_hdf5.py` | Finalize the cleaned HDF5 source dataset from Stage 2 HDF5 inputs and Stage 4.3 accepted manifests |
 | 6 | `6_crossfold.py` | Create patient-level TRAIN/VALIDATION/TEST HDF5 splits and fit stain normalization on `TRAIN` only |
 | 7 | `7_sanity_checks.py` | Validate HDF5 split integrity, provenance, leakage, and mask/label semantics |
 | 8 | `8_smart_sampler.py` | Select the most informative training samples from `TRAIN.h5` into `TRAIN_FILTERED.h5` (optional) |

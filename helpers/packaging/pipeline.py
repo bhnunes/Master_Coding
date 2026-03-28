@@ -4,20 +4,44 @@ import logging
 from pathlib import Path
 
 from helpers.packaging.config import PackagingConfig
-from helpers.packaging.discovery import discover_patch_pool_samples
-from helpers.packaging.writer import write_patch_dataset_hdf5
+from helpers.packaging.writer import (
+    copy_source_hdf5_dataset,
+    filter_source_hdf5_by_manifest,
+    merge_source_hdf5_shards,
+)
 
 
 def run_packaging_pipeline(config: PackagingConfig) -> Path:
-    logging.info("Starting Stage 7 HDF5 packaging from %s", config.base_dir)
-    samples = discover_patch_pool_samples(config.base_dir, config.patient_id_regex)
-    if not samples:
-        raise ValueError(f"No PNG pairs found in cleaned patch pool: {config.base_dir}")
-    output_path = write_patch_dataset_hdf5(
+    if config.accepted_manifest_path is not None:
+        logging.info(
+            "Starting Stage 7 HDF5 finalization from %s using accepted manifest %s",
+            config.source_hdf5_path,
+            config.accepted_manifest_path,
+        )
+        output_path = filter_source_hdf5_by_manifest(
+            config.source_hdf5_path,
+            config.accepted_manifest_path,
+            config.output_path,
+            overwrite=config.overwrite_outputs,
+        )
+        logging.info("Filtered canonical HDF5 input into %s", output_path)
+        return output_path
+
+    if config.source_hdf5_path.is_dir():
+        logging.info("Starting Stage 7 HDF5 merge from shard directory %s", config.source_hdf5_path)
+        output_path = merge_source_hdf5_shards(
+            config.source_hdf5_path,
+            config.output_path,
+            overwrite=config.overwrite_outputs,
+        )
+        logging.info("Merged Stage 2 HDF5 shards into %s", output_path)
+        return output_path
+
+    logging.info("Starting Stage 7 HDF5 finalization from %s", config.source_hdf5_path)
+    output_path = copy_source_hdf5_dataset(
+        config.source_hdf5_path,
         config.output_path,
-        samples,
-        img_size=config.img_size,
         overwrite=config.overwrite_outputs,
     )
-    logging.info("Packed %s samples into %s", len(samples), output_path)
+    logging.info("Validated and copied canonical HDF5 input into %s", output_path)
     return output_path

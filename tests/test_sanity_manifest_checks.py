@@ -1,6 +1,14 @@
+from pathlib import Path
+
+import h5py
+import numpy as np
 import pandas as pd
 
-from helpers.sanity.manifest_checks import check_manifest_schema, check_split_stats_against_manifest
+from helpers.sanity.manifest_checks import (
+    check_manifest_schema,
+    check_split_stats_against_manifest,
+    check_stage4_cleaning_lineage,
+)
 
 
 def test_check_split_stats_against_manifest_fails_when_counts_drift() -> None:
@@ -56,5 +64,87 @@ def test_check_manifest_schema_accepts_hdf5_native_manifest_columns() -> None:
     )
 
     result = check_manifest_schema(manifest_df)
+
+    assert result.status == "PASS"
+
+
+def test_check_stage4_cleaning_lineage_fails_on_split_attr_mismatch(tmp_path: Path) -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "split": "TRAIN",
+                "label": 1,
+                "patient_id": 1,
+                "filename": "PATIENT_1_PATCH_001.png",
+                "normalization_method": "NOT_NORMALIZED",
+                "is_normalized": False,
+                "relative_hdf5_path": "TRAIN.h5",
+                "hdf5_row_index": 0,
+            }
+        ]
+    )
+    with h5py.File(tmp_path / "TRAIN.h5", "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"PATIENT_1_PATCH_001.png"]))
+        handle.attrs["stage4_cleaning_manifest_path"] = "/tmp/other_manifest.csv"
+        handle.attrs["stage4_cleaning_manifest_sha256"] = "other-sha"
+
+    result = check_stage4_cleaning_lineage(
+        manifest_df,
+        {
+            "source_hdf5_provenance": {
+                "attrs": {
+                    "stage4_cleaning_manifest_path": "/tmp/accepted_manifest.csv",
+                    "stage4_cleaning_manifest_sha256": "abc123",
+                }
+            }
+        },
+        tmp_path,
+    )
+
+    assert result.status == "FAIL"
+
+
+def test_check_stage4_cleaning_lineage_passes_when_split_attrs_match(tmp_path: Path) -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "split": "TRAIN",
+                "label": 1,
+                "patient_id": 1,
+                "filename": "PATIENT_1_PATCH_001.png",
+                "normalization_method": "NOT_NORMALIZED",
+                "is_normalized": False,
+                "relative_hdf5_path": "TRAIN.h5",
+                "hdf5_row_index": 0,
+            }
+        ]
+    )
+    with h5py.File(tmp_path / "TRAIN.h5", "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"PATIENT_1_PATCH_001.png"]))
+        handle.attrs["stage4_cleaning_manifest_path"] = "/tmp/accepted_manifest.csv"
+        handle.attrs["stage4_cleaning_manifest_sha256"] = "abc123"
+
+    result = check_stage4_cleaning_lineage(
+        manifest_df,
+        {
+            "source_hdf5_provenance": {
+                "attrs": {
+                    "stage4_cleaning_manifest_path": "/tmp/accepted_manifest.csv",
+                    "stage4_cleaning_manifest_sha256": "abc123",
+                }
+            }
+        },
+        tmp_path,
+    )
 
     assert result.status == "PASS"

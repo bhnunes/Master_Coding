@@ -6,10 +6,11 @@ from helpers.optimization_sampling.config import load_optimization_sampling_conf
 
 
 def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
     config = load_optimization_sampling_config(
         {
-            "OPTIMIZATION_SAMPLING_IMAGE_FOLDER": str(tmp_path / "images"),
-            "OPTIMIZATION_SAMPLING_MASK_FOLDER": str(tmp_path / "masks"),
+            "OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH": str(source_path),
             "OPTIMIZATION_SAMPLING_OUTPUT_BASE": str(tmp_path / "output"),
             "OPTIMIZATION_SAMPLING_LOG_FOLDER": str(tmp_path / "logs"),
             "OPTIMIZATION_SAMPLING_LOG_FILE": "stage4.log",
@@ -27,8 +28,7 @@ def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: 
         }
     )
 
-    assert config.image_folder == tmp_path / "images"
-    assert config.mask_folder == tmp_path / "masks"
+    assert config.source_hdf5_path == source_path
     assert config.output_base == tmp_path / "output"
     assert config.log_folder == tmp_path / "logs"
     assert config.log_file_name == "stage4.log"
@@ -44,5 +44,19 @@ def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: 
 
 
 def test_load_optimization_sampling_config_requires_source_and_output_paths() -> None:
-    with pytest.raises(ValueError, match="OPTIMIZATION_SAMPLING_IMAGE_FOLDER"):
+    with pytest.raises(ValueError, match="OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH"):
         load_optimization_sampling_config({})
+
+
+def test_load_optimization_sampling_config_uses_hdf5_source(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
+
+    config = load_optimization_sampling_config(
+        {
+            "OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH": str(source_path),
+            "OPTIMIZATION_SAMPLING_OUTPUT_BASE": str(tmp_path / "output"),
+        }
+    )
+
+    assert config.source_hdf5_path == source_path

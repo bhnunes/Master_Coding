@@ -7,14 +7,16 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import h5py
+import numpy as np
 from tqdm import tqdm
 
 from helpers.optimization_sampling.sampling import OverlayTask
 
 
 def overlay_mask_edges(
-    image_path: Path,
-    mask_path: Path,
+    image_path: Path | str,
+    mask_path: Path | str,
     output_path: Path,
     *,
     color: tuple[int, int, int] = (0, 0, 255),
@@ -26,12 +28,12 @@ def overlay_mask_edges(
 
     active_logger = logger or logging.getLogger("optimization_sampling")
     try:
-        image: Any = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        image: Any = _read_image_source(image_path)
         if image is None:
             active_logger.error("Could not read image: %s", image_path)
             return False
 
-        mask: Any = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+        mask: Any = _read_mask_source(mask_path)
         if mask is None:
             active_logger.error("Could not read mask: %s", mask_path)
             return False
@@ -43,7 +45,7 @@ def overlay_mask_edges(
                 "Size mismatch: image=%s vs mask=%s for %s",
                 image.shape[:2],
                 mask_binary.shape[:2],
-                image_path.name,
+                Path(str(image_path)).name,
             )
             return False
 
@@ -59,7 +61,7 @@ def overlay_mask_edges(
     except cv2.error as error:
         active_logger.error(
             "Failed to process and save overlay for %s: %s",
-            image_path.name,
+            Path(str(image_path)).name,
             error,
         )
         return False
@@ -98,3 +100,32 @@ def _to_grayscale_mask(mask: Any) -> Any:
     if getattr(mask, "ndim", 0) == 3:
         return cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
     return mask
+
+
+def _parse_hdf5_ref(source: Path | str, dataset_name: str) -> tuple[Path, int] | None:
+    text = str(source)
+    marker = f"::{dataset_name}["
+    if marker not in text or not text.endswith("]"):
+        return None
+    path_text, index_text = text.split(marker, maxsplit=1)
+    return Path(path_text), int(index_text[:-1])
+
+
+def _read_image_source(image_path: Path | str) -> Any:
+    parsed = _parse_hdf5_ref(image_path, "images")
+    if parsed is None:
+        return cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    source_hdf5_path, row_index = parsed
+    with h5py.File(source_hdf5_path, "r") as handle:
+        image = np.asarray(handle["images"][row_index], dtype=np.uint8)
+    return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+
+def _read_mask_source(mask_path: Path | str) -> Any:
+    parsed = _parse_hdf5_ref(mask_path, "masks")
+    if parsed is None:
+        return cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+    source_hdf5_path, row_index = parsed
+    with h5py.File(source_hdf5_path, "r") as handle:
+        mask = np.asarray(handle["masks"][row_index], dtype=np.uint8)
+    return (mask * 255).astype(np.uint8)

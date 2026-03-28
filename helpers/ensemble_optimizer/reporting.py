@@ -116,6 +116,17 @@ def build_recipe_metadata(
         "holdout_metrics": holdout_metrics,
         "provenance": {
             "validation": validation_provenance,
+            "validation_lineage": {
+                "source_hdf5_sha256": validation_provenance.get("attrs", {}).get(
+                    "source_hdf5_sha256"
+                ),
+                "upstream_source_signature": validation_provenance.get("attrs", {}).get(
+                    "upstream_source_signature"
+                ),
+                "stage4_cleaning_manifest_sha256": validation_provenance.get("attrs", {}).get(
+                    "stage4_cleaning_manifest_sha256"
+                ),
+            },
             "split_fingerprint": split_fingerprint,
         },
     }

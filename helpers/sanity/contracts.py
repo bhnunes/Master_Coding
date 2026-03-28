@@ -7,6 +7,9 @@ import pandas as pd
 from helpers.sanity.models import CheckResult
 
 PATIENT_FILENAME_PATTERN = re.compile(r"PATIENT_(\d+)_")
+LOGICAL_HDF5_REF_PATTERN = re.compile(
+    r"^(?P<path>.+\.h5)::(?P<dataset>images|masks)\[(?P<row>\d+)\]$"
+)
 
 
 def check_filename_uniqueness(manifest_df: pd.DataFrame) -> CheckResult:
@@ -50,3 +53,48 @@ def check_filename_patient_id_consistency(manifest_df: pd.DataFrame) -> CheckRes
             ),
         )
     return CheckResult("PASS", "Filename regex and manifest patient_id values are consistent.")
+
+
+def check_source_reference_contract(manifest_df: pd.DataFrame) -> CheckResult:
+    source_columns = {"source_image_path", "source_mask_path"}
+    if not source_columns.issubset(manifest_df.columns):
+        return CheckResult(
+            "N/A",
+            "Manifest has no source provenance columns; skipping source reference checks.",
+        )
+
+    invalid: list[str] = []
+    for row in manifest_df.itertuples(index=False):
+        image_ref = str(getattr(row, "source_image_path", "") or "")
+        mask_ref = str(getattr(row, "source_mask_path", "") or "")
+        if not image_ref and not mask_ref:
+            continue
+        if not image_ref or not mask_ref:
+            invalid.append(str(getattr(row, "filename", "<missing filename>")))
+            continue
+
+        image_match = LOGICAL_HDF5_REF_PATTERN.match(image_ref)
+        mask_match = LOGICAL_HDF5_REF_PATTERN.match(mask_ref)
+        if image_match and mask_match:
+            if (
+                image_match.group("path") != mask_match.group("path")
+                or image_match.group("row") != mask_match.group("row")
+                or image_match.group("dataset") != "images"
+                or mask_match.group("dataset") != "masks"
+            ):
+                invalid.append(str(getattr(row, "filename", "<missing filename>")))
+            continue
+
+        if image_match or mask_match:
+            invalid.append(str(getattr(row, "filename", "<missing filename>")))
+
+    if invalid:
+        return CheckResult(
+            "FAIL",
+            "Invalid source provenance contract: logical HDF5 refs must be paired image/mask "
+            f"references to the same source row. Examples: {invalid[:10]}",
+        )
+    return CheckResult(
+        "PASS",
+        "Source references are valid, including logical HDF5 refs when present.",
+    )

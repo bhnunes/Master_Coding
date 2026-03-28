@@ -153,6 +153,7 @@ def build_slide_request(
     cancer_folder, not_cancer_folder, cancer_mask_folder, not_cancer_mask_folder = patch_folders
     if case.annotation_path is None:
         raise ValueError(f"Case {case.record_id} is missing an annotation path.")
+    hdf5_output_path = config.patch_base_path / "HDF5_SHARDS" / f"{Path(case.image_path).stem}.h5"
     return SlideProcessingRequest(
         image_path=image_path or case.image_path,
         annotation_path=case.annotation_path,
@@ -171,6 +172,8 @@ def build_slide_request(
         num_workers=runtime_settings.num_workers,
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
         artifacts_geojson_path=resolve_artifacts_geojson(case, config),
+        hdf5_output_path=hdf5_output_path,
+        export_png_patches=runtime_settings.export_png_patches,
     )
 
 

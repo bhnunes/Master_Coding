@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
 
 from helpers.ensemble_inference.config import EnsembleInferenceConfig
@@ -108,4 +110,90 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
     )
 
     with pytest.raises(ValueError, match="Checkpoint provenance mismatch"):
+        _execute_pipeline(config)
+
+
+def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_path = tmp_path / "model.pth"
+    checkpoint_path.write_bytes(b"model-v1")
+    recipe_path = tmp_path / "recipe.json"
+    recipe_path.write_text(
+        json.dumps(
+            {
+                "ensemble_strategy": "two_stream_spatial_gating",
+                "roi_config": {"threshold": 0.33, "scale": 4},
+                "decision_config": {"threshold": 0.57},
+                "model_registry": [
+                    {
+                        "architecture": "SWIN",
+                        "encoder": "enc-a",
+                        "checkpoint_path": str(checkpoint_path),
+                        "stream_role": "semantic",
+                        "weight": 1.0,
+                        "checkpoint_sha256": "ok-hash",
+                    }
+                ],
+                "provenance": {
+                    "validation": {
+                        "sha256": "validation-sha",
+                        "attrs": {
+                            "source_hdf5_sha256": "stage5-sha",
+                            "upstream_source_signature": "stage2-sig",
+                            "stage4_cleaning_manifest_sha256": "clean-sha",
+                        },
+                    },
+                    "validation_lineage": {
+                        "source_hdf5_sha256": "stage5-sha",
+                        "upstream_source_signature": "stage2-sig",
+                        "stage4_cleaning_manifest_sha256": "clean-sha",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    test_h5_path = tmp_path / "dataset" / "TEST.h5"
+    test_h5_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(test_h5_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"PATIENT_1.png"]))
+        handle.attrs["source_hdf5_sha256"] = "other-stage5-sha"
+        handle.attrs["upstream_source_signature"] = "stage2-sig"
+        handle.attrs["stage4_cleaning_manifest_sha256"] = "clean-sha"
+
+    config = EnsembleInferenceConfig(
+        recipe_path=recipe_path,
+        hdf5_drive_dir=tmp_path / "dataset",
+        output_dir=tmp_path / "reports",
+        local_data_dir=tmp_path / "cache",
+        stage_input_locally=False,
+        overwrite_output=True,
+        batch_size=8,
+        workers=1,
+        seed=24,
+        visualization_samples=0,
+        export_csv=False,
+        export_latex=False,
+        export_visualizations=False,
+    )
+    assert config.output_dir is not None
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.setup_test_hdf5",
+        lambda *args, **kwargs: test_h5_path,
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.hash_file_sha256",
+        lambda path: (
+            "ok-hash" if Path(path) == checkpoint_path or Path(path) == recipe_path else "h5-sha"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Dataset lineage mismatch"):
         _execute_pipeline(config)

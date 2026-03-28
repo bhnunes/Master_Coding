@@ -34,6 +34,41 @@ IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 
+def _validate_recipe_dataset_lineage(
+    recipe_payload: dict[str, Any],
+    test_h5_provenance: dict[str, Any],
+) -> None:
+    provenance = recipe_payload.get("provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("Recipe provenance mismatch: missing provenance payload.")
+    validation_lineage = provenance.get("validation_lineage")
+    if not isinstance(validation_lineage, dict):
+        raise ValueError("Recipe provenance mismatch: missing validation_lineage payload.")
+
+    observed_attrs = test_h5_provenance.get("attrs")
+    if not isinstance(observed_attrs, dict):
+        raise ValueError("Dataset lineage mismatch: test_h5_provenance is missing attrs.")
+
+    lineage_keys = (
+        "source_hdf5_sha256",
+        "upstream_source_signature",
+        "stage4_cleaning_manifest_sha256",
+    )
+    mismatches: list[str] = []
+    for key in lineage_keys:
+        expected = validation_lineage.get(key)
+        if expected is None:
+            raise ValueError(f"Recipe provenance mismatch: validation_lineage missing '{key}'.")
+        observed = observed_attrs.get(key)
+        if observed != expected:
+            mismatches.append(f"{key}: recipe={expected} test={observed}")
+    if mismatches:
+        raise ValueError(
+            "Dataset lineage mismatch between recipe validation provenance and TEST.h5: "
+            + "; ".join(mismatches)
+        )
+
+
 @dataclass(frozen=True)
 class EnsembleInferenceOutputs:
     output_dir: Path
@@ -110,6 +145,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
             )
 
     test_h5_provenance = collect_hdf5_provenance(test_h5_path)
+    _validate_recipe_dataset_lineage(recipe_payload, test_h5_provenance)
     test_loader = create_test_dataloader(
         test_h5_path,
         batch_size=config.batch_size,

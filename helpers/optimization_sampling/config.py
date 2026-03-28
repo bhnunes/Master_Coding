@@ -67,8 +67,7 @@ def _string_with_default(
 class OptimizationSamplingConfig:
     """Runtime configuration for `4_1_optimization_sampling.py`."""
 
-    image_folder: Path
-    mask_folder: Path
+    source_hdf5_path: Path
     output_base: Path
     log_folder: Path
     log_file_name: str
@@ -95,6 +94,11 @@ def load_optimization_sampling_config(
     """Load and validate Stage 4 optimization sampling configuration."""
 
     values = env if env is not None else os.environ
+    source_hdf5_path = _required_path(
+        values,
+        "OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH",
+        system_name=system_name,
+    )
     num_processes = max(
         1,
         _parse_int(
@@ -105,16 +109,7 @@ def load_optimization_sampling_config(
     )
 
     return OptimizationSamplingConfig(
-        image_folder=_required_path(
-            values,
-            "OPTIMIZATION_SAMPLING_IMAGE_FOLDER",
-            system_name=system_name,
-        ),
-        mask_folder=_required_path(
-            values,
-            "OPTIMIZATION_SAMPLING_MASK_FOLDER",
-            system_name=system_name,
-        ),
+        source_hdf5_path=source_hdf5_path,
         output_base=_required_path(
             values,
             "OPTIMIZATION_SAMPLING_OUTPUT_BASE",

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import h5py
 import pandas as pd
 
 from helpers.crossfold.provenance import (
@@ -101,6 +102,13 @@ def test_write_manifest_and_log_stats_writes_expected_artifacts(tmp_path: Path) 
         split_data=split_data,
     )
 
+    with h5py.File(tmp_path / "SOURCE_DATASET.h5", "w") as handle:
+        handle.create_dataset("images", data=[[[[0, 0, 0]]]], dtype="uint8")
+        handle.create_dataset("masks", data=[[[0]]], dtype="uint8")
+        handle.create_dataset("labels", data=[0], dtype="uint8")
+        handle.create_dataset("patient_ids", data=[1], dtype="int32")
+        handle.create_dataset("filenames", data=[b"PATIENT_1_PATCH_001.png"])
+
     write_manifest_and_log_stats(
         output_dir=tmp_path,
         run_id="run-1",
@@ -128,6 +136,13 @@ def test_run_config_json_uses_safe_json_encoding(tmp_path: Path) -> None:
         split_data=split_data,
     )
 
+    with h5py.File(tmp_path / "SOURCE_DATASET.h5", "w") as handle:
+        handle.create_dataset("images", data=[[[[0, 0, 0]]]], dtype="uint8")
+        handle.create_dataset("masks", data=[[[0]]], dtype="uint8")
+        handle.create_dataset("labels", data=[0], dtype="uint8")
+        handle.create_dataset("patient_ids", data=[1], dtype="int32")
+        handle.create_dataset("filenames", data=[b"PATIENT_1_PATCH_001.png"])
+
     write_manifest_and_log_stats(
         output_dir=tmp_path,
         run_id="run-1",
@@ -142,6 +157,45 @@ def test_run_config_json_uses_safe_json_encoding(tmp_path: Path) -> None:
 
     payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
     assert payload["extra"]["value"] == 1
+
+
+def test_write_manifest_and_log_stats_records_stage4_cleaning_lineage(tmp_path: Path) -> None:
+    split_data = _split_data()
+    manifest_df = build_hdf5_manifest_from_split_dfs(
+        output_dir=tmp_path,
+        run_id="run-1",
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
+        split_data=split_data,
+    )
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=[[[[0, 0, 0]]]], dtype="uint8")
+        handle.create_dataset("masks", data=[[[0]]], dtype="uint8")
+        handle.create_dataset("labels", data=[0], dtype="uint8")
+        handle.create_dataset("patient_ids", data=[1], dtype="int32")
+        handle.create_dataset("filenames", data=[b"PATIENT_1_PATCH_001.png"])
+        handle.attrs["stage4_cleaning_manifest_path"] = "/tmp/accepted_manifest.csv"
+        handle.attrs["stage4_cleaning_manifest_sha256"] = "abc123"
+
+    write_manifest_and_log_stats(
+        output_dir=tmp_path,
+        run_id="run-1",
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
+        source_hdf5_path=source_path,
+        split_data=split_data,
+        manifest_df=manifest_df,
+        calc_checksums=False,
+        extra={"value": 1},
+    )
+
+    payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
+    assert (
+        payload["source_hdf5_provenance"]["attrs"]["stage4_cleaning_manifest_path"]
+        == "/tmp/accepted_manifest.csv"
+    )
+    assert payload["source_hdf5_provenance"]["attrs"]["stage4_cleaning_manifest_sha256"] == "abc123"
 
 
 def test_write_manifest_and_log_stats_rejects_checksum_mode_for_hdf5_manifests(

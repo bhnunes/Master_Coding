@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import cv2
+import h5py
 import numpy as np
 import pandas as pd
 import pytest
@@ -70,3 +71,40 @@ def test_score_split_by_patient_entropy_median_returns_negative_infinity_for_emp
     patient_entropy_df = pd.DataFrame([{"patient_id": 1, "patient_entropy_median": 1.0}])
 
     assert score_split_by_patient_entropy_median(patient_entropy_df, [99]) == float("-inf")
+
+
+def test_compute_all_patch_entropies_supports_hdf5_backed_rows(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    variable = np.zeros((8, 8, 3), dtype=np.uint8)
+    variable[:, 1::2, :] = 255
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset(
+            "images",
+            data=np.stack([np.zeros((8, 8, 3), dtype=np.uint8), variable], axis=0),
+        )
+
+    dataset = pd.DataFrame(
+        [
+            {
+                "image_path": f"{source_path}::images[0]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 0,
+            },
+            {
+                "image_path": f"{source_path}::images[1]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 1,
+            },
+        ]
+    )
+
+    entropy_df = compute_all_patch_entropies(
+        dataset, num_workers=1, chunksize=1, entropy_thumbnail=8
+    )
+
+    assert entropy_df["image_path"].tolist() == [
+        f"{source_path}::images[0]",
+        f"{source_path}::images[1]",
+    ]
+    assert entropy_df["entropy"].iloc[0] == pytest.approx(0.0)
+    assert entropy_df["entropy"].iloc[1] > 0.0

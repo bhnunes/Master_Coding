@@ -56,3 +56,37 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
     assert payload["compatibility_signature"] == "compat-a"
     assert payload["provenance"]["validation"] == {"dataset_sha256": "val-sha"}
     assert payload["provenance"]["split_fingerprint"] == "split-sha"
+
+
+def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
+    payload = build_recipe_metadata(
+        selected_models=[],
+        semantic_indices=[],
+        spatial_indices=[],
+        semantic_weights=[],
+        spatial_weights=[],
+        roi_context_scale=4,
+        roi_threshold=0.33,
+        decision_threshold=0.57,
+        spill_penalty_lambda=0.1,
+        spatial_patient_policy="positive_only",
+        calibration_metrics={},
+        holdout_metrics={},
+        generated_at="2026-03-20_10_00_00",
+        compatibility_signature="compat-a",
+        validation_provenance={
+            "sha256": "val-sha",
+            "attrs": {
+                "source_hdf5_sha256": "stage5-sha",
+                "upstream_source_signature": "stage2-sig",
+                "stage4_cleaning_manifest_sha256": "clean-sha",
+            },
+        },
+        split_fingerprint="split-sha",
+    )
+
+    assert payload["provenance"]["validation_lineage"] == {
+        "source_hdf5_sha256": "stage5-sha",
+        "upstream_source_signature": "stage2-sig",
+        "stage4_cleaning_manifest_sha256": "clean-sha",
+    }

@@ -24,6 +24,56 @@ def _write_source_hdf5(path: Path, *, filename_dataset_name: str = "filenames") 
         )
 
 
+def test_write_filtered_hdf5_propagates_upstream_lineage_attrs(tmp_path: Path) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_source_hdf5(source_path)
+    with h5py.File(source_path, "a") as handle:
+        handle.attrs["source_signature"] = "stage5-signature"
+        handle.attrs["upstream_source_signature"] = "stage2-signature"
+        handle.attrs["stage4_cleaning_manifest_path"] = "/tmp/accepted_manifest.csv"
+        handle.attrs["stage4_cleaning_manifest_sha256"] = "abc123"
+        handle.attrs["stage4_cleaning_selected_rows"] = 3
+
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=output_dir,
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=None,
+        stage_input_locally=False,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+    )
+
+    result = write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+
+    with h5py.File(result, "r") as handle:
+        assert handle.attrs["source_signature"] == "stage5-signature"
+        assert handle.attrs["upstream_source_signature"] == "stage2-signature"
+        assert handle.attrs["stage4_cleaning_manifest_path"] == "/tmp/accepted_manifest.csv"
+        assert handle.attrs["stage4_cleaning_manifest_sha256"] == "abc123"
+        assert handle.attrs["stage4_cleaning_selected_rows"] == 3
+
+
 def test_write_filtered_hdf5_writes_plural_filenames_for_legacy_input(tmp_path: Path) -> None:
     source_path = tmp_path / "TRAIN.h5"
     output_dir = tmp_path / "output"

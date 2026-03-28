@@ -8,10 +8,11 @@ from helpers.graph.contamination import GraphContaminationParameters
 
 
 def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
     config = load_graph_cleaning_config(
         {
-            "GRAPH_CLEANING_SOURCE_IMAGE_DIR": str(tmp_path / "images"),
-            "GRAPH_CLEANING_SOURCE_MASK_DIR": str(tmp_path / "masks"),
+            "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(source_path),
             "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
             "GRAPH_CLEANING_LOG_FOLDER": str(tmp_path / "logs"),
             "GRAPH_CLEANING_LOG_FILE": "cleaning.log",
@@ -24,8 +25,7 @@ def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -
         }
     )
 
-    assert config.source_image_dir == tmp_path / "images"
-    assert config.source_mask_dir == tmp_path / "masks"
+    assert config.source_hdf5_path == source_path
     assert config.output_base_dir == tmp_path / "output"
     assert config.log_folder == tmp_path / "logs"
     assert config.log_file_name == "cleaning.log"
@@ -39,9 +39,23 @@ def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -
     )
 
 
-def test_load_graph_cleaning_config_requires_source_image_dir() -> None:
-    with pytest.raises(ValueError, match="GRAPH_CLEANING_SOURCE_IMAGE_DIR"):
+def test_load_graph_cleaning_config_requires_hdf5_source() -> None:
+    with pytest.raises(ValueError, match="GRAPH_CLEANING_SOURCE_HDF5_PATH"):
         load_graph_cleaning_config({})
+
+
+def test_load_graph_cleaning_config_allows_hdf5_source_without_png_dirs(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
+
+    config = load_graph_cleaning_config(
+        {
+            "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(source_path),
+            "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
+        }
+    )
+
+    assert config.source_hdf5_path == source_path
 
 
 def test_load_graph_cleaning_config_prefers_parameter_artifact(tmp_path: Path) -> None:
@@ -69,8 +83,7 @@ def test_load_graph_cleaning_config_prefers_parameter_artifact(tmp_path: Path) -
 
     config = load_graph_cleaning_config(
         {
-            "GRAPH_CLEANING_SOURCE_IMAGE_DIR": str(tmp_path / "images"),
-            "GRAPH_CLEANING_SOURCE_MASK_DIR": str(tmp_path / "masks"),
+            "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(tmp_path / "SOURCE_DATASET.h5"),
             "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
             "GRAPH_CLEANING_PARAMS_PATH": str(artifact_path),
             "GRAPH_CLEANING_TAU": "0.24",

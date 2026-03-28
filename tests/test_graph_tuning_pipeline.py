@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pytest
 
@@ -47,24 +48,43 @@ def test_collect_review_labels_rejects_empty_review_folders(tmp_path: Path) -> N
 
 
 def test_resolve_labeled_source_records_keeps_only_pairs_present_in_source(tmp_path: Path) -> None:
-    image_dir = tmp_path / "images"
-    mask_dir = tmp_path / "masks"
-    image_dir.mkdir()
-    mask_dir.mkdir()
-    (image_dir / "case_a.png").write_bytes(b"image")
-    (mask_dir / "case_a.png").write_bytes(b"mask")
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"case_a.png"]))
 
     logger = logging.getLogger("test_graph_tuning")
     records = resolve_labeled_source_records(
         labels_by_stem={"case_a": "Approved", "case_b": "Rejected"},
-        source_image_folder=image_dir,
-        source_mask_folder=mask_dir,
+        source_hdf5_path=source_path,
         logger=logger,
     )
 
     assert [(record.pair.stem, record.label, record.group_id) for record in records] == [
         ("case_a", "Approved", "case_a")
     ]
+
+
+def test_resolve_labeled_source_records_supports_hdf5_source(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"CANCER_PATIENT_7_PATCH_001.png"]))
+
+    records = resolve_labeled_source_records(
+        labels_by_stem={"CANCER_PATIENT_7_PATCH_001": "Approved"},
+        source_hdf5_path=source_path,
+        logger=logging.getLogger("test_graph_tuning"),
+    )
+
+    assert len(records) == 1
+    assert str(records[0].pair.image_path).endswith("::images[0]")
 
 
 def test_infer_group_id_from_stem_extracts_patient_from_legacy_and_new_patterns() -> None:
@@ -85,13 +105,10 @@ def test_select_best_contamination_threshold_optimizes_rejected_f1() -> None:
 def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
     tmp_path: Path,
 ) -> None:
-    image_dir = tmp_path / "images"
-    mask_dir = tmp_path / "masks"
+    source_path = tmp_path / "SOURCE_DATASET.h5"
     review_dir = tmp_path / "review"
     approved_dir = review_dir / "APPROVED"
     rejected_dir = review_dir / "REJECTED"
-    image_dir.mkdir()
-    mask_dir.mkdir()
     approved_dir.mkdir(parents=True)
     rejected_dir.mkdir(parents=True)
 
@@ -105,9 +122,14 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
         "r3_PATIENT_7",
         "r4_PATIENT_8",
     )
-    for name in source_names:
-        (image_dir / f"{name}.png").write_bytes(b"image")
-        (mask_dir / f"{name}.png").write_bytes(b"mask")
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((8, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((8, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.ones((8,), dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.arange(1, 9, dtype=np.int32))
+        handle.create_dataset(
+            "filenames", data=np.array([f"{name}.png".encode() for name in source_names])
+        )
     for name in ("a1_PATIENT_1", "a2_PATIENT_2", "a3_PATIENT_5", "a4_PATIENT_6"):
         (approved_dir / f"{name}.png").write_bytes(b"overlay")
     for name in ("r1_PATIENT_3", "r2_PATIENT_4", "r3_PATIENT_7", "r4_PATIENT_8"):
@@ -125,10 +147,11 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
     }
 
     def fake_scorer(
-        image_path: Path, mask_path: Path, params: GraphContaminationParameters
+        image_path: Path | str, mask_path: Path | str, params: GraphContaminationParameters
     ) -> float | None:
         del mask_path, params
-        return score_map[image_path.stem]
+        row_index = int(str(image_path).rsplit("[", maxsplit=1)[1][:-1])
+        return score_map[source_names[row_index]]
 
     def fake_optimizer(*, objective: object, search_space: list[object]) -> GraphTuningResult:
         del objective, search_space
@@ -143,8 +166,7 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
         )
 
     summary = run_graph_tuning_pipeline(
-        source_image_folder=image_dir,
-        source_mask_folder=mask_dir,
+        source_hdf5_path=source_path,
         review_base_dir=review_dir,
         test_set_size=0.5,
         n_splits_inner_cv=2,
@@ -165,6 +187,85 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
     assert summary.best_params.k == 386.0
     assert summary.final_tau == pytest.approx(0.21, abs=0.05)
     assert summary.best_cross_validated_f1 == 1.0
+
+
+def test_run_graph_tuning_pipeline_accepts_hdf5_source(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    review_dir = tmp_path / "review"
+    approved_dir = review_dir / "APPROVED"
+    rejected_dir = review_dir / "REJECTED"
+    approved_dir.mkdir(parents=True)
+    rejected_dir.mkdir(parents=True)
+
+    names = [
+        "a1_PATIENT_1",
+        "a2_PATIENT_2",
+        "a3_PATIENT_5",
+        "a4_PATIENT_6",
+        "r1_PATIENT_3",
+        "r2_PATIENT_4",
+        "r3_PATIENT_7",
+        "r4_PATIENT_8",
+    ]
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((8, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((8, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.ones((8,), dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.arange(1, 9, dtype=np.int32))
+        handle.create_dataset(
+            "filenames", data=np.array([f"{name}.png".encode() for name in names])
+        )
+
+    for name in names[:4]:
+        (approved_dir / f"{name}.png").write_bytes(b"overlay")
+    for name in names[4:]:
+        (rejected_dir / f"{name}.png").write_bytes(b"overlay")
+
+    score_map = {
+        name: value
+        for name, value in zip(names, [0.1, 0.2, 0.12, 0.18, 0.8, 0.9, 0.82, 0.88], strict=True)
+    }
+
+    def fake_scorer(
+        image_path: Path | str, mask_path: Path | str, params: GraphContaminationParameters
+    ) -> float | None:
+        del mask_path, params
+        ref = str(image_path)
+        row_index = int(ref.rsplit("[", maxsplit=1)[1][:-1])
+        return score_map[names[row_index]]
+
+    def fake_optimizer(*, objective: object, search_space: list[object]) -> GraphTuningResult:
+        del objective, search_space
+        return GraphTuningResult(
+            best_score=1.0,
+            best_params=GraphContaminationParameters(
+                bg_intensity_thresh=198,
+                k=386.0,
+                min_size=200,
+                erosion_px=0,
+            ),
+        )
+
+    summary = run_graph_tuning_pipeline(
+        source_hdf5_path=source_path,
+        review_base_dir=review_dir,
+        test_set_size=0.5,
+        n_splits_inner_cv=2,
+        n_bayesian_calls=10,
+        n_initial_points=4,
+        random_state=42,
+        bg_intensity_range=(100, 250),
+        k_range=(100, 500),
+        min_size_range=(10, 200),
+        erosion_range=(0, 10),
+        logger=logging.getLogger("test_graph_pipeline_hdf5"),
+        scorer=fake_scorer,
+        optimizer=fake_optimizer,
+        progress_factory=lambda iterable, **_: iterable,
+    )
+
+    assert summary.best_params.k == 386.0
+    assert summary.final_tau == pytest.approx(0.21, abs=0.05)
 
 
 def test_split_records_keeps_patient_groups_disjoint() -> None:
@@ -268,7 +369,9 @@ def _make_record(stem: str, label: str) -> LabeledSourceRecord:
     mask_path = Path(f"/tmp/{stem}.png")
 
     return LabeledSourceRecord(
-        pair=ImageMaskPair(stem=stem, image_path=image_path, mask_path=mask_path),
+        pair=ImageMaskPair(
+            stem=stem, image_path=image_path, mask_path=mask_path, output_name=f"{stem}.png"
+        ),
         label=label,
         group_id=infer_group_id_from_stem(stem),
     )

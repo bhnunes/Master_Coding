@@ -43,6 +43,107 @@ This file gives coding agents repository-specific guidance for working safely an
 
 ## Current Repository Notes
 
+### Planned: End-to-End HDF5 Migration
+
+**Strategic goal**: make the pipeline HDF5-compatible from Stage 2 through Stage 12 while preserving scientific correctness, deterministic filenames, artifact joins, patient isolation, and the human-in-the-loop review workflow.
+
+**Target storage direction**:
+- Stage 2 becomes the first HDF5-producing stage.
+- HDF5 becomes the canonical source of truth for patch data.
+- PNG remains only a derived review/export format where explicitly needed.
+- The long-term patch layout still converges to unified `IMAGES/` and `MASKS/` semantics, with labels derived from mask content rather than folder names.
+
+**Canonical HDF5 row contract**:
+- Required datasets: `images`, `masks`, `labels`, `patient_ids`, `filenames`
+- Recommended provenance fields or equivalent metadata: `slide_ids`, logical source references, extraction config fingerprint, `source_signature`
+- Required invariants:
+  - deterministic and globally unique `filename`
+  - exact image/mask row alignment
+  - labels consistent with mask content
+  - compatibility with filename-keyed artifact metadata
+
+**Label derivation rule**:
+- `mask.any() > 0` → cancer (`label = 1`)
+- `mask.all() == 0` → not_cancer (`label = 0`)
+
+**Unified folder direction for PNG-era artifacts**:
+```
+PATCHES/
+├── IMAGES/
+└── MASKS/
+```
+There is no scientific requirement to keep `CANCER/`, `NOT_CANCER/`, `CANCER_MASK/`, and `NOT_CANCER_MASK/` as separate truth sources. Folder names must not be treated as authoritative labels in the migrated design.
+
+**Frozen Stage 4.1 / Stage 4.2 contract**:
+- `4_1_optimization_sampling.py` must preserve its operator-facing workflow.
+- Stage 4.1 must continue generating PNG review artifacts for `pilot_sample/`, `master_candidate_pool/`, and their support folders such as `APPROVED/` and `REJECTED/`.
+- The Stage 4.1 change is internal only: sample records come from HDF5, then selected rows are exported to PNG overlays for review.
+- `4_2_tune_graph_method.py` must preserve its current review-folder contract and tuning workflow.
+- Stage 4.2 may resolve reviewed PNG stems back to HDF5-backed source records internally, but the manual-review UX and on-disk review structure must not change.
+
+**Stage 4.3 direction**:
+- Stage 4.3 is the first Stage 4 script whose storage behavior may materially change.
+- Preferred migration path: score cancer records directly from HDF5 and first emit accepted/rejected manifests keyed by stable identifiers.
+- Rewriting cleaned HDF5 shards may come later, after manifest-based validation is proven.
+
+**Wave-based migration plan**:
+
+1. **Wave 0 - Freeze the canonical HDF5 schema**
+   - Define the Stage 2+ source HDF5 contract before behavior changes land.
+   - Map all Stage 5-12 consumers to the canonical datasets and provenance fields.
+   - Do not let folder origin remain the authority for labels.
+
+2. **Wave 1 - Make Stage 5 accept HDF5 input**
+   - Refactor Stage 5 so it can package either legacy PNG pools or prebuilt canonical HDF5 inputs.
+   - This de-risks the migration by making downstream consumers indifferent to whether upstream data originated from PNG or HDF5.
+   - Key files: `helpers/packaging/discovery.py`, `helpers/packaging/pipeline.py`, `helpers/packaging/writer.py`, `helpers/packaging/config.py`.
+
+3. **Wave 2 - Unified `IMAGES/` / `MASKS/` cutover for PNG-era stages**
+   - Replace 4-folder label semantics with unified image/mask folders.
+   - Add mask-based cancer filtering in Stage 4.x instead of folder-based filtering.
+   - Key files: `2_database_manager.py`, `helpers/extraction/patch_engine.py`, `helpers/extraction/image_reader_service.py`, `helpers/optimization_sampling/sampling.py`, `helpers/graph/tuning_pipeline.py`, `helpers/graph/cleaning_pipeline.py`, `helpers/packaging/discovery.py`.
+
+4. **Wave 3 - Stage 2 emits canonical HDF5 side-by-side with temporary PNG outputs**
+   - Stage 2 writes canonical HDF5 shards immediately after extraction while temporarily preserving PNG review-compatible outputs.
+   - Prefer bounded HDF5 shards over one monolithic file.
+   - Preserve the existing artifact Parquet contract keyed by `filename`.
+   - Key files: `2_database_manager.py`, `helpers/extraction/patch_engine.py`, `helpers/extraction/image_reader_service.py`, `helpers/extraction/artifact_index.py`, plus extraction-domain HDF5 helpers.
+
+5. **Wave 4 - Refactor Stage 4.1 / 4.2 / 4.3 to HDF5-first internals**
+   - Stage 4.1: sample from HDF5, export selected review overlays to the exact current PNG review folders.
+   - Stage 4.2: keep the same review-folder contract, but resolve reviewed stems back to HDF5-backed records.
+   - Stage 4.3: score all cancer records from HDF5 and emit accepted/rejected manifests keyed by stable identifiers.
+   - Preserve `helpers/graph/contamination.py` as the shared scientific logic.
+
+6. **Wave 5 - Clean cutover after Stage 4 is HDF5-native**
+   - Remove PNG as a pipeline truth source beyond explicit review exports.
+   - Stage 5 becomes validation/finalization and provenance normalization, not PNG packaging.
+   - Relax downstream assumptions that literal PNG source paths must always exist, but preserve audit-grade lineage.
+
+7. **Wave 6 - Provenance hardening and stale-artifact protection**
+   - Strengthen content-based lineage and invalidation across Stage 5, Stage 6, Stage 8, Stage 11, and Stage 12.
+   - Prefer dataset signatures and row lineage over path-only provenance.
+
+**Mixed-mode compatibility guidance**:
+- Temporary mixed-mode compatibility is allowed only through Waves 1-3.
+- Recommended temporary mode:
+  - Stage 2 writes HDF5 plus PNG review-compatible outputs.
+  - Stage 5 accepts both legacy PNG pools and canonical HDF5 inputs.
+  - Stage 4.1 / 4.2 preserve their PNG review contract exactly.
+- After Wave 4 is validated, do a clean cutover. Do not keep duplicate PNG and HDF5 truth sources long-term.
+
+**Validation priorities for each wave**:
+- preserve deterministic filenames
+- preserve image/mask pairing and row alignment
+- preserve filename-keyed artifact joins
+- preserve patient-level split isolation
+- preserve Stage 4.1 / 4.2 manual review workflow exactly
+- preserve Stage 6-12 dataset contracts and provenance expectations
+
+**Important planning note**:
+- The older migration boundary of "keep PNG through Stage 4.3, then package to HDF5 in Stage 5" is no longer the preferred long-term direction.
+- The preferred direction is HDF5-first from Stage 2 onward, with PNG retained only where the review workflow explicitly requires exported image artifacts.
+
 - `1_artifact_detection.py` is now a `.env`-driven Stage 1 orchestrator. Keep orchestration there and keep runtime/domain behavior in `helpers/artifact/*.py`.
 - Stage 1 artifact detection reads WSI members directly from a zip archive, extracts one slide at a time to a temporary workspace, writes GeoJSON outputs, updates SQLite status, and cleans temporary files after each slide.
 - Stage 1 GeoJSON outputs are intended to be reused by Stage 2 through `GEOJSON_PATH` when advanced artifact filtering is enabled.
@@ -105,7 +206,7 @@ This file gives coding agents repository-specific guidance for working safely an
 - `4_3_cleaner_script.py` should be a `.env`-driven Stage 4.3 orchestrator. Keep orchestration there and keep configuration and filtering workflow in `helpers/graph/cleaning_config.py` and `helpers/graph/cleaning_pipeline.py`.
 - Stage 4.3 must reuse `helpers/graph/contamination.py` for the ROI contamination metric and load the tuned graph parameters plus `tau` through typed config so Stage 4.2 and Stage 4.3 stay scientifically aligned.
 - Stage 4.3 must preserve the current accepted/rejected move semantics: accepted files remain in place, rejected images move to `REJECTED_IMAGES`, rejected masks move to `REJECTED_MASKS`, and missing/invalid pairs are skipped with explicit logging under `/logs`.
-- The current planned migration boundary is: keep PNG-based patch handling through Stage 4.3, then convert the cleaned accepted patch pool into one single source HDF5 dataset in Stage 5, and keep Stage 6 and Stage 7 fully HDF5-native after that boundary.
+- The current preferred migration boundary is now HDF5-first from Stage 2 onward, with PNG retained only for explicit manual-review exports in Stage 4.1 and review-folder consumption in Stage 4.2 while the migration waves are in progress.
 - Stage 8 trains one model per execution, not the entire ensemble in a single run.
 - Stage 8 architecture/encoder pairs are intentionally restricted to the approved research matrix in `.env_example` and `training_model_registry.json`; do not expand support casually.
 - Stage 8 learning-rate and weight-decay defaults come from `training_model_registry.json`, optionally overridden with `TRAINING_MODEL_REGISTRY_PATH`.
@@ -156,7 +257,7 @@ This file gives coding agents repository-specific guidance for working safely an
   - Stage 4.1 optimization sampling is patient-aware rather than patch-naive.
   - Training and LR finder now default to `PAPER` execution mode instead of `FAST_DEV`.
   - Shared runtime provenance now flows through `helpers/provenance.py` into Stage 9, Stage 10 metadata, and Stage 12 run configs.
-  - The forward migration plan is now: Stage 2 may stage one external-SSD WSI at a time into local SSD temp storage for processing; Stage 4.3 remains the last PNG-based stage; Stage 5 builds one cleaned source HDF5 dataset immediately after Stage 4.3; Stage 6 and Stage 7 are intended to be HDF5-native downstream of that boundary.
+  - The forward migration plan is now: Stage 2 may stage one external-SSD WSI at a time into local SSD temp storage for processing; Stage 2 becomes the first HDF5-producing stage; Stage 4.1 and Stage 4.2 preserve their PNG review contract while moving to HDF5-backed internals; Stage 4.3 transitions to HDF5-backed scoring plus accepted/rejected manifests; Stage 5 becomes validation/finalization of cleaned HDF5 inputs; and Stage 6 and Stage 7 remain HDF5-native downstream.
   - Under the HDF5-native Stage 6 design, stain normalization remains scientifically train-fitted only: entropy-based template selection and parameter fitting must use `TRAIN` rows only, and the resulting frozen normalizer must be applied to `TRAIN`, `VALIDATION`, and `TEST`.
 - Recent cleanup follow-up completed the documentation-aligned HDF5 simplification for downstream data preparation: Stage 6 and Stage 7 no longer carry PNG-era backward-compatibility branches, split-stat recomputation is centralized in `helpers/crossfold/provenance.py`, and shared stage logger setup now lives in `helpers/logging_utils.py`.
 - Important remaining scientific risks after the remediation pass, and the best starting points for the next session, are:
@@ -203,7 +304,8 @@ This file gives coding agents repository-specific guidance for working safely an
 
 - Match existing domain terminology: `cancer`, `not_cancer`, `patient`, `split`, `manifest`, `artifact`, `annotation`.
 - Preserve output folder names exactly when they are part of the pipeline contract.
-- Do not silently rename `TRAIN`, `VALIDATION`, `TEST`, `CANCER`, `NOT_CANCER`, `CANCER_MASK`, or `NOT_CANCER_MASK`.
+- **Exception for unified IMAGES/MASKS refactor**: The new target structure uses `IMAGES/` and `MASKS/` folders. During the refactor, update all path references accordingly.
+- Do not silently rename `TRAIN`, `VALIDATION`, `TEST`, `IMAGES`, `MASKS`, or `REJECTED_*` folders without explicit user intent.
 - Reserve ALL_CAPS names for environment variables, true constants, and registry/config keys; prefer `snake_case` for regular runtime variables.
 
 ## Logging and Output

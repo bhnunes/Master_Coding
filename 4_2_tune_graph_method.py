@@ -29,8 +29,7 @@ def main() -> None:
         file_pattern="%(asctime)s - %(levelname)s - %(message)s",
     )
     summary = run_graph_tuning_pipeline(
-        source_image_folder=config.source_image_folder,
-        source_mask_folder=config.source_mask_folder,
+        source_hdf5_path=config.source_hdf5_path,
         review_base_dir=config.review_base_dir,
         test_set_size=config.test_set_size,
         n_splits_inner_cv=config.n_splits_inner_cv,

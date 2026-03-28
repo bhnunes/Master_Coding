@@ -88,6 +88,15 @@ def write_split_hdf5(
         dest_handle.attrs["source_hdf5_sha256"] = collect_hdf5_provenance(source_hdf5_path)[
             "sha256"
         ]
+        for attr_name in (
+            "upstream_source_signature",
+            "stage4_cleaning_manifest_path",
+            "stage4_cleaning_manifest_sha256",
+            "stage4_cleaning_selected_rows",
+        ):
+            attr_value = source_handle.attrs.get(attr_name)
+            if attr_value is not None:
+                dest_handle.attrs[attr_name] = attr_value
 
         first_index = int(ordered_split_df.iloc[0]["source_row_index"])
         first_image = np.asarray(source_handle["images"][first_index])

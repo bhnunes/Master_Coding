@@ -1,28 +1,24 @@
 from __future__ import annotations
 
+import csv
 import logging
-import shutil
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import cast
 
+import h5py
 import numpy as np
 
 from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
+from helpers.optimization_sampling.sampling import discover_hdf5_image_mask_pairs
 
-SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif"}
-SKIPPED_NO_MASK = "skipped_no_mask"
-SKIPPED_PROCESSING_ERROR = "skipped_processing_error"
-SKIPPED_UNEXPECTED_ERROR = "skipped_unexpected_error"
 ACCEPTED = "accepted"
 REJECTED = "rejected"
 
-Scorer = Callable[[Path, Path, GraphContaminationParameters], float | None]
+Scorer = Callable[[Path | str, Path | str, GraphContaminationParameters], float | None]
 type ProgressFactory = Callable[[Iterable[str]], Iterable[str]]
 
 
@@ -36,20 +32,35 @@ class GraphCleaningSummary:
     skipped: int
     rejected_images_dir: Path
     rejected_masks_dir: Path
+    accepted_manifest_path: Path | None = None
+    rejected_manifest_path: Path | None = None
 
 
 @dataclass(frozen=True)
-class _CleaningDirectories:
-    images: Path
-    masks: Path
-    rejected_images: Path
-    rejected_masks: Path
+class SourceCandidateRecord:
+    filename: str
+    image_path: Path | str
+    mask_path: Path | str
+    patient_id: str | None = None
+    slide_id: str | None = None
+    source_hdf5_path: str | None = None
+    source_row_index: int | None = None
+
+
+@dataclass(frozen=True)
+class CleaningDecisionRecord:
+    filename: str
+    decision: str
+    contamination_rate: float | None
+    patient_id: str | None = None
+    slide_id: str | None = None
+    source_hdf5_path: str | None = None
+    source_row_index: int | None = None
 
 
 def run_graph_cleaning_pipeline(
     *,
-    source_image_dir: Path,
-    source_mask_dir: Path,
+    source_hdf5_path: Path,
     output_base_dir: Path,
     graph_params: GraphContaminationParameters,
     tau: float,
@@ -65,61 +76,53 @@ def run_graph_cleaning_pipeline(
     logger.info("Using optimal parameters: %s | tau=%.2f", graph_params, tau)
     logger.info("Distributing work across %s CPU cores.", num_workers)
 
-    rejected_images_dir = output_base_dir / "REJECTED_IMAGES"
-    rejected_masks_dir = output_base_dir / "REJECTED_MASKS"
-    rejected_images_dir.mkdir(parents=True, exist_ok=True)
-    rejected_masks_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Rejected files will be moved to: %s", output_base_dir)
+    accepted_manifest_path = output_base_dir / "accepted_manifest.csv"
+    rejected_manifest_path = output_base_dir / "rejected_manifest.csv"
+    logger.info("Accepted/rejected manifests will be written under: %s", output_base_dir)
 
-    image_files = _list_image_files(source_image_dir, logger)
-    if not image_files:
+    candidates = _list_hdf5_candidates(source_hdf5_path, logger)
+
+    if not candidates:
         return GraphCleaningSummary(
             total_images=0,
             accepted=0,
             rejected=0,
             skipped=0,
-            rejected_images_dir=rejected_images_dir,
-            rejected_masks_dir=rejected_masks_dir,
+            rejected_images_dir=output_base_dir / "REJECTED_IMAGES",
+            rejected_masks_dir=output_base_dir / "REJECTED_MASKS",
+            accepted_manifest_path=accepted_manifest_path,
+            rejected_manifest_path=rejected_manifest_path,
         )
 
-    logger.info("Found %s images to process.", len(image_files))
-    directories = _CleaningDirectories(
-        images=source_image_dir,
-        masks=source_mask_dir,
-        rejected_images=rejected_images_dir,
-        rejected_masks=rejected_masks_dir,
-    )
-
-    results = _process_images(
-        image_files=image_files,
-        directories=directories,
+    logger.info("Found %s images to process.", len(candidates))
+    decisions = _process_hdf5_candidates(
+        candidates=candidates,
         graph_params=graph_params,
         tau=tau,
-        num_workers=num_workers,
         scorer=scorer,
         progress_factory=progress_factory,
     )
-    result_counts = Counter(results)
-    skipped_total = (
-        result_counts[SKIPPED_NO_MASK]
-        + result_counts[SKIPPED_PROCESSING_ERROR]
-        + result_counts[SKIPPED_UNEXPECTED_ERROR]
-    )
+    _write_decision_manifest(accepted_manifest_path, decisions, ACCEPTED)
+    _write_decision_manifest(rejected_manifest_path, decisions, REJECTED)
+    result_counts = Counter(record.decision for record in decisions)
+    skipped_total = 0
 
     logger.info("\n--- Filtering Complete ---")
-    logger.info("Total images analyzed: %s", len(image_files))
-    logger.info("Images Accepted (Kept in source folder): %s", result_counts[ACCEPTED])
-    logger.info("Images Rejected (Moved to output folder): %s", result_counts[REJECTED])
-    logger.info("Images Skipped (Errors or missing masks): %s", skipped_total)
+    logger.info("Total images analyzed: %s", len(candidates))
+    logger.info("Images Accepted (manifest rows): %s", result_counts[ACCEPTED])
+    logger.info("Images Rejected (manifest rows): %s", result_counts[REJECTED])
+    logger.info("Images Skipped: %s", skipped_total)
     logger.info("Total execution time: %.2f minutes.", (time.time() - started_at) / 60)
     logger.info("A detailed log has been saved to: %s", _resolve_log_destination(logger))
     return GraphCleaningSummary(
-        total_images=len(image_files),
+        total_images=len(candidates),
         accepted=result_counts[ACCEPTED],
         rejected=result_counts[REJECTED],
         skipped=skipped_total,
-        rejected_images_dir=rejected_images_dir,
-        rejected_masks_dir=rejected_masks_dir,
+        rejected_images_dir=output_base_dir / "REJECTED_IMAGES",
+        rejected_masks_dir=output_base_dir / "REJECTED_MASKS",
+        accepted_manifest_path=accepted_manifest_path,
+        rejected_manifest_path=rejected_manifest_path,
     )
 
 
@@ -132,101 +135,133 @@ def build_cleaning_message(summary: GraphCleaningSummary) -> str:
         f"Accepted: {summary.accepted}\n"
         f"Rejected: {summary.rejected}\n"
         f"Skipped: {summary.skipped}\n"
-        f"Rejected images: {summary.rejected_images_dir}\n"
-        f"Rejected masks: {summary.rejected_masks_dir}"
+        f"Accepted manifest: {summary.accepted_manifest_path}\n"
+        f"Rejected manifest: {summary.rejected_manifest_path}"
     )
 
 
-def process_image_worker(
-    image_filename: str,
-    *,
-    directories: _CleaningDirectories,
-    graph_params: GraphContaminationParameters,
-    tau: float,
-    scorer: Scorer = calculate_roi_contamination,
-) -> str:
-    """Process one image and move it when the contamination rate exceeds tau."""
-
-    logger = logging.getLogger("graph_cleaning")
-    try:
-        source_image_path = directories.images / image_filename
-        source_mask_path = directories.masks / image_filename
-        if not source_mask_path.exists():
-            logger.debug("Mask not found for image '%s'. Skipping.", image_filename)
-            return SKIPPED_NO_MASK
-
-        contamination_rate = scorer(source_image_path, source_mask_path, graph_params)
-        if contamination_rate is None or np.isnan(contamination_rate):
-            return SKIPPED_PROCESSING_ERROR
-
-        if contamination_rate > tau:
-            shutil.move(str(source_image_path), str(directories.rejected_images / image_filename))
-            shutil.move(str(source_mask_path), str(directories.rejected_masks / image_filename))
-            logger.debug(
-                "Rejected '%s' with contamination rate: %.3f", image_filename, contamination_rate
-            )
-            return REJECTED
-
-        logger.debug(
-            "Accepted '%s' with contamination rate: %.3f", image_filename, contamination_rate
-        )
-        return ACCEPTED
-    except OSError as error:
-        logger.error("An unexpected error occurred while processing %s: %s", image_filename, error)
-        return SKIPPED_UNEXPECTED_ERROR
-
-
-def _list_image_files(source_image_dir: Path, logger: logging.Logger) -> list[str]:
-    if not source_image_dir.is_dir():
-        logger.error("The source image directory '%s' does not exist.", source_image_dir)
+def _list_hdf5_candidates(
+    source_hdf5_path: Path,
+    logger: logging.Logger,
+) -> list[SourceCandidateRecord]:
+    if not source_hdf5_path.is_file():
+        logger.error("The source HDF5 dataset '%s' does not exist.", source_hdf5_path)
         return []
-    image_files = [
-        path.name
-        for path in sorted(source_image_dir.iterdir())
-        if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
-    ]
-    if not image_files:
-        logger.error("No image files found in the source directory: '%s'.", source_image_dir)
-    return image_files
+    with h5py.File(source_hdf5_path, "r") as handle:
+        filenames = handle["filenames"]
+        if len(filenames) == 0:
+            logger.error("No rows found in the source HDF5 dataset: '%s'.", source_hdf5_path)
+            return []
+    pairs = discover_hdf5_image_mask_pairs(source_hdf5_path)
+    candidates: list[SourceCandidateRecord] = []
+    with h5py.File(source_hdf5_path, "r") as handle:
+        patient_ids = handle["patient_ids"]
+        filenames = handle["filenames"]
+        slide_ids = handle.get("slide_ids")
+        for index in range(len(filenames)):
+            filename_value = filenames[index]
+            filename = (
+                filename_value.decode("utf-8")
+                if isinstance(filename_value, bytes)
+                else str(filename_value)
+            )
+            stem = Path(filename).stem
+            pair = pairs[stem]
+            slide_value = slide_ids[index] if slide_ids is not None else None
+            candidates.append(
+                SourceCandidateRecord(
+                    filename=filename,
+                    image_path=pair.image_path,
+                    mask_path=pair.mask_path,
+                    patient_id=str(int(patient_ids[index])),
+                    slide_id=(
+                        slide_value.decode("utf-8")
+                        if isinstance(slide_value, bytes)
+                        else str(slide_value)
+                    )
+                    if slide_value is not None
+                    else None,
+                    source_hdf5_path=str(source_hdf5_path),
+                    source_row_index=index,
+                )
+            )
+    return candidates
 
 
-def _process_images(
+def _process_hdf5_candidates(
     *,
-    image_files: Sequence[str],
-    directories: _CleaningDirectories,
+    candidates: Sequence[SourceCandidateRecord],
     graph_params: GraphContaminationParameters,
     tau: float,
-    num_workers: int,
     scorer: Scorer,
     progress_factory: ProgressFactory | None,
-) -> list[str]:
-    if num_workers <= 1:
-        results_iterable: Iterable[str] = (
-            process_image_worker(
-                image_filename,
-                directories=directories,
-                graph_params=graph_params,
-                tau=tau,
-                scorer=scorer,
+) -> list[CleaningDecisionRecord]:
+    iterable: Iterable[SourceCandidateRecord] = candidates
+    if progress_factory is not None:
+        iterable = cast(
+            Iterable[SourceCandidateRecord], progress_factory([c.filename for c in candidates])
+        )
+        filename_to_candidate = {candidate.filename: candidate for candidate in candidates}
+        iterable = (filename_to_candidate[filename] for filename in cast(Iterable[str], iterable))
+    decisions: list[CleaningDecisionRecord] = []
+    for candidate in iterable:
+        contamination_rate = scorer(candidate.image_path, candidate.mask_path, graph_params)
+        decision = (
+            REJECTED
+            if contamination_rate is not None
+            and not np.isnan(contamination_rate)
+            and contamination_rate > tau
+            else ACCEPTED
+        )
+        decisions.append(
+            CleaningDecisionRecord(
+                filename=candidate.filename,
+                decision=decision,
+                contamination_rate=float(contamination_rate)
+                if contamination_rate is not None and not np.isnan(contamination_rate)
+                else None,
+                patient_id=candidate.patient_id,
+                slide_id=candidate.slide_id,
+                source_hdf5_path=candidate.source_hdf5_path,
+                source_row_index=candidate.source_row_index,
             )
-            for image_filename in image_files
         )
-        return list(
-            progress_factory(results_iterable) if progress_factory is not None else results_iterable
-        )
+    return decisions
 
-    worker = partial(
-        process_image_worker,
-        directories=directories,
-        graph_params=graph_params,
-        tau=tau,
-        scorer=scorer,
-    )
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        results_iterable = executor.map(worker, image_files)
-        if progress_factory is not None:
-            return list(progress_factory(cast(Iterable[str], results_iterable)))
-        return list(results_iterable)
+
+def _write_decision_manifest(
+    output_path: Path,
+    decisions: Sequence[CleaningDecisionRecord],
+    decision_name: str,
+) -> None:
+    rows = [record for record in decisions if record.decision == decision_name]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "filename",
+                "decision",
+                "contamination_rate",
+                "patient_id",
+                "slide_id",
+                "source_hdf5_path",
+                "source_row_index",
+            ],
+        )
+        writer.writeheader()
+        for record in rows:
+            writer.writerow(
+                {
+                    "filename": record.filename,
+                    "decision": record.decision,
+                    "contamination_rate": record.contamination_rate,
+                    "patient_id": record.patient_id,
+                    "slide_id": record.slide_id,
+                    "source_hdf5_path": record.source_hdf5_path,
+                    "source_row_index": record.source_row_index,
+                }
+            )
 
 
 def _resolve_log_destination(logger: logging.Logger) -> str:

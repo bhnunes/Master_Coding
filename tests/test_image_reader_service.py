@@ -19,6 +19,8 @@ def test_run_slide_processing_returns_patch_engine_counts(
 ) -> None:
     captured: dict[str, object] = {}
     artifact_records = [{"filename": "patch.png", "cov_fold": 0.5}]
+    hdf5_calls: list[tuple[Path, list[dict[str, object]]]] = []
+    manifest_calls: list[tuple[Path, Path]] = []
 
     def fake_run_extraction(**kwargs: object) -> tuple[int, int, list[dict[str, object]]]:
         captured.update(kwargs)
@@ -26,6 +28,16 @@ def test_run_slide_processing_returns_patch_engine_counts(
 
     monkeypatch.setattr(
         "helpers.extraction.image_reader_service.patch_engine.run_extraction", fake_run_extraction
+    )
+    monkeypatch.setattr(
+        "helpers.extraction.image_reader_service.write_slide_patch_dataset_hdf5",
+        lambda output_path, records, **kwargs: (
+            hdf5_calls.append((output_path, records)) or output_path
+        ),
+    )
+    monkeypatch.setattr(
+        "helpers.extraction.image_reader_service.update_stage2_shard_manifest",
+        lambda manifest_path, shard_path: manifest_calls.append((manifest_path, shard_path)),
     )
 
     request = SlideProcessingRequest(
@@ -47,6 +59,8 @@ def test_run_slide_processing_returns_patch_engine_counts(
         use_advanced_artifact_filtering=False,
         artifacts_geojson_path=None,
         profile_output_path=tmp_path / "profile.json",
+        hdf5_output_path=tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
+        export_png_patches=False,
     )
 
     result = run_slide_processing(request)
@@ -59,3 +73,16 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert captured["patient"] == "100001"
     assert captured["window_size"] == 224
     assert captured["profile_output_path"] == str(tmp_path / "profile.json")
+    assert captured["export_png_patches"] is False
+    assert hdf5_calls == [
+        (
+            tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
+            artifact_records,
+        )
+    ]
+    assert manifest_calls == [
+        (
+            tmp_path / "PATCHES" / "HDF5_SHARDS" / "manifest.json",
+            tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
+        )
+    ]

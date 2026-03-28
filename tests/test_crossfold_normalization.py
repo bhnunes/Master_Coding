@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import h5py
 import numpy as np
 import pandas as pd
 from _pytest.monkeypatch import MonkeyPatch
@@ -150,6 +151,98 @@ def test_load_stain_normalizer_backend_uses_tiatoolbox_module(monkeypatch: Monke
     monkeypatch.setitem(sys.modules, "tiatoolbox.tools", fake_tools_module)
 
     assert normalization.load_stain_normalizer_backend() is fake_stainnorm
+
+
+def test_fit_normalizer_on_train_set_supports_hdf5_backed_template_rows(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_normalizer = _FakeNormalizer()
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset(
+            "images",
+            data=np.stack(
+                [
+                    np.zeros((2, 2, 3), dtype=np.uint8),
+                    np.full((2, 2, 3), 25, dtype=np.uint8),
+                    np.full((2, 2, 3), 50, dtype=np.uint8),
+                ],
+                axis=0,
+            ),
+        )
+
+    train_df = pd.DataFrame(
+        [
+            {
+                "patient_id": 1,
+                "image_path": f"{source_path}::images[0]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 0,
+            },
+            {
+                "patient_id": 1,
+                "image_path": f"{source_path}::images[1]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 1,
+            },
+            {
+                "patient_id": 2,
+                "image_path": f"{source_path}::images[2]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 2,
+            },
+        ]
+    )
+    entropy_df = pd.DataFrame(
+        [
+            {"image_path": f"{source_path}::images[0]", "entropy": 0.1},
+            {"image_path": f"{source_path}::images[1]", "entropy": 0.9},
+            {"image_path": f"{source_path}::images[2]", "entropy": 0.4},
+        ]
+    )
+
+    monkeypatch.setattr(
+        normalization,
+        "load_stain_normalizer_backend",
+        lambda: _FakeStainModule(fake_normalizer),
+    )
+
+    fitted_normalizer, template_paths = normalization.fit_normalizer_on_train_set(
+        train_df,
+        "MACENKO",
+        entropy_df=entropy_df,
+    )
+
+    assert fitted_normalizer is fake_normalizer
+    assert template_paths == [f"{source_path}::images[1]", f"{source_path}::images[2]"]
+    assert np.array_equal(fake_normalizer.fitted_target, np.full((2, 2, 3), 37, dtype=np.uint8))
+
+
+def test_save_normalizer_stats_exports_hdf5_template_images(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.full((1, 2, 2, 3), 80, dtype=np.uint8))
+
+    fake_module = type(
+        "FakeStainModule",
+        (),
+        {
+            "StainNormalizer": type("FakeStainNormalizer", (), {}),
+            "ReinhardNormalizer": type("FakeReinhardNormalizer", (), {}),
+        },
+    )
+
+    normalization.save_normalizer_stats(
+        normalizer=object(),
+        method_name="MACENKO",
+        output_dir=tmp_path,
+        template_paths=[f"{source_path}::images[0]"],
+        stainnorm_module=fake_module,
+    )
+
+    exported = tmp_path / "normalization_templates" / "template_000_SOURCE_DATASET_row_000000.png"
+    assert exported.is_file()
 
 
 def test_save_normalizer_stats_extracts_known_normalizer_fields(tmp_path: Path) -> None:

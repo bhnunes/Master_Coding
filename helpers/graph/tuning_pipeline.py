@@ -17,7 +17,10 @@ from skopt.space import Integer
 
 from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
 from helpers.graph.parameter_store import GraphCleaningParameterArtifact
-from helpers.optimization_sampling.sampling import ImageMaskPair, discover_image_mask_pairs
+from helpers.optimization_sampling.sampling import (
+    ImageMaskPair,
+    discover_hdf5_image_mask_pairs,
+)
 
 APPROVED_LABEL = "Approved"
 REJECTED_LABEL = "Rejected"
@@ -27,7 +30,7 @@ ZERO_DIVISION = 0.0
 
 ProgressItem = TypeVar("ProgressItem")
 ProgressFactory = Callable[[Iterable[ProgressItem]], Iterable[ProgressItem]]
-Scorer = Callable[[Path, Path, GraphContaminationParameters], float | None]
+Scorer = Callable[[Path | str, Path | str, GraphContaminationParameters], float | None]
 RecordProgressFactory = Callable[[Iterable["LabeledSourceRecord"]], Iterable["LabeledSourceRecord"]]
 
 
@@ -78,13 +81,12 @@ def collect_review_labels(review_base_dir: Path) -> dict[str, str]:
 def resolve_labeled_source_records(
     *,
     labels_by_stem: dict[str, str],
-    source_image_folder: Path,
-    source_mask_folder: Path,
+    source_hdf5_path: Path,
     logger: logging.Logger,
 ) -> list[LabeledSourceRecord]:
     """Resolve review labels to existing source image/mask pairs."""
 
-    source_pairs = discover_image_mask_pairs(source_image_folder, source_mask_folder)
+    source_pairs = discover_hdf5_image_mask_pairs(source_hdf5_path)
     records: list[LabeledSourceRecord] = []
     missing_files = False
     for stem, label in labels_by_stem.items():
@@ -174,8 +176,7 @@ def evaluate_on_test_set(
 
 def run_graph_tuning_pipeline(
     *,
-    source_image_folder: Path,
-    source_mask_folder: Path,
+    source_hdf5_path: Path,
     review_base_dir: Path,
     test_set_size: float,
     n_splits_inner_cv: int,
@@ -199,8 +200,7 @@ def run_graph_tuning_pipeline(
     logger.info("Performing pre-flight check on all source file paths...")
     records = resolve_labeled_source_records(
         labels_by_stem=labels_by_stem,
-        source_image_folder=source_image_folder,
-        source_mask_folder=source_mask_folder,
+        source_hdf5_path=source_hdf5_path,
         logger=logger,
     )
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import cv2
+import h5py
 import numpy as np
 
 
@@ -39,8 +40,8 @@ def coerce_graph_contamination_parameters(
 
 
 def calculate_roi_contamination(
-    image_path: Path,
-    mask_path: Path,
+    image_path: Path | str,
+    mask_path: Path | str,
     params: GraphContaminationParameters | dict[str, object],
     *,
     logger: logging.Logger | None = None,
@@ -49,15 +50,15 @@ def calculate_roi_contamination(
 
     active_logger = logger or logging.getLogger("graph_tuning")
     normalized_params = coerce_graph_contamination_parameters(params)
-    base_name = image_path.name
+    base_name = Path(str(image_path)).name
 
     try:
-        image: Any = cv2.imread(str(image_path))
+        image: Any = _read_image_source(image_path)
         if image is None:
             active_logger.debug("[%s] FAILED: cv2.imread returned None for image path.", base_name)
             return None
 
-        roi_mask: Any = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        roi_mask: Any = _read_mask_source(mask_path)
         if roi_mask is None:
             active_logger.debug("[%s] FAILED: cv2.imread returned None for mask path.", base_name)
             return None
@@ -118,3 +119,32 @@ def calculate_roi_contamination(
     except cv2.error as error:
         active_logger.error("[%s] CRITICAL EXCEPTION: %s", base_name, error, exc_info=True)
         return None
+
+
+def _parse_hdf5_ref(source: Path | str, dataset_name: str) -> tuple[Path, int] | None:
+    text = str(source)
+    marker = f"::{dataset_name}["
+    if marker not in text or not text.endswith("]"):
+        return None
+    path_text, index_text = text.split(marker, maxsplit=1)
+    return Path(path_text), int(index_text[:-1])
+
+
+def _read_image_source(image_path: Path | str) -> Any:
+    parsed = _parse_hdf5_ref(image_path, "images")
+    if parsed is None:
+        return cv2.imread(str(image_path))
+    source_hdf5_path, row_index = parsed
+    with h5py.File(source_hdf5_path, "r") as handle:
+        image = np.asarray(handle["images"][row_index], dtype=np.uint8)
+    return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+
+def _read_mask_source(mask_path: Path | str) -> Any:
+    parsed = _parse_hdf5_ref(mask_path, "masks")
+    if parsed is None:
+        return cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    source_hdf5_path, row_index = parsed
+    with h5py.File(source_hdf5_path, "r") as handle:
+        mask = np.asarray(handle["masks"][row_index], dtype=np.uint8)
+    return (mask * 255).astype(np.uint8)

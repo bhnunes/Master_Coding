@@ -67,8 +67,7 @@ def _string_with_default(
 class GraphTuningConfig:
     """Runtime configuration for `4_2_tune_graph_method.py`."""
 
-    source_image_folder: Path
-    source_mask_folder: Path
+    source_hdf5_path: Path
     review_base_dir: Path
     log_folder: Path
     log_file_name: str
@@ -96,17 +95,13 @@ def load_graph_tuning_config(
     """Load and validate Stage 4.2 graph tuning configuration."""
 
     values = env if env is not None else os.environ
+    source_hdf5_path = _required_path(
+        values,
+        "GRAPH_TUNING_SOURCE_HDF5_PATH",
+        system_name=system_name,
+    )
     return GraphTuningConfig(
-        source_image_folder=_required_path(
-            values,
-            "GRAPH_TUNING_SOURCE_IMAGE_FOLDER",
-            system_name=system_name,
-        ),
-        source_mask_folder=_required_path(
-            values,
-            "GRAPH_TUNING_SOURCE_MASK_FOLDER",
-            system_name=system_name,
-        ),
+        source_hdf5_path=source_hdf5_path,
         review_base_dir=_required_path(values, "GRAPH_TUNING_BASE_DIR", system_name=system_name),
         log_folder=resolve_log_folder(
             values,

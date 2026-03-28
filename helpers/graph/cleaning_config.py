@@ -69,8 +69,7 @@ def _string_with_default(
 class GraphCleaningConfig:
     """Runtime configuration for `4_3_cleaner_script.py`."""
 
-    source_image_dir: Path
-    source_mask_dir: Path
+    source_hdf5_path: Path
     output_base_dir: Path
     log_folder: Path
     log_file_name: str
@@ -92,6 +91,11 @@ def load_graph_cleaning_config(
     """Load and validate Stage 4.3 graph cleaning configuration."""
 
     values = env if env is not None else os.environ
+    source_hdf5_path = _required_path(
+        values,
+        "GRAPH_CLEANING_SOURCE_HDF5_PATH",
+        system_name=system_name,
+    )
     params_path = resolve_env_path(
         values.get("GRAPH_CLEANING_PARAMS_PATH"),
         "GRAPH_CLEANING_PARAMS_PATH",
@@ -101,16 +105,7 @@ def load_graph_cleaning_config(
         load_graph_cleaning_parameter_artifact(params_path) if params_path is not None else None
     )
     return GraphCleaningConfig(
-        source_image_dir=_required_path(
-            values,
-            "GRAPH_CLEANING_SOURCE_IMAGE_DIR",
-            system_name=system_name,
-        ),
-        source_mask_dir=_required_path(
-            values,
-            "GRAPH_CLEANING_SOURCE_MASK_DIR",
-            system_name=system_name,
-        ),
+        source_hdf5_path=source_hdf5_path,
         output_base_dir=_required_path(
             values,
             "GRAPH_CLEANING_OUTPUT_BASE_DIR",

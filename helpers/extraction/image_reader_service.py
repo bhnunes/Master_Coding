@@ -15,6 +15,8 @@ from helpers.extraction.data_handlers import (
     NDPI_NDPA_Handler,
     SVS_XML_Handler,
 )
+from helpers.extraction.hdf5_manifest import update_stage2_shard_manifest
+from helpers.extraction.hdf5_storage import write_slide_patch_dataset_hdf5
 from helpers.runtime_platform import load_openslide_module
 
 HANDLER_MAPPING: dict[tuple[str, str], type[BaseHandler]] = {
@@ -36,6 +38,7 @@ class SlideRuntimeSettings:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
+    export_png_patches: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,8 @@ class SlideProcessingRequest:
     use_advanced_artifact_filtering: bool
     artifacts_geojson_path: Path | None = None
     profile_output_path: Path | None = None
+    hdf5_output_path: Path | None = None
+    export_png_patches: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,8 @@ def load_slide_runtime_settings(
         target_level=int(values.get("TARGET_LEVEL") or 0),
         num_workers=max(1, int(values.get("NUM_WORKERS") or (os.cpu_count() or 1))),
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
+        export_png_patches=(values.get("STAGE2_EXPORT_PNG_PATCHES") or "false").lower()
+        in {"true", "1", "t"},
     )
 
 
@@ -169,8 +176,22 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             else None,
             use_artifact_filter=request.use_advanced_artifact_filtering,
             num_workers=request.num_workers,
+            export_png_patches=request.export_png_patches,
         )
         artifact_patch_records = cast(list[dict[str, Any]], artifact_patch_records)
+        if request.hdf5_output_path is not None:
+            shard_output = write_slide_patch_dataset_hdf5(
+                output_path=request.hdf5_output_path,
+                records=artifact_patch_records,
+                cancer_folder=request.cancer_folder,
+                not_cancer_folder=request.not_cancer_folder,
+                cancer_mask_folder=request.cancer_mask_folder,
+                not_cancer_mask_folder=request.not_cancer_mask_folder,
+            )
+            update_stage2_shard_manifest(
+                request.hdf5_output_path.parent / "manifest.json",
+                request.hdf5_output_path if shard_output is not None else request.hdf5_output_path,
+            )
     except Exception as error:
         logging.exception("Critical failure while processing %s", request.image_path.name)
         return SlideProcessingResult(

@@ -6,10 +6,11 @@ from helpers.graph.tuning_config import load_graph_tuning_config
 
 
 def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
     config = load_graph_tuning_config(
         {
-            "GRAPH_TUNING_SOURCE_IMAGE_FOLDER": str(tmp_path / "images"),
-            "GRAPH_TUNING_SOURCE_MASK_FOLDER": str(tmp_path / "masks"),
+            "GRAPH_TUNING_SOURCE_HDF5_PATH": str(source_path),
             "GRAPH_TUNING_BASE_DIR": str(tmp_path / "review"),
             "GRAPH_TUNING_LOG_FOLDER": str(tmp_path / "logs"),
             "GRAPH_TUNING_LOG_FILE": "graph.log",
@@ -29,8 +30,7 @@ def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> 
         }
     )
 
-    assert config.source_image_folder == tmp_path / "images"
-    assert config.source_mask_folder == tmp_path / "masks"
+    assert config.source_hdf5_path == source_path
     assert config.review_base_dir == tmp_path / "review"
     assert config.log_folder == tmp_path / "logs"
     assert config.log_file_name == "graph.log"
@@ -45,6 +45,20 @@ def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> 
     assert config.erosion_range == (1, 8)
 
 
-def test_load_graph_tuning_config_requires_source_folders() -> None:
-    with pytest.raises(ValueError, match="GRAPH_TUNING_SOURCE_IMAGE_FOLDER"):
+def test_load_graph_tuning_config_requires_hdf5_source() -> None:
+    with pytest.raises(ValueError, match="GRAPH_TUNING_SOURCE_HDF5_PATH"):
         load_graph_tuning_config({})
+
+
+def test_load_graph_tuning_config_allows_hdf5_source_without_png_dirs(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
+
+    config = load_graph_tuning_config(
+        {
+            "GRAPH_TUNING_SOURCE_HDF5_PATH": str(source_path),
+            "GRAPH_TUNING_BASE_DIR": str(tmp_path / "review"),
+        }
+    )
+
+    assert config.source_hdf5_path == source_path

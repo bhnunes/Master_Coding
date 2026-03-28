@@ -9,6 +9,7 @@ from helpers.sanity.config import SanityConfig
 from helpers.sanity.contracts import (
     check_filename_patient_id_consistency,
     check_filename_uniqueness,
+    check_source_reference_contract,
 )
 from helpers.sanity.disk_checks import (
     check_decode_and_shapes,
@@ -23,6 +24,7 @@ from helpers.sanity.manifest_checks import (
     check_split_constraints_from_run_config,
     check_split_patient_lists_against_run_config,
     check_split_stats_against_manifest,
+    check_stage4_cleaning_lineage,
 )
 from helpers.sanity.models import SPLITS, CheckResult, SanityReport, worst_status
 from helpers.sanity.provenance import load_manifest, load_run_config, load_split_stats
@@ -63,6 +65,12 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
         dataset_checks["Split Stats Parity"] = check_split_stats_against_manifest(
             manifest_df, split_stats_df
         )
+    dataset_checks["Source Reference Contract"] = check_source_reference_contract(manifest_df)
+    dataset_checks["Stage4 Cleaning Lineage"] = check_stage4_cleaning_lineage(
+        manifest_df,
+        run_config,
+        base_dir,
+    )
 
     split_checks: dict[str, dict[str, CheckResult]] = {}
     for split_name in SPLITS:

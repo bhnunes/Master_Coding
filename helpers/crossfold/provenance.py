@@ -9,7 +9,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from helpers.provenance import collect_runtime_environment, get_git_commit_hash
+from helpers.provenance import (
+    collect_hdf5_provenance,
+    collect_runtime_environment,
+    get_git_commit_hash,
+)
 
 
 class SafeJSONEncoder(json.JSONEncoder):
@@ -193,6 +197,7 @@ def write_manifest_and_log_stats(
             "validation": [int(value) for value in split_data.get("val_patients", [])],
             "test": [int(value) for value in split_data.get("test_patients", [])],
         },
+        "source_hdf5_provenance": collect_hdf5_provenance(source_hdf5_path),
         "library_versions": collect_runtime_environment(),
         "git_commit": get_git_commit_hash(),
         "extra": extra or {},
