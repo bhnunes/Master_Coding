@@ -20,11 +20,15 @@ def test_run_packaging_pipeline_accepts_canonical_hdf5_input(tmp_path: Path) -> 
         )
         handle.create_dataset(
             "source_image_paths",
-            data=np.array([b"/src/p11.png", b"/src/p22.png"]),
+            data=np.array(
+                [f"{source_path}::images[0]".encode(), f"{source_path}::images[1]".encode()]
+            ),
         )
         handle.create_dataset(
             "source_mask_paths",
-            data=np.array([b"/src/p11_mask.png", b"/src/p22_mask.png"]),
+            data=np.array(
+                [f"{source_path}::masks[0]".encode(), f"{source_path}::masks[1]".encode()]
+            ),
         )
 
     output_dir = tmp_path / "packaged"
@@ -45,10 +49,13 @@ def test_run_packaging_pipeline_accepts_canonical_hdf5_input(tmp_path: Path) -> 
             b"PATIENT_11_PATCH_001.png",
             b"PATIENT_22_PATCH_001.png",
         ]
-        assert handle["source_image_paths"][:].tolist() == [b"/src/p11.png", b"/src/p22.png"]
+        assert handle["source_image_paths"][:].tolist() == [
+            f"{source_path}::images[0]".encode(),
+            f"{source_path}::images[1]".encode(),
+        ]
         assert handle["source_mask_paths"][:].tolist() == [
-            b"/src/p11_mask.png",
-            b"/src/p22_mask.png",
+            f"{source_path}::masks[0]".encode(),
+            f"{source_path}::masks[1]".encode(),
         ]
 
 
@@ -64,8 +71,12 @@ def test_run_packaging_pipeline_merges_stage2_hdf5_shards(tmp_path: Path) -> Non
         handle.create_dataset("labels", data=np.array([0], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
-        handle.create_dataset("source_image_paths", data=np.array([b"/src/a.png"]))
-        handle.create_dataset("source_mask_paths", data=np.array([b"/src/a_mask.png"]))
+        handle.create_dataset(
+            "source_image_paths", data=np.array([f"{first_shard}::images[0]".encode()])
+        )
+        handle.create_dataset(
+            "source_mask_paths", data=np.array([f"{first_shard}::masks[0]".encode()])
+        )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a"]))
 
     with h5py.File(second_shard, "w") as handle:
@@ -74,8 +85,12 @@ def test_run_packaging_pipeline_merges_stage2_hdf5_shards(tmp_path: Path) -> Non
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([22], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_22_PATCH_001.png"]))
-        handle.create_dataset("source_image_paths", data=np.array([b"/src/b.png"]))
-        handle.create_dataset("source_mask_paths", data=np.array([b"/src/b_mask.png"]))
+        handle.create_dataset(
+            "source_image_paths", data=np.array([f"{second_shard}::images[0]".encode()])
+        )
+        handle.create_dataset(
+            "source_mask_paths", data=np.array([f"{second_shard}::masks[0]".encode()])
+        )
         handle.create_dataset("slide_ids", data=np.array([b"slide_b"]))
 
     output_dir = tmp_path / "packaged"
@@ -96,8 +111,14 @@ def test_run_packaging_pipeline_merges_stage2_hdf5_shards(tmp_path: Path) -> Non
             b"PATIENT_11_PATCH_001.png",
             b"PATIENT_22_PATCH_001.png",
         ]
-        assert handle["source_image_paths"][:].tolist() == [b"/src/a.png", b"/src/b.png"]
-        assert handle["source_mask_paths"][:].tolist() == [b"/src/a_mask.png", b"/src/b_mask.png"]
+        assert handle["source_image_paths"][:].tolist() == [
+            f"{first_shard}::images[0]".encode(),
+            f"{second_shard}::images[0]".encode(),
+        ]
+        assert handle["source_mask_paths"][:].tolist() == [
+            f"{first_shard}::masks[0]".encode(),
+            f"{second_shard}::masks[0]".encode(),
+        ]
 
 
 def test_run_packaging_pipeline_filters_source_hdf5_by_accepted_manifest(tmp_path: Path) -> None:
@@ -113,11 +134,16 @@ def test_run_packaging_pipeline_filters_source_hdf5_by_accepted_manifest(tmp_pat
             data=np.array([b"PATIENT_11_PATCH_001.png", b"PATIENT_22_PATCH_001.png"]),
         )
         handle.create_dataset(
-            "source_image_paths", data=np.array([b"/src/p11.png", b"/src/p22.png"])
+            "source_image_paths",
+            data=np.array(
+                [f"{source_path}::images[0]".encode(), f"{source_path}::images[1]".encode()]
+            ),
         )
         handle.create_dataset(
             "source_mask_paths",
-            data=np.array([b"/src/p11_mask.png", b"/src/p22_mask.png"]),
+            data=np.array(
+                [f"{source_path}::masks[0]".encode(), f"{source_path}::masks[1]".encode()]
+            ),
         )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a", b"slide_b"]))
         handle.attrs["source_signature"] = "stage2-signature"
@@ -158,11 +184,16 @@ def test_run_packaging_pipeline_auto_uses_adjacent_accepted_manifest(tmp_path: P
             data=np.array([b"PATIENT_11_PATCH_001.png", b"PATIENT_22_PATCH_001.png"]),
         )
         handle.create_dataset(
-            "source_image_paths", data=np.array([b"/src/p11.png", b"/src/p22.png"])
+            "source_image_paths",
+            data=np.array(
+                [f"{source_path}::images[0]".encode(), f"{source_path}::images[1]".encode()]
+            ),
         )
         handle.create_dataset(
             "source_mask_paths",
-            data=np.array([b"/src/p11_mask.png", b"/src/p22_mask.png"]),
+            data=np.array(
+                [f"{source_path}::masks[0]".encode(), f"{source_path}::masks[1]".encode()]
+            ),
         )
         handle.attrs["source_signature"] = "stage2-signature"
 

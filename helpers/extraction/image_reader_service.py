@@ -38,7 +38,6 @@ class SlideRuntimeSettings:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
-    export_png_patches: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,10 +46,6 @@ class SlideProcessingRequest:
 
     image_path: Path
     annotation_path: Path
-    cancer_folder: Path
-    not_cancer_folder: Path
-    cancer_mask_folder: Path
-    not_cancer_mask_folder: Path
     cancer_color: str
     not_cancer_color: str
     patient: str
@@ -64,7 +59,6 @@ class SlideProcessingRequest:
     artifacts_geojson_path: Path | None = None
     profile_output_path: Path | None = None
     hdf5_output_path: Path | None = None
-    export_png_patches: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,8 +107,6 @@ def load_slide_runtime_settings(
         target_level=int(values.get("TARGET_LEVEL") or 0),
         num_workers=max(1, int(values.get("NUM_WORKERS") or (os.cpu_count() or 1))),
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
-        export_png_patches=(values.get("STAGE2_EXPORT_PNG_PATCHES") or "false").lower()
-        in {"true", "1", "t"},
     )
 
 
@@ -161,10 +153,6 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             stride=request.stride,
             tissue_percentage_req=request.tissue_percentage,
             match_percentage_req=request.match_percentage,
-            path_cancer_folder=str(request.cancer_folder),
-            path_not_cancer_folder=str(request.not_cancer_folder),
-            path_cancer_mask_folder=str(request.cancer_mask_folder),
-            path_not_cancer_mask_folder=str(request.not_cancer_mask_folder),
             cancer_color=request.cancer_color,
             not_cancer_color=request.not_cancer_color,
             patient=request.patient,
@@ -176,17 +164,12 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             else None,
             use_artifact_filter=request.use_advanced_artifact_filtering,
             num_workers=request.num_workers,
-            export_png_patches=request.export_png_patches,
         )
         artifact_patch_records = cast(list[dict[str, Any]], artifact_patch_records)
         if request.hdf5_output_path is not None:
             shard_output = write_slide_patch_dataset_hdf5(
                 output_path=request.hdf5_output_path,
                 records=artifact_patch_records,
-                cancer_folder=request.cancer_folder,
-                not_cancer_folder=request.not_cancer_folder,
-                cancer_mask_folder=request.cancer_mask_folder,
-                not_cancer_mask_folder=request.not_cancer_mask_folder,
             )
             update_stage2_shard_manifest(
                 request.hdf5_output_path.parent / "manifest.json",

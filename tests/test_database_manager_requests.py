@@ -53,7 +53,6 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
         geojson_path=None,
         copy_wsi_to_local_cache=False,
         local_slide_cache_dir=None,
-        export_png_patches=False,
         log_folder=tmp_path / "logs",
         log_file_name="stage2.log",
     )
@@ -65,20 +64,12 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
         target_level=0,
         num_workers=2,
         use_advanced_artifact_filtering=False,
-        export_png_patches=False,
     )
 
     request = build_slide_request(
         case,
         config,
         runtime_settings,
-        (
-            tmp_path / "PATCHES" / "CANCER",
-            tmp_path / "PATCHES" / "NOT_CANCER",
-            tmp_path / "PATCHES" / "CANCER_MASK",
-            tmp_path / "PATCHES" / "NOT_CANCER_MASK",
-        ),
     )
 
     assert request.hdf5_output_path == tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide_a.h5"
-    assert request.export_png_patches is False

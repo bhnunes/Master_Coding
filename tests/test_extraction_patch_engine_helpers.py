@@ -108,89 +108,6 @@ def test_clip_geometry_to_patch_coords_handles_multipolygon_result() -> None:
     assert all(coords.shape[1] == 2 for coords in clipped)
 
 
-def test_process_window_saves_cancer_patch_and_returns_artifact_record(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    class FakeSlide:
-        level_downsamples = [1.0]
-
-        def __init__(self) -> None:
-            self.closed = False
-
-        def read_region(
-            self, _coords: tuple[int, int], _level: int, _size: tuple[int, int]
-        ) -> Image.Image:
-            return Image.new(
-                "RGB", (patch_engine.WINDOW_SIZE, patch_engine.WINDOW_SIZE), color=(1, 2, 3)
-            )
-
-        def close(self) -> None:
-            self.closed = True
-
-    slide = FakeSlide()
-    monkeypatch.setattr(
-        patch_engine,
-        "load_openslide_module",
-        lambda: type("OS", (), {"OpenSlide": lambda self, path: slide})(),
-    )
-    monkeypatch.setattr(patch_engine, "check_tissue_percentage_robust", lambda patch, req: True)
-    monkeypatch.setattr(
-        patch_engine,
-        "polygons_to_mask",
-        lambda shape, polygons, scale, coords: (
-            np.ones(shape, dtype=np.uint8) if polygons else np.zeros(shape, dtype=np.uint8)
-        ),
-    )
-    monkeypatch.setattr(
-        patch_engine,
-        "compute_artifact_coverages_for_patch",
-        lambda **kwargs: {
-            "cov_fold": 0.5,
-            "cov_penmarking": 0.0,
-            "cov_oof": 0.0,
-            "cov_darkspot_foreign": 0.0,
-            "cov_edge_airbubble": 0.0,
-        },
-    )
-
-    cancer_dir = tmp_path / "CANCER"
-    cancer_mask_dir = tmp_path / "CANCER_MASK"
-    not_cancer_dir = tmp_path / "NOT_CANCER"
-    not_cancer_mask_dir = tmp_path / "NOT_CANCER_MASK"
-    for path in [cancer_dir, cancer_mask_dir, not_cancer_dir, not_cancer_mask_dir]:
-        path.mkdir()
-
-    status, record = patch_engine.process_window(
-        (
-            str(tmp_path / "slide.svs"),
-            0,
-            patch_engine.WINDOW_SIZE,
-            0.1,
-            0.1,
-            str(cancer_dir),
-            str(not_cancer_dir),
-            str(cancer_mask_dir),
-            str(not_cancer_mask_dir),
-            "patient-1",
-            0,
-            0,
-            [[(0, 0), (10, 0), (10, 10), (0, 10)]],
-            [],
-            {"Fold": [[(0, 0), (10, 0), (10, 10), (0, 10)]]},
-            True,
-        )
-    )
-
-    assert status == "SAVED_CANCER"
-    assert record is not None
-    assert record["label"] == 1
-    assert record["patient_id"] == "patient-1"
-    assert record["cov_fold"] == 0.5
-    assert any(cancer_dir.iterdir())
-    assert any(cancer_mask_dir.iterdir())
-    assert slide.closed is True
-
-
 def test_run_extraction_returns_zero_when_handler_finds_no_annotations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -280,7 +197,7 @@ def test_process_window_with_slide_skips_tissue_and_records_profile_stats(
     assert result[2]["read_region"].calls == 1
 
 
-def test_process_window_with_slide_saves_not_cancer_patch_with_artifact_coverages(
+def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverages(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     class FakeSlide:
@@ -335,8 +252,8 @@ def test_process_window_with_slide_saves_not_cancer_patch_with_artifact_coverage
     assert result[1]["label"] == 0
     assert result[1]["slide_id"] == "slide-b"
     assert result[1]["cov_fold"] == 0.25
-    assert any((tmp_path / "NOT_CANCER").iterdir())
-    assert any((tmp_path / "NOT_CANCER_MASK").iterdir())
+    assert result[1]["_image_array"].shape == (4, 4, 3)
+    assert result[1]["_mask_array"].shape == (4, 4)
 
 
 def test_process_window_with_slide_skips_overlap_before_reading_slide(

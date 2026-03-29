@@ -19,11 +19,15 @@ def test_load_patch_dataset_reads_hdf5_source_dataset(tmp_path: Path) -> None:
         )
         handle.create_dataset(
             "source_image_paths",
-            data=np.array([b"/src/p11.png", b"/src/p22.png"]),
+            data=np.array(
+                [f"{source_path}::images[0]".encode(), f"{source_path}::images[1]".encode()]
+            ),
         )
         handle.create_dataset(
             "source_mask_paths",
-            data=np.array([b"/src/p11_mask.png", b"/src/p22_mask.png"]),
+            data=np.array(
+                [f"{source_path}::masks[0]".encode(), f"{source_path}::masks[1]".encode()]
+            ),
         )
 
     dataset = load_patch_dataset(source_path)
@@ -41,6 +45,14 @@ def test_load_patch_dataset_reads_hdf5_source_dataset(tmp_path: Path) -> None:
             "filename": "PATIENT_22_PATCH_001.png",
             "source_row_index": 1,
         },
+    ]
+    assert dataset["image_path"].tolist() == [
+        f"{source_path}::images[0]",
+        f"{source_path}::images[1]",
+    ]
+    assert dataset["mask_path"].tolist() == [
+        f"{source_path}::masks[0]",
+        f"{source_path}::masks[1]",
     ]
 
 

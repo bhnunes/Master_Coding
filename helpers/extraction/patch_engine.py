@@ -15,7 +15,6 @@ import cv2
 import numpy as np
 import shapely
 from dotenv import load_dotenv
-from PIL import Image
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import clip_by_rect
 from shapely.prepared import prep
@@ -54,32 +53,7 @@ WINDOW_PROFILE_PHASES = (
     "tissue_check",
     "cancer_mask",
     "not_cancer_mask",
-    "image_save",
-    "mask_save",
 )
-FAST_PNG_COMPRESS_LEVEL = 1
-
-
-def get_png_save_kwargs(kind: str) -> dict[str, object]:
-    del kind
-    return {
-        "format": "PNG",
-        "compress_level": FAST_PNG_COMPRESS_LEVEL,
-        "optimize": False,
-    }
-
-
-def save_patch_outputs(
-    patch_pil: Image.Image,
-    final_mask: np.ndarray,
-    image_output_path: Path,
-    mask_output_path: Path,
-) -> None:
-    patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
-    Image.fromarray((final_mask * 255).astype(np.uint8)).save(
-        str(mask_output_path),
-        **get_png_save_kwargs(kind="mask"),
-    )
 
 
 def build_patch_record(
@@ -91,8 +65,6 @@ def build_patch_record(
     artifact_coverages: dict[str, float],
     patch_np: np.ndarray,
     final_mask: np.ndarray,
-    image_output_path: Path | None,
-    mask_output_path: Path | None,
 ) -> dict[str, object]:
     record: dict[str, object] = {
         "filename": filename,
@@ -103,10 +75,6 @@ def build_patch_record(
         "_mask_array": final_mask.astype(np.uint8, copy=False),
         **artifact_coverages,
     }
-    if image_output_path is not None:
-        record["_png_image_export_path"] = str(image_output_path)
-    if mask_output_path is not None:
-        record["_png_mask_export_path"] = str(mask_output_path)
     return record
 
 
@@ -435,26 +403,16 @@ def _process_window_with_slide(slide, x, y):
 
     patch_saved = False
     label = ""
-    save_folder_img = ""
-    save_folder_mask = ""
     final_mask = np.zeros((window_size, window_size), dtype=np.uint8)
     if (cancer_overlap >= context["match_percentage_req"]) and (
         non_cancer_overlap < context["match_percentage_req"]
     ):
-        save_folder_img, save_folder_mask, label = (
-            context["path_cancer_folder"],
-            context["path_cancer_mask_folder"],
-            "CANCER",
-        )
+        label = "CANCER"
         final_mask, patch_saved = cancer_mask, True
     elif (non_cancer_overlap >= context["match_percentage_req"]) and (
         cancer_overlap < context["match_percentage_req"]
     ):
-        save_folder_img, save_folder_mask, label = (
-            context["path_not_cancer_folder"],
-            context["path_not_cancer_mask_folder"],
-            "NOT_CANCER",
-        )
+        label = "NOT_CANCER"
         final_mask, patch_saved = np.zeros((window_size, window_size), dtype=np.uint8), True
 
     if not patch_saved:
@@ -506,28 +464,6 @@ def _process_window_with_slide(slide, x, y):
         x_coord=x_int,
         y_coord=y_int,
     )
-    image_output_path = Path(save_folder_img) / file_basename
-    mask_output_path = Path(save_folder_mask) / file_basename
-    export_png_patches = context.get("export_png_patches", True)
-    exported_image_path = image_output_path if export_png_patches else None
-    exported_mask_path = mask_output_path if export_png_patches else None
-    if export_png_patches:
-        image_save_started_at = time.perf_counter()
-        patch_pil.save(str(image_output_path), **get_png_save_kwargs(kind="image"))
-        if window_phase_stats is not None:
-            record_phase(
-                window_phase_stats, "image_save", time.perf_counter() - image_save_started_at
-            )
-
-        mask_save_started_at = time.perf_counter()
-        Image.fromarray((final_mask * 255).astype(np.uint8)).save(
-            str(mask_output_path),
-            **get_png_save_kwargs(kind="mask"),
-        )
-        if window_phase_stats is not None:
-            record_phase(
-                window_phase_stats, "mask_save", time.perf_counter() - mask_save_started_at
-            )
     patch_record = build_patch_record(
         filename=file_basename,
         label=label,
@@ -536,8 +472,6 @@ def _process_window_with_slide(slide, x, y):
         artifact_coverages=artifact_coverages,
         patch_np=patch_np,
         final_mask=final_mask,
-        image_output_path=exported_image_path,
-        mask_output_path=exported_mask_path,
     )
     return (
         (f"SAVED_{label}", patch_record, window_phase_stats)
@@ -574,122 +508,6 @@ def iter_window_results(filtered_coords, num_workers, worker_state, batch_size):
             chunksize=1,
         ):
             yield from batch_results
-
-
-def process_window(args):
-    """Generic window processor. Returns a detailed traceback on failure."""
-    (
-        path_Image,
-        target_level,
-        window_size,
-        tissue_percentage_req,
-        match_percentage_req,
-        path_cancer_folder,
-        path_not_cancer_folder,
-        path_cancer_mask_folder,
-        path_not_cancer_mask_folder,
-        patient,
-        x,
-        y,
-        annotations_cancer_level0,
-        annotations_not_cancer_level0,
-        artifact_polygons_by_class_level0,
-        use_artifact_filter,
-    ) = args
-    slide = None
-    openslide_module = load_openslide_module()
-    try:
-        slide = openslide_module.OpenSlide(path_Image)
-        x_int, y_int = int(x), int(y)
-        patch_coords = (x_int, y_int)
-
-        scale_factor = slide.level_downsamples[target_level]
-        patch_polygon = Polygon(
-            [
-                (x, y),
-                (x + window_size, y),
-                (x + window_size, y + window_size),
-                (x, y + window_size),
-            ]
-        )
-        artifact_coverages = get_zero_artifact_coverages()
-        if use_artifact_filter and artifact_polygons_by_class_level0:
-            artifact_coverages = compute_artifact_coverages_for_patch(
-                artifact_polygons_by_class_level0=artifact_polygons_by_class_level0,
-                patch_polygon=patch_polygon,
-                scale_factor=scale_factor,
-                patch_area=PATCH_AREA,
-            )
-
-        patch_pil = slide.read_region(
-            patch_coords, target_level, (window_size, window_size)
-        ).convert("RGB")
-        patch_np = np.array(patch_pil)
-
-        if not check_tissue_percentage_robust(patch_np, tissue_percentage_req):
-            slide.close()
-            return "SKIPPED_TISSUE", None
-
-        cancer_mask = polygons_to_mask(
-            (window_size, window_size), annotations_cancer_level0, scale_factor, patch_coords
-        )
-        non_cancer_mask = polygons_to_mask(
-            (window_size, window_size), annotations_not_cancer_level0, scale_factor, patch_coords
-        )
-
-        cancer_overlap = np.count_nonzero(cancer_mask) / PATCH_AREA
-        non_cancer_overlap = np.count_nonzero(non_cancer_mask) / PATCH_AREA
-
-        patch_saved = False
-        label = ""
-        save_folder_img = ""
-        save_folder_mask = ""
-        final_mask = np.zeros((window_size, window_size), dtype=np.uint8)
-        if (cancer_overlap >= match_percentage_req) and (non_cancer_overlap < match_percentage_req):
-            save_folder_img, save_folder_mask, label = (
-                path_cancer_folder,
-                path_cancer_mask_folder,
-                "CANCER",
-            )
-            final_mask, patch_saved = cancer_mask, True
-        elif (non_cancer_overlap >= match_percentage_req) and (
-            cancer_overlap < match_percentage_req
-        ):
-            save_folder_img, save_folder_mask, label = (
-                path_not_cancer_folder,
-                path_not_cancer_mask_folder,
-                "NOT_CANCER",
-            )
-            final_mask, patch_saved = np.zeros((window_size, window_size), dtype=np.uint8), True
-
-        if patch_saved:
-            file_basename = build_patch_filename(
-                label=label,
-                patient_id=patient,
-                slide_id=os.path.splitext(os.path.basename(path_Image))[0],
-                x_coord=x_int,
-                y_coord=y_int,
-            )
-            patch_pil.save(os.path.join(save_folder_img, file_basename))
-            Image.fromarray((final_mask * 255).astype(np.uint8)).save(
-                os.path.join(save_folder_mask, file_basename)
-            )
-            patch_record = {
-                "filename": file_basename,
-                "label": 1 if label == "CANCER" else 0,
-                "patient_id": str(patient),
-                "slide_id": os.path.splitext(os.path.basename(path_Image))[0],
-                **artifact_coverages,
-            }
-            slide.close()
-            return f"SAVED_{label}", patch_record
-
-        slide.close()
-        return "SKIPPED_OVERLAP", None
-    except Exception:
-        if slide:
-            slide.close()
-        return "ERROR", traceback.format_exc()
 
 
 def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
@@ -886,10 +704,6 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             "window_size": kwargs["window_size"],
             "tissue_percentage_req": kwargs["tissue_percentage_req"],
             "match_percentage_req": kwargs["match_percentage_req"],
-            "path_cancer_folder": kwargs["path_cancer_folder"],
-            "path_not_cancer_folder": kwargs["path_not_cancer_folder"],
-            "path_cancer_mask_folder": kwargs["path_cancer_mask_folder"],
-            "path_not_cancer_mask_folder": kwargs["path_not_cancer_mask_folder"],
             "patient": kwargs["patient"],
             "slide_id": os.path.splitext(os.path.basename(path_Image))[0],
             "use_artifact_filter": kwargs.get("use_artifact_filter"),
@@ -897,7 +711,6 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             "cancer_polygon_index": cancer_polygon_index,
             "not_cancer_polygon_index": not_cancer_polygon_index,
             "artifact_geometry_index": artifact_geometry_index,
-            "export_png_patches": kwargs.get("export_png_patches", True),
         }
 
         logging.info(

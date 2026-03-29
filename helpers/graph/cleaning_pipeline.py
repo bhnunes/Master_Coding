@@ -30,8 +30,7 @@ class GraphCleaningSummary:
     accepted: int
     rejected: int
     skipped: int
-    rejected_images_dir: Path
-    rejected_masks_dir: Path
+    output_base_dir: Path
     accepted_manifest_path: Path | None = None
     rejected_manifest_path: Path | None = None
 
@@ -69,10 +68,10 @@ def run_graph_cleaning_pipeline(
     scorer: Scorer = calculate_roi_contamination,
     progress_factory: ProgressFactory | None = None,
 ) -> GraphCleaningSummary:
-    """Run Stage 4.3 filtering and move rejected image/mask pairs."""
+    """Run Stage 4.3 filtering and write accepted/rejected manifests."""
 
     started_at = time.time()
-    logger.info("--- Starting Production Image Filtering Process ---")
+    logger.info("--- Starting Stage 4.3 HDF5-backed filtering process ---")
     logger.info("Using optimal parameters: %s | tau=%.2f", graph_params, tau)
     logger.info("Distributing work across %s CPU cores.", num_workers)
 
@@ -88,13 +87,12 @@ def run_graph_cleaning_pipeline(
             accepted=0,
             rejected=0,
             skipped=0,
-            rejected_images_dir=output_base_dir / "REJECTED_IMAGES",
-            rejected_masks_dir=output_base_dir / "REJECTED_MASKS",
+            output_base_dir=output_base_dir,
             accepted_manifest_path=accepted_manifest_path,
             rejected_manifest_path=rejected_manifest_path,
         )
 
-    logger.info("Found %s images to process.", len(candidates))
+    logger.info("Found %s source rows to process.", len(candidates))
     decisions = _process_hdf5_candidates(
         candidates=candidates,
         graph_params=graph_params,
@@ -108,10 +106,10 @@ def run_graph_cleaning_pipeline(
     skipped_total = 0
 
     logger.info("\n--- Filtering Complete ---")
-    logger.info("Total images analyzed: %s", len(candidates))
-    logger.info("Images Accepted (manifest rows): %s", result_counts[ACCEPTED])
-    logger.info("Images Rejected (manifest rows): %s", result_counts[REJECTED])
-    logger.info("Images Skipped: %s", skipped_total)
+    logger.info("Total source rows analyzed: %s", len(candidates))
+    logger.info("Accepted rows: %s", result_counts[ACCEPTED])
+    logger.info("Rejected rows: %s", result_counts[REJECTED])
+    logger.info("Skipped rows: %s", skipped_total)
     logger.info("Total execution time: %.2f minutes.", (time.time() - started_at) / 60)
     logger.info("A detailed log has been saved to: %s", _resolve_log_destination(logger))
     return GraphCleaningSummary(
@@ -119,8 +117,7 @@ def run_graph_cleaning_pipeline(
         accepted=result_counts[ACCEPTED],
         rejected=result_counts[REJECTED],
         skipped=skipped_total,
-        rejected_images_dir=output_base_dir / "REJECTED_IMAGES",
-        rejected_masks_dir=output_base_dir / "REJECTED_MASKS",
+        output_base_dir=output_base_dir,
         accepted_manifest_path=accepted_manifest_path,
         rejected_manifest_path=rejected_manifest_path,
     )
@@ -131,7 +128,7 @@ def build_cleaning_message(summary: GraphCleaningSummary) -> str:
 
     return (
         "\n\n--- Cleaning Complete ---\n"
-        f"Total images analyzed: {summary.total_images}\n"
+        f"Total source rows analyzed: {summary.total_images}\n"
         f"Accepted: {summary.accepted}\n"
         f"Rejected: {summary.rejected}\n"
         f"Skipped: {summary.skipped}\n"

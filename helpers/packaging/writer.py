@@ -19,10 +19,12 @@ _REQUIRED_HDF5_DATASETS = (
     "labels",
     "patient_ids",
     "filenames",
-    "source_image_paths",
-    "source_mask_paths",
 )
-_OPTIONAL_HDF5_DATASETS = ("slide_ids",)
+_OPTIONAL_HDF5_DATASETS = ("slide_ids", "source_image_paths", "source_mask_paths")
+
+
+def _build_logical_hdf5_ref(source_path: Path, dataset_name: str, row_index: int) -> str:
+    return f"{source_path}::{dataset_name}[{row_index}]"
 
 
 def _signature_hexdigest(payload: dict[str, Any]) -> str:
@@ -63,6 +65,14 @@ def _validate_source_hdf5_contract(source_path: Path) -> None:
             raise ValueError(
                 f"Source HDF5 dataset '{source_path}' must store 4D images and 3D masks."
             )
+
+        for dataset_name in _OPTIONAL_HDF5_DATASETS:
+            dataset = handle.get(dataset_name)
+            if dataset is not None and len(dataset) != row_count:
+                raise ValueError(
+                    f"Source HDF5 dataset '{source_path}' has mismatched row counts for "
+                    f"'{dataset_name}'."
+                )
 
 
 def _load_stage2_shard_manifest(shard_dir: Path) -> list[dict[str, Any]] | None:
@@ -225,6 +235,8 @@ def filter_source_hdf5_by_manifest(
             "source_row_indices", shape=(len(selected_rows),), dtype="int32"
         )
         slide_ids_source = source_handle.get("slide_ids")
+        source_image_refs = source_handle.get("source_image_paths")
+        source_mask_refs = source_handle.get("source_mask_paths")
         slide_ids = (
             dest_handle.create_dataset("slide_ids", shape=(len(selected_rows),), dtype=str_dtype)
             if slide_ids_source is not None
@@ -242,8 +254,16 @@ def filter_source_hdf5_by_manifest(
             labels[output_index] = int(source_handle["labels"][source_row_index])
             patient_ids[output_index] = int(source_handle["patient_ids"][source_row_index])
             filenames[output_index] = source_handle["filenames"][source_row_index]
-            source_image_paths[output_index] = source_handle["source_image_paths"][source_row_index]
-            source_mask_paths[output_index] = source_handle["source_mask_paths"][source_row_index]
+            source_image_paths[output_index] = (
+                source_image_refs[source_row_index]
+                if source_image_refs is not None
+                else _build_logical_hdf5_ref(source_path, "images", source_row_index)
+            )
+            source_mask_paths[output_index] = (
+                source_mask_refs[source_row_index]
+                if source_mask_refs is not None
+                else _build_logical_hdf5_ref(source_path, "masks", source_row_index)
+            )
             source_row_indices[output_index] = source_row_index
             if slide_ids is not None and slide_ids_source is not None:
                 slide_ids[output_index] = slide_ids_source[source_row_index]
@@ -279,6 +299,8 @@ def merge_source_hdf5_shards(shard_dir: Path, output_path: Path, *, overwrite: b
     for shard_path in shard_paths:
         with h5py.File(shard_path, "r") as handle:
             slide_ids = handle.get("slide_ids")
+            source_image_refs = handle.get("source_image_paths")
+            source_mask_refs = handle.get("source_mask_paths")
             for index in range(len(handle["filenames"])):
                 row: dict[str, Any] = {
                     "image": np.asarray(handle["images"][index], dtype=np.uint8),
@@ -286,8 +308,16 @@ def merge_source_hdf5_shards(shard_dir: Path, output_path: Path, *, overwrite: b
                     "label": int(handle["labels"][index]),
                     "patient_id": int(handle["patient_ids"][index]),
                     "filename": handle["filenames"][index],
-                    "source_image_path": handle["source_image_paths"][index],
-                    "source_mask_path": handle["source_mask_paths"][index],
+                    "source_image_path": (
+                        source_image_refs[index]
+                        if source_image_refs is not None
+                        else _build_logical_hdf5_ref(shard_path, "images", index)
+                    ),
+                    "source_mask_path": (
+                        source_mask_refs[index]
+                        if source_mask_refs is not None
+                        else _build_logical_hdf5_ref(shard_path, "masks", index)
+                    ),
                 }
                 if slide_ids is not None:
                     row["slide_id"] = slide_ids[index]

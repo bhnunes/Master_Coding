@@ -10,12 +10,12 @@ import pytest
 
 from helpers.optimization_sampling.pipeline import run_optimization_sampling
 from helpers.optimization_sampling.sampling import (
+    ImageMaskPair,
     OverlayTask,
     build_group_representatives,
     build_overlay_tasks,
     calculate_cochran_sample_size,
     discover_hdf5_image_mask_pairs,
-    discover_image_mask_pairs,
     infer_sampling_group_id,
     select_sample_stems,
 )
@@ -23,23 +23,6 @@ from helpers.optimization_sampling.sampling import (
 
 def test_calculate_cochran_sample_size_preserves_existing_defaults() -> None:
     assert calculate_cochran_sample_size() == 385
-
-
-def test_discover_image_mask_pairs_returns_only_matching_stems(tmp_path: Path) -> None:
-    image_dir = tmp_path / "images"
-    mask_dir = tmp_path / "masks"
-    image_dir.mkdir()
-    mask_dir.mkdir()
-    (image_dir / "case_a.png").write_bytes(b"image")
-    (image_dir / "case_b.png").write_bytes(b"image")
-    (mask_dir / "case_a.png").write_bytes(b"mask")
-    (mask_dir / "case_c.png").write_bytes(b"mask")
-
-    pairs = discover_image_mask_pairs(image_dir, mask_dir)
-
-    assert list(pairs) == ["case_a"]
-    assert pairs["case_a"].image_path == image_dir / "case_a.png"
-    assert pairs["case_a"].mask_path == mask_dir / "case_a.png"
 
 
 def test_select_sample_stems_returns_non_overlapping_groups() -> None:
@@ -118,15 +101,15 @@ def test_select_sample_stems_rejects_small_population() -> None:
 
 
 def test_build_overlay_tasks_preserves_output_folder_contract(tmp_path: Path) -> None:
-    image_dir = tmp_path / "images"
-    mask_dir = tmp_path / "masks"
-    image_dir.mkdir()
-    mask_dir.mkdir()
-    for index in range(4):
-        filename = f"case_{index}.png"
-        (image_dir / filename).write_bytes(b"image")
-        (mask_dir / filename).write_bytes(b"mask")
-    pairs = discover_image_mask_pairs(image_dir, mask_dir)
+    pairs = {
+        f"case_{index}": ImageMaskPair(
+            stem=f"case_{index}",
+            image_path=f"SOURCE_DATASET.h5::images[{index}]",
+            mask_path=f"SOURCE_DATASET.h5::masks[{index}]",
+            output_name=f"case_{index}.png",
+        )
+        for index in range(4)
+    }
 
     tasks = build_overlay_tasks(
         pairs=pairs,

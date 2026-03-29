@@ -29,11 +29,17 @@ def test_run_slide_processing_returns_patch_engine_counts(
     monkeypatch.setattr(
         "helpers.extraction.image_reader_service.patch_engine.run_extraction", fake_run_extraction
     )
+
+    def fake_write_slide_patch_dataset_hdf5(
+        output_path: Path, records: list[dict[str, object]], **kwargs: object
+    ) -> Path:
+        del kwargs
+        hdf5_calls.append((output_path, records))
+        return output_path
+
     monkeypatch.setattr(
         "helpers.extraction.image_reader_service.write_slide_patch_dataset_hdf5",
-        lambda output_path, records, **kwargs: (
-            hdf5_calls.append((output_path, records)) or output_path
-        ),
+        fake_write_slide_patch_dataset_hdf5,
     )
     monkeypatch.setattr(
         "helpers.extraction.image_reader_service.update_stage2_shard_manifest",
@@ -43,10 +49,6 @@ def test_run_slide_processing_returns_patch_engine_counts(
     request = SlideProcessingRequest(
         image_path=tmp_path / "slide.svs",
         annotation_path=tmp_path / "slide.xml",
-        cancer_folder=tmp_path / "cancer",
-        not_cancer_folder=tmp_path / "not_cancer",
-        cancer_mask_folder=tmp_path / "cancer_mask",
-        not_cancer_mask_folder=tmp_path / "not_cancer_mask",
         cancer_color="65280",
         not_cancer_color="255",
         patient="100001",
@@ -60,7 +62,6 @@ def test_run_slide_processing_returns_patch_engine_counts(
         artifacts_geojson_path=None,
         profile_output_path=tmp_path / "profile.json",
         hdf5_output_path=tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
-        export_png_patches=False,
     )
 
     result = run_slide_processing(request)
@@ -73,7 +74,6 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert captured["patient"] == "100001"
     assert captured["window_size"] == 224
     assert captured["profile_output_path"] == str(tmp_path / "profile.json")
-    assert captured["export_png_patches"] is False
     assert hdf5_calls == [
         (
             tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",

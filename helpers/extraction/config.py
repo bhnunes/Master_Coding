@@ -57,7 +57,6 @@ class DatabaseManagerConfig:
     geojson_path: Path | None
     copy_wsi_to_local_cache: bool
     local_slide_cache_dir: Path | None
-    export_png_patches: bool
     log_folder: Path
     log_file_name: str
 
@@ -150,7 +149,6 @@ def load_database_manager_config(
         activate_sanity_check_geojson=activate_sanity_check_geojson,
         copy_wsi_to_local_cache=copy_wsi_to_local_cache,
         local_slide_cache_dir=local_slide_cache_dir,
-        export_png_patches=_parse_bool(values.get("STAGE2_EXPORT_PNG_PATCHES"), default=False),
         log_folder=log_folder,
         log_file_name=(values.get("EXTRACTION_LOG_FILE") or "database_manager.log").strip(),
         geojson_path=(

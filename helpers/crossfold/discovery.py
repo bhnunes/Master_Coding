@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def load_patch_dataset(source_path: Path) -> pd.DataFrame:
-    """Load the Stage 7 source HDF5 dataset into a Stage 5 row index table."""
+    """Load the Stage 5 source HDF5 dataset into a row-indexed dataframe."""
 
     if source_path.suffix.lower() != ".h5":
         raise ValueError(f"Stage 5 requires a source .h5 dataset, got: {source_path}")
@@ -26,7 +26,7 @@ def _build_logical_hdf5_ref(source_path: Path, dataset_name: str, row_index: int
 
 
 def _load_hdf5_patch_dataset(source_path: Path) -> pd.DataFrame:
-    logging.info("Loading Stage 5 data from source HDF5 %s", source_path)
+    logging.info("Loading Stage 5 source rows from HDF5 %s", source_path)
     rows: list[dict[str, object]] = []
     with h5py.File(source_path, "r") as handle:
         filenames = handle["filenames"]
@@ -35,12 +35,12 @@ def _load_hdf5_patch_dataset(source_path: Path) -> pd.DataFrame:
         source_image_paths = handle.get("source_image_paths")
         source_mask_paths = handle.get("source_mask_paths")
         for index in range(len(filenames)):
-            image_path = (
+            image_ref = (
                 _decode_string(source_image_paths[index])
                 if source_image_paths is not None
                 else _build_logical_hdf5_ref(source_path, "images", index)
             )
-            mask_path = (
+            mask_ref = (
                 _decode_string(source_mask_paths[index])
                 if source_mask_paths is not None
                 else _build_logical_hdf5_ref(source_path, "masks", index)
@@ -48,8 +48,8 @@ def _load_hdf5_patch_dataset(source_path: Path) -> pd.DataFrame:
             rows.append(
                 {
                     "patient_id": int(patient_ids[index]),
-                    "image_path": image_path,
-                    "mask_path": mask_path,
+                    "image_path": image_ref,
+                    "mask_path": mask_ref,
                     "label": int(labels[index]),
                     "filename": _decode_string(filenames[index]),
                     "source_row_index": index,

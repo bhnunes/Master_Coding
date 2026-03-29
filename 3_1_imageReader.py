@@ -31,10 +31,6 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Full path to the annotation file.",
     )
-    parser.add_argument("--path_cancer_folder", type=str, required=True)
-    parser.add_argument("--path_not_cancer_folder", type=str, required=True)
-    parser.add_argument("--path_cancer_mask_folder", type=str, required=True)
-    parser.add_argument("--path_not_cancer_mask_folder", type=str, required=True)
     parser.add_argument("--cancer_color", type=str, required=True)
     parser.add_argument("--not_cancer_color", type=str, required=True)
     parser.add_argument("--patient", type=str, required=True)
@@ -43,7 +39,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Run one slide extraction job and emit the legacy JSON contract."""
+    """Run one slide extraction job and emit the CLI JSON result contract."""
 
     load_dotenv(override=True)
     log_folder = resolve_log_folder(os.environ, fallback_names=("EXTRACTION_LOG_FOLDER",))
@@ -66,10 +62,6 @@ def main() -> None:
         SlideProcessingRequest(
             image_path=Path(args.path_Image),
             annotation_path=Path(args.annotation_path),
-            cancer_folder=Path(args.path_cancer_folder),
-            not_cancer_folder=Path(args.path_not_cancer_folder),
-            cancer_mask_folder=Path(args.path_cancer_mask_folder),
-            not_cancer_mask_folder=Path(args.path_not_cancer_mask_folder),
             cancer_color=args.cancer_color,
             not_cancer_color=args.not_cancer_color,
             patient=args.patient,

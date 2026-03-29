@@ -35,7 +35,9 @@ def test_copy_source_hdf5_dataset_preserves_contract_and_records_upstream_signat
         assert handle.attrs["upstream_source_signature"] == "stage2-signature"
 
 
-def test_copy_source_hdf5_dataset_rejects_missing_required_datasets(tmp_path: Path) -> None:
+def test_copy_source_hdf5_dataset_allows_missing_optional_source_ref_datasets(
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path / "stage2_source.h5"
     output_path = tmp_path / "packaged" / "SOURCE_DATASET.h5"
     with h5py.File(source_path, "w") as handle:
@@ -44,6 +46,22 @@ def test_copy_source_hdf5_dataset_rejects_missing_required_datasets(tmp_path: Pa
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_7_PATCH_001.png"]))
+
+    copy_source_hdf5_dataset(source_path, output_path, overwrite=True)
+
+    with h5py.File(output_path, "r") as handle:
+        assert "source_image_paths" not in handle
+        assert "source_mask_paths" not in handle
+
+
+def test_copy_source_hdf5_dataset_rejects_missing_core_datasets(tmp_path: Path) -> None:
+    source_path = tmp_path / "stage2_source.h5"
+    output_path = tmp_path / "packaged" / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
 
     with pytest.raises(ValueError, match="missing required datasets"):
         copy_source_hdf5_dataset(source_path, output_path, overwrite=True)
@@ -64,11 +82,11 @@ def test_merge_source_hdf5_shards_writes_one_canonical_dataset(tmp_path: Path) -
             )
             handle.create_dataset(
                 "source_image_paths",
-                data=np.array([f"/src/{patient_id}.png".encode()]),
+                data=np.array([f"{shard_dir / f'slide_{index}.h5'}::images[0]".encode()]),
             )
             handle.create_dataset(
                 "source_mask_paths",
-                data=np.array([f"/src/{patient_id}_mask.png".encode()]),
+                data=np.array([f"{shard_dir / f'slide_{index}.h5'}::masks[0]".encode()]),
             )
             handle.create_dataset(
                 "slide_ids",
@@ -104,8 +122,6 @@ def test_merge_source_hdf5_shards_rejects_manifest_signature_mismatch(tmp_path: 
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_7_PATCH_001.png"]))
-        handle.create_dataset("source_image_paths", data=np.array([b"/src/7.png"]))
-        handle.create_dataset("source_mask_paths", data=np.array([b"/src/7_mask.png"]))
         handle.attrs["source_signature"] = "actual-sig"
 
     (shard_dir / "manifest.json").write_text(
@@ -132,11 +148,16 @@ def test_filter_source_hdf5_by_manifest_writes_only_accepted_rows(tmp_path: Path
             data=np.array([b"PATIENT_11_PATCH_001.png", b"PATIENT_22_PATCH_001.png"]),
         )
         handle.create_dataset(
-            "source_image_paths", data=np.array([b"/src/p11.png", b"/src/p22.png"])
+            "source_image_paths",
+            data=np.array(
+                [f"{source_path}::images[0]".encode(), f"{source_path}::images[1]".encode()]
+            ),
         )
         handle.create_dataset(
             "source_mask_paths",
-            data=np.array([b"/src/p11_mask.png", b"/src/p22_mask.png"]),
+            data=np.array(
+                [f"{source_path}::masks[0]".encode(), f"{source_path}::masks[1]".encode()]
+            ),
         )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a", b"slide_b"]))
         handle.attrs["source_signature"] = "stage2-signature"
@@ -166,8 +187,6 @@ def test_filter_source_hdf5_by_manifest_rejects_row_from_other_source(tmp_path: 
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
-        handle.create_dataset("source_image_paths", data=np.array([b"/src/p11.png"]))
-        handle.create_dataset("source_mask_paths", data=np.array([b"/src/p11_mask.png"]))
 
     manifest_path.write_text(
         "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_row_index\n"

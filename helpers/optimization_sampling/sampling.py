@@ -100,34 +100,6 @@ def calculate_cochran_sample_size(
     return math.ceil((z_score**2 * proportion * (1 - proportion)) / (margin_of_error**2))
 
 
-def discover_image_mask_pairs(image_folder: Path, mask_folder: Path) -> dict[str, ImageMaskPair]:
-    """Discover image/mask pairs that share the same file stem."""
-
-    if not image_folder.is_dir():
-        raise FileNotFoundError(f"Image folder does not exist: {image_folder}")
-    if not mask_folder.is_dir():
-        raise FileNotFoundError(f"Mask folder does not exist: {mask_folder}")
-
-    image_files = {path.stem: path for path in sorted(image_folder.iterdir()) if path.is_file()}
-    mask_files = {path.stem: path for path in sorted(mask_folder.iterdir()) if path.is_file()}
-    common_stems = sorted(set(image_files) & set(mask_files))
-
-    if not common_stems:
-        raise ValueError(
-            "No matching image and mask files found. Please ensure filenames are identical."
-        )
-
-    return {
-        stem: ImageMaskPair(
-            stem=stem,
-            image_path=image_files[stem],
-            mask_path=mask_files[stem],
-            output_name=image_files[stem].name,
-        )
-        for stem in common_stems
-    }
-
-
 def discover_hdf5_image_mask_pairs(source_hdf5_path: Path) -> dict[str, ImageMaskPair]:
     """Discover image/mask pairs from a canonical HDF5 dataset."""
 

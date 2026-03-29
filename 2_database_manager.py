@@ -112,24 +112,6 @@ def collect_problematic_svs_files(cases: list[ExtractionCaseRecord]) -> list[str
     return problematic_files
 
 
-def ensure_patch_output_folders(base_path: Path) -> tuple[Path, Path, Path, Path]:
-    """Create patch output folders and return them."""
-
-    patch_base_path = base_path / "PATCHES"
-    cancer_folder = patch_base_path / "CANCER"
-    not_cancer_folder = patch_base_path / "NOT_CANCER"
-    cancer_mask_folder = patch_base_path / "CANCER_MASK"
-    not_cancer_mask_folder = patch_base_path / "NOT_CANCER_MASK"
-    for folder in (
-        cancer_folder,
-        not_cancer_folder,
-        cancer_mask_folder,
-        not_cancer_mask_folder,
-    ):
-        folder.mkdir(parents=True, exist_ok=True)
-    return cancer_folder, not_cancer_folder, cancer_mask_folder, not_cancer_mask_folder
-
-
 def resolve_artifacts_geojson(
     case: ExtractionCaseRecord, config: DatabaseManagerConfig
 ) -> Path | None:
@@ -144,23 +126,17 @@ def build_slide_request(
     case: ExtractionCaseRecord,
     config: DatabaseManagerConfig,
     runtime_settings: SlideRuntimeSettings,
-    patch_folders: tuple[Path, Path, Path, Path],
     *,
     image_path: Path | None = None,
 ) -> SlideProcessingRequest:
     """Build the shared slide-processing request for one case."""
 
-    cancer_folder, not_cancer_folder, cancer_mask_folder, not_cancer_mask_folder = patch_folders
     if case.annotation_path is None:
         raise ValueError(f"Case {case.record_id} is missing an annotation path.")
     hdf5_output_path = config.patch_base_path / "HDF5_SHARDS" / f"{Path(case.image_path).stem}.h5"
     return SlideProcessingRequest(
         image_path=image_path or case.image_path,
         annotation_path=case.annotation_path,
-        cancer_folder=cancer_folder,
-        not_cancer_folder=not_cancer_folder,
-        cancer_mask_folder=cancer_mask_folder,
-        not_cancer_mask_folder=not_cancer_mask_folder,
         cancer_color=case.cancer_color or "NA",
         not_cancer_color=case.not_cancer_color or "NA",
         patient=case.patient,
@@ -173,7 +149,6 @@ def build_slide_request(
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
         artifacts_geojson_path=resolve_artifacts_geojson(case, config),
         hdf5_output_path=hdf5_output_path,
-        export_png_patches=runtime_settings.export_png_patches,
     )
 
 
@@ -217,7 +192,7 @@ def main_process() -> None:
         stale_names = ", ".join(case.image_path.name for case in stale_cases[:5])
         raise ValueError(
             "Stage 2 detected stale extraction inputs for existing cases. "
-            "Clear stale patch outputs and reprocess before continuing. "
+            "Clear stale extraction outputs and reprocess before continuing. "
             f"Examples: {stale_names}"
         )
     stale_processed_cases = []
@@ -241,7 +216,7 @@ def main_process() -> None:
         examples = ", ".join(stale_processed_cases[:5])
         raise ValueError(
             "Stage 2 detected completed slides whose processing inputs or settings changed. "
-            "Clear stale patch outputs and reprocess before continuing. "
+            "Clear stale extraction outputs and reprocess before continuing. "
             f"Examples: {examples}"
         )
     cases_to_process = repository.list_pending_cases()
@@ -264,7 +239,6 @@ def main_process() -> None:
         raise ValueError(error_message)
 
     print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.ROCKET} STARTING PROCESSING ---{Style.RESET}")
-    patch_folders = ensure_patch_output_folders(config.base_path)
     artifact_index_writer = ArtifactIndexWriter(
         config.patch_base_path / "artifact_patch_index.parquet"
     )
@@ -295,7 +269,6 @@ def main_process() -> None:
                             case,
                             config,
                             runtime_settings,
-                            patch_folders,
                             image_path=staged_image_path,
                         )
                     )
