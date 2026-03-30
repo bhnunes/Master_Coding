@@ -95,6 +95,12 @@ def print_ingestion_summary(table_name: str, svs_files_added: bool) -> None:
     )
 
 
+def is_hiseg_tag(tag: str) -> bool:
+    """Return whether the current Stage 2 tag targets HISEG."""
+
+    return tag.strip().upper() == "HISEG"
+
+
 def collect_problematic_svs_files(cases: list[ExtractionCaseRecord]) -> list[str]:
     """Return SVS/XML cases that are missing color assignments."""
 
@@ -110,6 +116,18 @@ def collect_problematic_svs_files(cases: list[ExtractionCaseRecord]) -> list[str
         if is_svs_xml and colors_missing:
             problematic_files.append(case.image_path.name)
     return problematic_files
+
+
+def collect_problematic_svs_files_for_tag(
+    cases: list[ExtractionCaseRecord],
+    *,
+    tag: str,
+) -> list[str]:
+    """Return SVS/XML cases requiring DB-configured colors for the active dataset."""
+
+    if is_hiseg_tag(tag):
+        return []
+    return collect_problematic_svs_files(cases)
 
 
 def resolve_artifacts_geojson(
@@ -139,6 +157,7 @@ def build_slide_request(
         annotation_path=case.annotation_path,
         cancer_color=case.cancer_color or "NA",
         not_cancer_color=case.not_cancer_color or "NA",
+        dataset_tag=config.tag,
         patient=case.patient,
         window_size=config.window_size,
         stride=config.stride,
@@ -182,6 +201,8 @@ def main_process() -> None:
             use_advanced_filtering=config.use_advanced_artifact_filtering,
             geojson_path=config.geojson_path,
         )
+        if is_hiseg_tag(config.tag):
+            svs_added = False
         print_ingestion_summary(config.table_name, svs_added)
         return
 
@@ -224,7 +245,7 @@ def main_process() -> None:
         print(f"\n{Style.INFO} No cases to process with status 'TO BE PROCESSED'.")
         return
 
-    problematic_svs_files = collect_problematic_svs_files(cases_to_process)
+    problematic_svs_files = collect_problematic_svs_files_for_tag(cases_to_process, tag=config.tag)
     if problematic_svs_files:
         error_message = (
             f"\n{Style.RED}{Style.ERROR}{Style.BOLD} PROCESSING HALTED: Missing SVS annotation "

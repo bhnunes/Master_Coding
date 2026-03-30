@@ -1,157 +1,183 @@
 # AGENTS.md
-Agent guide for this repository. Keep changes small, scientific, and test-backed.
+Agent guide for coding agents working in this repository.
 
-## Scope
+## Purpose
 - Repository type: Python research pipeline for pathology whole-slide-image processing.
-- Architecture: script-first root entrypoints with domain helpers under `helpers/<domain>/`.
-- Main stages: artifact detection, extraction, cleaning, HDF5 packaging, crossfolding, sanity checks, sampling, training, ensemble optimization, inference.
+- Architecture: root stage scripts orchestrate work; domain logic lives under `helpers/<domain>/`.
+- Primary goal: preserve scientific correctness and reproducibility while making minimal, well-tested changes.
 - Priority order: correctness > reproducibility > maintainability > performance.
 
-## Rules Sources
-- Existing `/workspace/AGENTS.md` was replaced with this shorter agent-focused guide.
+## Rule Sources
+- This repository contains `/workspace/AGENTS.md`.
 - No `.cursorrules` file was found.
 - No `.cursor/rules/` directory was found.
 - No `.github/copilot-instructions.md` file was found.
 
 ## Environment
-- Python version: `3.12`.
-- Dependency manager: `uv`.
-- Linter/formatter: `ruff`.
-- Type checker: `mypy` with `strict = true` and `ignore_missing_imports = true`.
-- Test runner: `pytest` with tests in `tests/`.
-- Ruff line length: `100`.
+- Python: `3.12`
+- Dependency manager: `uv`
+- Test runner: `pytest`
+- Linter and formatter: `ruff`
+- Type checker: `mypy`
+- Mypy mode: `strict = true`, `ignore_missing_imports = true`
+- Ruff line length: `100`
+- Tests live under `tests/`
 
-## High-Value Commands
+## Setup Commands
+- Install runtime dependencies: `uv sync --python 3.12`
+- Install runtime and dev dependencies: `uv sync --python 3.12 --group dev`
 
-### Setup
-- Sync runtime deps: `uv sync --python 3.12`
-- Sync with dev deps: `uv sync --python 3.12 --group dev`
-
-### Tests
-- Run full suite: `uv run pytest`
-- Run coverage for helpers: `uv run pytest --cov=helpers --cov-report=term-missing`
-- Run one test file: `uv run pytest tests/test_some_module.py`
-- Run one test by node id: `uv run pytest tests/test_some_module.py::test_specific_case`
-- Run one test class: `uv run pytest tests/test_some_module.py::TestSomething`
-- Filter tests by name: `uv run pytest -k "artifact and not slow"`
+## Test Commands
+- Run full test suite: `uv run pytest`
+- Run coverage for helper modules: `uv run pytest --cov=helpers --cov-report=term-missing`
+- Run one test file: `uv run pytest tests/test_artifact_pipeline.py`
+- Run one test by node id: `uv run pytest tests/test_artifact_pipeline.py::test_pipeline_processes_all_pending_records_and_continues_after_failure`
+- Run one test class: `uv run pytest tests/test_training_config.py::TestTrainingConfig`
+- Run tests matching an expression: `uv run pytest -k "artifact and not slow"`
 - Stop on first failure: `uv run pytest -x`
-- Show locals on failure: `uv run pytest -x -vv --showlocals`
+- Show verbose failures with locals: `uv run pytest -x -vv --showlocals`
 
-### Lint / Format / Types
-- Lint full repo: `uv run ruff check .`
-- Lint touched files: `uv run ruff check path/to/file.py tests/test_file.py`
-- Format full repo: `uv run ruff format .`
-- Format touched files: `uv run ruff format path/to/file.py tests/test_file.py`
-- Type-check full repo: `uv run mypy .`
+## Lint, Format, and Type Commands
+- Lint entire repo: `uv run ruff check .`
+- Lint touched files only: `uv run ruff check path/to/file.py tests/test_file.py`
+- Format entire repo: `uv run ruff format .`
+- Format touched files only: `uv run ruff format path/to/file.py tests/test_file.py`
+- Type-check entire repo: `uv run mypy .`
 - Type-check touched scope: `uv run mypy path/to/file.py tests/test_file.py`
 
-### Running Entrypoints
-- Run stage scripts through `uv`, for example: `uv run --python 3.12 python 6_crossfold.py`
-- Most runtime configuration comes from `.env`; update `.env_example` when adding variables.
+## Stage Entrypoints
+- Stage 1: `1_artifact_detection.py`
+- Stage 2: `2_database_manager.py`
+- Stage 3.1: `3_1_imageReader.py`
+- Stage 4.1: `4_1_optimization_sampling.py`
+- Stage 4.2: `4_2_tune_graph_method.py`
+- Stage 4.3: `4_3_cleaner_script.py`
+- Stage 5: `5_pack_splits_to_hdf5.py`
+- Stage 6: `6_crossfold.py`
+- Stage 7: `7_sanity_checks.py`
+- Stage 8: `8_smart_sampler.py`
+- Stage 9: `9_lr_finder.py`
+- Stage 10: `10_training_ensemble.py`
+- Stage 11: `11_optimizer_ensemble.py`
+- Stage 12: `12_inference_ensemble.py`
+- Run a stage script with `uv`, for example: `uv run --python 3.12 python 6_crossfold.py`
 
 ## Repository Shape
-- Root scripts are standalone apps: `1_artifact_detection.py` through `12_inference_ensemble.py`.
-- Domain logic belongs in `helpers/<domain>/`; keep root scripts orchestration-focused.
-- Shared cross-domain utilities may live in top-level `helpers/`, e.g. `helpers/runtime_platform.py` and `helpers/logging_utils.py`.
-- Tests belong in `tests/`; logs in `logs/`; databases in `databases/`.
+- Keep root scripts orchestration-focused.
+- Put reusable domain logic in `helpers/<domain>/`.
+- Reuse shared helpers such as `helpers/runtime_platform.py` and `helpers/logging_utils.py`.
+- Keep tests in `tests/`.
+- Treat `logs/`, `databases/`, generated HDF5 outputs, manifests, checkpoints, and Aim repos as generated artifacts unless the task says otherwise.
 
 ## Working Norms
-- First inspect the relevant stage script and its helper package.
-- Reuse existing helpers before adding new modules.
-- Preserve pipeline contracts unless the task explicitly changes them.
-- Every behavior change needs tests; for bug fixes, add a regression test.
-- Before finishing, run targeted tests for touched code at minimum.
-- If shared infrastructure or scientific logic changes, run broader relevant suites too.
+- Inspect the relevant stage script and helper package before changing behavior.
+- Prefer the smallest correct change over broad rewrites.
+- Reuse existing helpers before creating new modules.
+- Preserve existing pipeline contracts unless the task explicitly changes them.
+- For Stage 2 `.svs/.xml` work, verify whether `TAG=HISEG` is active before changing color or XML parsing behavior.
+- Every behavior change needs tests.
+- For bug fixes, add or update a regression test.
+- Run targeted tests for touched code before finishing.
+- If you change shared infrastructure or scientific logic, run a broader relevant slice of the suite.
 
-## Code Style
-
-### Imports
-- Use explicit imports; never use wildcard imports.
-- Prefer standard library, then third-party, then local imports.
-- Use package-safe imports from `helpers...`; do not use sibling imports like `from data_handlers import ...`.
+## Imports
+- Prefer `from __future__ import annotations` in Python modules, matching existing code.
+- Use explicit imports only; never use wildcard imports.
+- Order imports as standard library, third-party, then local packages.
+- Use package-safe imports from `helpers...`; do not use sibling-relative shortcuts.
 - Remove unused imports.
 
-### Formatting
-- Follow Ruff formatting and a max line length of `100`.
+## Formatting
+- Follow Ruff formatting and the repository max line length of `100`.
 - Prefer small functions, guard clauses, and shallow nesting.
 - Avoid commented-out code and dead code.
-- Use ASCII by default unless the file already requires Unicode.
+- Use ASCII unless the file already requires non-ASCII text.
+- Keep orchestrators thin and push nontrivial logic into helper modules when it improves reuse or clarity.
 
-### Types
-- Add type hints to all public functions.
-- Match repository style: `Path`, `Mapping`, `Sequence`, `tuple[...]`, `str | None`.
-- Prefer precise standard types over `Any`.
-- Use `dataclass(frozen=True)` for validated configuration objects when appropriate.
+## Types
+- Add type hints to public functions and nontrivial helpers.
+- Match repository conventions such as `Path`, `Mapping`, `Sequence`, `tuple[...]`, and `str | None`.
+- Prefer precise types over `Any`.
+- Use `@dataclass(frozen=True)` for validated configuration objects and immutable result containers when appropriate.
 - Keep touched code compatible with strict mypy.
 
-### Naming
+## Naming
 - Use `snake_case` for functions, variables, and module-level helpers.
 - Use `PascalCase` for classes.
-- Reserve `ALL_CAPS` for true constants and environment variable names.
-- Match repo vocabulary: `cancer`, `not_cancer`, `patient`, `split`, `manifest`, `artifact`, `annotation`.
-- Do not silently rename contract names such as `TRAIN`, `VALIDATION`, `TEST`, `IMAGES`, `MASKS`, `REJECTED_IMAGES`, `REJECTED_MASKS`.
+- Use `ALL_CAPS` for constants and environment variable names.
+- Match repository vocabulary: `cancer`, `not_cancer`, `patient`, `split`, `manifest`, `artifact`, `annotation`.
+- Do not silently rename established contract names such as `TRAIN`, `VALIDATION`, `TEST`, `IMAGES`, `MASKS`, `REJECTED_IMAGES`, and `REJECTED_MASKS`.
 
-### Docstrings and Comments
-- Add concise docstrings to public functions.
-- Keep comments only for non-obvious scientific or control-flow reasoning.
-- Do not add noisy comments that restate the code.
+## Docstrings and Comments
+- Add concise docstrings to public functions and public dataclasses.
+- Keep comments for non-obvious scientific assumptions, invariants, or control flow.
+- Do not add noisy comments that only restate the code.
 
 ## Error Handling
-- Fail fast on invalid configuration or broken contracts.
-- Raise specific, meaningful exceptions with context.
+- Fail fast on invalid configuration, bad inputs, or broken pipeline contracts.
+- Raise specific exceptions with useful context.
 - Validate environment variables early.
-- Avoid broad `except Exception` unless you re-raise with useful context or are at a true process boundary.
+- Prefer explicit validation over silent fallback behavior for scientific or data-integrity concerns.
+- Avoid broad `except Exception` unless you are at a true process boundary or you re-raise with actionable context.
 - Do not silently swallow scientific integrity errors.
 
 ## Logging
 - Prefer `logging` over `print` for nontrivial workflows.
-- Reuse `helpers/logging_utils.py` for shared logger setup.
-- Preserve existing user-facing logging patterns where already established, especially Stage 1.
-- Write logs under `logs/`.
+- Reuse `helpers/logging_utils.py` for logger setup and log-folder resolution.
+- Preserve user-facing logging patterns where an entrypoint already depends on them.
+- Write logs under `logs/` unless an existing stage contract dictates another path.
+
+## Configuration
+- Most runtime configuration comes from environment variables and `.env`.
+- Update `.env_example` when adding or renaming environment variables.
+- Use `helpers.runtime_platform.resolve_env_path` and related helpers for path-like environment variables.
+- Preserve cross-platform behavior, especially Windows `OPENSLIDE_PATH` handling.
+- `TAG=HISEG` enables the HISEG-specific Stage 2 SVS/XML annotation path.
+- HISEG uses hardcoded XML color groups in code; legacy `.svs/.xml` datasets still use DB-driven `CANCER_COLOR` / `NOT_CANCER_COLOR` values.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
-- Preserve image/mask row alignment and filename parity.
+- Preserve image and mask row alignment.
+- Preserve filename parity and filename-keyed provenance joins.
 - Preserve label semantics: cancer is positive (`1`), not-cancer is negative (`0`).
-- Do not change stain normalization behavior, sampling semantics, or artifact logic without explicit intent.
-- Preserve filename-keyed provenance joins, especially artifact metadata.
-- In HDF5 workflows, keep canonical datasets stable: `images`, `masks`, `labels`, `patient_ids`, `filenames`.
+- Do not change stain normalization, sampling semantics, artifact logic, or contamination logic without explicit intent.
+- For HISEG XML annotations, preserve the hardcoded label policy: cancer colors map to positive, not-cancer colors map to negative, and rejected colors are skipped entirely.
+- In HDF5 workflows, keep canonical dataset names stable: `images`, `masks`, `labels`, `patient_ids`, `filenames`.
 
 ## Stage Boundaries
-- Keep Stage 1 logic in `helpers/artifact/*` and orchestration in `1_artifact_detection.py`.
-- Keep Stage 2 orchestration in `2_database_manager.py` and `3_1_imageReader.py`; extraction details belong in `helpers/extraction/*`.
+- Keep Stage 1 logic in `helpers/artifact/*`.
+- Keep extraction and image-reading details in `helpers/extraction/*`.
+- Keep Stage 2 dataset-specific XML parsing localized to `helpers/extraction/data_handlers.py` and the Stage 2 request flow.
 - Keep Stage 4.1 sampling logic in `helpers/optimization_sampling/*`.
-- Keep Stage 4.2/4.3 graph contamination logic shared in `helpers/graph/contamination.py`.
+- Keep Stage 4.2 and 4.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
 - Keep Stage 5 packaging logic in `helpers/packaging/*`.
 - Keep Stage 6 split and normalization logic in `helpers/crossfold/*`.
 - Keep Stage 7 integrity checks in `helpers/sanity/*`.
 - Keep Stage 8 smart-sampling logic in `helpers/smart_sampling/*`.
-- Keep Stage 9-12 training and inference logic in their matching helper packages.
+- Keep Stage 9 learning-rate finder logic in `helpers/lr_finder/*`.
+- Keep Stage 10 training logic in `helpers/training/*`.
+- Keep Stage 11 ensemble optimization logic in `helpers/ensemble_optimizer/*`.
+- Keep Stage 12 inference logic in `helpers/ensemble_inference/*`.
 
 ## Filesystem and Safety
-- Do not commit generated artifacts unless explicitly asked.
-- Treat `.env`, `credentials.json`, `token.json`, databases, checkpoints, HDF5 outputs, manifests, Aim repos, and logs as sensitive or generated.
 - Respect `.gitignore`.
-- Do not delete datasets, logs, or outputs unless the user explicitly asks.
-- Never use destructive git commands like `git reset --hard` or `git checkout --` unless explicitly requested.
-
-## Platform Guidance
-- Reuse `helpers/runtime_platform.py` for OS/path handling.
-- On Windows, `OPENSLIDE_PATH` must point to the OpenSlide `bin` folder.
-- Avoid open-coded platform checks when shared helpers already exist.
+- Do not commit generated artifacts unless explicitly asked.
+- Treat `.env`, credentials files, databases, HDF5 outputs, manifests, logs, checkpoints, and Aim repos as sensitive or generated.
+- Do not delete datasets, logs, or outputs unless explicitly requested.
+- Never use destructive git commands such as `git reset --hard` or `git checkout --` unless explicitly requested.
 
 ## Validation Checklist
-- Relevant tests added or updated.
-- Relevant tests pass.
+- Relevant tests were added or updated.
+- Relevant targeted tests pass.
 - `uv run ruff check` passes for touched files.
-- `uv run ruff format` applied where needed.
+- `uv run ruff format` has been applied where needed.
 - `uv run mypy` passes for touched files.
-- No unrelated files changed.
-- Pipeline contracts and scientific invariants preserved.
+- No unrelated files were modified intentionally.
+- Pipeline contracts and scientific invariants remain intact.
 
 ## Agent Heuristics
-- Prefer minimal local edits over broad rewrites.
-- Use existing libraries and helpers instead of reinventing behavior.
-- Optimize only with evidence; for Stage 2 performance work, benchmark real samples before and after.
-- If changing scientific logic, be conservative and prioritize reproducibility.
-- If unsure where code belongs, prefer a thin orchestrator and a richer helper module.
+- Prefer minimal local edits.
+- Prefer existing helpers and established patterns over reinvention.
+- If changing scientific logic, be conservative and explicit.
+- If performance work is requested, benchmark before and after when feasible.
+- If unsure where code belongs, prefer a thin stage script and a richer helper module.

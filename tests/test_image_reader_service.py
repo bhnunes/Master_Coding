@@ -51,6 +51,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
         annotation_path=tmp_path / "slide.xml",
         cancer_color="65280",
         not_cancer_color="255",
+        dataset_tag="TEST",
         patient="100001",
         window_size=224,
         stride=112,
@@ -72,6 +73,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert result.artifact_patch_records == artifact_records
     assert captured["path_Image"] == str(tmp_path / "slide.svs")
     assert captured["patient"] == "100001"
+    assert captured["dataset_tag"] == "TEST"
     assert captured["window_size"] == 224
     assert captured["profile_output_path"] == str(tmp_path / "profile.json")
     assert hdf5_calls == [

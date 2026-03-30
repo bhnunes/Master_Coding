@@ -6,6 +6,7 @@ A Python research pipeline for pathology whole-slide-image (WSI) processing. It 
 
 - Whole-slide image processing (supports `.svs`, `.ndpi`, `.tiff` formats)
 - Annotation handling for multiple formats (XML, NDPA, JSON)
+- Dataset-aware Stage 2 SVS/XML parsing, including HISEG ASAP-style XML support
 - Patch extraction with tissue detection and artifact filtering
 - Patient-level stratified dataset splitting on HDF5 datasets
 - Train-fitted stain normalization support
@@ -210,6 +211,18 @@ Current Stage 2 artifact-aware behavior:
 - Stage 2 writes filename-keyed artifact metadata to `PATCHES/artifact_patch_index.parquet`
 - Stage 8 can join that Parquet file with HDF5 `filenames` for artifact-aware loss discounting during training
 
+Current Stage 2 multi-dataset XML behavior:
+
+- `.svs/.xml` support is dataset-aware and selected through `TAG`
+- For legacy `.svs/.xml` datasets, Stage 2 still expects `CANCER_COLOR` and `NOT_CANCER_COLOR` to be configured in the SQLite database after ingestion
+- `TAG=HISEG` enables the HISEG-specific ASAP XML path in `helpers/extraction/data_handlers.py`
+- HISEG reads `Annotation Color="#..."` plus `Coordinates/Coordinate` entries instead of the legacy `LineColor` + `Region/Vertex` layout
+- HISEG uses hardcoded color groups in code rather than SQLite color columns
+- HISEG color policy is:
+  - cancer: `#8B0000`, `#FF00FF`, `#800080`
+  - not_cancer: `#8A2BE2`, `#0000FF`, `#4682B4`, `#00FF00`, `#008000`, `#FFFF00`
+  - rejected: `#4B0082` (skipped entirely)
+
 ### Stage 3: Annotation Cleaning
 
 | Script | Purpose |
@@ -348,6 +361,8 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
+For the HISEG dataset, use `TAG=HISEG`. Stage 2 will then parse ASAP-style `.xml` annotations and will not require manual `CANCER_COLOR` / `NOT_CANCER_COLOR` setup in the Stage 2 SQLite table.
+
 See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 5/6/7 HDF5-native preparation, Stage 8 smart sampling, Stage 9 LR-finder reporting, the Stage 10 training matrix, and Stage 11 ensemble-optimizer settings.
 
 OpenSlide runtime rules:
@@ -426,6 +441,11 @@ uv run --python 3.12 python 1_artifact_detection.py
 
 # 2. Database & Patch Extraction
 # Configure .env first, then:
+uv run --python 3.12 python 2_database_manager.py
+
+# HISEG example
+# Set TAG=HISEG in .env, place `.svs` slides in IMAGES_HISEG,
+# place matching `.xml` files in ANNOTATIONS_HISEG, then run:
 uv run --python 3.12 python 2_database_manager.py
 
 # 3. Annotation Cleaning (optional, for cancer patches)

@@ -138,10 +138,101 @@ def test_svs_xml_handler_filters_by_line_color(tmp_path: Path) -> None:
         annotation_path=str(annotation_path),
         cancer_color="255",
         not_cancer_color="65280",
+        dataset_tag="TCGA",
     )
 
     assert len(result["cancer_polygons"]) == 1
     assert len(result["not_cancer_polygons"]) == 1
+
+
+def test_svs_xml_handler_supports_hiseg_asap_color_mapping(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "slide.xml"
+    annotation_path.write_text(
+        """
+        <ASAP_Annotations>
+          <Annotations>
+            <Annotation Color="#8B0000">
+              <Coordinates>
+                <Coordinate Order="0" X="0" Y="0" />
+                <Coordinate Order="1" X="4" Y="0" />
+                <Coordinate Order="2" X="4" Y="4" />
+              </Coordinates>
+            </Annotation>
+            <Annotation Color="#4682B4">
+              <Coordinates>
+                <Coordinate Order="0" X="10" Y="10" />
+                <Coordinate Order="1" X="14" Y="10" />
+                <Coordinate Order="2" X="14" Y="14" />
+              </Coordinates>
+            </Annotation>
+            <Annotation Color="#4B0082">
+              <Coordinates>
+                <Coordinate Order="0" X="20" Y="20" />
+                <Coordinate Order="1" X="24" Y="20" />
+                <Coordinate Order="2" X="24" Y="24" />
+              </Coordinates>
+            </Annotation>
+          </Annotations>
+        </ASAP_Annotations>
+        """,
+        encoding="utf-8",
+    )
+
+    result = SVS_XML_Handler().load_annotations(
+        None,
+        annotation_path=str(annotation_path),
+        cancer_color="NA",
+        not_cancer_color="NA",
+        dataset_tag="HISEG",
+    )
+
+    assert len(result["cancer_polygons"]) == 1
+    assert len(result["not_cancer_polygons"]) == 1
+
+
+def test_svs_xml_handler_merges_multiple_hiseg_cancer_colors(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "slide.xml"
+    annotation_path.write_text(
+        """
+        <ASAP_Annotations>
+          <Annotations>
+            <Annotation Color="#8B0000">
+              <Coordinates>
+                <Coordinate Order="0" X="0" Y="0" />
+                <Coordinate Order="1" X="4" Y="0" />
+                <Coordinate Order="2" X="4" Y="4" />
+              </Coordinates>
+            </Annotation>
+            <Annotation Color="#FF00FF">
+              <Coordinates>
+                <Coordinate Order="0" X="10" Y="10" />
+                <Coordinate Order="1" X="14" Y="10" />
+                <Coordinate Order="2" X="14" Y="14" />
+              </Coordinates>
+            </Annotation>
+            <Annotation Color="#800080">
+              <Coordinates>
+                <Coordinate Order="0" X="20" Y="20" />
+                <Coordinate Order="1" X="24" Y="20" />
+                <Coordinate Order="2" X="24" Y="24" />
+              </Coordinates>
+            </Annotation>
+          </Annotations>
+        </ASAP_Annotations>
+        """,
+        encoding="utf-8",
+    )
+
+    result = SVS_XML_Handler().load_annotations(
+        None,
+        annotation_path=str(annotation_path),
+        cancer_color="NA",
+        not_cancer_color="NA",
+        dataset_tag="HISEG",
+    )
+
+    assert len(result["cancer_polygons"]) == 3
+    assert result["not_cancer_polygons"] == []
 
 
 def test_ndpi_ndpa_handler_converts_points_and_filters_titles(

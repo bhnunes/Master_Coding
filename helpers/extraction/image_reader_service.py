@@ -48,6 +48,7 @@ class SlideProcessingRequest:
     annotation_path: Path
     cancer_color: str
     not_cancer_color: str
+    dataset_tag: str
     patient: str
     window_size: int
     stride: int
@@ -155,6 +156,7 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             match_percentage_req=request.match_percentage,
             cancer_color=request.cancer_color,
             not_cancer_color=request.not_cancer_color,
+            dataset_tag=request.dataset_tag,
             patient=request.patient,
             path_artifacts_geojson=str(request.artifacts_geojson_path)
             if request.artifacts_geojson_path is not None
