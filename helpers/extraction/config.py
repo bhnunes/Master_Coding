@@ -43,6 +43,7 @@ class DatabaseManagerConfig:
     """Runtime configuration for `2_database_manager.py`."""
 
     tag: str
+    source_folder: Path
     database_path: Path
     base_path: Path
     window_size: int
@@ -102,6 +103,12 @@ def load_database_manager_config(
         system_name=system_name,
         required=True,
     )
+    source_folder = resolve_env_path(
+        values.get("SOURCE_FOLDER"),
+        "SOURCE_FOLDER",
+        system_name=system_name,
+        required=True,
+    )
     base_path = resolve_env_path(
         values.get("PROJECTS_BASE_PATH") or "./projects",
         "PROJECTS_BASE_PATH",
@@ -109,6 +116,7 @@ def load_database_manager_config(
         required=True,
     )
     assert database_path is not None
+    assert source_folder is not None
     assert base_path is not None
     local_slide_cache_dir = _parse_optional_path(
         values.get("STAGE2_LOCAL_SLIDE_CACHE_DIR"),
@@ -128,6 +136,7 @@ def load_database_manager_config(
 
     return DatabaseManagerConfig(
         tag=tag,
+        source_folder=source_folder,
         database_path=database_path,
         base_path=base_path,
         window_size=window_size,
@@ -152,11 +161,7 @@ def load_database_manager_config(
         log_folder=log_folder,
         log_file_name=(values.get("EXTRACTION_LOG_FILE") or "database_manager.log").strip(),
         geojson_path=(
-            _parse_optional_path(
-                values.get("GEOJSON_PATH"),
-                "GEOJSON_PATH",
-                system_name=system_name,
-            )
+            source_folder / "GEOJSON"
             if use_advanced_artifact_filtering or activate_sanity_check_geojson
             else None
         ),

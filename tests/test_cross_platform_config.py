@@ -11,6 +11,7 @@ def test_load_database_manager_config_rejects_windows_path_on_linux() -> None:
         load_database_manager_config(
             {
                 "TAG": "TCGA",
+                "SOURCE_FOLDER": r"D:\data\source",
                 "SQLITE_DB_PATH": r"D:\data\database.db",
                 "PROJECTS_BASE_PATH": r"D:\data\projects",
             },

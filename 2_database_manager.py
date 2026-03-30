@@ -43,32 +43,35 @@ class Style:
 
 
 def ensure_project_is_initialized(
-    repository: ExtractionRepository, base_path: Path
+    repository: ExtractionRepository,
+    source_folder: Path,
+    output_base_path: Path,
+    *,
+    require_geojson: bool,
 ) -> tuple[tuple[Path, Path, Path], bool]:
-    """Ensure project folders and database schema exist."""
+    """Ensure Stage 2 source layout exists and output schema is initialized."""
 
-    images_folder = base_path / f"IMAGES_{repository.tag}"
-    annotations_folder = base_path / f"ANNOTATIONS_{repository.tag}"
-    geojson_folder = base_path / f"GEOJSON_{repository.tag}"
-    setup_needed = any(
-        not folder.exists() for folder in (images_folder, annotations_folder, geojson_folder)
-    )
-    folders = repository.ensure_case_directories(base_path)
+    folders = repository.get_source_directories(source_folder)
+    required_folders = folders if require_geojson else folders[:2]
+    setup_needed = any(not folder.exists() for folder in required_folders)
+    output_base_path.mkdir(parents=True, exist_ok=True)
+    (output_base_path / "PATCHES").mkdir(parents=True, exist_ok=True)
     repository.initialize()
     return folders, setup_needed
 
 
 def print_project_setup(folders: tuple[Path, Path, Path]) -> None:
-    """Print the one-time project setup guidance."""
+    """Print the expected Stage 2 source-folder layout guidance."""
 
     images_folder, annotations_folder, geojson_folder = folders
     print(f"\n{Style.BLUE}{Style.BOLD}--- PROJECT SETUP ---{Style.RESET}")
-    print(f"{Style.GREEN}{Style.SUCCESS} '{images_folder}' created.{Style.RESET}")
-    print(f"{Style.GREEN}{Style.SUCCESS} '{annotations_folder}' created.{Style.RESET}")
-    print(f"{Style.GREEN}{Style.SUCCESS} '{geojson_folder}' created.{Style.RESET}")
+    print(f"{Style.YELLOW}{Style.WARNING} Stage 2 source folders are missing.{Style.RESET}")
+    print(f"{Style.INFO} Expected image folder: '{images_folder}'.{Style.RESET}")
+    print(f"{Style.INFO} Expected annotation folder: '{annotations_folder}'.{Style.RESET}")
+    print(f"{Style.INFO} Expected GeoJSON folder: '{geojson_folder}'.{Style.RESET}")
     print(
-        f"{Style.YELLOW}{Style.INFO} Please move your images and annotations to these "
-        f"folders.{Style.RESET}"
+        f"{Style.YELLOW}{Style.INFO} Please point SOURCE_FOLDER at a directory that contains "
+        f"these subfolders.{Style.RESET}"
     )
     print(
         f"{Style.BOLD}   IMPORTANT: Image and annotation files must share the same base name "
@@ -187,7 +190,14 @@ def main_process() -> None:
     )
     logger.info("Stage 2 log file: %s", config.log_path)
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
-    folders, setup_needed = ensure_project_is_initialized(repository, config.base_path)
+    folders, setup_needed = ensure_project_is_initialized(
+        repository,
+        config.source_folder,
+        config.base_path,
+        require_geojson=(
+            config.use_advanced_artifact_filtering or config.activate_sanity_check_geojson
+        ),
+    )
     if setup_needed:
         print_project_setup(folders)
         return
@@ -196,7 +206,7 @@ def main_process() -> None:
         logger.info("Starting Stage 2 ingestion for tag=%s", config.tag)
         print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.CHECK} INGESTION PROCESS ---{Style.RESET}")
         svs_added = repository.ingest_new_cases(
-            base_path=config.base_path,
+            source_folder=config.source_folder,
             activate_sanity_check=config.activate_sanity_check_geojson,
             use_advanced_filtering=config.use_advanced_artifact_filtering,
             geojson_path=config.geojson_path,

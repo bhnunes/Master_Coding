@@ -40,6 +40,7 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
     )
     config = DatabaseManagerConfig(
         tag="TEST",
+        source_folder=tmp_path / "source",
         database_path=tmp_path / "db.sqlite",
         base_path=tmp_path,
         window_size=224,

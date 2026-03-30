@@ -5,10 +5,12 @@ from helpers.extraction.repository import ExtractionRepository
 
 
 def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -> None:
-    base_path = tmp_path / "project"
+    source_folder = tmp_path / "source"
     repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
 
-    images_dir, annotations_dir, geojson_dir = repository.ensure_case_directories(base_path)
+    images_dir, annotations_dir, geojson_dir = repository.get_source_directories(source_folder)
+    for folder in (images_dir, annotations_dir, geojson_dir):
+        folder.mkdir(parents=True, exist_ok=True)
     repository.initialize()
 
     (images_dir / "case_a.svs").write_text("slide")
@@ -18,7 +20,7 @@ def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -
     (geojson_dir / "case_a.geojson").write_text("{}")
 
     svs_added = repository.ingest_new_cases(
-        base_path=base_path,
+        source_folder=source_folder,
         activate_sanity_check=True,
         use_advanced_filtering=True,
         geojson_path=geojson_dir,
@@ -69,10 +71,12 @@ def test_repository_lists_pending_cases_in_id_order(tmp_path: Path) -> None:
 
 
 def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path) -> None:
-    base_path = tmp_path / "project"
+    source_folder = tmp_path / "source"
     repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
 
-    images_dir, annotations_dir, _geojson_dir = repository.ensure_case_directories(base_path)
+    images_dir, annotations_dir, _geojson_dir = repository.get_source_directories(source_folder)
+    for folder in (images_dir, annotations_dir):
+        folder.mkdir(parents=True, exist_ok=True)
     repository.initialize()
 
     image_path = images_dir / "case_a.svs"
@@ -81,7 +85,7 @@ def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path)
     annotation_path.write_text("annotation-v1")
 
     repository.ingest_new_cases(
-        base_path=base_path,
+        source_folder=source_folder,
         activate_sanity_check=False,
         use_advanced_filtering=False,
         geojson_path=None,
@@ -89,7 +93,7 @@ def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path)
 
     annotation_path.write_text("annotation-v2")
     repository.ingest_new_cases(
-        base_path=base_path,
+        source_folder=source_folder,
         activate_sanity_check=False,
         use_advanced_filtering=False,
         geojson_path=None,
@@ -105,4 +109,14 @@ def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path)
         "STALE",
         "Input files changed for an existing case. "
         "Clear stale patch outputs and reprocess this slide.",
+    )
+
+
+def test_repository_reports_expected_source_directories(tmp_path: Path) -> None:
+    repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
+
+    assert repository.get_source_directories(tmp_path / "source") == (
+        tmp_path / "source" / "IMAGES",
+        tmp_path / "source" / "ANNOTATIONS",
+        tmp_path / "source" / "GEOJSON",
     )

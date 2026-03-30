@@ -56,15 +56,14 @@ class ExtractionRepository:
         self.tag = tag
         self.table_name = f"DATABASE_{tag}"
 
-    def ensure_case_directories(self, base_path: Path) -> tuple[Path, Path, Path]:
-        """Return the case folders and create them when missing."""
+    def get_source_directories(self, source_folder: Path) -> tuple[Path, Path, Path]:
+        """Return the Stage 2 source folder layout under one dataset root."""
 
-        images_folder = base_path / f"IMAGES_{self.tag}"
-        annotations_folder = base_path / f"ANNOTATIONS_{self.tag}"
-        geojson_folder = base_path / f"GEOJSON_{self.tag}"
-        for folder in (images_folder, annotations_folder, geojson_folder):
-            folder.mkdir(parents=True, exist_ok=True)
-        return images_folder, annotations_folder, geojson_folder
+        return (
+            source_folder / "IMAGES",
+            source_folder / "ANNOTATIONS",
+            source_folder / "GEOJSON",
+        )
 
     def initialize(self) -> None:
         """Create the Stage 2 database table when needed."""
@@ -130,15 +129,14 @@ class ExtractionRepository:
 
     def ingest_new_cases(
         self,
-        base_path: Path,
+        source_folder: Path,
         activate_sanity_check: bool,
         use_advanced_filtering: bool,
         geojson_path: Path | None,
     ) -> bool:
         """Scan case folders and insert unseen cases into the database."""
 
-        images_folder = base_path / f"IMAGES_{self.tag}"
-        annotations_folder = base_path / f"ANNOTATIONS_{self.tag}"
+        images_folder, annotations_folder, _ = self.get_source_directories(source_folder)
         image_files = sorted(path for path in images_folder.iterdir() if path.is_file())
         if not image_files:
             raise FileNotFoundError(
@@ -150,7 +148,7 @@ class ExtractionRepository:
         if run_geojson_check:
             if geojson_path is None or not geojson_path.is_dir():
                 raise FileNotFoundError(
-                    "GeoJSON sanity check is active, but GEOJSON_PATH "
+                    "GeoJSON sanity check is active, but the source GEOJSON folder "
                     f"('{geojson_path}') is invalid."
                 )
             geojson_basenames = {
