@@ -17,7 +17,7 @@ def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -
     (annotations_dir / "case_a.xml").write_text("annotation")
     (images_dir / "case_b.svs").write_text("slide")
     (annotations_dir / "case_b.xml").write_text("annotation")
-    (geojson_dir / "case_a.geojson").write_text("{}")
+    (geojson_dir / "case_a__abcdef123456.geojson").write_text("{}")
 
     svs_added = repository.ingest_new_cases(
         source_folder=source_folder,
@@ -110,6 +110,50 @@ def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path)
         "Input files changed for an existing case. "
         "Clear stale patch outputs and reprocess this slide.",
     )
+
+
+def test_repository_marks_only_ambiguous_geojson_slide_as_failed(tmp_path: Path) -> None:
+    source_folder = tmp_path / "source"
+    repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
+
+    images_dir, annotations_dir, geojson_dir = repository.get_source_directories(source_folder)
+    for folder in (images_dir, annotations_dir, geojson_dir):
+        folder.mkdir(parents=True, exist_ok=True)
+    repository.initialize()
+
+    (images_dir / "case_a.svs").write_text("slide")
+    (annotations_dir / "case_a.xml").write_text("annotation")
+    (images_dir / "case_b.svs").write_text("slide")
+    (annotations_dir / "case_b.xml").write_text("annotation")
+    (geojson_dir / "case_a__abcdef123456.geojson").write_text("{}")
+    (geojson_dir / "case_a__fedcba654321.geojson").write_text("{}")
+    (geojson_dir / "case_b__123456abcdef.geojson").write_text("{}")
+
+    repository.ingest_new_cases(
+        source_folder=source_folder,
+        activate_sanity_check=True,
+        use_advanced_filtering=True,
+        geojson_path=geojson_dir,
+    )
+
+    with sqlite3.connect(tmp_path / "database.db") as connection:
+        rows = connection.execute(
+            "SELECT IMAGEPATH, STATUS, COMMENTS FROM DATABASE_TEST ORDER BY ID"
+        ).fetchall()
+
+    assert rows == [
+        (
+            str(images_dir / "case_a.svs"),
+            "FAILED",
+            "GeoJSON Sanity Check Failed: Ambiguous artifact GeoJSON mapping for "
+            "'case_a.svs'. Multiple collision-safe GeoJSON files share this slide stem.",
+        ),
+        (
+            str(images_dir / "case_b.svs"),
+            "TO BE PROCESSED",
+            "",
+        ),
+    ]
 
 
 def test_repository_reports_expected_source_directories(tmp_path: Path) -> None:

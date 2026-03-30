@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.extraction.artifact_lookup import resolve_geojson_for_slide
 from helpers.provenance import hash_file_sha256, hash_json_payload
 
 
@@ -143,7 +144,6 @@ class ExtractionRepository:
                 f"The directory '{images_folder}' is empty. Please add images to process."
             )
 
-        geojson_basenames: set[str] = set()
         run_geojson_check = activate_sanity_check and use_advanced_filtering
         if run_geojson_check:
             if geojson_path is None or not geojson_path.is_dir():
@@ -151,11 +151,6 @@ class ExtractionRepository:
                     "GeoJSON sanity check is active, but the source GEOJSON folder "
                     f"('{geojson_path}') is invalid."
                 )
-            geojson_basenames = {
-                path.stem
-                for path in geojson_path.iterdir()
-                if path.is_file() and path.suffix.lower() == ".geojson"
-            }
 
         annotation_lookup = {
             path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
@@ -209,11 +204,20 @@ class ExtractionRepository:
                 if annotation_path is None:
                     status = "FAILED"
                     comments = "The equivalent annotation file could not be found."
-                elif run_geojson_check and image_path.stem not in geojson_basenames:
-                    status = "FAILED"
-                    comments = (
-                        "GeoJSON Sanity Check Failed: The equivalent GeoJSON file was not found."
-                    )
+                elif run_geojson_check:
+                    assert geojson_path is not None
+                    try:
+                        resolved_geojson = resolve_geojson_for_slide(geojson_path, image_path)
+                    except ValueError as error:
+                        status = "FAILED"
+                        comments = f"GeoJSON Sanity Check Failed: {error}"
+                    else:
+                        if resolved_geojson is None:
+                            status = "FAILED"
+                            comments = (
+                                "GeoJSON Sanity Check Failed: "
+                                "The equivalent GeoJSON file was not found."
+                            )
 
                 payload.append(
                     (
