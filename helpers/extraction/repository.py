@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from helpers.extraction.artifact_lookup import resolve_geojson_for_slide
+from helpers.extraction.artifact_lookup import GeoJsonLookup, resolve_geojson_for_slide
 from helpers.provenance import hash_file_sha256, hash_json_payload
 
 
@@ -145,12 +145,14 @@ class ExtractionRepository:
             )
 
         run_geojson_check = activate_sanity_check and use_advanced_filtering
+        geojson_lookup = None
         if run_geojson_check:
             if geojson_path is None or not geojson_path.is_dir():
                 raise FileNotFoundError(
                     "GeoJSON sanity check is active, but the source GEOJSON folder "
                     f"('{geojson_path}') is invalid."
                 )
+            geojson_lookup = GeoJsonLookup.from_directory(geojson_path)
 
         annotation_lookup = {
             path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
@@ -207,7 +209,11 @@ class ExtractionRepository:
                 elif run_geojson_check:
                     assert geojson_path is not None
                     try:
-                        resolved_geojson = resolve_geojson_for_slide(geojson_path, image_path)
+                        resolved_geojson = resolve_geojson_for_slide(
+                            geojson_path,
+                            image_path,
+                            lookup=geojson_lookup,
+                        )
                     except ValueError as error:
                         status = "FAILED"
                         comments = f"GeoJSON Sanity Check Failed: {error}"

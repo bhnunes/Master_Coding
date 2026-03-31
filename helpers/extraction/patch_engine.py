@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import atexit
 import json
 import logging
 import os
@@ -47,6 +48,8 @@ ARTIFACT_CLASS_TO_COLUMN = {
 }
 
 _WORKER_CONTEXT = {}
+_WORKER_SLIDE = None
+_WORKER_CLEANUP_REGISTERED = False
 WINDOW_PROFILE_PHASES = (
     "artifact_coverage",
     "read_region",
@@ -99,6 +102,14 @@ def build_patch_filename(
         f"{safe_label}_PATIENT_{safe_patient_id}_SLIDE_{safe_slide_id}_"
         f"X_{int(x_coord)}_Y_{int(y_coord)}.png"
     )
+
+
+def build_patch_filename_prefix(*, patient_id: object, slide_id: object) -> str:
+    """Build the invariant filename prefix once per slide worker."""
+
+    safe_patient_id = sanitize_patch_filename_component(patient_id)
+    safe_slide_id = sanitize_patch_filename_component(slide_id)
+    return f"PATIENT_{safe_patient_id}_SLIDE_{safe_slide_id}"
 
 
 def check_tissue_percentage_robust(patch_np, required_percentage):
@@ -321,22 +332,26 @@ def compute_artifact_coverages_from_index(artifact_geometry_index, patch_polygon
     return coverages
 
 
-def polygons_to_mask_with_index(mask_shape, polygon_index, patch_coords):
+def polygons_to_mask_with_index(
+    mask_shape,
+    polygon_index,
+    patch_coords,
+    *,
+    patch_polygon=None,
+    prepared_patch_polygon=None,
+):
     mask = np.zeros(mask_shape, dtype=np.uint8)
     polygons_level, tree = polygon_index
     if not polygons_level or tree is None:
         return mask
 
     patch_x, patch_y = patch_coords
-    win_poly = Polygon(
-        [
-            (patch_x, patch_y),
-            (patch_x + mask_shape[1], patch_y),
-            (patch_x + mask_shape[1], patch_y + mask_shape[0]),
-            (patch_x, patch_y + mask_shape[0]),
-        ]
+    win_poly = (
+        patch_polygon
+        if patch_polygon is not None
+        else shapely.box(patch_x, patch_y, patch_x + mask_shape[1], patch_y + mask_shape[0])
     )
-    prep_win = prep(win_poly)
+    prep_win = prepared_patch_polygon if prepared_patch_polygon is not None else prep(win_poly)
     for polygon_idx in tree.query(win_poly):
         polygon = polygons_level[int(polygon_idx)]
         if not prep_win.intersects(polygon):
@@ -366,8 +381,21 @@ def chunk_coordinates(filtered_coords, batch_size):
 
 
 def _initialize_worker(worker_context):
-    global _WORKER_CONTEXT
+    global _WORKER_CONTEXT, _WORKER_SLIDE, _WORKER_CLEANUP_REGISTERED
+    close_worker_resources()
     _WORKER_CONTEXT = worker_context
+    openslide_module = load_openslide_module()
+    _WORKER_SLIDE = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
+    if not _WORKER_CLEANUP_REGISTERED:
+        atexit.register(close_worker_resources)
+        _WORKER_CLEANUP_REGISTERED = True
+
+
+def close_worker_resources():
+    global _WORKER_SLIDE
+    if _WORKER_SLIDE is not None:
+        _WORKER_SLIDE.close()
+        _WORKER_SLIDE = None
 
 
 def _process_window_with_slide(slide, x, y):
@@ -377,10 +405,16 @@ def _process_window_with_slide(slide, x, y):
     x_int, y_int = int(x), int(y)
     patch_coords = (x_int, y_int)
     window_size = context["window_size"]
+    patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
+    prepared_patch_polygon = prep(patch_polygon)
 
     cancer_mask_started_at = time.perf_counter()
     cancer_mask = polygons_to_mask_with_index(
-        (window_size, window_size), context["cancer_polygon_index"], patch_coords
+        (window_size, window_size),
+        context["cancer_polygon_index"],
+        patch_coords,
+        patch_polygon=patch_polygon,
+        prepared_patch_polygon=prepared_patch_polygon,
     )
     if window_phase_stats is not None:
         record_phase(
@@ -389,7 +423,11 @@ def _process_window_with_slide(slide, x, y):
 
     non_cancer_mask_started_at = time.perf_counter()
     non_cancer_mask = polygons_to_mask_with_index(
-        (window_size, window_size), context["not_cancer_polygon_index"], patch_coords
+        (window_size, window_size),
+        context["not_cancer_polygon_index"],
+        patch_coords,
+        patch_polygon=patch_polygon,
+        prepared_patch_polygon=prepared_patch_polygon,
     )
     if window_phase_stats is not None:
         record_phase(
@@ -447,7 +485,7 @@ def _process_window_with_slide(slide, x, y):
         artifact_started_at = time.perf_counter()
         artifact_coverages = compute_artifact_coverages_from_index(
             artifact_geometry_index=artifact_geometry_index,
-            patch_polygon=shapely.box(x_int, y_int, x_int + window_size, y_int + window_size),
+            patch_polygon=patch_polygon,
             patch_area=PATCH_AREA,
         )
         if window_phase_stats is not None:
@@ -457,13 +495,7 @@ def _process_window_with_slide(slide, x, y):
                 time.perf_counter() - artifact_started_at,
             )
 
-    file_basename = build_patch_filename(
-        label=label,
-        patient_id=context["patient"],
-        slide_id=context["slide_id"],
-        x_coord=x_int,
-        y_coord=y_int,
-    )
+    file_basename = f"{label}_{context['filename_prefix']}_X_{x_int}_Y_{y_int}.png"
     patch_record = build_patch_record(
         filename=file_basename,
         label=label,
@@ -481,19 +513,15 @@ def _process_window_with_slide(slide, x, y):
 
 
 def process_window_batch(coord_batch):
-    slide = None
-    openslide_module = load_openslide_module()
     profile_enabled = bool(_WORKER_CONTEXT.get("profile_output_path"))
     try:
-        slide = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
-        return [_process_window_with_slide(slide, x, y) for x, y in coord_batch]
+        if _WORKER_SLIDE is None:
+            raise RuntimeError("Worker slide handle was not initialized.")
+        return [_process_window_with_slide(_WORKER_SLIDE, x, y) for x, y in coord_batch]
     except Exception:
         if profile_enabled:
             return [("ERROR", traceback.format_exc(), create_phase_stats(WINDOW_PROFILE_PHASES))]
         return [("ERROR", traceback.format_exc())]
-    finally:
-        if slide:
-            slide.close()
 
 
 def iter_window_results(filtered_coords, num_workers, worker_state, batch_size):
@@ -706,6 +734,10 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             "match_percentage_req": kwargs["match_percentage_req"],
             "patient": kwargs["patient"],
             "slide_id": os.path.splitext(os.path.basename(path_Image))[0],
+            "filename_prefix": build_patch_filename_prefix(
+                patient_id=kwargs["patient"],
+                slide_id=os.path.splitext(os.path.basename(path_Image))[0],
+            ),
             "use_artifact_filter": kwargs.get("use_artifact_filter"),
             "profile_output_path": profile_output_path,
             "cancer_polygon_index": cancer_polygon_index,

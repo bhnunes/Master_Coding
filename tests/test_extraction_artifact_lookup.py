@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from helpers.extraction.artifact_lookup import build_processing_signature, resolve_geojson_for_slide
+from helpers.extraction.artifact_lookup import (
+    GeoJsonLookup,
+    build_processing_signature,
+    resolve_geojson_for_slide,
+)
 
 
 def test_resolve_geojson_for_slide_accepts_single_collision_safe_match(tmp_path: Path) -> None:
@@ -24,6 +28,22 @@ def test_resolve_geojson_for_slide_rejects_ambiguous_collision_safe_matches(tmp_
 
     with pytest.raises(ValueError, match="Ambiguous artifact GeoJSON mapping"):
         resolve_geojson_for_slide(geojson_dir, Path("/tmp/case_a.svs"))
+
+
+def test_resolve_geojson_for_slide_uses_prebuilt_lookup(tmp_path: Path) -> None:
+    geojson_dir = tmp_path / "geojson"
+    geojson_dir.mkdir()
+    candidate = geojson_dir / "case_a__abcdef123456.geojson"
+    candidate.write_text("{}")
+
+    lookup = GeoJsonLookup.from_directory(geojson_dir)
+    resolved = resolve_geojson_for_slide(
+        geojson_dir,
+        Path("/tmp/case_a.svs"),
+        lookup=lookup,
+    )
+
+    assert resolved == candidate
 
 
 def test_build_processing_signature_changes_when_geojson_changes(tmp_path: Path) -> None:

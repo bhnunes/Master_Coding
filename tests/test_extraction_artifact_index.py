@@ -56,3 +56,32 @@ def test_artifact_index_writer_creates_empty_file_with_schema(tmp_path: Path) ->
 
     assert table.num_rows == 0
     assert "cov_edge_airbubble" in table.column_names
+
+
+def test_artifact_index_writer_accepts_mapping_records_with_extra_keys(tmp_path: Path) -> None:
+    output_path = tmp_path / "artifact_patch_index.parquet"
+    writer = ArtifactIndexWriter(output_path)
+
+    writer.append_records(
+        [
+            {
+                "filename": "CANCER_PATIENT_101_0_0_0001.png",
+                "label": 1,
+                "patient_id": "101",
+                "slide_id": "slide_a",
+                "cov_fold": 0.25,
+                "cov_penmarking": 0.0,
+                "cov_oof": 0.1,
+                "cov_darkspot_foreign": 0.0,
+                "cov_edge_airbubble": 0.05,
+                "_image_array": b"ignored",
+                "_mask_array": b"ignored",
+            }
+        ]
+    )
+    writer.close()
+
+    table = pq.read_table(output_path)
+
+    assert table.num_rows == 1
+    assert table["filename"].to_pylist() == ["CANCER_PATIENT_101_0_0_0001.png"]

@@ -8,8 +8,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from helpers.extraction.artifact_index import ArtifactIndexWriter, ArtifactPatchRecord
-from helpers.extraction.artifact_lookup import build_processing_signature, resolve_geojson_for_slide
+from helpers.extraction.artifact_index import ArtifactIndexWriter
+from helpers.extraction.artifact_lookup import (
+    GeoJsonLookup,
+    build_processing_signature,
+    resolve_geojson_for_slide,
+)
 from helpers.extraction.config import DatabaseManagerConfig, load_database_manager_config
 from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
@@ -134,13 +138,40 @@ def collect_problematic_svs_files_for_tag(
 
 
 def resolve_artifacts_geojson(
-    case: ExtractionCaseRecord, config: DatabaseManagerConfig
+    case: ExtractionCaseRecord,
+    config: DatabaseManagerConfig,
+    *,
+    geojson_lookup: GeoJsonLookup | None = None,
 ) -> Path | None:
     """Resolve the optional artifact GeoJSON path for one case."""
 
     if not config.use_advanced_artifact_filtering or config.geojson_path is None:
         return None
-    return resolve_geojson_for_slide(config.geojson_path, case.image_path)
+    return resolve_geojson_for_slide(config.geojson_path, case.image_path, lookup=geojson_lookup)
+
+
+def build_processing_signature_for_case(
+    case: ExtractionCaseRecord,
+    config: DatabaseManagerConfig,
+    runtime_settings: SlideRuntimeSettings,
+    *,
+    artifacts_geojson_path: Path | None,
+) -> str:
+    """Build the persisted Stage 2 processing signature for one case."""
+
+    if case.annotation_path is None:
+        raise ValueError(f"Case {case.record_id} is missing an annotation path.")
+    return build_processing_signature(
+        image_path=case.image_path,
+        annotation_path=case.annotation_path,
+        artifacts_geojson_path=artifacts_geojson_path,
+        window_size=config.window_size,
+        stride=config.stride,
+        match_percentage=config.match_percentage,
+        tissue_percentage=config.tissue_percentage,
+        target_level=runtime_settings.target_level,
+        use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+    )
 
 
 def build_slide_request(
@@ -149,6 +180,7 @@ def build_slide_request(
     runtime_settings: SlideRuntimeSettings,
     *,
     image_path: Path | None = None,
+    artifacts_geojson_path: Path | None = None,
 ) -> SlideProcessingRequest:
     """Build the shared slide-processing request for one case."""
 
@@ -170,7 +202,7 @@ def build_slide_request(
         num_workers=runtime_settings.num_workers,
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
         hiseg_xml_coord_level=config.hiseg_xml_coord_level,
-        artifacts_geojson_path=resolve_artifacts_geojson(case, config),
+        artifacts_geojson_path=artifacts_geojson_path,
         hdf5_output_path=hdf5_output_path,
     )
 
@@ -218,6 +250,12 @@ def main_process() -> None:
         return
 
     runtime_settings = load_slide_runtime_settings(os.environ)
+    geojson_lookup = (
+        GeoJsonLookup.from_directory(config.geojson_path)
+        if config.geojson_path is not None
+        and (config.use_advanced_artifact_filtering or config.activate_sanity_check_geojson)
+        else None
+    )
     logger.info("Starting Stage 2 processing for tag=%s", config.tag)
     stale_cases = repository.list_stale_cases()
     if stale_cases:
@@ -231,16 +269,16 @@ def main_process() -> None:
     for case in repository.list_completed_cases():
         if case.annotation_path is None or case.processing_signature is None:
             continue
-        expected_processing_signature = build_processing_signature(
-            image_path=case.image_path,
-            annotation_path=case.annotation_path,
-            artifacts_geojson_path=resolve_artifacts_geojson(case, config),
-            window_size=config.window_size,
-            stride=config.stride,
-            match_percentage=config.match_percentage,
-            tissue_percentage=config.tissue_percentage,
-            target_level=runtime_settings.target_level,
-            use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+        artifacts_geojson_path = resolve_artifacts_geojson(
+            case,
+            config,
+            geojson_lookup=geojson_lookup,
+        )
+        expected_processing_signature = build_processing_signature_for_case(
+            case,
+            config,
+            runtime_settings,
+            artifacts_geojson_path=artifacts_geojson_path,
         )
         if expected_processing_signature != case.processing_signature:
             stale_processed_cases.append(case.image_path.name)
@@ -289,6 +327,17 @@ def main_process() -> None:
 
                 repository.mark_processing(case.record_id)
                 started_at = time.perf_counter()
+                artifacts_geojson_path = resolve_artifacts_geojson(
+                    case,
+                    config,
+                    geojson_lookup=geojson_lookup,
+                )
+                processing_signature = build_processing_signature_for_case(
+                    case,
+                    config,
+                    runtime_settings,
+                    artifacts_geojson_path=artifacts_geojson_path,
+                )
                 with stage_wsi_locally(
                     source_path=case.image_path,
                     cache_dir=(
@@ -302,22 +351,10 @@ def main_process() -> None:
                             config,
                             runtime_settings,
                             image_path=staged_image_path,
+                            artifacts_geojson_path=artifacts_geojson_path,
                         )
                     )
-                processing_signature = build_processing_signature(
-                    image_path=case.image_path,
-                    annotation_path=case.annotation_path,
-                    artifacts_geojson_path=resolve_artifacts_geojson(case, config),
-                    window_size=config.window_size,
-                    stride=config.stride,
-                    match_percentage=config.match_percentage,
-                    tissue_percentage=config.tissue_percentage,
-                    target_level=runtime_settings.target_level,
-                    use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
-                )
-                artifact_index_writer.append_records(
-                    [ArtifactPatchRecord(**record) for record in result.artifact_patch_records]
-                )
+                artifact_index_writer.append_records(result.artifact_patch_records)
                 elapsed_minutes = (time.perf_counter() - started_at) / 60
                 repository.update_case(
                     case.record_id,

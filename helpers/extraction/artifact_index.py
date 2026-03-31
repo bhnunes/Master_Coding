@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import pyarrow as pa
@@ -61,16 +62,31 @@ class ArtifactIndexWriter:
     def rows_written(self) -> int:
         return self._rows_written
 
-    def append_records(self, records: list[ArtifactPatchRecord]) -> None:
+    def append_records(self, records: Sequence[ArtifactPatchRecord | Mapping[str, object]]) -> None:
         if not records:
             return
         table = pa.Table.from_pylist(
-            [asdict(record) for record in records], schema=ARTIFACT_INDEX_SCHEMA
+            [self._build_row(record) for record in records], schema=ARTIFACT_INDEX_SCHEMA
         )
         if self._writer is None:
             self._writer = pq.ParquetWriter(self.output_path, ARTIFACT_INDEX_SCHEMA)
         self._writer.write_table(table)
         self._rows_written += len(records)
+
+    def _build_row(self, record: ArtifactPatchRecord | Mapping[str, object]) -> dict[str, object]:
+        if isinstance(record, ArtifactPatchRecord):
+            return {
+                "filename": record.filename,
+                "label": record.label,
+                "patient_id": record.patient_id,
+                "slide_id": record.slide_id,
+                "cov_fold": record.cov_fold,
+                "cov_penmarking": record.cov_penmarking,
+                "cov_oof": record.cov_oof,
+                "cov_darkspot_foreign": record.cov_darkspot_foreign,
+                "cov_edge_airbubble": record.cov_edge_airbubble,
+            }
+        return {column: record[column] for column in ARTIFACT_INDEX_COLUMNS}
 
     def close(self) -> None:
         if self._writer is None:

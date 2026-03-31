@@ -228,6 +228,10 @@ def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverag
         "path_not_cancer_mask_folder": str(tmp_path / "NOT_CANCER_MASK"),
         "patient": "patient-2",
         "slide_id": "slide-b",
+        "filename_prefix": patch_engine.build_patch_filename_prefix(
+            patient_id="patient-2",
+            slide_id="slide-b",
+        ),
     }
     for folder in ["CANCER", "CANCER_MASK", "NOT_CANCER", "NOT_CANCER_MASK"]:
         (tmp_path / folder).mkdir()
@@ -287,23 +291,87 @@ def test_process_window_with_slide_skips_overlap_before_reading_slide(
 def test_process_window_batch_returns_profiled_error_when_worker_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        patch_engine,
+        "_WORKER_CONTEXT",
+        {"path_Image": "/tmp/broken.svs", "profile_output_path": "/tmp/profile.json"},
+    )
+    monkeypatch.setattr(patch_engine, "_WORKER_SLIDE", None)
+
+    result = patch_engine.process_window_batch([(0, 0)])
+
+    assert result[0][0] == "ERROR"
+    assert "Worker slide handle was not initialized" in result[0][1]
+    assert "read_region" in result[0][2]
+
+
+def test_initialize_worker_opens_slide_once_and_reuses_it_across_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    open_calls: list[str] = []
+    closed: list[str] = []
+
+    class FakeSlide:
+        def close(self) -> None:
+            closed.append("closed")
+
+    class FakeOpenSlideModule:
+        def OpenSlide(self, path: str) -> FakeSlide:
+            open_calls.append(path)
+            return FakeSlide()
+
+    processed: list[tuple[int, int]] = []
+    monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
+    monkeypatch.setattr(patch_engine.atexit, "register", lambda callback: None)
+    monkeypatch.setattr(
+        patch_engine,
+        "_process_window_with_slide",
+        lambda slide, x, y: processed.append((x, y)) or ("OK", slide, (x, y)),
+    )
+
+    patch_engine._initialize_worker({"path_Image": "/tmp/slide.svs"})
+    first = patch_engine.process_window_batch([(0, 0)])
+    second = patch_engine.process_window_batch([(1, 1), (2, 2)])
+
+    assert open_calls == ["/tmp/slide.svs"]
+    assert processed == [(0, 0), (1, 1), (2, 2)]
+    assert first[0][0] == "OK"
+    assert second[1][2] == (2, 2)
+
+    patch_engine.close_worker_resources()
+
+    assert closed == ["closed"]
+
+
+def test_initialize_worker_raises_when_slide_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeOpenSlideModule:
         def OpenSlide(self, path: str) -> object:
             del path
             raise RuntimeError("boom")
 
     monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
-    monkeypatch.setattr(
-        patch_engine,
-        "_WORKER_CONTEXT",
-        {"path_Image": "/tmp/broken.svs", "profile_output_path": "/tmp/profile.json"},
-    )
+    monkeypatch.setattr(patch_engine.atexit, "register", lambda callback: None)
 
-    result = patch_engine.process_window_batch([(0, 0)])
+    with pytest.raises(RuntimeError, match="boom"):
+        patch_engine._initialize_worker({"path_Image": "/tmp/broken.svs"})
 
-    assert result[0][0] == "ERROR"
-    assert "RuntimeError: boom" in result[0][1]
-    assert "read_region" in result[0][2]
+
+def test_close_worker_resources_is_idempotent() -> None:
+    class FakeSlide:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    slide = FakeSlide()
+    patch_engine._WORKER_SLIDE = slide
+
+    patch_engine.close_worker_resources()
+    patch_engine.close_worker_resources()
+
+    assert slide.close_calls == 1
+    assert patch_engine._WORKER_SLIDE is None
 
 
 def test_run_extraction_parses_artifact_geojson_and_writes_profile_summary(

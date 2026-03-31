@@ -1,30 +1,74 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.provenance import hash_file_sha256, hash_json_payload
 
 
-def resolve_geojson_for_slide(geojson_dir: Path, image_path: Path) -> Path | None:
+@dataclass(frozen=True)
+class GeoJsonLookup:
+    """Single-pass index for resolving artifact GeoJSON files by slide stem."""
+
+    legacy_by_stem: dict[str, Path]
+    hashed_by_stem: dict[str, tuple[Path, ...]]
+
+    @classmethod
+    def from_directory(cls, geojson_dir: Path) -> GeoJsonLookup:
+        legacy_by_stem: dict[str, Path] = {}
+        hashed_lists_by_stem: dict[str, list[Path]] = {}
+
+        for candidate in geojson_dir.iterdir():
+            if not candidate.is_file() or candidate.suffix.lower() != ".geojson":
+                continue
+
+            stem = candidate.stem
+            stem_prefix, separator, _suffix = stem.partition("__")
+            if separator:
+                hashed_lists_by_stem.setdefault(stem_prefix, []).append(candidate)
+                continue
+
+            legacy_by_stem[stem] = candidate
+
+        return cls(
+            legacy_by_stem=legacy_by_stem,
+            hashed_by_stem={
+                stem: tuple(sorted(paths)) for stem, paths in hashed_lists_by_stem.items()
+            },
+        )
+
+    def resolve_for_slide(self, image_path: Path) -> Path | None:
+        """Resolve the artifact GeoJSON for one slide, failing closed on ambiguity."""
+
+        legacy_candidate = self.legacy_by_stem.get(image_path.stem)
+        hashed_candidates = self.hashed_by_stem.get(image_path.stem, ())
+        if legacy_candidate is not None and hashed_candidates:
+            raise ValueError(
+                f"Ambiguous artifact GeoJSON mapping for '{image_path.name}'. "
+                "Remove duplicate legacy/collision-safe files before processing."
+            )
+        if legacy_candidate is not None:
+            return legacy_candidate
+        if len(hashed_candidates) > 1:
+            raise ValueError(
+                f"Ambiguous artifact GeoJSON mapping for '{image_path.name}'. "
+                "Multiple collision-safe GeoJSON files share this slide stem."
+            )
+        if len(hashed_candidates) == 1:
+            return hashed_candidates[0]
+        return None
+
+
+def resolve_geojson_for_slide(
+    geojson_dir: Path,
+    image_path: Path,
+    *,
+    lookup: GeoJsonLookup | None = None,
+) -> Path | None:
     """Resolve the artifact GeoJSON for one slide, failing closed on ambiguity."""
 
-    legacy_candidate = geojson_dir / f"{image_path.stem}.geojson"
-    hashed_candidates = sorted(geojson_dir.glob(f"{image_path.stem}__*.geojson"))
-    if legacy_candidate.exists() and hashed_candidates:
-        raise ValueError(
-            f"Ambiguous artifact GeoJSON mapping for '{image_path.name}'. "
-            "Remove duplicate legacy/collision-safe files before processing."
-        )
-    if legacy_candidate.exists():
-        return legacy_candidate
-    if len(hashed_candidates) > 1:
-        raise ValueError(
-            f"Ambiguous artifact GeoJSON mapping for '{image_path.name}'. "
-            "Multiple collision-safe GeoJSON files share this slide stem."
-        )
-    if len(hashed_candidates) == 1:
-        return hashed_candidates[0]
-    return None
+    resolver = lookup if lookup is not None else GeoJsonLookup.from_directory(geojson_dir)
+    return resolver.resolve_for_slide(image_path)
 
 
 def build_processing_signature(
