@@ -19,8 +19,6 @@ class ExtractionCaseRecord:
     cancer_qtd: int | None
     non_cancer_qtd: int | None
     valid_image: int | None
-    cancer_color: str | None
-    not_cancer_color: str | None
     processing_time_minutes: float | None
     patient: str
     comments: str
@@ -82,8 +80,6 @@ class ExtractionRepository:
                     CANCER_QTD INTEGER,
                     NON_CANCER_QTD INTEGER,
                     VALID_IMAGE INTEGER,
-                    CANCER_COLOR TEXT,
-                    NOT_CANCER_COLOR TEXT,
                     PROCESSINGTIME_MINUTES REAL,
                     PATIENT TEXT NOT NULL UNIQUE,
                     COMMENTS TEXT,
@@ -134,7 +130,7 @@ class ExtractionRepository:
         activate_sanity_check: bool,
         use_advanced_filtering: bool,
         geojson_path: Path | None,
-    ) -> bool:
+    ) -> None:
         """Scan case folders and insert unseen cases into the database."""
 
         images_folder, annotations_folder, _ = self.get_source_directories(source_folder)
@@ -158,7 +154,6 @@ class ExtractionRepository:
             path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
         }
 
-        svs_files_added = False
         with self._connect() as connection:
             existing_data = connection.execute(
                 f"SELECT ID, IMAGEPATH, PATIENT, INPUT_SIGNATURE FROM {self.table_name}"
@@ -197,9 +192,6 @@ class ExtractionRepository:
                             ),
                         )
                     continue
-
-                if image_path.suffix.lower() == ".svs":
-                    svs_files_added = True
 
                 status = "TO BE PROCESSED"
                 comments = ""
@@ -247,8 +239,6 @@ class ExtractionRepository:
                     payload,
                 )
             connection.commit()
-
-        return svs_files_added
 
     def list_pending_cases(self) -> list[ExtractionCaseRecord]:
         """Return all cases still waiting for processing, ordered deterministically."""
@@ -343,8 +333,6 @@ class ExtractionRepository:
             if row["NON_CANCER_QTD"] is not None
             else None,
             valid_image=int(row["VALID_IMAGE"]) if row["VALID_IMAGE"] is not None else None,
-            cancer_color=str(row["CANCER_COLOR"]) if row["CANCER_COLOR"] else None,
-            not_cancer_color=str(row["NOT_CANCER_COLOR"]) if row["NOT_CANCER_COLOR"] else None,
             processing_time_minutes=float(row["PROCESSINGTIME_MINUTES"])
             if row["PROCESSINGTIME_MINUTES"] is not None
             else None,

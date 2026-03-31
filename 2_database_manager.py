@@ -84,63 +84,13 @@ def print_project_setup(folders: tuple[Path, Path, Path]) -> None:
     )
 
 
-def print_ingestion_summary(table_name: str, svs_files_added: bool) -> None:
-    """Print the ingestion completion messages."""
+def print_ingestion_summary() -> None:
+    """Print the ingestion completion message."""
 
     print(
         f"\n{Style.GREEN}{Style.SUCCESS} Ingestion complete. Set {Style.BOLD}LOADCASES=False"
         f"{Style.RESET}{Style.GREEN} in .env to start processing.{Style.RESET}"
     )
-    if not svs_files_added:
-        return
-
-    print(f"\n{Style.YELLOW}{Style.BOLD}SVS ACTION REQUIRED{Style.RESET}")
-    print("SVS files require manual annotation color setup in the database.")
-    print(
-        f"Example: {Style.CYAN}UPDATE {table_name} SET CANCER_COLOR = '65280' WHERE ...;"
-        f"{Style.RESET}"
-    )
-
-
-def is_hiseg_tag(tag: str) -> bool:
-    """Return whether the current Stage 2 tag targets HISEG."""
-
-    return tag.strip().upper() == "HISEG"
-
-
-def is_chile_tag(tag: str) -> bool:
-    """Return whether the current Stage 2 tag targets the CHILE dataset."""
-
-    return tag.strip() == "Chile"
-
-
-def collect_problematic_svs_files(cases: list[ExtractionCaseRecord]) -> list[str]:
-    """Return SVS/XML cases that are missing color assignments."""
-
-    problematic_files: list[str] = []
-    for case in cases:
-        if case.annotation_path is None:
-            continue
-        is_svs_xml = (
-            case.image_path.suffix.lower() == ".svs"
-            and case.annotation_path.suffix.lower() == ".xml"
-        )
-        colors_missing = not case.cancer_color or not case.not_cancer_color
-        if is_svs_xml and colors_missing:
-            problematic_files.append(case.image_path.name)
-    return problematic_files
-
-
-def collect_problematic_svs_files_for_tag(
-    cases: list[ExtractionCaseRecord],
-    *,
-    tag: str,
-) -> list[str]:
-    """Return SVS/XML cases requiring DB-configured colors for the active dataset."""
-
-    if is_hiseg_tag(tag) or is_chile_tag(tag):
-        return []
-    return collect_problematic_svs_files(cases)
 
 
 def resolve_artifacts_geojson(
@@ -196,8 +146,6 @@ def build_slide_request(
     return SlideProcessingRequest(
         image_path=image_path or case.image_path,
         annotation_path=case.annotation_path,
-        cancer_color=case.cancer_color or "NA",
-        not_cancer_color=case.not_cancer_color or "NA",
         dataset_tag=config.tag,
         patient=case.patient,
         window_size=config.window_size,
@@ -244,15 +192,13 @@ def main_process() -> None:
     if config.load_cases:
         logger.info("Starting Stage 2 ingestion for tag=%s", config.tag)
         print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.CHECK} INGESTION PROCESS ---{Style.RESET}")
-        svs_added = repository.ingest_new_cases(
+        repository.ingest_new_cases(
             source_folder=config.source_folder,
             activate_sanity_check=config.activate_sanity_check_geojson,
             use_advanced_filtering=config.use_advanced_artifact_filtering,
             geojson_path=config.geojson_path,
         )
-        if is_hiseg_tag(config.tag):
-            svs_added = False
-        print_ingestion_summary(config.table_name, svs_added)
+        print_ingestion_summary()
         return
 
     runtime_settings = load_slide_runtime_settings(os.environ)
@@ -299,20 +245,6 @@ def main_process() -> None:
     if not cases_to_process:
         print(f"\n{Style.INFO} No cases to process with status 'TO BE PROCESSED'.")
         return
-
-    problematic_svs_files = collect_problematic_svs_files_for_tag(cases_to_process, tag=config.tag)
-    if problematic_svs_files:
-        error_message = (
-            f"\n{Style.RED}{Style.ERROR}{Style.BOLD} PROCESSING HALTED: Missing SVS annotation "
-            f"colors.{Style.RESET}\n"
-            f"{Style.YELLOW}The following .svs files are marked 'TO BE PROCESSED' but do not "
-            f"have "
-            f"'CANCER_COLOR' and/or 'NOT_CANCER_COLOR' set in the database.{Style.RESET}\n\n"
-            + "\n".join(f"  - {name}" for name in problematic_svs_files)
-            + f"\n\nPlease run an UPDATE query on the '{Style.CYAN}{config.table_name}"
-            f"{Style.RESET}' table to set these values before proceeding."
-        )
-        raise ValueError(error_message)
 
     print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.ROCKET} STARTING PROCESSING ---{Style.RESET}")
     artifact_index_writer = ArtifactIndexWriter(

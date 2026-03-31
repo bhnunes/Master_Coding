@@ -19,14 +19,12 @@ def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -
     (annotations_dir / "case_b.xml").write_text("annotation")
     (geojson_dir / "case_a__abcdef123456.geojson").write_text("{}")
 
-    svs_added = repository.ingest_new_cases(
+    repository.ingest_new_cases(
         source_folder=source_folder,
         activate_sanity_check=True,
         use_advanced_filtering=True,
         geojson_path=geojson_dir,
     )
-
-    assert svs_added is True
 
     with sqlite3.connect(tmp_path / "database.db") as connection:
         rows = connection.execute(

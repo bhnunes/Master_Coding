@@ -49,8 +49,6 @@ def test_run_slide_processing_returns_patch_engine_counts(
     request = SlideProcessingRequest(
         image_path=tmp_path / "slide.svs",
         annotation_path=tmp_path / "slide.xml",
-        cancer_color="65280",
-        not_cancer_color="255",
         dataset_tag="TEST",
         patient="100001",
         window_size=224,

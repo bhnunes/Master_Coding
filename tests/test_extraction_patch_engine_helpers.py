@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -189,7 +189,10 @@ def test_process_window_with_slide_skips_tissue_and_records_profile_stats(
         "slide_id": "slide",
     }
 
-    result = patch_engine._process_window_with_slide(FakeSlide(), 1, 2)
+    result = cast(
+        tuple[str, object | None, dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 1, 2),
+    )
 
     assert result[0] == "SKIPPED_TISSUE"
     assert result[1] is None
@@ -250,7 +253,10 @@ def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverag
         },
     )
 
-    result = patch_engine._process_window_with_slide(FakeSlide(), 0, 0)
+    result = cast(
+        tuple[str, dict[str, Any], dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 0, 0),
+    )
 
     assert result[0] == "SAVED_NOT_CANCER"
     assert result[1]["label"] == 0
@@ -281,7 +287,10 @@ def test_process_window_with_slide_skips_overlap_before_reading_slide(
     }
     monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
 
-    result = patch_engine._process_window_with_slide(FakeSlide(), 0, 0)
+    result = cast(
+        tuple[str, object | None, dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 0, 0),
+    )
 
     assert result[0] == "SKIPPED_OVERLAP"
     assert result[1] is None
@@ -298,7 +307,9 @@ def test_process_window_batch_returns_profiled_error_when_worker_fails(
     )
     monkeypatch.setattr(patch_engine, "_WORKER_SLIDE", None)
 
-    result = patch_engine.process_window_batch([(0, 0)])
+    result = cast(
+        list[tuple[str, str, dict[str, Any]]], patch_engine.process_window_batch([(0, 0)])
+    )
 
     assert result[0][0] == "ERROR"
     assert "Worker slide handle was not initialized" in result[0][1]
@@ -321,17 +332,25 @@ def test_initialize_worker_opens_slide_once_and_reuses_it_across_batches(
             return FakeSlide()
 
     processed: list[tuple[int, int]] = []
+
+    def fake_process_window_with_slide(
+        slide: object, x: int, y: int
+    ) -> tuple[str, object, tuple[int, int]]:
+        processed.append((x, y))
+        return ("OK", slide, (x, y))
+
     monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
-    monkeypatch.setattr(patch_engine.atexit, "register", lambda callback: None)
-    monkeypatch.setattr(
-        patch_engine,
-        "_process_window_with_slide",
-        lambda slide, x, y: processed.append((x, y)) or ("OK", slide, (x, y)),
-    )
+    monkeypatch.setattr("helpers.extraction.patch_engine.atexit.register", lambda callback: None)
+    monkeypatch.setattr(patch_engine, "_process_window_with_slide", fake_process_window_with_slide)
 
     patch_engine._initialize_worker({"path_Image": "/tmp/slide.svs"})
-    first = patch_engine.process_window_batch([(0, 0)])
-    second = patch_engine.process_window_batch([(1, 1), (2, 2)])
+    first = cast(
+        list[tuple[str, object, tuple[int, int]]], patch_engine.process_window_batch([(0, 0)])
+    )
+    second = cast(
+        list[tuple[str, object, tuple[int, int]]],
+        patch_engine.process_window_batch([(1, 1), (2, 2)]),
+    )
 
     assert open_calls == ["/tmp/slide.svs"]
     assert processed == [(0, 0), (1, 1), (2, 2)]
@@ -350,7 +369,7 @@ def test_initialize_worker_raises_when_slide_open_fails(monkeypatch: pytest.Monk
             raise RuntimeError("boom")
 
     monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
-    monkeypatch.setattr(patch_engine.atexit, "register", lambda callback: None)
+    monkeypatch.setattr("helpers.extraction.patch_engine.atexit.register", lambda callback: None)
 
     with pytest.raises(RuntimeError, match="boom"):
         patch_engine._initialize_worker({"path_Image": "/tmp/broken.svs"})
@@ -365,7 +384,7 @@ def test_close_worker_resources_is_idempotent() -> None:
             self.close_calls += 1
 
     slide = FakeSlide()
-    patch_engine._WORKER_SLIDE = slide
+    cast(Any, patch_engine)._WORKER_SLIDE = slide
 
     patch_engine.close_worker_resources()
     patch_engine.close_worker_resources()

@@ -46,8 +46,6 @@ class SlideProcessingRequest:
 
     image_path: Path
     annotation_path: Path
-    cancer_color: str
-    not_cancer_color: str
     dataset_tag: str
     patient: str
     window_size: int
@@ -155,8 +153,6 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             stride=request.stride,
             tissue_percentage_req=request.tissue_percentage,
             match_percentage_req=request.match_percentage,
-            cancer_color=request.cancer_color,
-            not_cancer_color=request.not_cancer_color,
             dataset_tag=request.dataset_tag,
             hiseg_xml_coord_level=request.hiseg_xml_coord_level,
             patient=request.patient,

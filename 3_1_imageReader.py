@@ -31,8 +31,6 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Full path to the annotation file.",
     )
-    parser.add_argument("--cancer_color", type=str, required=True)
-    parser.add_argument("--not_cancer_color", type=str, required=True)
     parser.add_argument("--patient", type=str, required=True)
     parser.add_argument("--path_artifacts_geojson", type=str, required=False, default=None)
     return parser.parse_args()
@@ -62,8 +60,7 @@ def main() -> None:
         SlideProcessingRequest(
             image_path=Path(args.path_Image),
             annotation_path=Path(args.annotation_path),
-            cancer_color=args.cancer_color,
-            not_cancer_color=args.not_cancer_color,
+            dataset_tag=(os.environ.get("TAG") or "").strip(),
             patient=args.patient,
             window_size=runtime_settings.window_size,
             stride=runtime_settings.stride,
@@ -72,6 +69,7 @@ def main() -> None:
             target_level=runtime_settings.target_level,
             num_workers=runtime_settings.num_workers,
             use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+            hiseg_xml_coord_level=int(os.environ.get("HISEG_XML_COORD_LEVEL") or 6),
             artifacts_geojson_path=Path(args.path_artifacts_geojson)
             if args.path_artifacts_geojson
             else None,

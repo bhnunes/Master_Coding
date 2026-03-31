@@ -214,10 +214,12 @@ Current Stage 2 artifact-aware behavior:
 Current Stage 2 multi-dataset XML behavior:
 
 - `.svs/.xml` support is dataset-aware and selected through `TAG`
-- For legacy `.svs/.xml` datasets, Stage 2 still expects `CANCER_COLOR` and `NOT_CANCER_COLOR` to be configured in the SQLite database after ingestion
+- `.svs/.xml` is supported only for `TAG=HISEG` and `TAG=Chile`
+- Unsupported `.svs/.xml` tags now fail fast with an explicit error
 - `TAG=HISEG` enables the HISEG-specific ASAP XML path in `helpers/extraction/data_handlers.py`
+- `TAG=Chile` enables the CHILE-specific XML `LineColor` path in `helpers/extraction/data_handlers.py`
 - HISEG reads `Annotation Color="#..."` plus `Coordinates/Coordinate` entries instead of the legacy `LineColor` + `Region/Vertex` layout
-- HISEG uses hardcoded color groups in code rather than SQLite color columns
+- Stage 2 now resolves supported SVS/XML label colors internally in code rather than through SQLite columns
 - HISEG color policy is:
   - cancer: `#8B0000`, `#FF00FF`, `#800080`
   - not_cancer: `#8A2BE2`, `#0000FF`, `#4682B4`, `#00FF00`, `#008000`, `#FFFF00`
@@ -361,7 +363,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-For the HISEG dataset, use `TAG=HISEG`. Stage 2 will then parse ASAP-style `.xml` annotations and will not require manual `CANCER_COLOR` / `NOT_CANCER_COLOR` setup in the Stage 2 SQLite table.
+For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Stage 2 resolves the supported label colors internally and does not require manual SQLite color setup.
 
 See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 5/6/7 HDF5-native preparation, Stage 8 smart sampling, Stage 9 LR-finder reporting, the Stage 10 training matrix, and Stage 11 ensemble-optimizer settings.
 

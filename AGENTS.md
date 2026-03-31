@@ -133,7 +133,8 @@ Agent guide for coding agents working in this repository.
 - Use `helpers.runtime_platform.resolve_env_path` and related helpers for path-like environment variables.
 - Preserve cross-platform behavior, especially Windows `OPENSLIDE_PATH` handling.
 - `TAG=HISEG` enables the HISEG-specific Stage 2 SVS/XML annotation path.
-- HISEG uses hardcoded XML color groups in code; legacy `.svs/.xml` datasets still use DB-driven `CANCER_COLOR` / `NOT_CANCER_COLOR` values.
+- `TAG=Chile` enables the CHILE-specific Stage 2 SVS/XML annotation path.
+- Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
