@@ -107,3 +107,32 @@ def test_hiseg_tag_skips_missing_svs_xml_color_guard(tmp_path: Path) -> None:
 
     assert collect_problematic_svs_files_for_tag(cases, tag="HISEG") == []
     assert collect_problematic_svs_files_for_tag(cases, tag="TCGA") == ["slide_a.svs"]
+
+
+def test_chile_tag_skips_missing_svs_xml_color_guard(tmp_path: Path) -> None:
+    cases = [
+        ExtractionCaseRecord(
+            record_id=1,
+            status="TO BE PROCESSED",
+            image_path=tmp_path / "slide_a.svs",
+            annotation_path=tmp_path / "slide_a.xml",
+            cancer_qtd=None,
+            non_cancer_qtd=None,
+            valid_image=None,
+            cancer_color=None,
+            not_cancer_color=None,
+            processing_time_minutes=None,
+            patient="1001",
+            comments="",
+            window_size=None,
+            stride=None,
+            match_percentage=None,
+            tissue_percentage=None,
+            last_update=None,
+            input_signature=None,
+            processing_signature=None,
+        )
+    ]
+
+    assert collect_problematic_svs_files_for_tag(cases, tag="Chile") == []
+    assert collect_problematic_svs_files_for_tag(cases, tag="TCGA") == ["slide_a.svs"]

@@ -192,6 +192,78 @@ def test_svs_xml_handler_supports_hiseg_asap_color_mapping(tmp_path: Path) -> No
     assert len(result["not_cancer_polygons"]) == 1
 
 
+def test_svs_xml_handler_uses_hardcoded_chile_colors_with_65280(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "slide.xml"
+    annotation_path.write_text(
+        """
+        <Annotations>
+          <Annotation LineColor="255">
+            <Region>
+              <Vertex X="0" Y="0" />
+              <Vertex X="4" Y="0" />
+              <Vertex X="4" Y="4" />
+            </Region>
+          </Annotation>
+          <Annotation LineColor="65280">
+            <Region>
+              <Vertex X="10" Y="10" />
+              <Vertex X="14" Y="10" />
+              <Vertex X="14" Y="14" />
+            </Region>
+          </Annotation>
+        </Annotations>
+        """,
+        encoding="utf-8",
+    )
+
+    result = SVS_XML_Handler().load_annotations(
+        None,
+        annotation_path=str(annotation_path),
+        cancer_color="unexpected",
+        not_cancer_color="unexpected",
+        dataset_tag="Chile",
+    )
+
+    assert len(result["cancer_polygons"]) == 1
+    assert len(result["not_cancer_polygons"]) == 1
+
+
+def test_svs_xml_handler_uses_hardcoded_chile_colors_with_65408(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "slide.xml"
+    annotation_path.write_text(
+        """
+        <Annotations>
+          <Annotation LineColor="255">
+            <Region>
+              <Vertex X="0" Y="0" />
+              <Vertex X="4" Y="0" />
+              <Vertex X="4" Y="4" />
+            </Region>
+          </Annotation>
+          <Annotation LineColor="65408">
+            <Region>
+              <Vertex X="10" Y="10" />
+              <Vertex X="14" Y="10" />
+              <Vertex X="14" Y="14" />
+            </Region>
+          </Annotation>
+        </Annotations>
+        """,
+        encoding="utf-8",
+    )
+
+    result = SVS_XML_Handler().load_annotations(
+        None,
+        annotation_path=str(annotation_path),
+        cancer_color="unexpected",
+        not_cancer_color="unexpected",
+        dataset_tag="Chile",
+    )
+
+    assert len(result["cancer_polygons"]) == 1
+    assert len(result["not_cancer_polygons"]) == 1
+
+
 def test_svs_xml_handler_merges_multiple_hiseg_cancer_colors(tmp_path: Path) -> None:
     annotation_path = tmp_path / "slide.xml"
     annotation_path.write_text(

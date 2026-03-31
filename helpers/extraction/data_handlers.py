@@ -30,6 +30,17 @@ class HisegLabelColors:
 HISEG_LABEL_COLORS = HisegLabelColors()
 
 
+@dataclass(frozen=True)
+class ChileLabelColors:
+    """Hardcoded CHILE XML line-color policy."""
+
+    cancer: str = "255"
+    not_cancer: frozenset[str] = frozenset({"65280", "65408"})
+
+
+CHILE_LABEL_COLORS = ChileLabelColors()
+
+
 def _to_coord_list(geometry: Polygon | MultiPolygon) -> list[list[tuple[float, float]]]:
     """Convert a Shapely polygon geometry into plain coordinate lists."""
     if geometry.is_empty:
@@ -130,12 +141,40 @@ class SVS_XML_Handler(BaseHandler):
                 root,
                 annotation_level=_required_int(kwargs.get("hiseg_xml_coord_level")),
             )
+        if _is_chile_tag(kwargs.get("dataset_tag")):
+            return self._load_chile_annotations(root)
 
         return self._load_line_color_annotations(
             root,
             cancer_color=kwargs.get("cancer_color"),
             not_cancer_color=kwargs.get("not_cancer_color"),
         )
+
+    def _load_chile_annotations(self, root: ET.Element) -> dict[str, list[Any]]:
+        raw_cancer_coords: list[list[tuple[float, float]]] = []
+        raw_not_cancer_coords: list[list[tuple[float, float]]] = []
+
+        for annotation in root.findall(".//Annotation"):
+            line_color = str(annotation.get("LineColor"))
+            is_cancer = line_color == CHILE_LABEL_COLORS.cancer
+            is_non_cancer = line_color in CHILE_LABEL_COLORS.not_cancer
+            if not (is_cancer or is_non_cancer):
+                continue
+
+            for region in annotation.findall(".//Region"):
+                vertices = [
+                    (_required_float(vertex.get("X")), _required_float(vertex.get("Y")))
+                    for vertex in region.findall(".//Vertex")
+                    if vertex.get("X") is not None and vertex.get("Y") is not None
+                ]
+                if len(vertices) < 3:
+                    continue
+                if is_cancer:
+                    raw_cancer_coords.append(vertices)
+                else:
+                    raw_not_cancer_coords.append(vertices)
+
+        return _finalize_polygons(raw_cancer_coords, raw_not_cancer_coords)
 
     def _load_line_color_annotations(
         self,
@@ -393,3 +432,7 @@ def _normalize_hex_color(value: str | None) -> str:
 
 def _is_hiseg_tag(value: object) -> bool:
     return isinstance(value, str) and value.strip().upper() == "HISEG"
+
+
+def _is_chile_tag(value: object) -> bool:
+    return isinstance(value, str) and value.strip() == "Chile"

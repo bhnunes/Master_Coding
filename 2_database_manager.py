@@ -108,6 +108,12 @@ def is_hiseg_tag(tag: str) -> bool:
     return tag.strip().upper() == "HISEG"
 
 
+def is_chile_tag(tag: str) -> bool:
+    """Return whether the current Stage 2 tag targets the CHILE dataset."""
+
+    return tag.strip() == "Chile"
+
+
 def collect_problematic_svs_files(cases: list[ExtractionCaseRecord]) -> list[str]:
     """Return SVS/XML cases that are missing color assignments."""
 
@@ -132,7 +138,7 @@ def collect_problematic_svs_files_for_tag(
 ) -> list[str]:
     """Return SVS/XML cases requiring DB-configured colors for the active dataset."""
 
-    if is_hiseg_tag(tag):
+    if is_hiseg_tag(tag) or is_chile_tag(tag):
         return []
     return collect_problematic_svs_files(cases)
 
