@@ -57,6 +57,7 @@ class SlideProcessingRequest:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
+    hiseg_xml_coord_level: int
     artifacts_geojson_path: Path | None = None
     profile_output_path: Path | None = None
     hdf5_output_path: Path | None = None
@@ -157,6 +158,7 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             cancer_color=request.cancer_color,
             not_cancer_color=request.not_cancer_color,
             dataset_tag=request.dataset_tag,
+            hiseg_xml_coord_level=request.hiseg_xml_coord_level,
             patient=request.patient,
             path_artifacts_geojson=str(request.artifacts_geojson_path)
             if request.artifacts_geojson_path is not None

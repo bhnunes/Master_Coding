@@ -35,7 +35,15 @@ def _to_coord_list(geometry: Polygon | MultiPolygon) -> list[list[tuple[float, f
     if geometry.is_empty:
         return []
     geoms = geometry.geoms if isinstance(geometry, MultiPolygon) else [geometry]
-    return [list(polygon.exterior.coords) for polygon in geoms if not polygon.is_empty]
+    coord_lists: list[list[tuple[float, float]]] = []
+    for polygon in geoms:
+        if polygon.is_empty:
+            continue
+        coords: list[tuple[float, float]] = [
+            (float(x_coord), float(y_coord)) for x_coord, y_coord in polygon.exterior.coords
+        ]
+        coord_lists.append(coords)
+    return coord_lists
 
 
 def _coords_to_shapely_polygons(coord_lists: list[Any]) -> list[Polygon]:
@@ -75,7 +83,9 @@ def _remove_ambiguous_regions(
     cancer_area = unary_union(cancer_polygons) if cancer_polygons else Polygon()
     non_cancer_area = unary_union(non_cancer_polygons) if non_cancer_polygons else Polygon()
     ambiguous_area = cancer_area.intersection(non_cancer_area)
-    return cancer_area.difference(ambiguous_area), non_cancer_area.difference(ambiguous_area)
+    clean_cancer_area = cast(Polygon | MultiPolygon, cancer_area.difference(ambiguous_area))
+    clean_non_cancer_area = cast(Polygon | MultiPolygon, non_cancer_area.difference(ambiguous_area))
+    return clean_cancer_area, clean_non_cancer_area
 
 
 class BaseHandler(ABC):
@@ -108,7 +118,6 @@ class SVS_XML_Handler(BaseHandler):
     """Handle `.svs` slides with `.xml` annotations."""
 
     def _load_raw_annotations(self, slide: Any, **kwargs: Any) -> dict[str, list[Any]]:
-        del slide
         logging.info("Using SVS_XML_Handler with explicit overlap cleaning.")
         annotation_path = _require_annotation_path(kwargs)
         if not os.path.exists(annotation_path):
@@ -116,7 +125,11 @@ class SVS_XML_Handler(BaseHandler):
 
         root = ET.parse(annotation_path).getroot()
         if _is_hiseg_tag(kwargs.get("dataset_tag")):
-            return self._load_hiseg_annotations(root)
+            return self._load_hiseg_annotations(
+                slide,
+                root,
+                annotation_level=_required_int(kwargs.get("hiseg_xml_coord_level")),
+            )
 
         return self._load_line_color_annotations(
             root,
@@ -155,7 +168,30 @@ class SVS_XML_Handler(BaseHandler):
 
         return _finalize_polygons(raw_cancer_coords, raw_not_cancer_coords)
 
-    def _load_hiseg_annotations(self, root: ET.Element) -> dict[str, list[Any]]:
+    def _load_hiseg_annotations(
+        self,
+        slide: Any,
+        root: ET.Element,
+        *,
+        annotation_level: int,
+    ) -> dict[str, list[Any]]:
+        if slide is None:
+            raise ValueError("slide is required for HISEG annotation scaling")
+        if annotation_level < 0:
+            raise ValueError("hiseg_xml_coord_level must be non-negative")
+        if annotation_level >= len(slide.level_downsamples):
+            raise ValueError(
+                "HISEG annotation level "
+                f"{annotation_level} is out of range for slide with "
+                f"{len(slide.level_downsamples)} levels."
+            )
+
+        annotation_scale = float(slide.level_downsamples[annotation_level])
+        logging.info(
+            "Scaling HISEG XML annotations from level %s to level 0 with downsample %.6f.",
+            annotation_level,
+            annotation_scale,
+        )
         raw_cancer_coords: list[list[tuple[float, float]]] = []
         raw_not_cancer_coords: list[list[tuple[float, float]]] = []
 
@@ -170,7 +206,10 @@ class SVS_XML_Handler(BaseHandler):
                 continue
 
             vertices = [
-                (_required_float(node.get("X")), _required_float(node.get("Y")))
+                (
+                    _required_float(node.get("X")) * annotation_scale,
+                    _required_float(node.get("Y")) * annotation_scale,
+                )
                 for node in annotation.findall("./Coordinates/Coordinate")
                 if node.get("X") is not None and node.get("Y") is not None
             ]
@@ -326,6 +365,15 @@ def _required_float(value: str | None) -> float:
     if value is None:
         raise ValueError("Missing numeric value")
     return float(value)
+
+
+def _required_int(value: object) -> int:
+    if value is None:
+        raise ValueError("Missing integer value")
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError("Missing integer value")
+    integer_value = cast(int | str, value)
+    return int(integer_value)
 
 
 def _node_text(node: Any) -> str | None:

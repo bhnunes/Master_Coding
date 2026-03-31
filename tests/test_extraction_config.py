@@ -34,7 +34,22 @@ def test_load_database_manager_config_reads_expected_environment(tmp_path: Path)
     assert config.use_advanced_artifact_filtering is True
     assert config.activate_sanity_check_geojson is True
     assert config.geojson_path == tmp_path / "source" / "GEOJSON"
+    assert config.hiseg_xml_coord_level == 6
     assert config.log_path == Path("logs/database_manager.log")
+
+
+def test_load_database_manager_config_reads_hiseg_annotation_level_override(tmp_path: Path) -> None:
+    config = load_database_manager_config(
+        {
+            "TAG": "HISEG",
+            "SOURCE_FOLDER": str(tmp_path / "source"),
+            "SQLITE_DB_PATH": str(tmp_path / "databases" / "cases.db"),
+            "PROJECTS_BASE_PATH": str(tmp_path / "projects"),
+            "HISEG_XML_COORD_LEVEL": "5",
+        }
+    )
+
+    assert config.hiseg_xml_coord_level == 5
 
 
 def test_load_database_manager_config_defaults_artifact_feature_to_true(tmp_path: Path) -> None:

@@ -56,6 +56,7 @@ class DatabaseManagerConfig:
     use_advanced_artifact_filtering: bool
     activate_sanity_check_geojson: bool
     geojson_path: Path | None
+    hiseg_xml_coord_level: int
     copy_wsi_to_local_cache: bool
     local_slide_cache_dir: Path | None
     log_folder: Path
@@ -158,6 +159,11 @@ def load_database_manager_config(
         activate_sanity_check_geojson=activate_sanity_check_geojson,
         copy_wsi_to_local_cache=copy_wsi_to_local_cache,
         local_slide_cache_dir=local_slide_cache_dir,
+        hiseg_xml_coord_level=_parse_int(
+            values.get("HISEG_XML_COORD_LEVEL"),
+            "HISEG_XML_COORD_LEVEL",
+            default=6,
+        ),
         log_folder=log_folder,
         log_file_name=(values.get("EXTRACTION_LOG_FILE") or "database_manager.log").strip(),
         geojson_path=(

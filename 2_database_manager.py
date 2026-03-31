@@ -169,6 +169,7 @@ def build_slide_request(
         target_level=runtime_settings.target_level,
         num_workers=runtime_settings.num_workers,
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+        hiseg_xml_coord_level=config.hiseg_xml_coord_level,
         artifacts_geojson_path=resolve_artifacts_geojson(case, config),
         hdf5_output_path=hdf5_output_path,
     )

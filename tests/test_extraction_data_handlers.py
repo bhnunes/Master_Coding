@@ -40,6 +40,7 @@ class FakeSlide:
             "openslide.mpp-y": "0.25",
         }
         self.level_dimensions = [(1000, 800)]
+        self.level_downsamples = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
 
 
 def test_to_coord_list_handles_empty_polygon() -> None:
@@ -179,11 +180,12 @@ def test_svs_xml_handler_supports_hiseg_asap_color_mapping(tmp_path: Path) -> No
     )
 
     result = SVS_XML_Handler().load_annotations(
-        None,
+        FakeSlide(),
         annotation_path=str(annotation_path),
         cancer_color="NA",
         not_cancer_color="NA",
         dataset_tag="HISEG",
+        hiseg_xml_coord_level=0,
     )
 
     assert len(result["cancer_polygons"]) == 1
@@ -224,15 +226,55 @@ def test_svs_xml_handler_merges_multiple_hiseg_cancer_colors(tmp_path: Path) -> 
     )
 
     result = SVS_XML_Handler().load_annotations(
-        None,
+        FakeSlide(),
         annotation_path=str(annotation_path),
         cancer_color="NA",
         not_cancer_color="NA",
         dataset_tag="HISEG",
+        hiseg_xml_coord_level=0,
     )
 
     assert len(result["cancer_polygons"]) == 3
     assert result["not_cancer_polygons"] == []
+
+
+def test_svs_xml_handler_scales_hiseg_coordinates_from_configured_level(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "slide.xml"
+    annotation_path.write_text(
+        """
+        <ASAP_Annotations>
+          <Annotations>
+            <Annotation Color="#8B0000">
+              <Coordinates>
+                <Coordinate Order="0" X="1" Y="2" />
+                <Coordinate Order="1" X="3" Y="2" />
+                <Coordinate Order="2" X="3" Y="4" />
+              </Coordinates>
+            </Annotation>
+          </Annotations>
+        </ASAP_Annotations>
+        """,
+        encoding="utf-8",
+    )
+
+    result = SVS_XML_Handler().load_annotations(
+        FakeSlide(),
+        annotation_path=str(annotation_path),
+        cancer_color="NA",
+        not_cancer_color="NA",
+        dataset_tag="HISEG",
+        hiseg_xml_coord_level=6,
+    )
+
+    assert result["not_cancer_polygons"] == []
+    assert len(result["cancer_polygons"]) == 1
+    assert result["cancer_polygons"][0][0] == result["cancer_polygons"][0][-1]
+    x_coords = [x_coord for x_coord, _ in result["cancer_polygons"][0]]
+    y_coords = [y_coord for _, y_coord in result["cancer_polygons"][0]]
+    assert min(x_coords) == 64.0
+    assert max(x_coords) == 192.0
+    assert min(y_coords) == 128.0
+    assert max(y_coords) == 256.0
 
 
 def test_ndpi_ndpa_handler_converts_points_and_filters_titles(
