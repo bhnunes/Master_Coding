@@ -144,7 +144,7 @@ class SVS_XML_Handler(BaseHandler):
         if _is_chile_tag(kwargs.get("dataset_tag")):
             return self._load_chile_annotations(root)
         raise ValueError(
-            "Unsupported .svs/.xml dataset tag. Supported tags are 'HISEG' and 'Chile'."
+            "Unsupported .svs/.xml dataset tag. Supported tags are 'HISEG' and 'CHILE'."
         )
 
     def _load_chile_annotations(self, root: ET.Element) -> dict[str, list[Any]]:

@@ -134,7 +134,7 @@ def test_svs_xml_handler_rejects_unsupported_dataset_tag(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Supported tags are 'HISEG' and 'Chile'"):
+    with pytest.raises(ValueError, match="Supported tags are 'HISEG' and 'CHILE'"):
         SVS_XML_Handler().load_annotations(
             None,
             annotation_path=str(annotation_path),
