@@ -266,6 +266,71 @@ def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverag
     assert result[1]["_mask_array"].shape == (4, 4)
 
 
+def test_process_window_with_slide_builds_cancer_patch_with_nonzero_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSlide:
+        def read_region(
+            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+        ) -> Image.Image:
+            del coords, level, size
+            return Image.new("RGB", (4, 4), color=(10, 20, 30))
+
+    cancer_index = patch_engine.build_scaled_polygon_index(
+        [[(0, 0), (4, 0), (4, 4), (0, 4)]],
+        scale_factor=1.0,
+    )
+    patch_engine._WORKER_CONTEXT = {
+        "profile_output_path": "/tmp/profile.json",
+        "window_size": 4,
+        "use_artifact_filter": False,
+        "target_level": 0,
+        "tissue_percentage_req": 0.1,
+        "match_percentage_req": 0.01,
+        "cancer_polygon_index": cancer_index,
+        "not_cancer_polygon_index": ([], None),
+        "patient": "patient-1",
+        "slide_id": "slide-a",
+        "filename_prefix": patch_engine.build_patch_filename_prefix(
+            patient_id="patient-1",
+            slide_id="slide-a",
+        ),
+    }
+
+    monkeypatch.setattr(patch_engine, "check_tissue_percentage_robust", lambda patch, req: True)
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
+
+    result = cast(
+        tuple[str, dict[str, Any], dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 0, 0),
+    )
+
+    assert result[0] == "SAVED_CANCER"
+    assert result[1]["label"] == 1
+    assert result[1]["_mask_array"].shape == (4, 4)
+    assert np.count_nonzero(result[1]["_mask_array"]) > 0
+
+
+def test_build_patch_record_accepts_read_only_image_array() -> None:
+    patch_np = np.asarray(Image.new("RGB", (4, 4), color=(10, 20, 30)))
+    assert patch_np.flags.writeable is False
+
+    record = patch_engine.build_patch_record(
+        filename="patch.png",
+        label="NOT_CANCER",
+        patient_id="p1",
+        slide_id="s1",
+        artifact_coverages=patch_engine.get_zero_artifact_coverages(),
+        patch_np=patch_np,
+        final_mask=np.zeros((4, 4), dtype=np.uint8),
+    )
+
+    image_array = cast(np.ndarray[Any, Any], record["_image_array"])
+
+    assert image_array.shape == (4, 4, 3)
+    assert image_array.flags.writeable is False
+
+
 def test_process_window_with_slide_skips_overlap_before_reading_slide(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -454,7 +519,7 @@ def test_run_extraction_parses_artifact_geojson_and_writes_profile_summary(
     )
     monkeypatch.setattr(
         patch_engine,
-        "iter_window_results",
+        "iter_window_results_serial",
         lambda **kwargs: iter(
             [
                 (
@@ -539,7 +604,7 @@ def test_run_extraction_raises_when_workers_report_errors(monkeypatch: pytest.Mo
     monkeypatch.setattr(patch_engine, "HALF_WINDOW", 1)
     monkeypatch.setattr(
         patch_engine,
-        "iter_window_results",
+        "iter_window_results_serial",
         lambda **kwargs: iter([("ERROR", "traceback text")]),
     )
 

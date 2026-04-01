@@ -135,6 +135,11 @@ Agent guide for coding agents working in this repository.
 - `TAG=HISEG` enables the HISEG-specific Stage 2 SVS/XML annotation path.
 - `TAG=Chile` enables the CHILE-specific Stage 2 SVS/XML annotation path.
 - Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
+- Stage 2 performance-related env vars now include:
+  - `STAGE2_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
+  - `OPENSLIDE_CACHE_BYTES` with default `0`
+  - `STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES` with default `0`
+- Current best-known Stage 2 runtime choice in `.env` is `STAGE2_HDF5_COMPRESSION=none`.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
@@ -175,6 +180,25 @@ Agent guide for coding agents working in this repository.
 - `uv run mypy` passes for touched files.
 - No unrelated files were modified intentionally.
 - Pipeline contracts and scientific invariants remain intact.
+
+## Stage 2 Performance Notes
+- Use `stage2_performance_findings.md` as the canonical handoff document for Stage 2 benchmarking and optimization work.
+- Use `uv run python scripts/benchmark_stage2_cases.py --case-ids 8,4,6,7,2,5,1` for the agreed benchmark set.
+- Benchmark outputs live under `analysis/stage2_benchmarks*/`.
+- The biggest confirmed Stage 2 wins so far were:
+  - batched HDF5 shard writes in `helpers/extraction/hdf5_storage.py`
+  - `STAGE2_HDF5_COMPRESSION=none`
+  - replacing hot PIL-to-NumPy `np.array(...)` conversions with `np.asarray(...)` in `helpers/extraction/patch_engine.py`
+- Current remaining extraction hotspot is `helpers/extraction/patch_engine.py`, especially `read_region()` inside `parallel_processing`.
+- Negative results already established:
+  - `OPENSLIDE_CACHE_BYTES=134217728` and `536870912` did not beat `0` after rebuilding with native OpenSlide `4.0.0`
+  - scan-area preload was much slower
+  - a streaming `source_signature` rewrite was slower and was reverted
+- Docker/OpenSlide status:
+  - The previous Ubuntu 22.04 package install exposed native OpenSlide `3.4.1`
+  - `Dockerfile` now builds native OpenSlide `4.0.0` from source and includes a build-time self-check that fails unless native OpenSlide is `>= 4.0.0` and `OpenSlideCache` can be instantiated
+  - The rebuilt container now reports native OpenSlide `4.0.0`, and `openslide.OpenSlideCache(...)` instantiates successfully
+  - Despite that, `OPENSLIDE_CACHE_BYTES=0` remains the best-known setting on the agreed benchmark slide set
 
 ## Agent Heuristics
 - Prefer minimal local edits.

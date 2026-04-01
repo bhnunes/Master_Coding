@@ -19,7 +19,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
 ) -> None:
     captured: dict[str, object] = {}
     artifact_records = [{"filename": "patch.png", "cov_fold": 0.5}]
-    hdf5_calls: list[tuple[Path, list[dict[str, object]]]] = []
+    hdf5_calls: list[tuple[Path, list[dict[str, object]], dict[str, object]]] = []
     manifest_calls: list[tuple[Path, Path]] = []
 
     def fake_run_extraction(**kwargs: object) -> tuple[int, int, list[dict[str, object]]]:
@@ -33,8 +33,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
     def fake_write_slide_patch_dataset_hdf5(
         output_path: Path, records: list[dict[str, object]], **kwargs: object
     ) -> Path:
-        del kwargs
-        hdf5_calls.append((output_path, records))
+        hdf5_calls.append((output_path, records, kwargs))
         return output_path
 
     monkeypatch.setattr(
@@ -59,6 +58,9 @@ def test_run_slide_processing_returns_patch_engine_counts(
         num_workers=2,
         use_advanced_artifact_filtering=False,
         hiseg_xml_coord_level=6,
+        openslide_cache_bytes=134217728,
+        hdf5_compression="gzip",
+        preload_scan_area_max_bytes=0,
         artifacts_geojson_path=None,
         profile_output_path=tmp_path / "profile.json",
         hdf5_output_path=tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
@@ -76,10 +78,13 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert captured["hiseg_xml_coord_level"] == 6
     assert captured["window_size"] == 224
     assert captured["profile_output_path"] == str(tmp_path / "profile.json")
+    assert captured["openslide_cache_bytes"] == 134217728
+    assert captured["preload_scan_area_max_bytes"] == 0
     assert hdf5_calls == [
         (
             tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
             artifact_records,
+            {"compression": "gzip"},
         )
     ]
     assert manifest_calls == [

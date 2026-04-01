@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -257,6 +258,25 @@ class ExtractionRepository:
                 f"SELECT * FROM {self.table_name} WHERE STATUS = 'STALE' ORDER BY ID ASC"
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def list_cases_by_ids(self, case_ids: Sequence[int]) -> list[ExtractionCaseRecord]:
+        """Return the requested cases ordered by the provided identifier sequence."""
+
+        ordered_ids = [int(case_id) for case_id in case_ids]
+        if not ordered_ids:
+            return []
+        placeholders = ", ".join("?" for _ in ordered_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM {self.table_name} WHERE ID IN ({placeholders})",
+                ordered_ids,
+            ).fetchall()
+        rows_by_id = {int(row["ID"]): row for row in rows}
+        return [
+            self._row_to_record(rows_by_id[case_id])
+            for case_id in ordered_ids
+            if case_id in rows_by_id
+        ]
 
     def list_completed_cases(self) -> list[ExtractionCaseRecord]:
         """Return all completed cases to validate processing lineage."""

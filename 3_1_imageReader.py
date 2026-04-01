@@ -70,6 +70,9 @@ def main() -> None:
             num_workers=runtime_settings.num_workers,
             use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
             hiseg_xml_coord_level=int(os.environ.get("HISEG_XML_COORD_LEVEL") or 6),
+            openslide_cache_bytes=runtime_settings.openslide_cache_bytes,
+            hdf5_compression=runtime_settings.hdf5_compression,
+            preload_scan_area_max_bytes=runtime_settings.preload_scan_area_max_bytes,
             artifacts_geojson_path=Path(args.path_artifacts_geojson)
             if args.path_artifacts_geojson
             else None,

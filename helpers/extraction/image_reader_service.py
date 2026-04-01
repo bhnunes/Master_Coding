@@ -38,6 +38,9 @@ class SlideRuntimeSettings:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
+    openslide_cache_bytes: int
+    hdf5_compression: str | None
+    preload_scan_area_max_bytes: int
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,9 @@ class SlideProcessingRequest:
     num_workers: int
     use_advanced_artifact_filtering: bool
     hiseg_xml_coord_level: int
+    openslide_cache_bytes: int
+    hdf5_compression: str | None
+    preload_scan_area_max_bytes: int
     artifacts_geojson_path: Path | None = None
     profile_output_path: Path | None = None
     hdf5_output_path: Path | None = None
@@ -99,6 +105,12 @@ def load_slide_runtime_settings(
         "t",
     }
 
+    hdf5_compression_raw = (values.get("STAGE2_HDF5_COMPRESSION") or "gzip").strip().lower()
+    if hdf5_compression_raw not in {"gzip", "lzf", "none"}:
+        raise ValueError(
+            f"STAGE2_HDF5_COMPRESSION must be one of: gzip, lzf, none. Got: {hdf5_compression_raw}"
+        )
+
     return SlideRuntimeSettings(
         window_size=window_size,
         stride=stride,
@@ -107,6 +119,12 @@ def load_slide_runtime_settings(
         target_level=int(values.get("TARGET_LEVEL") or 0),
         num_workers=max(1, int(values.get("NUM_WORKERS") or (os.cpu_count() or 1))),
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
+        openslide_cache_bytes=max(0, int(values.get("OPENSLIDE_CACHE_BYTES") or 0)),
+        hdf5_compression=None if hdf5_compression_raw == "none" else hdf5_compression_raw,
+        preload_scan_area_max_bytes=max(
+            0,
+            int(values.get("STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES") or 0),
+        ),
     )
 
 
@@ -164,12 +182,16 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             else None,
             use_artifact_filter=request.use_advanced_artifact_filtering,
             num_workers=request.num_workers,
+            openslide_cache_bytes=request.openslide_cache_bytes,
+            hdf5_compression=request.hdf5_compression,
+            preload_scan_area_max_bytes=request.preload_scan_area_max_bytes,
         )
         artifact_patch_records = cast(list[dict[str, Any]], artifact_patch_records)
         if request.hdf5_output_path is not None:
             shard_output = write_slide_patch_dataset_hdf5(
                 output_path=request.hdf5_output_path,
                 records=artifact_patch_records,
+                compression=request.hdf5_compression,
             )
             update_stage2_shard_manifest(
                 request.hdf5_output_path.parent / "manifest.json",

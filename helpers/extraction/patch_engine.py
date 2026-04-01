@@ -49,6 +49,7 @@ ARTIFACT_CLASS_TO_COLUMN = {
 
 _WORKER_CONTEXT = {}
 _WORKER_SLIDE = None
+_WORKER_SLIDE_CACHE = None
 _WORKER_CLEANUP_REGISTERED = False
 WINDOW_PROFILE_PHASES = (
     "artifact_coverage",
@@ -380,22 +381,40 @@ def chunk_coordinates(filtered_coords, batch_size):
         yield batch
 
 
+def _configure_slide_cache(openslide_module, slide, cache_bytes):
+    if not cache_bytes:
+        return None
+    try:
+        cache = openslide_module.OpenSlideCache(int(cache_bytes))
+        slide.set_cache(cache)
+    except Exception as error:
+        logging.warning("OpenSlide cache setup failed; continuing without cache: %s", error)
+        return None
+    return cache
+
+
 def _initialize_worker(worker_context):
-    global _WORKER_CONTEXT, _WORKER_SLIDE, _WORKER_CLEANUP_REGISTERED
+    global _WORKER_CONTEXT, _WORKER_SLIDE, _WORKER_SLIDE_CACHE, _WORKER_CLEANUP_REGISTERED
     close_worker_resources()
     _WORKER_CONTEXT = worker_context
     openslide_module = load_openslide_module()
     _WORKER_SLIDE = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
+    _WORKER_SLIDE_CACHE = _configure_slide_cache(
+        openslide_module,
+        _WORKER_SLIDE,
+        _WORKER_CONTEXT.get("openslide_cache_bytes", 0),
+    )
     if not _WORKER_CLEANUP_REGISTERED:
         atexit.register(close_worker_resources)
         _WORKER_CLEANUP_REGISTERED = True
 
 
 def close_worker_resources():
-    global _WORKER_SLIDE
+    global _WORKER_SLIDE, _WORKER_SLIDE_CACHE
     if _WORKER_SLIDE is not None:
         _WORKER_SLIDE.close()
         _WORKER_SLIDE = None
+    _WORKER_SLIDE_CACHE = None
 
 
 def _process_window_with_slide(slide, x, y):
@@ -461,10 +480,20 @@ def _process_window_with_slide(slide, x, y):
         )
 
     read_started_at = time.perf_counter()
-    patch_pil = slide.read_region(
-        patch_coords, context["target_level"], (window_size, window_size)
-    ).convert("RGB")
-    patch_np = np.array(patch_pil)
+    preloaded_region = context.get("preloaded_region")
+    if preloaded_region is not None:
+        patch_x = x_int - context["preloaded_region_x"]
+        patch_y = y_int - context["preloaded_region_y"]
+        patch_np = np.ascontiguousarray(
+            preloaded_region[patch_y : patch_y + window_size, patch_x : patch_x + window_size]
+        )
+    else:
+        assert slide is not None
+        patch_np = np.asarray(
+            slide.read_region(
+                patch_coords, context["target_level"], (window_size, window_size)
+            ).convert("RGB")
+        )
     if window_phase_stats is not None:
         record_phase(window_phase_stats, "read_region", time.perf_counter() - read_started_at)
 
@@ -538,6 +567,20 @@ def iter_window_results(filtered_coords, num_workers, worker_state, batch_size):
             yield from batch_results
 
 
+def iter_window_results_preloaded(filtered_coords, worker_state):
+    global _WORKER_CONTEXT
+    _WORKER_CONTEXT = worker_state
+    for x, y in filtered_coords:
+        yield _process_window_with_slide(None, x, y)
+
+
+def iter_window_results_serial(filtered_coords, worker_state, slide):
+    global _WORKER_CONTEXT
+    _WORKER_CONTEXT = worker_state
+    for x, y in filtered_coords:
+        yield _process_window_with_slide(slide, x, y)
+
+
 def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
     slide = None
     openslide_module = load_openslide_module()
@@ -548,6 +591,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         "load_artifacts": 0.0,
         "candidate_filter": 0.0,
         "build_indexes": 0.0,
+        "preload_scan_area": 0.0,
         "parallel_processing": 0.0,
     }
     profile_output_path = kwargs.get("profile_output_path")
@@ -557,6 +601,7 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         logging.info(f"--- Starting processing for slide: {slide_basename} ---")
         open_slide_started_at = time.perf_counter()
         slide = openslide_module.OpenSlide(path_Image)
+        _configure_slide_cache(openslide_module, slide, kwargs.get("openslide_cache_bytes", 0))
         slide_phase_seconds["open_slide"] = time.perf_counter() - open_slide_started_at
 
         load_annotations_started_at = time.perf_counter()
@@ -726,6 +771,27 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         slide_phase_seconds["build_indexes"] = time.perf_counter() - build_indexes_started_at
 
         batch_size = max(8, min(64, len(filtered_coords) // max(1, kwargs["num_workers"] * 4) or 8))
+        preload_scan_area_max_bytes = int(kwargs.get("preload_scan_area_max_bytes", 0) or 0)
+        scan_width = x_end - x_start
+        scan_height = y_end - y_start
+        preload_scan_area_bytes = scan_width * scan_height * 3
+        preloaded_region = None
+        if preload_scan_area_max_bytes and preload_scan_area_bytes <= preload_scan_area_max_bytes:
+            preload_started_at = time.perf_counter()
+            preloaded_region = np.asarray(
+                slide.read_region(
+                    (x_start, y_start),
+                    kwargs["target_level"],
+                    (scan_width, scan_height),
+                ).convert("RGB")
+            )
+            slide_phase_seconds["preload_scan_area"] = time.perf_counter() - preload_started_at
+            logging.info(
+                "Preloaded optimized scan area into memory: %sx%s pixels (%.2f MiB).",
+                scan_width,
+                scan_height,
+                preload_scan_area_bytes / (1024 * 1024),
+            )
         worker_state = {
             "path_Image": path_Image,
             "target_level": kwargs["target_level"],
@@ -740,16 +806,25 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
             ),
             "use_artifact_filter": kwargs.get("use_artifact_filter"),
             "profile_output_path": profile_output_path,
+            "openslide_cache_bytes": kwargs.get("openslide_cache_bytes", 0),
+            "preloaded_region": preloaded_region,
+            "preloaded_region_x": x_start,
+            "preloaded_region_y": y_start,
             "cancer_polygon_index": cancer_polygon_index,
             "not_cancer_polygon_index": not_cancer_polygon_index,
             "artifact_geometry_index": artifact_geometry_index,
         }
 
-        logging.info(
-            "Starting parallel processing with %s workers and batch size %s...",
-            kwargs["num_workers"],
-            batch_size,
-        )
+        if preloaded_region is not None:
+            logging.info("Starting in-memory scan-area processing without per-patch slide reads...")
+        elif kwargs["num_workers"] == 1:
+            logging.info("Starting in-process single-worker extraction without multiprocessing...")
+        else:
+            logging.info(
+                "Starting parallel processing with %s workers and batch size %s...",
+                kwargs["num_workers"],
+                batch_size,
+            )
         parallel_started_at = time.perf_counter()
         status_counts = {}
         artifact_patch_records = []
@@ -757,12 +832,25 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         window_phase_stats: dict[str, PhaseStats] | None = (
             create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
         )
-        for result in iter_window_results(
-            filtered_coords=filtered_coords,
-            num_workers=kwargs["num_workers"],
-            worker_state=worker_state,
-            batch_size=batch_size,
-        ):
+        result_iterator = (
+            iter_window_results_preloaded(
+                filtered_coords=filtered_coords, worker_state=worker_state
+            )
+            if preloaded_region is not None
+            else iter_window_results_serial(
+                filtered_coords=filtered_coords,
+                worker_state=worker_state,
+                slide=slide,
+            )
+            if kwargs["num_workers"] == 1
+            else iter_window_results(
+                filtered_coords=filtered_coords,
+                num_workers=kwargs["num_workers"],
+                worker_state=worker_state,
+                batch_size=batch_size,
+            )
+        )
+        for result in result_iterator:
             status = result[0]
             payload = result[1]
             if profile_enabled and len(result) == 3 and window_phase_stats is not None:
