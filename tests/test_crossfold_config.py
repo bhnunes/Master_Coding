@@ -17,7 +17,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
             "CROSSFOLD_MIN_TRAIN_PATIENTS": "4",
             "CROSSFOLD_MIN_VAL_PATIENTS": "2",
             "CROSSFOLD_MIN_TEST_PATIENTS": "3",
-            "CROSSFOLD_ENFORCE_STAGE11_VALIDATION_SIZING": "true",
+            "CROSSFOLD_ENFORCE_VALIDATION_SIZING": "true",
             "CROSSFOLD_MIN_VALIDATION_PATIENTS_FOR_ENSEMBLE": "30",
             "CROSSFOLD_MIN_VALIDATION_POSITIVE_PATIENTS_FOR_ENSEMBLE": "15",
             "CROSSFOLD_MIN_VALIDATION_NEGATIVE_PATIENTS_FOR_ENSEMBLE": "15",

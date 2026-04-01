@@ -48,19 +48,18 @@ Agent guide for coding agents working in this repository.
 ## Stage Entrypoints
 - Stage 1: `1_artifact_detection.py`
 - Stage 2: `2_database_manager.py`
-- Stage 3.1: `3_1_imageReader.py`
+- Stage 3: `3_pack_splits_to_hdf5.py`
 - Stage 4.1: `4_1_optimization_sampling.py`
 - Stage 4.2: `4_2_tune_graph_method.py`
 - Stage 4.3: `4_3_cleaner_script.py`
-- Stage 5: `5_pack_splits_to_hdf5.py`
-- Stage 6: `6_crossfold.py`
-- Stage 7: `7_sanity_checks.py`
-- Stage 8: `8_smart_sampler.py`
-- Stage 9: `9_lr_finder.py`
-- Stage 10: `10_training_ensemble.py`
-- Stage 11: `11_optimizer_ensemble.py`
-- Stage 12: `12_inference_ensemble.py`
-- Run a stage script with `uv`, for example: `uv run --python 3.12 python 6_crossfold.py`
+- Stage 5: `5_crossfold.py`
+- Stage 6: `6_sanity_checks.py`
+- Stage 7: `7_smart_sampler.py`
+- Stage 8: `8_lr_finder.py`
+- Stage 9: `9_training_ensemble.py`
+- Stage 10: `10_optimizer_ensemble.py`
+- Stage 11: `11_inference_ensemble.py`
+- Run a stage script with `uv`, for example: `uv run --python 3.12 python 5_crossfold.py`
 
 ## Repository Shape
 - Keep root scripts orchestration-focused.
@@ -154,16 +153,16 @@ Agent guide for coding agents working in this repository.
 - Keep Stage 1 logic in `helpers/artifact/*`.
 - Keep extraction and image-reading details in `helpers/extraction/*`.
 - Keep Stage 2 dataset-specific XML parsing localized to `helpers/extraction/data_handlers.py` and the Stage 2 request flow.
+- Keep Stage 3 packaging logic in `helpers/packaging/*`.
 - Keep Stage 4.1 sampling logic in `helpers/optimization_sampling/*`.
 - Keep Stage 4.2 and 4.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
-- Keep Stage 5 packaging logic in `helpers/packaging/*`.
-- Keep Stage 6 split and normalization logic in `helpers/crossfold/*`.
-- Keep Stage 7 integrity checks in `helpers/sanity/*`.
-- Keep Stage 8 smart-sampling logic in `helpers/smart_sampling/*`.
-- Keep Stage 9 learning-rate finder logic in `helpers/lr_finder/*`.
-- Keep Stage 10 training logic in `helpers/training/*`.
-- Keep Stage 11 ensemble optimization logic in `helpers/ensemble_optimizer/*`.
-- Keep Stage 12 inference logic in `helpers/ensemble_inference/*`.
+- Keep Stage 5 split and normalization logic in `helpers/crossfold/*`.
+- Keep Stage 6 integrity checks in `helpers/sanity/*`.
+- Keep Stage 7 smart-sampling logic in `helpers/smart_sampling/*`.
+- Keep Stage 8 learning-rate finder logic in `helpers/lr_finder/*`.
+- Keep Stage 9 training logic in `helpers/training/*`.
+- Keep Stage 10 ensemble optimization logic in `helpers/ensemble_optimizer/*`.
+- Keep Stage 11 inference logic in `helpers/ensemble_inference/*`.
 
 ## Filesystem and Safety
 - Respect `.gitignore`.

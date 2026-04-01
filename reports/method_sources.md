@@ -8,7 +8,6 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `AGENTS.md`
 - `1_artifact_detection.py`
 - `2_database_manager.py`
-- `3_1_imageReader.py`
 - `4_1_optimization_sampling.py`
 - `4_2_tune_graph_method.py`
 - `4_3_cleaner_script.py`
@@ -35,7 +34,6 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 ## Stage 2 database-backed patch extraction
 
 - `2_database_manager.py`
-- `3_1_imageReader.py`
 - `helpers/extraction/config.py`
 - `helpers/extraction/repository.py`
 - `helpers/extraction/image_reader_service.py`

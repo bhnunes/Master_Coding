@@ -177,8 +177,8 @@ def load_crossfold_config(
             5,
         ),
         enforce_stage11_validation_sizing=_parse_bool(
-            values.get("CROSSFOLD_ENFORCE_STAGE11_VALIDATION_SIZING"),
-            "CROSSFOLD_ENFORCE_STAGE11_VALIDATION_SIZING",
+            values.get("CROSSFOLD_ENFORCE_VALIDATION_SIZING"),
+            "CROSSFOLD_ENFORCE_VALIDATION_SIZING",
             True,
         ),
         min_validation_patients_for_ensemble=_parse_int(
