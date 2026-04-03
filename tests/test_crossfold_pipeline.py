@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 from _pytest.monkeypatch import MonkeyPatch
@@ -44,6 +45,8 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         ]
     )
     calls: list[str] = []
+    split_kwargs: dict[str, object] = {}
+    provenance_kwargs: dict[str, object] = {}
 
     def record(name: str, return_value: object | None = None) -> object | None:
         calls.append(name)
@@ -63,7 +66,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.create_train_val_test_split_best",
-        lambda **kwargs: record("split", split_data),
+        lambda **kwargs: (split_kwargs.update(kwargs), record("split", split_data))[1],
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
@@ -79,7 +82,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
-        lambda **kwargs: record("provenance"),
+        lambda **kwargs: (provenance_kwargs.update(kwargs), record("provenance")),
     )
 
     summary = run_crossfold_pipeline(
@@ -88,6 +91,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
             source_hdf5_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
+            optimize_training_set=False,
             constraints=SplitConstraints(
                 min_test_patients=1,
                 min_val_patients=1,
@@ -106,6 +110,11 @@ def test_run_crossfold_pipeline_executes_stage_flow(
 
     assert summary.output_dir == tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
     assert summary.manifest_rows == 1
+    assert split_kwargs["optimize_training_set"] is False
+    split_selection = cast(dict[str, Any], provenance_kwargs["extra"])["split_selection"]
+    assert split_selection["test_selection_method"] == "neutral_stratified"
+    assert split_selection["train_validation_selection_method"] == "neutral_stratified"
+    assert split_selection["optimize_training_set"] is False
     assert calls == [
         "log:data_preparation.log",
         "load",

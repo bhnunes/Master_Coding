@@ -12,6 +12,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
             "CROSSFOLD_NORMALIZATION_METHOD": "MACENKO",
             "CROSSFOLD_OVERWRITE_OUTPUT_DIR": "false",
             "CROSSFOLD_RANDOM_STATE": "7",
+            "CROSSFOLD_OPTIMIZE_TRAINING_SET": "true",
             "CROSSFOLD_TEST_RATIO": "0.2",
             "CROSSFOLD_VAL_RATIO": "0.15",
             "CROSSFOLD_MIN_TRAIN_PATIENTS": "4",
@@ -42,6 +43,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.normalization_method == "MACENKO"
     assert config.overwrite_output_dir is False
     assert config.random_state == 7
+    assert config.optimize_training_set is True
     assert config.constraints.test_ratio == 0.2
     assert config.constraints.val_ratio == 0.15
     assert config.constraints.min_train_patients == 4
@@ -128,3 +130,4 @@ def test_load_crossfold_config_defaults_stage11_validation_guardrails(tmp_path: 
     assert config.constraints.min_validation_patients_for_ensemble == 30
     assert config.constraints.min_validation_positive_patients_for_ensemble == 15
     assert config.constraints.min_validation_negative_patients_for_ensemble == 15
+    assert config.optimize_training_set is False

@@ -89,6 +89,7 @@ def test_create_train_val_test_split_best_keeps_patients_disjoint() -> None:
             adaptive=True,
         ),
         objective=ObjectiveConfig(enable_objective=False),
+        optimize_training_set=False,
         patient_entropy_df=None,
     )
 
@@ -129,6 +130,7 @@ def test_create_train_val_test_split_best_enforces_stage11_validation_minimums()
                 adaptive=True,
             ),
             objective=ObjectiveConfig(enable_objective=False),
+            optimize_training_set=False,
             patient_entropy_df=None,
         )
     except ValueError as error:

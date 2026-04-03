@@ -313,6 +313,7 @@ def _build_benchmark_config(
         source_hdf5_path=source_hdf5_path,
         overwrite_output_dir=True,
         random_state=random_state,
+        optimize_training_set=enable_objective,
         constraints=SplitConstraints(
             min_test_patients=2,
             min_val_patients=2,
@@ -498,6 +499,7 @@ def main() -> None:
             num_workers=args.num_workers,
             random_state=42,
         ).objective,
+        optimize_training_set=True,
         patient_entropy_df=patient_entropy["result"],
     )
     train_df = split_data["train_df"]

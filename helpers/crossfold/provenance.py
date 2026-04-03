@@ -188,6 +188,9 @@ def write_manifest_and_log_stats(
         "output_dir": str(output_dir),
         "normalization_method": normalization_method,
         "is_normalized": bool(is_normalized),
+        "optimize_training_set": bool(
+            (extra or {}).get("split_selection", {}).get("optimize_training_set", False)
+        ),
         "constraints": split_data.get("constraints", {}),
         "split_seed": split_data.get("split_seed"),
         "split_attempt": split_data.get("split_attempt"),

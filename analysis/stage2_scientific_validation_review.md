@@ -86,3 +86,93 @@ I would not treat Stage 2-derived downstream metrics as scientifically reliable 
 2. processing-signature coverage for HISEG coordinate-level parsing
 
 Those two issues are sufficient to invalidate claims about leakage-safe evaluation and strict reproducibility.
+
+## Addendum: Stage 3 and Stage 5 Scientific Validation Review
+
+### Summary of Scientific Objective
+
+This addendum evaluated `3_pack_splits_to_hdf5.py` and `5_crossfold.py` together with the helper modules they orchestrate. The scientific question is whether Stage 3 preserves the post-cleaning patch cohort faithfully and whether Stage 5 creates leakage-safe, evaluation-fair, reproducible TRAIN/VALIDATION/TEST splits suitable for defensible downstream model claims.
+
+`3_pack_splits_to_hdf5.py` and `5_crossfold.py` themselves are thin wrappers. The substantive scientific behavior lives in `helpers/packaging/*` and `helpers/crossfold/*`.
+
+### Detected Threats to Validity
+
+#### Major: Stage 3 accepted-manifest filtering is bound to mutable row indices, not immutable source identity
+
+- `helpers/graph/cleaning_pipeline.py:229-260` writes accepted/rejected manifests with `source_hdf5_path` and `source_row_index`, but no source-HDF5 hash or row-level identity check.
+- `helpers/packaging/writer.py:320-348` loads accepted rows and only verifies that `source_hdf5_path` string matches the current input path.
+- `helpers/packaging/writer.py:358-375` builds the output signature from the current source-file hash plus manifest hash plus selected row indices, but does not verify that the manifest rows still refer to the same patch identities in the current source file.
+- `helpers/packaging/writer.py:436-494` then copies rows strictly by current `source_row_index`.
+
+Impact:
+
+- If the Stage 3 source HDF5 is regenerated or reordered in place at the same path, an older accepted manifest can silently select the wrong rows.
+- That means Stage 4.3 cleaning decisions can be applied to different patches than the ones that were actually reviewed.
+- The result can silently reintroduce rejected/contaminated patches or drop accepted ones, breaking reproducibility and potentially biasing downstream training and evaluation.
+
+Severity: Major
+
+#### Major: Stage 5 split search cherry-picks one split from many candidates using a full-cohort entropy objective
+
+- `helpers/crossfold/config.py:101-109` sets the entropy-based objective fields, and `helpers/crossfold/config.py:217-233` enables that objective by default.
+- `helpers/crossfold/pipeline.py:54-73` computes entropy on the full source dataset before split search and passes patient-level entropy into the splitter.
+- `helpers/crossfold/splitting.py:220-320` samples up to `max_tries` randomized patient splits and keeps the single best one by objective score.
+- The default objective is `score_split="TRAIN"` with `maximize=True`, so the search preferentially allocates higher-entropy patients into TRAIN.
+
+Impact:
+
+- This is not a neutral random split. It is a data-dependent split selection procedure that searches many feasible partitions and retains the one with the most favorable entropy profile.
+- Because the default objective maximizes TRAIN difficulty, the held-out VALIDATION/TEST sets can become systematically easier on the same full cohort budget.
+- Reported downstream metrics can therefore be inflated relative to a neutral patient-level split, especially on the currently documented small-cohort regime.
+- A reviewer could reasonably classify this as split cherry-picking unless the manuscript explicitly justifies the objective and reports results against fixed neutral baselines.
+
+Severity: Major
+
+#### Moderate: Stage 5 does not implement cross-validation despite the crossfold framing, and it emits no uncertainty estimate
+
+- `helpers/crossfold/pipeline.py:67-140` creates one TRAIN/VALIDATION/TEST split and writes one run directory.
+- `helpers/crossfold/splitting.py:147-359` searches for a single feasible split and returns only that split.
+
+Impact:
+
+- If a manuscript describes this stage as cross-validation or implies fold-averaged robustness, the code does not support that claim.
+- On the documented small-patient setting, one selected split without confidence intervals or repeated resampling gives a high-variance estimate of performance.
+- This weakens statistical defensibility even when the code is otherwise correct.
+
+Severity: Moderate
+
+#### Moderate: Stage 5 run provenance does not fully persist the split-selection objective configuration
+
+- `helpers/crossfold/pipeline.py:43-48` logs the objective configuration at runtime.
+- `helpers/crossfold/provenance.py:184-206` writes `run_config.json`, but it stores constraints, random seed, selected patients, and objective score without persisting the full objective configuration used to search splits.
+- Missing persisted fields include whether objective search was enabled and the settings that change the search behavior, such as optimization direction and entropy-generation parameters.
+
+Impact:
+
+- Two runs can produce scientifically different split-selection procedures while leaving an incomplete audit trail in the saved artifacts.
+- That makes independent reproduction and peer-review reconstruction harder, particularly because the split itself is chosen by optimization rather than simple random partitioning.
+
+Severity: Moderate
+
+### Recommended Corrections
+
+1. Make Stage 3 accepted-manifest application fail closed unless the manifest records and matches an immutable source-HDF5 identity, ideally including the source HDF5 SHA256 and row-level metadata checks for filename/patient/slide.
+2. Disable the Stage 5 entropy objective by default for reported benchmark datasets, or justify it explicitly and compare against a neutral fixed split strategy.
+3. If entropy-guided split design is kept, pre-register the objective, persist the full objective config in `run_config.json`, and report results against multiple seeds or folds rather than a single selected split.
+4. Avoid describing Stage 5 as cross-validation unless true multi-fold evaluation is implemented and reported.
+
+### Reproducibility Improvements
+
+1. Add a regression test proving that a stale accepted manifest from an older source HDF5 is rejected rather than silently reused by row index.
+2. Add a provenance test requiring Stage 5 `run_config.json` to persist the entire objective configuration used during split search.
+3. Add a scientific regression benchmark that compares downstream split difficulty and class/patient balance with objective-enabled versus neutral splitting.
+4. If publication claims rely on robust generalization, add repeated-seed or fold-level reporting with confidence intervals.
+
+### Bottom Line
+
+The most serious new concerns are:
+
+1. Stage 3 can silently misapply Stage 4.3 acceptance decisions if the source HDF5 is regenerated in place.
+2. Stage 5 currently performs data-dependent split optimization by default, which can bias held-out evaluation difficulty and invite reviewer concerns about split cherry-picking.
+
+I would not present Stage 5-held-out metrics as fully publication-safe until those two points are addressed or very explicitly justified in the experimental methods.

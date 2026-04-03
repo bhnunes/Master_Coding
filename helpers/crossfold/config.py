@@ -115,6 +115,7 @@ class CrossfoldConfig:
     source_hdf5_path: Path
     overwrite_output_dir: bool
     random_state: int
+    optimize_training_set: bool
     constraints: SplitConstraints
     objective: ObjectiveConfig
     hdf5_compression: str
@@ -265,6 +266,11 @@ def load_crossfold_config(
             True,
         ),
         random_state=_parse_int(values.get("CROSSFOLD_RANDOM_STATE"), "CROSSFOLD_RANDOM_STATE", 42),
+        optimize_training_set=_parse_bool(
+            values.get("CROSSFOLD_OPTIMIZE_TRAINING_SET"),
+            "CROSSFOLD_OPTIMIZE_TRAINING_SET",
+            False,
+        ),
         constraints=constraints,
         objective=objective,
         hdf5_compression=_parse_choice(

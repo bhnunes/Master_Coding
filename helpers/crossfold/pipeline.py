@@ -43,6 +43,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     logging.info("=== Data Preparation (Refactored) ===")
     logging.info("Normalization method: %s", config.normalization_method)
     logging.info("Random state: %s", config.random_state)
+    logging.info("Optimize training set: %s", config.optimize_training_set)
     logging.info("Constraints: %s", asdict(config.constraints))
     logging.info("Objective: %s", asdict(config.objective))
     logging.info("Output: %s", output_dir)
@@ -51,17 +52,22 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     dataset = load_patch_dataset(config.source_hdf5_path)
     entropy_df: pd.DataFrame | None = None
     patient_entropy_df: pd.DataFrame | None = None
-    if config.objective.enable_objective:
+    should_compute_entropy = config.optimize_training_set and config.objective.enable_objective
+    if config.normalization_method != "NOT_NORMALIZED":
+        should_compute_entropy = True
+    if should_compute_entropy:
         entropy_df = compute_all_patch_entropies(
             df=dataset,
             num_workers=config.objective.num_workers,
             chunksize=config.objective.chunksize,
             entropy_thumbnail=config.objective.entropy_thumbnail,
         )
-        patient_entropy_df = compute_patient_entropy_median(dataset, entropy_df)
+        if config.optimize_training_set and config.objective.enable_objective:
+            patient_entropy_df = compute_patient_entropy_median(dataset, entropy_df)
         if config.save_entropy_cache_csv:
             entropy_df.to_csv(output_dir / "entropy_cache.csv", index=False)
-            patient_entropy_df.to_csv(output_dir / "patient_entropy_median.csv", index=False)
+            if patient_entropy_df is not None:
+                patient_entropy_df.to_csv(output_dir / "patient_entropy_median.csv", index=False)
             logging.info("Saved entropy cache: %s", output_dir / "entropy_cache.csv")
 
     split_data = create_train_val_test_split_best(
@@ -69,6 +75,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         random_state=config.random_state,
         constraints=config.constraints,
         objective=config.objective,
+        optimize_training_set=config.optimize_training_set,
         patient_entropy_df=patient_entropy_df,
     )
     split_data["constraints"]["random_state"] = config.random_state
@@ -112,6 +119,16 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         verify_split_hdf5_integrity(output_path, split_df)
 
     extra: dict[str, object] = {}
+    extra["split_selection"] = {
+        "test_selection_method": "neutral_stratified",
+        "train_validation_selection_method": (
+            "entropy_guided"
+            if config.optimize_training_set and config.objective.enable_objective
+            else "neutral_stratified"
+        ),
+        "optimize_training_set": config.optimize_training_set,
+        "objective": asdict(config.objective),
+    }
     if patient_entropy_df is not None and split_data.get("objective_score") is not None:
         extra["objective_definition"] = {
             "metric": config.objective.metric,
