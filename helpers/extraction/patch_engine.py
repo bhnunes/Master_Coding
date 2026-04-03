@@ -308,13 +308,20 @@ def build_artifact_geometry_index(artifact_polygons_by_class_level0, scale_facto
 
         try:
             artifact_geometry = MultiPolygon(scaled_polys_flat)
-            artifact_geometries[column_name] = (artifact_geometry, prep(artifact_geometry))
+            artifact_geometries[column_name] = artifact_geometry
         except shapely.errors.TopologicalError:
             logging.warning(
                 "Skipping artifact geometry index for class '%s' due to invalid geometry.",
                 artifact_class,
             )
     return artifact_geometries
+
+
+def prepare_artifact_geometry_index(artifact_geometry_index):
+    prepared_index = {}
+    for column_name, artifact_geometry in artifact_geometry_index.items():
+        prepared_index[column_name] = (artifact_geometry, prep(artifact_geometry))
+    return prepared_index
 
 
 def compute_artifact_coverages_from_index(artifact_geometry_index, patch_polygon, patch_area):
@@ -397,6 +404,11 @@ def _initialize_worker(worker_context):
     global _WORKER_CONTEXT, _WORKER_SLIDE, _WORKER_SLIDE_CACHE, _WORKER_CLEANUP_REGISTERED
     close_worker_resources()
     _WORKER_CONTEXT = worker_context
+    artifact_geometry_index = _WORKER_CONTEXT.get("artifact_geometry_index")
+    if artifact_geometry_index:
+        _WORKER_CONTEXT["artifact_geometry_index"] = prepare_artifact_geometry_index(
+            artifact_geometry_index
+        )
     openslide_module = load_openslide_module()
     _WORKER_SLIDE = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
     _WORKER_SLIDE_CACHE = _configure_slide_cache(
@@ -570,6 +582,11 @@ def iter_window_results(filtered_coords, num_workers, worker_state, batch_size):
 def iter_window_results_preloaded(filtered_coords, worker_state):
     global _WORKER_CONTEXT
     _WORKER_CONTEXT = worker_state
+    artifact_geometry_index = _WORKER_CONTEXT.get("artifact_geometry_index")
+    if artifact_geometry_index:
+        _WORKER_CONTEXT["artifact_geometry_index"] = prepare_artifact_geometry_index(
+            artifact_geometry_index
+        )
     for x, y in filtered_coords:
         yield _process_window_with_slide(None, x, y)
 
@@ -577,6 +594,11 @@ def iter_window_results_preloaded(filtered_coords, worker_state):
 def iter_window_results_serial(filtered_coords, worker_state, slide):
     global _WORKER_CONTEXT
     _WORKER_CONTEXT = worker_state
+    artifact_geometry_index = _WORKER_CONTEXT.get("artifact_geometry_index")
+    if artifact_geometry_index:
+        _WORKER_CONTEXT["artifact_geometry_index"] = prepare_artifact_geometry_index(
+            artifact_geometry_index
+        )
     for x, y in filtered_coords:
         yield _process_window_with_slide(slide, x, y)
 

@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast
 
 import pytest
+from shapely.geometry import Polygon
 
 from helpers.extraction import patch_engine
 
@@ -123,3 +124,38 @@ def test_iter_window_results_flattens_batch_results(monkeypatch: pytest.MonkeyPa
         ("SAVED_2_2", {"coords": (2, 2)}),
         ("SAVED_3_3", {"coords": (3, 3)}),
     ]
+
+
+def test_initialize_worker_prepares_artifact_geometry_index_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSlide:
+        def close(self) -> None:
+            return None
+
+    class FakeOpenSlideModule:
+        def OpenSlide(self, path: str) -> FakeSlide:
+            assert path == "/tmp/sample.svs"
+            return FakeSlide()
+
+    monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
+    monkeypatch.setattr("helpers.extraction.patch_engine.atexit.register", lambda callback: None)
+
+    worker_state: dict[str, Any] = {
+        "path_Image": "/tmp/sample.svs",
+        "artifact_geometry_index": patch_engine.build_artifact_geometry_index(
+            {"Fold": [[(0, 0), (4, 0), (4, 4), (0, 4)]]},
+            scale_factor=1.0,
+        ),
+    }
+
+    try:
+        patch_engine._initialize_worker(worker_state)
+        artifact_geometry, prepared_geometry = patch_engine._WORKER_CONTEXT[
+            "artifact_geometry_index"
+        ]["cov_fold"]
+    finally:
+        patch_engine.close_worker_resources()
+
+    assert artifact_geometry.bounds == (0.0, 0.0, 4.0, 4.0)
+    assert prepared_geometry.intersects(Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]))

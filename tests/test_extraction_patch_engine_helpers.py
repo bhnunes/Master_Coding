@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 from typing import Any, cast
 
@@ -57,13 +58,37 @@ def test_build_artifact_geometry_index_builds_only_known_non_empty_classes() -> 
     )
 
     assert set(index) == {"cov_fold"}
+    assert index["cov_fold"].bounds == (0.0, 0.0, 10.0, 10.0)
+
+
+def test_build_artifact_geometry_index_is_picklable_for_worker_handoff() -> None:
+    index = patch_engine.build_artifact_geometry_index(
+        {"Fold": [[(0, 0), (10, 0), (10, 10), (0, 10)]]},
+        scale_factor=1.0,
+    )
+
+    pickle.dumps(index)
+
+
+def test_prepare_artifact_geometry_index_adds_prepared_geometries() -> None:
+    raw_index = patch_engine.build_artifact_geometry_index(
+        {"Fold": [[(0, 0), (10, 0), (10, 10), (0, 10)]]},
+        scale_factor=1.0,
+    )
+
+    prepared_index = patch_engine.prepare_artifact_geometry_index(raw_index)
+
+    assert set(prepared_index) == {"cov_fold"}
+    artifact_geometry, prepared_geometry = prepared_index["cov_fold"]
+    assert artifact_geometry.bounds == (0.0, 0.0, 10.0, 10.0)
+    assert prepared_geometry.intersects(Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]))
 
 
 def test_compute_artifact_coverages_from_index_returns_overlap_fraction() -> None:
-    index = patch_engine.build_artifact_geometry_index(
-        {"Fold": [[(0, 0), (5, 0), (5, 5), (0, 5)]]},
-        scale_factor=1.0,
+    raw_index = patch_engine.build_artifact_geometry_index(
+        {"Fold": [[(0, 0), (5, 0), (5, 5), (0, 5)]]}, scale_factor=1.0
     )
+    index = patch_engine.prepare_artifact_geometry_index(raw_index)
 
     coverages = patch_engine.compute_artifact_coverages_from_index(
         index,
