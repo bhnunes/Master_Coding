@@ -28,12 +28,12 @@ def main() -> None:
         )
         output_path = run_packaging_pipeline(config)
     except Exception as error:
-        print(f"Stage 7 packaging failed: {error}")
+        print(f"Stage 3 packaging failed: {error}")
         raise SystemExit(2) from error
 
-    logging.info("Stage 7 packaging completed successfully")
+    logging.info("Stage 3 packaging completed successfully")
     logging.info("SOURCE_DATASET: %s", output_path)
-    print("Stage 7 packaging completed successfully:")
+    print("Stage 3 packaging completed successfully:")
     print(f"- SOURCE_DATASET: {output_path}")
     raise SystemExit(0)
 

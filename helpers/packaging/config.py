@@ -26,12 +26,43 @@ def _required_path(variable_value: str | None, variable_name: str) -> Path:
     return path
 
 
+def _parse_positive_int(value: str | None, variable_name: str, default: int) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ValueError(
+            f"The '{variable_name}' environment variable must be an integer."
+        ) from error
+    if parsed <= 0:
+        raise ValueError(f"The '{variable_name}' environment variable must be greater than zero.")
+    return parsed
+
+
+def _parse_hdf5_compression(
+    value: str | None,
+    variable_name: str,
+    default: str | None,
+) -> str | None:
+    if value is None or value == "":
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"gzip", "lzf"}:
+        return normalized
+    if normalized == "none":
+        return None
+    raise ValueError(f"The '{variable_name}' environment variable must be one of: gzip, lzf, none.")
+
+
 @dataclass(frozen=True)
 class PackagingConfig:
     source_hdf5_path: Path
     output_dir: Path
     output_filename: str
     overwrite_outputs: bool
+    hdf5_compression: str | None = None
+    copy_batch_size: int = 256
     accepted_manifest_path: Path | None = None
     log_folder: Path = Path("logs")
     log_file_name: str = "packaging.log"
@@ -87,6 +118,16 @@ def load_packaging_config(
             values.get("PACKAGING_OVERWRITE_OUTPUTS"),
             "PACKAGING_OVERWRITE_OUTPUTS",
             False,
+        ),
+        hdf5_compression=_parse_hdf5_compression(
+            values.get("PACKAGING_HDF5_COMPRESSION"),
+            "PACKAGING_HDF5_COMPRESSION",
+            None,
+        ),
+        copy_batch_size=_parse_positive_int(
+            values.get("PACKAGING_COPY_BATCH_SIZE"),
+            "PACKAGING_COPY_BATCH_SIZE",
+            256,
         ),
         log_folder=resolve_log_folder(
             values,
