@@ -21,9 +21,6 @@ if (-not (Test-Command "uv")) {
     exit 1
 }
 
-Write-Step "Syncing Python dependencies"
-uv sync --python $PythonVersion --group dev
-
 $openSlidePath = [Environment]::GetEnvironmentVariable("OPENSLIDE_PATH")
 if ([string]::IsNullOrWhiteSpace($openSlidePath)) {
     Write-Host "OPENSLIDE_PATH is required on native Windows." -ForegroundColor Yellow
@@ -37,6 +34,13 @@ Write-Step "Validating OPENSLIDE_PATH"
 if (-not (Test-Path $openSlidePath -PathType Container)) {
     Write-Host "OPENSLIDE_PATH does not exist or is not a directory: $openSlidePath" -ForegroundColor Red
     exit 1
+}
+
+Write-Step "Syncing Python dependencies (excluding aim on Windows)"
+uv sync --python $PythonVersion --group dev --no-install-package aim
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "uv sync failed." -ForegroundColor Red
+    exit $LASTEXITCODE
 }
 
 Write-Step "Verifying Python imports"
@@ -62,5 +66,9 @@ print("torch", torch.__version__)
 '@
 
 uv run --python $PythonVersion python -c $pythonCheck
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Python import verification failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 Write-Host "Windows bootstrap complete." -ForegroundColor Green
