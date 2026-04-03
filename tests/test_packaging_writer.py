@@ -14,6 +14,7 @@ from helpers.packaging.writer import (
 
 def test_copy_source_hdf5_dataset_preserves_contract_and_records_upstream_signature(
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     source_path = tmp_path / "stage2_source.h5"
     output_path = tmp_path / "packaged" / "SOURCE_DATASET.h5"
@@ -27,6 +28,7 @@ def test_copy_source_hdf5_dataset_preserves_contract_and_records_upstream_signat
         handle.create_dataset("source_mask_paths", data=np.array([b"/src/p7_mask.png"]))
         handle.attrs["source_signature"] = "stage2-signature"
 
+    caplog.set_level(logging.INFO)
     copy_source_hdf5_dataset(source_path, output_path, overwrite=True)
 
     with h5py.File(output_path, "r") as handle:
@@ -34,6 +36,10 @@ def test_copy_source_hdf5_dataset_preserves_contract_and_records_upstream_signat
         assert handle["patient_ids"][:].tolist() == [7]
         assert handle["filenames"][:].tolist() == [b"PATIENT_7_PATCH_001.png"]
         assert handle.attrs["upstream_source_signature"] == "stage2-signature"
+
+    assert "Copy progress: mode=copy" in caplog.text
+    assert "copied=" in caplog.text
+    assert "ETA" in caplog.text
 
 
 def test_copy_source_hdf5_dataset_allows_missing_optional_source_ref_datasets(
@@ -181,8 +187,13 @@ def test_merge_source_hdf5_shards_logs_progress(
     )
 
     assert "Merging 2 HDF5 shard(s)" in caplog.text
-    assert "Read Stage 2 shards: 2/2 (100.0%)" in caplog.text
-    assert "Wrote merged rows: 2/2 (100.0%)" in caplog.text
+    assert "Merge shard scan: mode=merge" in caplog.text
+    assert "Merge shard scan: 2/2 shards" in caplog.text
+    assert "Merge progress: total_rows=2" in caplog.text
+    assert "Merge progress: 2/2 rows" in caplog.text
+    assert "read=2/2 rows" in caplog.text
+    assert "wrote=2/2 rows" in caplog.text
+    assert "ETA" in caplog.text
 
 
 def test_filter_source_hdf5_by_manifest_writes_only_accepted_rows(tmp_path: Path) -> None:
@@ -270,7 +281,11 @@ def test_filter_source_hdf5_by_manifest_logs_progress(
         copy_batch_size=256,
     )
 
-    assert "Filtering accepted rows: 2/2 (100.0%)" in caplog.text
+    assert "Filter progress: mode=filter" in caplog.text
+    assert "Filter progress: 2/2 rows" in caplog.text
+    assert "read=2/2 rows" in caplog.text
+    assert "wrote=2/2 rows" in caplog.text
+    assert "ETA" in caplog.text
 
 
 def test_filter_source_hdf5_by_manifest_preserves_manifest_row_order(tmp_path: Path) -> None:

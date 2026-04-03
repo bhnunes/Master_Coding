@@ -8,6 +8,7 @@ import shutil
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any, cast
 
 import h5py
@@ -24,6 +25,8 @@ _REQUIRED_HDF5_DATASETS = (
     "filenames",
 )
 _OPTIONAL_HDF5_DATASETS = ("slide_ids", "source_image_paths", "source_mask_paths")
+_COPY_BUFFER_BYTES = 8 * 1024 * 1024
+_PROGRESS_LOG_INTERVAL_SECONDS = 1.5
 
 
 @dataclass(frozen=True)
@@ -43,14 +46,73 @@ class _MergeRowReference:
     slide_id: str | None
 
 
-def _progress_interval(total: int) -> int:
-    return max(1_000, total // 100, 1)
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "00:00"
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
 
 
-def _log_progress(*, message: str, completed: int, total: int, interval: int) -> None:
-    if completed != 1 and completed != total and completed % interval != 0:
-        return
-    logging.info("%s: %s/%s (%.1f%%)", message, completed, total, (completed / total) * 100.0)
+def _format_bytes(byte_count: int) -> str:
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    value = float(byte_count)
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{byte_count} B"
+
+
+@dataclass
+class _ProgressReporter:
+    phase_name: str
+    total_units: int
+    unit_label: str
+    context: str = ""
+    start_time: float = 0.0
+    last_logged_at: float = 0.0
+
+    def __post_init__(self) -> None:
+        self.start_time = perf_counter()
+        self.last_logged_at = self.start_time
+
+    def log_start(self, summary: str) -> None:
+        logging.info("%s: %s", self.phase_name, summary)
+
+    def log(
+        self,
+        *,
+        completed_units: int,
+        force: bool = False,
+        extra_parts: list[str] | None = None,
+    ) -> None:
+        now = perf_counter()
+        if not force and completed_units < self.total_units:
+            if now - self.last_logged_at < _PROGRESS_LOG_INTERVAL_SECONDS:
+                return
+        elapsed = max(now - self.start_time, 1e-9)
+        rate = completed_units / elapsed if completed_units > 0 else 0.0
+        remaining_units = max(self.total_units - completed_units, 0)
+        eta_seconds = remaining_units / rate if rate > 0 else 0.0
+        percent = (completed_units / self.total_units) * 100.0 if self.total_units else 100.0
+        parts = [
+            f"{completed_units}/{self.total_units} {self.unit_label}",
+            f"{percent:.1f}%",
+            f"{rate:.1f} {self.unit_label}/s",
+            f"ETA {_format_duration(eta_seconds)}",
+        ]
+        if self.context:
+            parts.insert(0, self.context)
+        if extra_parts:
+            parts.extend(extra_parts)
+        logging.info("%s: %s", self.phase_name, " | ".join(parts))
+        self.last_logged_at = now
 
 
 def _dataset_kwargs(compression: str | None) -> dict[str, Any]:
@@ -217,7 +279,36 @@ def copy_source_hdf5_dataset(source_path: Path, output_path: Path, *, overwrite:
         return _validate_existing_hdf5(output_path, source_signature)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, output_path)
+    total_bytes = source_path.stat().st_size
+    reporter = _ProgressReporter("Copy progress", total_bytes, "bytes")
+    reporter.log_start(
+        "mode=copy | "
+        f"source={source_path} | output={output_path} | total={_format_bytes(total_bytes)}"
+    )
+    copied_bytes = 0
+    with source_path.open("rb") as source_handle, output_path.open("wb") as output_handle:
+        while True:
+            chunk = source_handle.read(_COPY_BUFFER_BYTES)
+            if not chunk:
+                break
+            output_handle.write(chunk)
+            copied_bytes += len(chunk)
+            reporter.log(
+                completed_units=copied_bytes,
+                extra_parts=[
+                    f"copied={_format_bytes(copied_bytes)}",
+                    f"remaining={_format_bytes(max(total_bytes - copied_bytes, 0))}",
+                ],
+            )
+    shutil.copystat(source_path, output_path)
+    reporter.log(
+        completed_units=total_bytes,
+        force=True,
+        extra_parts=[
+            f"copied={_format_bytes(total_bytes)}",
+            f"remaining={_format_bytes(0)}",
+        ],
+    )
     with h5py.File(output_path, "r+") as handle:
         upstream_signature = handle.attrs.get("source_signature")
         if upstream_signature is not None:
@@ -288,8 +379,13 @@ def filter_source_hdf5_by_manifest(
     total_rows = len(selected_rows)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     str_dtype = h5py.string_dtype(encoding="utf-8")
-    progress_interval = _progress_interval(total_rows)
     dataset_kwargs = _dataset_kwargs(compression)
+    reporter = _ProgressReporter("Filter progress", total_rows, "rows")
+    reporter.log_start(
+        "mode=filter | "
+        f"source={source_path} | output={output_path} | selected_rows={total_rows} | "
+        f"compression={compression or 'none'} | batch_size={copy_batch_size}"
+    )
     with h5py.File(source_path, "r") as source_handle, h5py.File(output_path, "w") as dest_handle:
         source_images = cast(Any, source_handle["images"])
         source_masks = cast(Any, source_handle["masks"])
@@ -405,11 +501,13 @@ def filter_source_hdf5_by_manifest(
                 ]
             images[start:end] = batch_images
             masks[start:end] = batch_masks
-            _log_progress(
-                message="Filtering accepted rows",
-                completed=end,
-                total=total_rows,
-                interval=progress_interval,
+            reporter.log(
+                completed_units=end,
+                extra_parts=[
+                    f"read={end}/{total_rows} rows",
+                    f"wrote={end}/{total_rows} rows",
+                    f"remaining={total_rows - end} rows",
+                ],
             )
 
         upstream_signature = source_handle.attrs.get("source_signature")
@@ -419,6 +517,15 @@ def filter_source_hdf5_by_manifest(
         dest_handle.attrs["stage4_cleaning_manifest_path"] = str(manifest_path)
         dest_handle.attrs["stage4_cleaning_manifest_sha256"] = hash_file_sha256(manifest_path)
         dest_handle.attrs["stage4_cleaning_selected_rows"] = total_rows
+    reporter.log(
+        completed_units=total_rows,
+        force=True,
+        extra_parts=[
+            f"read={total_rows}/{total_rows} rows",
+            f"wrote={total_rows}/{total_rows} rows",
+            "remaining=0 rows",
+        ],
+    )
     return output_path
 
 
@@ -499,7 +606,12 @@ def merge_source_hdf5_shards(
         raise ValueError(f"No HDF5 shards found in '{shard_dir}'.")
 
     logging.info("Merging %s HDF5 shard(s) from %s", len(shard_paths), shard_dir)
-    shard_progress_interval = _progress_interval(len(shard_paths))
+    shard_scan_reporter = _ProgressReporter("Merge shard scan", len(shard_paths), "shards")
+    shard_scan_reporter.log_start(
+        "mode=merge | "
+        f"source={shard_dir} | output={output_path} | shard_count={len(shard_paths)} | "
+        f"compression={compression or 'none'} | batch_size={copy_batch_size}"
+    )
     with ExitStack() as stack:
         shard_handles = [
             stack.enter_context(h5py.File(shard_path, "r")) for shard_path in shard_paths
@@ -522,11 +634,13 @@ def merge_source_hdf5_shards(
             row_references.extend(
                 _build_merge_row_references(shard_index=shard_index - 1, handle=handle)
             )
-            _log_progress(
-                message="Read Stage 2 shards",
-                completed=shard_index,
-                total=len(shard_paths),
-                interval=shard_progress_interval,
+            shard_scan_reporter.log(
+                completed_units=shard_index,
+                extra_parts=[
+                    f"last_shard={shard_path.name}",
+                    f"rows_discovered={len(row_references)}",
+                    f"remaining_shards={len(shard_paths) - shard_index}",
+                ],
             )
 
         row_references.sort(key=lambda row: (row.patient_id, row.filename))
@@ -545,8 +659,12 @@ def merge_source_hdf5_shards(
         image_shape = tuple(first_images.shape[1:])
         mask_shape = tuple(first_masks.shape[1:])
         has_slide_ids = any(row.slide_id is not None for row in row_references)
-        row_progress_interval = _progress_interval(total_rows)
         dataset_kwargs = _dataset_kwargs(compression)
+        merge_reporter = _ProgressReporter("Merge progress", total_rows, "rows")
+        merge_reporter.log_start(
+            f"total_rows={total_rows} | read=0/{total_rows} rows | wrote=0/{total_rows} rows | "
+            f"remaining={total_rows} rows"
+        )
 
         with h5py.File(output_path, "w") as output_handle:
             images = output_handle.create_dataset(
@@ -583,6 +701,7 @@ def merge_source_hdf5_shards(
             for start in range(0, total_rows, copy_batch_size):
                 end = min(start + copy_batch_size, total_rows)
                 batch_rows = row_references[start:end]
+                batch_read_rows = 0
                 batch_images = np.empty((len(batch_rows),) + image_shape, dtype=np.uint8)
                 batch_masks = np.empty((len(batch_rows),) + mask_shape, dtype=np.uint8)
                 batch_labels = np.empty(len(batch_rows), dtype=np.uint8)
@@ -603,6 +722,7 @@ def merge_source_hdf5_shards(
                         dtype=np.int64,
                         count=len(positions),
                     )
+                    batch_read_rows += len(source_indices)
                     sorted_indices, order = _sorted_indices(source_indices)
                     ordered_positions = np.asarray(positions, dtype=np.int64)[order]
 
@@ -701,12 +821,24 @@ def merge_source_hdf5_shards(
                 source_mask_paths[start:end] = batch_source_mask_paths.tolist()
                 if slide_ids is not None and batch_slide_ids is not None:
                     slide_ids[start:end] = batch_slide_ids.tolist()
-                _log_progress(
-                    message="Wrote merged rows",
-                    completed=end,
-                    total=total_rows,
-                    interval=row_progress_interval,
+                merge_reporter.log(
+                    completed_units=end,
+                    extra_parts=[
+                        f"read={end}/{total_rows} rows",
+                        f"wrote={end}/{total_rows} rows",
+                        f"batch_read={batch_read_rows} rows",
+                        f"remaining={total_rows - end} rows",
+                    ],
                 )
 
             output_handle.attrs["source_signature"] = source_signature
+        merge_reporter.log(
+            completed_units=total_rows,
+            force=True,
+            extra_parts=[
+                f"read={total_rows}/{total_rows} rows",
+                f"wrote={total_rows}/{total_rows} rows",
+                "remaining=0 rows",
+            ],
+        )
     return output_path
