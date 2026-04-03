@@ -58,6 +58,10 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         lambda data_dir: record("load", dataset),
     )
     monkeypatch.setattr(
+        "helpers.crossfold.pipeline.collect_hdf5_provenance",
+        lambda path: {"path": str(path), "sha256": "source-hash", "attrs": {}},
+    )
+    monkeypatch.setattr(
         "helpers.crossfold.pipeline.create_train_val_test_split_best",
         lambda **kwargs: record("split", split_data),
     )
@@ -91,6 +95,8 @@ def test_run_crossfold_pipeline_executes_stage_flow(
                 max_tries=10,
             ),
             objective=ObjectiveConfig(enable_objective=False),
+            hdf5_compression="NONE",
+            copy_batch_size=256,
             calc_checksums=False,
             save_entropy_cache_csv=False,
             log_folder=tmp_path / "logs",

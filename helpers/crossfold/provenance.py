@@ -160,6 +160,7 @@ def write_manifest_and_log_stats(
     split_data: dict[str, Any],
     manifest_df: pd.DataFrame,
     calc_checksums: bool = True,
+    source_hdf5_provenance: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
     """Persist Stage 5 manifest, split statistics, and run metadata artifacts."""
@@ -197,7 +198,8 @@ def write_manifest_and_log_stats(
             "validation": [int(value) for value in split_data.get("val_patients", [])],
             "test": [int(value) for value in split_data.get("test_patients", [])],
         },
-        "source_hdf5_provenance": collect_hdf5_provenance(source_hdf5_path),
+        "source_hdf5_provenance": source_hdf5_provenance
+        or collect_hdf5_provenance(source_hdf5_path),
         "library_versions": collect_runtime_environment(),
         "git_commit": get_git_commit_hash(),
         "extra": extra or {},

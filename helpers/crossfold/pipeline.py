@@ -18,6 +18,7 @@ from helpers.crossfold.provenance import (
     write_manifest_and_log_stats,
 )
 from helpers.crossfold.splitting import create_train_val_test_split_best
+from helpers.provenance import collect_hdf5_provenance
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     logging.info("Objective: %s", asdict(config.objective))
     logging.info("Output: %s", output_dir)
 
+    source_hdf5_provenance = collect_hdf5_provenance(config.source_hdf5_path)
     dataset = load_patch_dataset(config.source_hdf5_path)
     entropy_df: pd.DataFrame | None = None
     patient_entropy_df: pd.DataFrame | None = None
@@ -102,6 +104,9 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
             output_path=output_dir / f"{split_name}.h5",
             normalizer=normalizer,
             normalization_method=config.normalization_method,
+            source_hdf5_provenance=source_hdf5_provenance,
+            hdf5_compression=config.hdf5_compression,
+            copy_batch_size=config.copy_batch_size,
             overwrite=True,
         )
         verify_split_hdf5_integrity(output_path, split_df)
@@ -125,6 +130,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         split_data=split_data,
         manifest_df=manifest_df,
         calc_checksums=config.calc_checksums,
+        source_hdf5_provenance=source_hdf5_provenance,
         extra=extra,
     )
     logging.info("=== DONE ===")

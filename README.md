@@ -260,8 +260,13 @@ Current Stage 5 behavior:
 - Reads one cleaned source HDF5 dataset produced by Stage 3, optionally repackaged after Stage 4.3
 - Preserves patient-level split isolation and stratifies patients by `max(patch_label)`
 - Can evaluate many feasible patient-level splits and score them with the entropy objective before selecting the best candidate
+- Reuses cached source-HDF5 provenance inside one run instead of rehashing the same source file for every split artifact
+- Uses batched HDF5-backed entropy reads when the Stage 5 source is an HDF5 dataset
 - Fits stain normalization on TRAIN only when a normalization method other than `NOT_NORMALIZED` is configured
 - Applies the frozen TRAIN-fitted normalizer to `TRAIN`, `VALIDATION`, and `TEST`
+- Supports `CROSSFOLD_HDF5_COMPRESSION` with `none`, `lzf`, or `gzip`
+- Supports `CROSSFOLD_COPY_BATCH_SIZE` to batch Stage 5 HDF5 row copies during split writing
+- Emits lightweight log-based progress for entropy and split writing with processed rows, throughput, remaining rows, and ETA
 - Writes HDF5 split artifacts plus `manifest.csv`, `split_stats.csv`, `run_config.json`, and optional entropy-cache CSV artifacts for traceability
 
 ### Stage 6: Quality Assurance
@@ -349,6 +354,10 @@ LR_FINDER_ARCHITECTURES=FPN,SEGFORMER
 PACKAGING_HDF5_COMPRESSION=none
 PACKAGING_COPY_BATCH_SIZE=256
 
+# Stage 5 - Crossfold
+CROSSFOLD_HDF5_COMPRESSION=none
+CROSSFOLD_COPY_BATCH_SIZE=1024
+
 # Stage 9 - Training
 TRAINING_ARCHITECTURE=SEGFORMER
 TRAINING_ENCODER=mit_b5
@@ -373,6 +382,8 @@ For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Stage 2 resolves the suppo
 See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 3 packaging, Stage 4 cleaning, Stage 5/6/7 HDF5-native preparation, Stage 8 LR-finder reporting, the Stage 9 training matrix, and Stage 10 ensemble-optimizer settings.
 
 For Stage 3 packaging, the current best-known performance settings are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`. The benchmark write-up lives in `analysis/stage3_packaging_performance_findings.md`.
+
+For Stage 5 crossfold, the current optimization analysis and benchmark notes live in `analysis/stage5_crossfold_performance_findings.md`. The current best-known runtime settings on the measured 10-patient source dataset are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
 
 OpenSlide runtime rules:
 

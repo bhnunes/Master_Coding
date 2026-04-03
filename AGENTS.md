@@ -143,6 +143,10 @@ Agent guide for coding agents working in this repository.
   - `PACKAGING_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `PACKAGING_COPY_BATCH_SIZE` with default `256`
 - Current best-known Stage 3 runtime choices in `.env` are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`.
+- Stage 5 crossfold-related env vars now include:
+  - `CROSSFOLD_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
+  - `CROSSFOLD_COPY_BATCH_SIZE` with default `256`
+- Current best-known Stage 5 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
@@ -215,6 +219,24 @@ Agent guide for coding agents working in this repository.
 - Established negative results:
   - `lzf` and `gzip` were slower than `none` on the measured Stage 3 workloads
   - larger batch sizes such as `512` did not improve the full configured merge consistently over `256`
+
+## Stage 5 Performance Notes
+- Use `analysis/stage5_crossfold_performance_findings.md` as the canonical handoff document for Stage 5 performance analysis and optimization planning.
+- Current first-pass Stage 5 improvements are:
+  - cached source-HDF5 provenance reuse across the pipeline, split writer, and run-config generation
+  - batched HDF5-backed entropy reads in `helpers/crossfold/entropy.py`
+  - configurable Stage 5 split-output compression and batched copy writes in `helpers/crossfold/io.py`
+  - bulk metadata verification in `helpers/crossfold/io.py`
+  - lightweight log-based progress for entropy and split writing in `helpers/crossfold/entropy.py` and `helpers/crossfold/io.py`
+- First measured benchmark highlights on the real 10-patient Stage 5 dataset are:
+  - entropy dropped from `629.8s` to `8.45s` on a `1024`-row before/after benchmark slice
+  - full optimized entropy on all `7176` rows took `59.0s`
+  - full optimized Stage 5 runtime was `253.1s` with the objective enabled and `157.9s` with the objective disabled
+  - tuning the copy batch size to `1024` reduced full optimized runtime further to about `193.1s` with the objective enabled and `128.2s` with the objective disabled
+  - the verification rewrite reduced one measured verify pass from `22.53s` to `0.045s`
+  - `CROSSFOLD_HDF5_COMPRESSION=none` beat `gzip` strongly on the full write benchmark
+  - the later progress-logging pass showed no evidence of meaningful slowdown on one measured objective-off rerun (`99.3s`)
+- When optimizing Stage 5, benchmark entropy, provenance hashing, split search, and split writing separately before changing scientific validation behavior.
 
 ## Agent Heuristics
 - Prefer minimal local edits.

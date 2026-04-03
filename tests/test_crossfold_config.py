@@ -31,6 +31,8 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
             "CROSSFOLD_ENTROPY_NUM_WORKERS": "3",
             "CROSSFOLD_ENTROPY_CHUNKSIZE": "64",
             "CROSSFOLD_ENTROPY_THUMBNAIL": "256",
+            "CROSSFOLD_HDF5_COMPRESSION": "lzf",
+            "CROSSFOLD_COPY_BATCH_SIZE": "32",
             "CROSSFOLD_CALC_CHECKSUMS": "true",
             "CROSSFOLD_SAVE_ENTROPY_CACHE_CSV": "false",
         }
@@ -59,6 +61,8 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.objective.num_workers == 3
     assert config.objective.chunksize == 64
     assert config.objective.entropy_thumbnail == 256
+    assert config.hdf5_compression == "LZF"
+    assert config.copy_batch_size == 32
     assert config.calc_checksums is True
     assert config.save_entropy_cache_csv is False
     assert config.log_path == Path("logs/data_preparation.log")

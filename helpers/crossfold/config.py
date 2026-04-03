@@ -16,6 +16,7 @@ VALID_NORMALIZATION_METHODS = (
     "VAHADANE",
 )
 VALID_SCORE_SPLITS = ("TRAIN", "VALIDATION")
+VALID_HDF5_COMPRESSION = ("NONE", "LZF", "GZIP")
 
 
 def _parse_bool(value: str | None, variable_name: str, default: bool) -> bool:
@@ -116,6 +117,8 @@ class CrossfoldConfig:
     random_state: int
     constraints: SplitConstraints
     objective: ObjectiveConfig
+    hdf5_compression: str
+    copy_batch_size: int
     calc_checksums: bool
     save_entropy_cache_csv: bool
     log_folder: Path
@@ -264,6 +267,20 @@ def load_crossfold_config(
         random_state=_parse_int(values.get("CROSSFOLD_RANDOM_STATE"), "CROSSFOLD_RANDOM_STATE", 42),
         constraints=constraints,
         objective=objective,
+        hdf5_compression=_parse_choice(
+            values.get("CROSSFOLD_HDF5_COMPRESSION"),
+            "CROSSFOLD_HDF5_COMPRESSION",
+            default="NONE",
+            allowed=VALID_HDF5_COMPRESSION,
+        ),
+        copy_batch_size=max(
+            1,
+            _parse_int(
+                values.get("CROSSFOLD_COPY_BATCH_SIZE"),
+                "CROSSFOLD_COPY_BATCH_SIZE",
+                256,
+            ),
+        ),
         calc_checksums=_parse_bool(
             values.get("CROSSFOLD_CALC_CHECKSUMS"),
             "CROSSFOLD_CALC_CHECKSUMS",

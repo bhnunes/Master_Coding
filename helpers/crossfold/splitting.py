@@ -9,7 +9,6 @@ import pandas as pd
 from sklearn.model_selection import StratifiedShuffleSplit
 
 from helpers.crossfold.config import ObjectiveConfig, SplitConstraints
-from helpers.crossfold.entropy import score_split_by_patient_entropy_median
 
 
 def build_patient_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -109,9 +108,13 @@ def _build_split_return(
     score: float | None,
     score_split: str,
 ) -> dict[str, Any]:
-    train_df = df[df["patient_id"].isin(sorted(train_patients))].reset_index(drop=True)
-    val_df = df[df["patient_id"].isin(sorted(val_patients))].reset_index(drop=True)
-    test_df = df[df["patient_id"].isin(sorted(test_patients))].reset_index(drop=True)
+    split_by_patient = {patient_id: "TRAIN" for patient_id in train_patients}
+    split_by_patient.update({patient_id: "VALIDATION" for patient_id in val_patients})
+    split_by_patient.update({patient_id: "TEST" for patient_id in test_patients})
+    row_split = df["patient_id"].map(lambda patient_id: split_by_patient.get(int(patient_id)))
+    train_df = df[row_split == "TRAIN"].reset_index(drop=True)
+    val_df = df[row_split == "VALIDATION"].reset_index(drop=True)
+    test_df = df[row_split == "TEST"].reset_index(drop=True)
     logging.info(
         "Split OK (attempt %s/%s, seed=%s): patients train/val/test=%s/%s/%s | "
         "images train/val/test=%s/%s/%s%s",
@@ -141,30 +144,6 @@ def _build_split_return(
     }
 
 
-def _validation_supports_stage11(
-    patient_df: pd.DataFrame,
-    val_patients: set[int],
-    constraints: SplitConstraints,
-    *,
-    dataset_has_both_classes: bool,
-) -> bool:
-    if not constraints.enforce_stage11_validation_sizing:
-        return True
-
-    validation_rows = patient_df[patient_df["patient_id"].isin(sorted(val_patients))]
-    if len(validation_rows) < constraints.min_validation_patients_for_ensemble:
-        return False
-    if not dataset_has_both_classes:
-        return True
-
-    positive_count = int((validation_rows["patient_label"] == 1).sum())
-    negative_count = int((validation_rows["patient_label"] == 0).sum())
-    return (
-        positive_count >= constraints.min_validation_positive_patients_for_ensemble
-        and negative_count >= constraints.min_validation_negative_patients_for_ensemble
-    )
-
-
 def create_train_val_test_split_best(
     df: pd.DataFrame,
     random_state: int,
@@ -180,10 +159,50 @@ def create_train_val_test_split_best(
     labels = patient_df["patient_label"].astype(int).to_numpy()
     dataset_has_both_classes = patient_df["patient_label"].nunique() >= 2
     rng = np.random.default_rng(random_state)
+    patient_image_counts = dict(
+        zip(
+            patient_df["patient_id"].tolist(),
+            patient_df["n_images"].astype(int).tolist(),
+            strict=True,
+        )
+    )
+    patient_labels = dict(
+        zip(
+            patient_df["patient_id"].tolist(),
+            patient_df["patient_label"].astype(int).tolist(),
+            strict=True,
+        )
+    )
+    patient_entropy_lookup: dict[int, float] = {}
+    if patient_entropy_df is not None:
+        patient_entropy_lookup = dict(
+            zip(
+                patient_entropy_df["patient_id"].astype(int).tolist(),
+                patient_entropy_df["patient_entropy_median"].astype(float).tolist(),
+                strict=True,
+            )
+        )
 
     def image_count(patient_ids_subset: set[int]) -> int:
-        return int(
-            patient_df[patient_df["patient_id"].isin(sorted(patient_ids_subset))]["n_images"].sum()
+        return int(sum(patient_image_counts[patient_id] for patient_id in patient_ids_subset))
+
+    def split_has_both(patient_subset: set[int]) -> bool:
+        split_labels = {patient_labels[patient_id] for patient_id in patient_subset}
+        return 0 in split_labels and 1 in split_labels
+
+    def validation_supports_stage11(val_patients: set[int]) -> bool:
+        if not constraints.enforce_stage11_validation_sizing:
+            return True
+        if len(val_patients) < constraints.min_validation_patients_for_ensemble:
+            return False
+        if not dataset_has_both_classes:
+            return True
+
+        positive_count = sum(1 for patient_id in val_patients if patient_labels[patient_id] == 1)
+        negative_count = len(val_patients) - positive_count
+        return (
+            positive_count >= constraints.min_validation_positive_patients_for_ensemble
+            and negative_count >= constraints.min_validation_negative_patients_for_ensemble
         )
 
     failure_counts = {
@@ -240,15 +259,6 @@ def create_train_val_test_split_best(
             failure_counts["fail_min_patients"] += 1
             continue
         if constraints.require_both_classes_if_possible and dataset_has_both_classes:
-
-            def split_has_both(patient_subset: set[int]) -> bool:
-                split_labels = set(
-                    patient_df[patient_df["patient_id"].isin(sorted(patient_subset))][
-                        "patient_label"
-                    ].tolist()
-                )
-                return 0 in split_labels and 1 in split_labels
-
             if not (
                 split_has_both(train_patients)
                 and split_has_both(val_patients)
@@ -256,12 +266,7 @@ def create_train_val_test_split_best(
             ):
                 failure_counts["fail_class_coverage"] += 1
                 continue
-        if not _validation_supports_stage11(
-            patient_df,
-            val_patients,
-            constraints,
-            dataset_has_both_classes=dataset_has_both_classes,
-        ):
+        if not validation_supports_stage11(val_patients):
             failure_counts["fail_stage11_validation_sizing"] += 1
             continue
         train_images = image_count(train_patients)
@@ -299,7 +304,11 @@ def create_train_val_test_split_best(
             score_ids = sorted(test_patients)
         else:
             raise ValueError(f"Invalid objective.score_split: {objective.score_split}")
-        score = score_split_by_patient_entropy_median(patient_entropy_df, score_ids)
+        score_values = [patient_entropy_lookup[patient_id] for patient_id in score_ids]
+        if not score_values:
+            score = float("-inf")
+        else:
+            score = float(np.median(np.asarray(score_values, dtype=np.float64)))
         if best is None or best_score is None:
             best = (train_patients, val_patients, test_patients, seed, attempt + 1)
             best_score = score

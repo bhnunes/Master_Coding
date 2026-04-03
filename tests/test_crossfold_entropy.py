@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import cv2
 import h5py
@@ -108,3 +109,74 @@ def test_compute_all_patch_entropies_supports_hdf5_backed_rows(tmp_path: Path) -
     ]
     assert entropy_df["entropy"].iloc[0] == pytest.approx(0.0)
     assert entropy_df["entropy"].iloc[1] > 0.0
+
+
+def test_compute_all_patch_entropies_reuses_hdf5_handle_per_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((3, 8, 8, 3), dtype=np.uint8))
+
+    dataset = pd.DataFrame(
+        [
+            {
+                "image_path": f"{source_path}::images[0]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 0,
+            },
+            {
+                "image_path": f"{source_path}::images[1]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 1,
+            },
+            {
+                "image_path": f"{source_path}::images[2]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 2,
+            },
+        ]
+    )
+    original_h5py_file = h5py.File
+    open_count = 0
+
+    def counting_file(*args: Any, **kwargs: Any) -> Any:
+        nonlocal open_count
+        open_count += 1
+        return original_h5py_file(*args, **kwargs)
+
+    monkeypatch.setattr("helpers.crossfold.entropy.h5py.File", counting_file)
+
+    compute_all_patch_entropies(dataset, num_workers=4, chunksize=2, entropy_thumbnail=8)
+
+    assert open_count == 1
+
+
+def test_compute_all_patch_entropies_emits_progress_logs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((2, 8, 8, 3), dtype=np.uint8))
+
+    dataset = pd.DataFrame(
+        [
+            {
+                "image_path": f"{source_path}::images[0]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 0,
+            },
+            {
+                "image_path": f"{source_path}::images[1]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 1,
+            },
+        ]
+    )
+
+    caplog.set_level("INFO")
+    compute_all_patch_entropies(dataset, num_workers=1, chunksize=1, entropy_thumbnail=8)
+
+    assert any("Stage 5 entropy" in message for message in caplog.messages)
