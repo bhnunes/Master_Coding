@@ -11,14 +11,14 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `4_1_optimization_sampling.py`
 - `4_2_tune_graph_method.py`
 - `4_3_cleaner_script.py`
-- `5_pack_splits_to_hdf5.py`
-- `6_crossfold.py`
-- `7_sanity_checks.py`
-- `8_smart_sampler.py`
-- `9_lr_finder.py`
-- `10_training_ensemble.py`
-- `11_optimizer_ensemble.py`
-- `12_inference_ensemble.py`
+- `3_pack_splits_to_hdf5.py`
+- `5_crossfold.py`
+- `6_sanity_checks.py`
+- `7_smart_sampler.py`
+- `8_lr_finder.py`
+- `9_training_ensemble.py`
+- `10_optimizer_ensemble.py`
+- `11_inference_ensemble.py`
 
 ## Stage 1 artifact detection
 
@@ -58,18 +58,18 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/graph/cleaning_pipeline.py`
 - `.env_example`
 
-## Stage 5 packaging
+## Stage 3 packaging
 
-- `5_pack_splits_to_hdf5.py`
+- `3_pack_splits_to_hdf5.py`
 - `helpers/packaging/config.py`
 - `helpers/packaging/discovery.py`
 - `helpers/packaging/pipeline.py`
 - `helpers/packaging/writer.py`
 - `.env_example`
 
-## Stage 6 crossfold and normalization
+## Stage 5 crossfold and normalization
 
-- `6_crossfold.py`
+- `5_crossfold.py`
 - `helpers/crossfold/config.py`
 - `helpers/crossfold/discovery.py`
 - `helpers/crossfold/entropy.py`
@@ -80,7 +80,7 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/crossfold/splitting.py`
 - `.env_example`
 
-## Stage 7 sanity checks
+## Stage 6 sanity checks
 
 - `7_sanity_checks.py`
 - `helpers/sanity/config.py`
@@ -92,9 +92,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/sanity/reporting.py`
 - `helpers/sanity/semantic_checks.py`
 
-## Stage 8 smart sampling
+## Stage 7 smart sampling
 
-- `8_smart_sampler.py`
+- `7_smart_sampler.py`
 - `helpers/smart_sampling/config.py`
 - `helpers/smart_sampling/index.py`
 - `helpers/smart_sampling/embeddings.py`
@@ -103,9 +103,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/smart_sampling/writer.py`
 - `helpers/smart_sampling/pipeline.py`
 
-## Stage 9 learning-rate screening
+## Stage 8 learning-rate screening
 
-- `9_lr_finder.py`
+- `8_lr_finder.py`
 - `helpers/lr_finder/config.py`
 - `helpers/lr_finder/data.py`
 - `helpers/lr_finder/search_space.py`
@@ -115,9 +115,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/lr_finder/pipeline.py`
 - `training_model_registry.json`
 
-## Stage 10 training
+## Stage 9 training
 
-- `10_training_ensemble.py`
+- `9_training_ensemble.py`
 - `helpers/training/config.py`
 - `helpers/training/data.py`
 - `helpers/training/models.py`
@@ -130,9 +130,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/training/gpu.py`
 - `training_model_registry.json`
 
-## Stages 11--12 ensemble optimization and inference
+## Stages 10--11 ensemble optimization and inference
 
-- `11_optimizer_ensemble.py`
+- `10_optimizer_ensemble.py`
 - `helpers/ensemble_optimizer/config.py`
 - `helpers/ensemble_optimizer/data.py`
 - `helpers/ensemble_optimizer/metadata.py`
@@ -141,7 +141,7 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/ensemble_optimizer/pipeline.py`
 - `helpers/ensemble_optimizer/reporting.py`
 - `helpers/ensemble_optimizer/splitting.py`
-- `12_inference_ensemble.py`
+- `11_inference_ensemble.py`
 - `helpers/ensemble_inference/config.py`
 - `helpers/ensemble_inference/data.py`
 - `helpers/ensemble_inference/inference.py`

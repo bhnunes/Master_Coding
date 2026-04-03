@@ -6,19 +6,17 @@ This review evaluated `2_database_manager.py` and its related extraction helpers
 
 ## Detected Threats to Validity
 
-### Critical: Synthetic patient IDs can break true patient-level isolation
+### Critical: True patient-level isolation still depends on an external dataset assumption
 
-- `helpers/extraction/repository.py:75-86` defines `PATIENT` as `TEXT NOT NULL UNIQUE`.
-- `helpers/extraction/repository.py:163-167` seeds new patient identifiers as sequential synthetic values.
-- `helpers/extraction/repository.py:221-231` assigns one new patient ID per image during ingestion.
-- `helpers/crossfold/discovery.py:32-35,48-57,62-66` loads those stored `patient_ids` from HDF5.
-- `helpers/crossfold/splitting.py:15-23` performs downstream grouping and stratification by `patient_id`.
+- `helpers/extraction/repository.py` still assigns one persisted patient identifier per ingested slide rather than deriving a verified biological patient identifier from source metadata.
+- `helpers/crossfold/discovery.py` and `helpers/crossfold/splitting.py` therefore preserve isolation only with respect to the Stage 2 stored patient IDs.
 
 Impact:
 
-- If one biological patient contributes multiple slides, Stage 2 currently treats those slides as different patients.
-- Downstream Stage 5 patient-level splits can therefore place slides from the same real patient into different splits while reporting that patient-level isolation was preserved.
-- This is a direct data leakage risk and can inflate reported performance.
+- If one biological patient contributes multiple slides, downstream Stage 5 patient-level splits can still place those slides into different partitions while appearing leakage-safe.
+- This remains a direct data leakage risk and can inflate reported performance.
+- In the current project state, this risk is being accepted based on the external operational assumption that each WSI corresponds to a unique patient.
+- That assumption is not enforced or validated in code.
 
 Severity: Critical
 
@@ -166,3 +164,11 @@ The most serious new concerns are:
 
 
 I would now treat the previous Stage 5 split-cherry-picking concern, the Stage 3 accepted-manifest provenance concern, and the HISEG coordinate-level signature concern as substantially mitigated. The strongest remaining publication risk is still upstream patient identity correctness in Stage 2.
+
+### Accepted Assumption
+
+For now, the pipeline is proceeding under the dataset-provider assumption that each WSI corresponds to a unique patient and that no patient contributes multiple slides. Because WSI filenames do not provide a reliable patient-key pattern and no external patient-mapping manifest is available, this assumption is not currently enforced in code.
+
+Implication:
+
+- If that source-data assumption is false, patient-level isolation claims for downstream Stage 5 evaluation may still be scientifically invalid despite the current code safeguards.
