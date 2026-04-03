@@ -139,6 +139,10 @@ Agent guide for coding agents working in this repository.
   - `OPENSLIDE_CACHE_BYTES` with default `0`
   - `STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES` with default `0`
 - Current best-known Stage 2 runtime choice in `.env` is `STAGE2_HDF5_COMPRESSION=none`.
+- Stage 3 packaging-related env vars now include:
+  - `PACKAGING_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
+  - `PACKAGING_COPY_BATCH_SIZE` with default `256`
+- Current best-known Stage 3 runtime choices in `.env` are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
@@ -198,6 +202,19 @@ Agent guide for coding agents working in this repository.
   - `Dockerfile` now builds native OpenSlide `4.0.0` from source and includes a build-time self-check that fails unless native OpenSlide is `>= 4.0.0` and `OpenSlideCache` can be instantiated
   - The rebuilt container now reports native OpenSlide `4.0.0`, and `openslide.OpenSlideCache(...)` instantiates successfully
   - Despite that, `OPENSLIDE_CACHE_BYTES=0` remains the best-known setting on the agreed benchmark slide set
+
+## Stage 3 Performance Notes
+- Use `analysis/stage3_packaging_performance_findings.md` as the canonical handoff document for Stage 3 benchmarking and optimization work.
+- The biggest confirmed Stage 3 wins so far were:
+  - batched HDF5 copy/write paths in `helpers/packaging/writer.py`
+  - replacing sorted fancy-index HDF5 reads with contiguous slice reads plus concatenate
+  - reusing shard-level `source_signature` provenance instead of recomputing per-row image and mask hashes during merge
+  - `PACKAGING_HDF5_COMPRESSION=none`
+- Current best-known Stage 3 runtime settings are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`.
+- Stage 3 now emits lightweight log-based progress for copy, filter, and merge paths, including processed counts, remaining work, throughput, and ETA.
+- Established negative results:
+  - `lzf` and `gzip` were slower than `none` on the measured Stage 3 workloads
+  - larger batch sizes such as `512` did not improve the full configured merge consistently over `256`
 
 ## Agent Heuristics
 - Prefer minimal local edits.

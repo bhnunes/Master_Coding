@@ -235,6 +235,10 @@ Current Stage 3 behavior:
 - Can merge Stage 2 HDF5 shards into one canonical `SOURCE_DATASET.h5` before Stage 4.1
 - Can also re-run after Stage 4.3 using `accepted_manifest.csv` to package only the accepted rows
 - Preserves stable row alignment and filename identity for downstream Stage 4.1, Stage 5, Stage 7, and artifact-aware joins
+- Uses batched HDF5 reads and writes to keep large merges practical on real shard sets
+- Supports `PACKAGING_HDF5_COMPRESSION` with `none`, `lzf`, or `gzip`; current best-known setting is `none`
+- Supports `PACKAGING_COPY_BATCH_SIZE`; current best-known setting is `256`
+- Emits lightweight log-based progress for copy, filter, and merge operations with throughput and ETA
 
 ### Stage 4: Annotation Cleaning
 
@@ -341,6 +345,10 @@ LR_FINDER_HDF5_DRIVE_DIR=./data/CAMELYON16
 LR_FINDER_OUTPUT_DIR=./reports/lr_finder
 LR_FINDER_ARCHITECTURES=FPN,SEGFORMER
 
+# Stage 3 - Packaging
+PACKAGING_HDF5_COMPRESSION=none
+PACKAGING_COPY_BATCH_SIZE=256
+
 # Stage 9 - Training
 TRAINING_ARCHITECTURE=SEGFORMER
 TRAINING_ENCODER=mit_b5
@@ -363,6 +371,8 @@ OPENSLIDE_PATH=
 For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Stage 2 resolves the supported label colors internally and does not require manual SQLite color setup.
 
 See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 3 packaging, Stage 4 cleaning, Stage 5/6/7 HDF5-native preparation, Stage 8 LR-finder reporting, the Stage 9 training matrix, and Stage 10 ensemble-optimizer settings.
+
+For Stage 3 packaging, the current best-known performance settings are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`. The benchmark write-up lives in `analysis/stage3_packaging_performance_findings.md`.
 
 OpenSlide runtime rules:
 
