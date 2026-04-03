@@ -1,5 +1,6 @@
 param(
-    [string]$PythonVersion = "3.12"
+    [string]$PythonVersion = "3.12",
+    [string]$OpenSlidePath = "C:\MASTER\openslide\bin"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,29 +22,33 @@ if (-not (Test-Command "uv")) {
     exit 1
 }
 
-$openSlidePath = [Environment]::GetEnvironmentVariable("OPENSLIDE_PATH")
-if ([string]::IsNullOrWhiteSpace($openSlidePath)) {
+$OpenSlidePath = $OpenSlidePath.Trim()
+
+Write-Step "Validating OPENSLIDE_PATH"
+if ([string]::IsNullOrWhiteSpace($OpenSlidePath)) {
     Write-Host "OPENSLIDE_PATH is required on native Windows." -ForegroundColor Yellow
     Write-Host "Install the OpenSlide Windows binaries and set OPENSLIDE_PATH to the OpenSlide 'bin' folder."
-    Write-Host "Example: OPENSLIDE_PATH=C:\openslide\bin"
+    Write-Host "Example: OPENSLIDE_PATH=C:\MASTER\openslide\bin"
     exit 1
 }
 
-$openSlidePath = $openSlidePath.Trim()
-Write-Step "Validating OPENSLIDE_PATH"
+Write-Step "Validating OPENSLIDE_PATH Exists..."
 if (-not (Test-Path $openSlidePath -PathType Container)) {
     Write-Host "OPENSLIDE_PATH does not exist or is not a directory: $openSlidePath" -ForegroundColor Red
     exit 1
 }
 
-Write-Step "Syncing Python dependencies (excluding aim on Windows)"
-uv sync --python $PythonVersion --group dev --no-install-package aim
+Write-Step "Syncing Python dependencies..."
+uv sync --python $PythonVersion --group dev
 if ($LASTEXITCODE -ne 0) {
     Write-Host "uv sync failed." -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
+$env:OPENSLIDE_PATH = $OpenSlidePath
+
 Write-Step "Verifying Python imports"
+
 $pythonCheck = @'
 import os
 from pathlib import Path
@@ -65,10 +70,17 @@ print("cv2", cv2.__version__)
 print("torch", torch.__version__)
 '@
 
-uv run --python $PythonVersion python -c $pythonCheck
-if ($LASTEXITCODE -ne 0) {
+$tempFile = [System.IO.Path]::GetTempFileName() + ".py"
+Set-Content -Path $tempFile -Value $pythonCheck -Encoding UTF8
+
+uv run --python $PythonVersion python $tempFile
+$exitCode = $LASTEXITCODE
+
+Remove-Item $tempFile -Force
+
+if ($exitCode -ne 0) {
     Write-Host "Python import verification failed." -ForegroundColor Red
-    exit $LASTEXITCODE
+    exit $exitCode
 }
 
 Write-Host "Windows bootstrap complete." -ForegroundColor Green
