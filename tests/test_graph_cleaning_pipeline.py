@@ -54,6 +54,7 @@ def test_run_graph_cleaning_pipeline_writes_hdf5_manifests(tmp_path: Path) -> No
             "filenames", data=np.array([f"{name}.png".encode() for name in names])
         )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a", b"slide_b"]))
+        handle.attrs["source_signature"] = "stage3-signature"
 
     scores = {0: 0.10, 1: 0.50}
 
@@ -90,6 +91,8 @@ def test_run_graph_cleaning_pipeline_writes_hdf5_manifests(tmp_path: Path) -> No
         rejected_rows = list(csv.DictReader(handle))
 
     assert accepted_rows[0]["filename"] == "accepted_PATIENT_1.png"
+    assert accepted_rows[0]["source_hdf5_sha256"] != ""
     assert accepted_rows[0]["source_row_index"] == "0"
     assert rejected_rows[0]["filename"] == "rejected_PATIENT_2.png"
+    assert rejected_rows[0]["source_hdf5_sha256"] != ""
     assert rejected_rows[0]["source_row_index"] == "1"

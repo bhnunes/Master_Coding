@@ -7,13 +7,14 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import h5py
 import numpy as np
 
 from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
 from helpers.optimization_sampling.sampling import discover_hdf5_image_mask_pairs
+from helpers.provenance import hash_file_sha256
 
 ACCEPTED = "accepted"
 REJECTED = "rejected"
@@ -43,6 +44,7 @@ class SourceCandidateRecord:
     patient_id: str | None = None
     slide_id: str | None = None
     source_hdf5_path: str | None = None
+    source_hdf5_sha256: str | None = None
     source_row_index: int | None = None
 
 
@@ -54,6 +56,7 @@ class CleaningDecisionRecord:
     patient_id: str | None = None
     slide_id: str | None = None
     source_hdf5_path: str | None = None
+    source_hdf5_sha256: str | None = None
     source_row_index: int | None = None
 
 
@@ -145,15 +148,16 @@ def _list_hdf5_candidates(
         logger.error("The source HDF5 dataset '%s' does not exist.", source_hdf5_path)
         return []
     with h5py.File(source_hdf5_path, "r") as handle:
-        filenames = handle["filenames"]
+        filenames = cast(Any, handle["filenames"])
         if len(filenames) == 0:
             logger.error("No rows found in the source HDF5 dataset: '%s'.", source_hdf5_path)
             return []
     pairs = discover_hdf5_image_mask_pairs(source_hdf5_path)
+    source_hdf5_sha256 = hash_file_sha256(source_hdf5_path)
     candidates: list[SourceCandidateRecord] = []
     with h5py.File(source_hdf5_path, "r") as handle:
-        patient_ids = handle["patient_ids"]
-        filenames = handle["filenames"]
+        patient_ids = cast(Any, handle["patient_ids"])
+        filenames = cast(Any, handle["filenames"])
         slide_ids = handle.get("slide_ids")
         for index in range(len(filenames)):
             filename_value = filenames[index]
@@ -164,7 +168,7 @@ def _list_hdf5_candidates(
             )
             stem = Path(filename).stem
             pair = pairs[stem]
-            slide_value = slide_ids[index] if slide_ids is not None else None
+            slide_value = cast(Any, slide_ids)[index] if slide_ids is not None else None
             candidates.append(
                 SourceCandidateRecord(
                     filename=filename,
@@ -179,6 +183,7 @@ def _list_hdf5_candidates(
                     if slide_value is not None
                     else None,
                     source_hdf5_path=str(source_hdf5_path),
+                    source_hdf5_sha256=source_hdf5_sha256,
                     source_row_index=index,
                 )
             )
@@ -220,6 +225,7 @@ def _process_hdf5_candidates(
                 patient_id=candidate.patient_id,
                 slide_id=candidate.slide_id,
                 source_hdf5_path=candidate.source_hdf5_path,
+                source_hdf5_sha256=candidate.source_hdf5_sha256,
                 source_row_index=candidate.source_row_index,
             )
         )
@@ -243,6 +249,7 @@ def _write_decision_manifest(
                 "patient_id",
                 "slide_id",
                 "source_hdf5_path",
+                "source_hdf5_sha256",
                 "source_row_index",
             ],
         )
@@ -256,6 +263,7 @@ def _write_decision_manifest(
                     "patient_id": record.patient_id,
                     "slide_id": record.slide_id,
                     "source_hdf5_path": record.source_hdf5_path,
+                    "source_hdf5_sha256": record.source_hdf5_sha256,
                     "source_row_index": record.source_row_index,
                 }
             )

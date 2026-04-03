@@ -5,6 +5,7 @@ import pytest
 from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
     get_handler_for_files,
+    load_slide_runtime_settings,
     run_slide_processing,
 )
 
@@ -12,6 +13,12 @@ from helpers.extraction.image_reader_service import (
 def test_get_handler_for_files_rejects_unknown_extension_pair() -> None:
     with pytest.raises(ValueError, match="No handler found"):
         get_handler_for_files("slide.abc", "annotation.xyz")
+
+
+def test_load_slide_runtime_settings_defaults_artifact_filtering_to_true() -> None:
+    settings = load_slide_runtime_settings({})
+
+    assert settings.use_advanced_artifact_filtering is True
 
 
 def test_run_slide_processing_returns_patch_engine_counts(

@@ -98,7 +98,7 @@ def load_slide_runtime_settings(
     window_size = int(values.get("WINDOW_SIZE") or 224)
     stride = int(values.get("STRIDE") or (window_size // 2))
     use_advanced_artifact_filtering = (
-        values.get("USE_ADVANCED_ARTIFACT_FILTERING") or "False"
+        values.get("USE_ADVANCED_ARTIFACT_FILTERING") or "True"
     ).lower() in {
         "true",
         "1",

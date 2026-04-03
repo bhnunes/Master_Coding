@@ -320,6 +320,8 @@ def copy_source_hdf5_dataset(source_path: Path, output_path: Path, *, overwrite:
 def _load_accepted_manifest_rows(
     source_path: Path,
     manifest_path: Path,
+    *,
+    source_hdf5_sha256: str,
 ) -> list[dict[str, Any]]:
     with manifest_path.open(encoding="utf-8", newline="") as handle:
         rows = [row for row in csv.DictReader(handle) if row.get("decision") == "accepted"]
@@ -333,6 +335,12 @@ def _load_accepted_manifest_rows(
         row_source = row.get("source_hdf5_path", "")
         if row_source and row_source != expected_source:
             raise ValueError(f"Accepted manifest row does not match source_hdf5_path: {row_source}")
+        row_source_sha256 = row.get("source_hdf5_sha256", "")
+        if row_source_sha256 != source_hdf5_sha256:
+            raise ValueError(
+                "Accepted manifest row does not match the current source_hdf5_sha256. "
+                "Regenerate accepted_manifest.csv from the current source HDF5 before packaging."
+            )
         source_row_index = int(row["source_row_index"])
         if source_row_index in seen_indices:
             continue
@@ -343,9 +351,59 @@ def _load_accepted_manifest_rows(
                 "source_row_index": source_row_index,
                 "patient_id": row.get("patient_id", ""),
                 "slide_id": row.get("slide_id", ""),
+                "source_hdf5_sha256": row_source_sha256,
             }
         )
     return normalized_rows
+
+
+def _validate_manifest_rows_against_source(
+    source_handle: h5py.File,
+    selected_rows: list[dict[str, Any]],
+) -> None:
+    if not selected_rows:
+        return
+    batch_indices = np.fromiter(
+        (int(row["source_row_index"]) for row in selected_rows),
+        dtype=np.int64,
+        count=len(selected_rows),
+    )
+    sorted_indices, order = _sorted_indices(batch_indices)
+    source_patient_ids = cast(Any, source_handle["patient_ids"])
+    source_filenames = cast(Any, source_handle["filenames"])
+    source_slide_ids = source_handle.get("slide_ids")
+    observed_patient_ids = _read_sorted_rows(source_patient_ids, sorted_indices, dtype=np.int32)[
+        order
+    ]
+    observed_filenames = _read_sorted_rows(source_filenames, sorted_indices, dtype=object)[order]
+    observed_slide_ids = (
+        _read_sorted_rows(cast(Any, source_slide_ids), sorted_indices, dtype=object)[order]
+        if source_slide_ids is not None
+        else np.full(len(selected_rows), "", dtype=object)
+    )
+
+    for position, row in enumerate(selected_rows):
+        expected_filename = str(row["filename"])
+        observed_filename = _normalize_hdf5_string(observed_filenames[position])
+        if expected_filename != observed_filename:
+            raise ValueError(
+                "Accepted manifest row metadata does not match the current source HDF5 "
+                f"at row {row['source_row_index']}: filename mismatch."
+            )
+        expected_patient_id = str(row["patient_id"])
+        observed_patient_id = str(int(observed_patient_ids[position]))
+        if expected_patient_id and expected_patient_id != observed_patient_id:
+            raise ValueError(
+                "Accepted manifest row metadata does not match the current source HDF5 "
+                f"at row {row['source_row_index']}: patient_id mismatch."
+            )
+        expected_slide_id = str(row["slide_id"])
+        observed_slide_id = _normalize_hdf5_string(observed_slide_ids[position])
+        if expected_slide_id and expected_slide_id != observed_slide_id:
+            raise ValueError(
+                "Accepted manifest row metadata does not match the current source HDF5 "
+                f"at row {row['source_row_index']}: slide_id mismatch."
+            )
 
 
 def _sorted_indices(
@@ -365,10 +423,15 @@ def filter_source_hdf5_by_manifest(
     copy_batch_size: int,
 ) -> Path:
     _validate_source_hdf5_contract(source_path)
-    selected_rows = _load_accepted_manifest_rows(source_path, manifest_path)
+    source_hdf5_sha256 = hash_file_sha256(source_path)
+    selected_rows = _load_accepted_manifest_rows(
+        source_path,
+        manifest_path,
+        source_hdf5_sha256=source_hdf5_sha256,
+    )
     source_signature = _signature_hexdigest(
         {
-            "source_hdf5_sha256": hash_file_sha256(source_path),
+            "source_hdf5_sha256": source_hdf5_sha256,
             "accepted_manifest_sha256": hash_file_sha256(manifest_path),
             "source_row_indices": [row["source_row_index"] for row in selected_rows],
         }
@@ -432,6 +495,7 @@ def filter_source_hdf5_by_manifest(
         source_mask_paths_dataset = (
             cast(Any, source_mask_refs) if source_mask_refs is not None else None
         )
+        _validate_manifest_rows_against_source(source_handle, selected_rows)
 
         for start in range(0, total_rows, copy_batch_size):
             end = min(start + copy_batch_size, total_rows)

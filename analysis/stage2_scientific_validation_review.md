@@ -22,35 +22,30 @@ Impact:
 
 Severity: Critical
 
-### Major: `hiseg_xml_coord_level` is missing from the persisted processing signature
+### Resolved: `hiseg_xml_coord_level` is now included in the persisted processing signature
 
-- `helpers/extraction/artifact_lookup.py:74-109` builds the Stage 2 `processing_signature`.
-- That signature includes image, annotation, GeoJSON, and several extraction settings, but not `hiseg_xml_coord_level`.
-- `helpers/extraction/data_handlers.py:138-142,176-198` uses `hiseg_xml_coord_level` to rescale HISEG XML annotations.
-- `2_database_manager.py:223-246` relies on `processing_signature` to decide whether completed outputs are stale.
+- `helpers/extraction/artifact_lookup.py` now includes `hiseg_xml_coord_level` in the Stage 2 `processing_signature`.
+- `2_database_manager.py` now passes `config.hiseg_xml_coord_level` into that signature builder.
 
 Impact:
 
-- Changing `HISEG_XML_COORD_LEVEL` changes annotation geometry and therefore masks and labels.
-- Because that setting is not included in the signature, previously completed slides can be incorrectly reused after a scientifically meaningful parsing change.
-- This threatens reproducibility and can silently mix stale labels into later experiments.
+- Changing `HISEG_XML_COORD_LEVEL` now invalidates the persisted processing signature as it should.
+- This mitigates the stale-output reuse risk for scientifically meaningful HISEG XML parsing changes.
 
-Severity: Major
+Severity: Resolved
 
-### Major: contradictory defaults for `USE_ADVANCED_ARTIFACT_FILTERING`
+### Resolved: `USE_ADVANCED_ARTIFACT_FILTERING` defaults are now aligned
 
-- `helpers/extraction/config.py:94-97` defaults `USE_ADVANCED_ARTIFACT_FILTERING` to `True`.
-- `helpers/extraction/image_reader_service.py:100-107` defaults the same setting to `False`.
-- `2_database_manager.py:96-106` resolves GeoJSONs based on the config-side interpretation.
-- `2_database_manager.py:156-163` and `helpers/extraction/image_reader_service.py:183-187` pass the runtime-side interpretation into extraction.
+- `helpers/extraction/config.py` defaults `USE_ADVANCED_ARTIFACT_FILTERING` to `True`.
+- `helpers/extraction/image_reader_service.py` now also defaults the same setting to `True`.
+- `2_database_manager.py` therefore now resolves GeoJSONs, persists signatures, and invokes extraction with a consistent interpretation when the env var is unset.
 
 Impact:
 
-- If the env var is unset, Stage 2 orchestration can behave as if artifact filtering is enabled while extraction behaves as if it is disabled.
-- That can silently change whether artifact coverage metadata is actually computed.
-- Downstream artifact-aware analyses or ablations may therefore be based on incorrect metadata generation assumptions.
+- This removes the previous split-brain behavior between orchestration and runtime extraction.
+- Downstream artifact-aware analyses and ablations now have a consistent default Stage 2 behavior when the env var is omitted.
 
-Severity: Major
+Severity: Resolved
 
 ### Moderate: HDF5 shard filenames can collide across same-stem slides
 
@@ -97,36 +92,31 @@ This addendum evaluated `3_pack_splits_to_hdf5.py` and `5_crossfold.py` together
 
 ### Detected Threats to Validity
 
-#### Major: Stage 3 accepted-manifest filtering is bound to mutable row indices, not immutable source identity
+#### Resolved: Stage 3 accepted-manifest filtering now binds rows to immutable source identity
 
-- `helpers/graph/cleaning_pipeline.py:229-260` writes accepted/rejected manifests with `source_hdf5_path` and `source_row_index`, but no source-HDF5 hash or row-level identity check.
-- `helpers/packaging/writer.py:320-348` loads accepted rows and only verifies that `source_hdf5_path` string matches the current input path.
-- `helpers/packaging/writer.py:358-375` builds the output signature from the current source-file hash plus manifest hash plus selected row indices, but does not verify that the manifest rows still refer to the same patch identities in the current source file.
-- `helpers/packaging/writer.py:436-494` then copies rows strictly by current `source_row_index`.
-
-Impact:
-
-- If the Stage 3 source HDF5 is regenerated or reordered in place at the same path, an older accepted manifest can silently select the wrong rows.
-- That means Stage 4.3 cleaning decisions can be applied to different patches than the ones that were actually reviewed.
-- The result can silently reintroduce rejected/contaminated patches or drop accepted ones, breaking reproducibility and potentially biasing downstream training and evaluation.
-
-Severity: Major
-
-#### Major: Stage 5 split search cherry-picks one split from many candidates using a full-cohort entropy objective
-
-- `helpers/crossfold/config.py:101-109` sets the entropy-based objective fields, and `helpers/crossfold/config.py:217-233` enables that objective by default.
-- `helpers/crossfold/pipeline.py:54-73` computes entropy on the full source dataset before split search and passes patient-level entropy into the splitter.
-- `helpers/crossfold/splitting.py:220-320` samples up to `max_tries` randomized patient splits and keeps the single best one by objective score.
-- The default objective is `score_split="TRAIN"` with `maximize=True`, so the search preferentially allocates higher-entropy patients into TRAIN.
+- `helpers/graph/cleaning_pipeline.py` now writes `source_hdf5_sha256` into accepted/rejected manifests.
+- `helpers/packaging/writer.py` now requires each accepted-manifest row to match both `source_hdf5_path` and `source_hdf5_sha256`.
+- `helpers/packaging/writer.py` now validates row-level identity against the current source HDF5 using `filename`, `patient_id`, and `slide_id` before copying rows.
 
 Impact:
 
-- This is not a neutral random split. It is a data-dependent split selection procedure that searches many feasible partitions and retains the one with the most favorable entropy profile.
-- Because the default objective maximizes TRAIN difficulty, the held-out VALIDATION/TEST sets can become systematically easier on the same full cohort budget.
-- Reported downstream metrics can therefore be inflated relative to a neutral patient-level split, especially on the currently documented small-cohort regime.
-- A reviewer could reasonably classify this as split cherry-picking unless the manuscript explicitly justifies the objective and reports results against fixed neutral baselines.
+- If the source HDF5 is regenerated, reordered, or row identities drift, Stage 3 now fails closed instead of silently applying stale cleaning decisions to the wrong rows.
+- This preserves the earlier Stage 3 performance gains because validation happens once up front and does not change the batched image/mask copy path.
 
-Severity: Major
+Severity: Resolved
+
+#### Resolved for TEST: Stage 5 entropy-guided split search is now confined to TRAIN / VALIDATION
+
+- `helpers/crossfold/splitting.py` now freezes `TEST` first with a neutral patient-level stratified split.
+- `helpers/crossfold/splitting.py` applies entropy-guided optimization only when allocating the remaining TRAIN / VALIDATION patients.
+- `helpers/crossfold/pipeline.py` persists the split-selection method in provenance so the procedure is auditable.
+
+Impact:
+
+- This removes the main scientific objection for held-out benchmarking because `TEST` is no longer influenced by entropy-guided search.
+- Remaining caveat: TRAIN / VALIDATION allocation is still a development-time heuristic when enabled, so methods/reporting should state that clearly.
+
+Severity: Mitigated for TEST; still requires transparent reporting for TRAIN / VALIDATION
 
 #### Moderate: Stage 5 does not implement cross-validation despite the crossfold framing, and it emits no uncertainty estimate
 
@@ -172,7 +162,7 @@ Severity: Moderate
 
 The most serious new concerns are:
 
-1. Stage 3 can silently misapply Stage 4.3 acceptance decisions if the source HDF5 is regenerated in place.
-2. Stage 5 currently performs data-dependent split optimization by default, which can bias held-out evaluation difficulty and invite reviewer concerns about split cherry-picking.
+1. Stage 2 synthetic patient IDs can still break true patient-level isolation upstream of Stage 5.
 
-I would not present Stage 5-held-out metrics as fully publication-safe until those two points are addressed or very explicitly justified in the experimental methods.
+
+I would now treat the previous Stage 5 split-cherry-picking concern, the Stage 3 accepted-manifest provenance concern, and the HISEG coordinate-level signature concern as substantially mitigated. The strongest remaining publication risk is still upstream patient identity correctness in Stage 2.

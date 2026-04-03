@@ -127,6 +127,7 @@ def build_processing_signature_for_case(
         tissue_percentage=config.tissue_percentage,
         target_level=runtime_settings.target_level,
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+        hiseg_xml_coord_level=config.hiseg_xml_coord_level,
     )
 
 

@@ -64,6 +64,7 @@ def test_build_processing_signature_changes_when_geojson_changes(tmp_path: Path)
         tissue_percentage=0.3,
         target_level=0,
         use_advanced_artifact_filtering=True,
+        hiseg_xml_coord_level=6,
     )
 
     geojson_path.write_text('{"version": 2}')
@@ -77,6 +78,41 @@ def test_build_processing_signature_changes_when_geojson_changes(tmp_path: Path)
         tissue_percentage=0.3,
         target_level=0,
         use_advanced_artifact_filtering=True,
+        hiseg_xml_coord_level=6,
+    )
+
+    assert signature_before != signature_after
+
+
+def test_build_processing_signature_changes_when_hiseg_coord_level_changes(tmp_path: Path) -> None:
+    image_path = tmp_path / "case_a.svs"
+    annotation_path = tmp_path / "case_a.xml"
+    image_path.write_text("slide")
+    annotation_path.write_text("annotation")
+
+    signature_before = build_processing_signature(
+        image_path=image_path,
+        annotation_path=annotation_path,
+        artifacts_geojson_path=None,
+        window_size=224,
+        stride=112,
+        match_percentage=1.0,
+        tissue_percentage=0.3,
+        target_level=0,
+        use_advanced_artifact_filtering=False,
+        hiseg_xml_coord_level=5,
+    )
+    signature_after = build_processing_signature(
+        image_path=image_path,
+        annotation_path=annotation_path,
+        artifacts_geojson_path=None,
+        window_size=224,
+        stride=112,
+        match_percentage=1.0,
+        tissue_percentage=0.3,
+        target_level=0,
+        use_advanced_artifact_filtering=False,
+        hiseg_xml_coord_level=6,
     )
 
     assert signature_before != signature_after

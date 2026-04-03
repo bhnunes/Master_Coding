@@ -82,6 +82,7 @@ def build_processing_signature(
     tissue_percentage: float,
     target_level: int,
     use_advanced_artifact_filtering: bool,
+    hiseg_xml_coord_level: int,
 ) -> str:
     """Build a fail-closed signature for Stage 2 processing inputs and settings."""
 
@@ -105,5 +106,6 @@ def build_processing_signature(
             "tissue_percentage": float(tissue_percentage),
             "target_level": int(target_level),
             "use_advanced_artifact_filtering": bool(use_advanced_artifact_filtering),
+            "hiseg_xml_coord_level": int(hiseg_xml_coord_level),
         }
     )

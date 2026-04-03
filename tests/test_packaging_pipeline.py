@@ -5,6 +5,7 @@ import numpy as np
 
 from helpers.packaging.config import PackagingConfig, load_packaging_config
 from helpers.packaging.pipeline import run_packaging_pipeline
+from helpers.provenance import hash_file_sha256
 
 
 def test_run_packaging_pipeline_accepts_canonical_hdf5_input(tmp_path: Path) -> None:
@@ -147,10 +148,11 @@ def test_run_packaging_pipeline_filters_source_hdf5_by_accepted_manifest(tmp_pat
         )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a", b"slide_b"]))
         handle.attrs["source_signature"] = "stage2-signature"
+    source_sha256 = hash_file_sha256(source_path)
 
     manifest_path.write_text(
-        "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_row_index\n"
-        f"PATIENT_22_PATCH_001.png,accepted,0.1,22,slide_b,{source_path},1\n",
+        "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
+        f"PATIENT_22_PATCH_001.png,accepted,0.1,22,slide_b,{source_path},{source_sha256},1\n",
         encoding="utf-8",
     )
 
@@ -196,10 +198,11 @@ def test_run_packaging_pipeline_auto_uses_adjacent_accepted_manifest(tmp_path: P
             ),
         )
         handle.attrs["source_signature"] = "stage2-signature"
+    source_sha256 = hash_file_sha256(source_path)
 
     manifest_path.write_text(
-        "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_row_index\n"
-        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,slide_a,{source_path},0\n",
+        "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
+        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,,{source_path},{source_sha256},0\n",
         encoding="utf-8",
     )
 
