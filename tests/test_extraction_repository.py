@@ -1,5 +1,8 @@
 import sqlite3
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from helpers.extraction.repository import ExtractionRepository
 
@@ -90,6 +93,89 @@ def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path)
     )
 
     annotation_path.write_text("annotation-v2")
+    repository.ingest_new_cases(
+        source_folder=source_folder,
+        activate_sanity_check=False,
+        use_advanced_filtering=False,
+        geojson_path=None,
+    )
+
+    with sqlite3.connect(tmp_path / "database.db") as connection:
+        row = connection.execute(
+            "SELECT STATUS, COMMENTS FROM DATABASE_TEST WHERE IMAGEPATH = ?",
+            (str(image_path),),
+        ).fetchone()
+
+    assert row == (
+        "STALE",
+        "Input files changed for an existing case. "
+        "Clear stale patch outputs and reprocess this slide.",
+    )
+
+
+def test_repository_reingestion_avoids_full_slide_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_folder = tmp_path / "source"
+    repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
+
+    images_dir, annotations_dir, _geojson_dir = repository.get_source_directories(source_folder)
+    for folder in (images_dir, annotations_dir):
+        folder.mkdir(parents=True, exist_ok=True)
+    repository.initialize()
+
+    image_path = images_dir / "case_a.svs"
+    annotation_path = annotations_dir / "case_a.xml"
+    image_path.write_text("slide-v1")
+    annotation_path.write_text("annotation-v1")
+
+    repository.ingest_new_cases(
+        source_folder=source_folder,
+        activate_sanity_check=False,
+        use_advanced_filtering=False,
+        geojson_path=None,
+    )
+
+    original_open = Path.open
+
+    def fail_if_raw_input_opened(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self in {image_path, annotation_path}:
+            raise AssertionError("Raw input files should not be opened during ingestion.")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_if_raw_input_opened)
+
+    repository.ingest_new_cases(
+        source_folder=source_folder,
+        activate_sanity_check=False,
+        use_advanced_filtering=False,
+        geojson_path=None,
+    )
+
+
+def test_repository_marks_existing_case_stale_when_slide_metadata_changes(tmp_path: Path) -> None:
+    source_folder = tmp_path / "source"
+    repository = ExtractionRepository(database_path=tmp_path / "database.db", tag="TEST")
+
+    images_dir, annotations_dir, _geojson_dir = repository.get_source_directories(source_folder)
+    for folder in (images_dir, annotations_dir):
+        folder.mkdir(parents=True, exist_ok=True)
+    repository.initialize()
+
+    image_path = images_dir / "case_a.svs"
+    annotation_path = annotations_dir / "case_a.xml"
+    image_path.write_text("slide-v1")
+    annotation_path.write_text("annotation-v1")
+
+    repository.ingest_new_cases(
+        source_folder=source_folder,
+        activate_sanity_check=False,
+        use_advanced_filtering=False,
+        geojson_path=None,
+    )
+
+    image_path.write_text("slide-v1-expanded")
     repository.ingest_new_cases(
         source_folder=source_folder,
         activate_sanity_check=False,

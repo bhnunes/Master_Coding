@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.extraction.artifact_lookup import GeoJsonLookup, resolve_geojson_for_slide
-from helpers.provenance import hash_file_sha256, hash_json_payload
+from helpers.provenance import build_file_metadata_fingerprint, hash_json_payload
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -114,11 +118,9 @@ class ExtractionRepository:
     ) -> str:
         return hash_json_payload(
             {
-                "image_path": str(image_path),
-                "image_sha256": hash_file_sha256(image_path),
-                "annotation_path": str(annotation_path) if annotation_path is not None else None,
-                "annotation_sha256": (
-                    hash_file_sha256(annotation_path)
+                "image": build_file_metadata_fingerprint(image_path),
+                "annotation": (
+                    build_file_metadata_fingerprint(annotation_path)
                     if annotation_path is not None and annotation_path.exists()
                     else None
                 ),
@@ -134,8 +136,11 @@ class ExtractionRepository:
     ) -> None:
         """Scan case folders and insert unseen cases into the database."""
 
+        ingestion_started_at = time.perf_counter()
         images_folder, annotations_folder, _ = self.get_source_directories(source_folder)
+        image_listing_started_at = time.perf_counter()
         image_files = sorted(path for path in images_folder.iterdir() if path.is_file())
+        image_listing_elapsed = time.perf_counter() - image_listing_started_at
         if not image_files:
             raise FileNotFoundError(
                 f"The directory '{images_folder}' is empty. Please add images to process."
@@ -143,22 +148,29 @@ class ExtractionRepository:
 
         run_geojson_check = activate_sanity_check and use_advanced_filtering
         geojson_lookup = None
+        geojson_lookup_elapsed = 0.0
         if run_geojson_check:
             if geojson_path is None or not geojson_path.is_dir():
                 raise FileNotFoundError(
                     "GeoJSON sanity check is active, but the source GEOJSON folder "
                     f"('{geojson_path}') is invalid."
                 )
+            geojson_lookup_started_at = time.perf_counter()
             geojson_lookup = GeoJsonLookup.from_directory(geojson_path)
+            geojson_lookup_elapsed = time.perf_counter() - geojson_lookup_started_at
 
+        annotation_lookup_started_at = time.perf_counter()
         annotation_lookup = {
             path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
         }
+        annotation_lookup_elapsed = time.perf_counter() - annotation_lookup_started_at
 
         with self._connect() as connection:
+            existing_query_started_at = time.perf_counter()
             existing_data = connection.execute(
                 f"SELECT ID, IMAGEPATH, PATIENT, INPUT_SIGNATURE FROM {self.table_name}"
             ).fetchall()
+            existing_query_elapsed = time.perf_counter() - existing_query_started_at
             existing_by_basename = {Path(str(row["IMAGEPATH"])).name: row for row in existing_data}
             existing_patients = {
                 int(str(row["PATIENT"])) for row in existing_data if str(row["PATIENT"]).isdigit()
@@ -166,7 +178,12 @@ class ExtractionRepository:
 
             next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
             payload: list[tuple[str, str | None, str, str, str, str]] = []
+            scanned_cases = 0
+            stale_updates = 0
+            failed_cases = 0
+            signature_scan_started_at = time.perf_counter()
             for image_path in image_files:
+                scanned_cases += 1
                 annotation_path = annotation_lookup.get(image_path.stem)
                 input_signature = self._build_input_signature(
                     image_path,
@@ -192,6 +209,7 @@ class ExtractionRepository:
                                 int(existing_row["ID"]),
                             ),
                         )
+                        stale_updates += 1
                     continue
 
                 status = "TO BE PROCESSED"
@@ -217,6 +235,8 @@ class ExtractionRepository:
                                 "GeoJSON Sanity Check Failed: "
                                 "The equivalent GeoJSON file was not found."
                             )
+                if status == "FAILED":
+                    failed_cases += 1
 
                 payload.append(
                     (
@@ -230,7 +250,11 @@ class ExtractionRepository:
                 )
                 next_patient_id += 1
 
+            signature_scan_elapsed = time.perf_counter() - signature_scan_started_at
+
+            write_elapsed = 0.0
             if payload:
+                write_started_at = time.perf_counter()
                 connection.executemany(
                     f"""
                     INSERT INTO {self.table_name}
@@ -239,7 +263,31 @@ class ExtractionRepository:
                     """,
                     payload,
                 )
+                write_elapsed = time.perf_counter() - write_started_at
+            commit_started_at = time.perf_counter()
             connection.commit()
+            commit_elapsed = time.perf_counter() - commit_started_at
+
+        total_elapsed = time.perf_counter() - ingestion_started_at
+        LOGGER.info(
+            "Stage 2 ingestion timing: slides=%d existing=%d inserted=%d stale_updates=%d "
+            "failed=%d list_images=%.3fs index_annotations=%.3fs index_geojson=%.3fs "
+            "query_existing=%.3fs "
+            "scan_signatures=%.3fs write_rows=%.3fs commit=%.3fs total=%.3fs",
+            scanned_cases,
+            len(existing_data),
+            len(payload),
+            stale_updates,
+            failed_cases,
+            image_listing_elapsed,
+            annotation_lookup_elapsed,
+            geojson_lookup_elapsed,
+            existing_query_elapsed,
+            signature_scan_elapsed,
+            write_elapsed,
+            commit_elapsed,
+            total_elapsed,
+        )
 
     def list_pending_cases(self) -> list[ExtractionCaseRecord]:
         """Return all cases still waiting for processing, ordered deterministically."""

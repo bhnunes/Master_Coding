@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from helpers.provenance import hash_file_sha256, hash_json_payload
+from helpers.provenance import build_file_metadata_fingerprint, hash_json_payload
 
 
 @dataclass(frozen=True)
@@ -88,15 +88,10 @@ def build_processing_signature(
 
     return hash_json_payload(
         {
-            "image_path": str(image_path),
-            "image_sha256": hash_file_sha256(image_path),
-            "annotation_path": str(annotation_path),
-            "annotation_sha256": hash_file_sha256(annotation_path),
-            "artifacts_geojson_path": (
-                str(artifacts_geojson_path) if artifacts_geojson_path is not None else None
-            ),
-            "artifacts_geojson_sha256": (
-                hash_file_sha256(artifacts_geojson_path)
+            "image": build_file_metadata_fingerprint(image_path),
+            "annotation": build_file_metadata_fingerprint(annotation_path),
+            "artifacts_geojson": (
+                build_file_metadata_fingerprint(artifacts_geojson_path)
                 if artifacts_geojson_path is not None and artifacts_geojson_path.exists()
                 else None
             ),

@@ -70,6 +70,19 @@ def hash_file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def build_file_metadata_fingerprint(path: str | Path) -> dict[str, Any]:
+    """Return a cheap content-change fingerprint based on filesystem metadata."""
+
+    resolved = Path(path)
+    stats = resolved.stat()
+    return {
+        "path": str(resolved),
+        "size_bytes": int(stats.st_size),
+        "mtime_ns": int(stats.st_mtime_ns),
+        "ctime_ns": int(stats.st_ctime_ns),
+    }
+
+
 def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
     """Collect content-aware provenance for an HDF5 artifact."""
 
