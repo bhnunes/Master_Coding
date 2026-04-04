@@ -38,8 +38,7 @@ def main() -> None:
             desc="Filtering Images",
         ),
     )
-    if config.params_path is not None:
-        logger.info("Loaded graph cleaning parameters from: %s", config.params_path)
+    logger.info("Loaded graph cleaning parameters from: %s", config.params_path)
     print(build_cleaning_message(summary))
 
 

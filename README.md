@@ -246,7 +246,7 @@ Current Stage 3 behavior:
 |--------|---------|
 | `4_1_optimization_sampling.py` | Selects a statistically representative subsample of cancer images for human-in-the-loop review. Uses Cochran's formula for sample size calculation. |
 | `4_2_tune_graph_method.py` | Uses Bayesian optimization to find optimal graph segmentation parameters for distinguishing correct vs. incorrect annotations. |
-| `4_3_cleaner_script.py` | Applies the tuned graph segmentation method to automatically remove incorrectly annotated HDF5 rows through accepted/rejected manifests. |
+| `4_3_cleaner_script.py` | Applies the tuned graph segmentation method to automatically remove incorrectly annotated HDF5 rows through accepted/rejected manifests. Requires the JSON parameter artifact produced by `4_2_tune_graph_method.py`. |
 
 ### Stage 5: Dataset Preparation
 
@@ -477,6 +477,7 @@ uv run --python 3.12 python 3_pack_splits_to_hdf5.py
 uv run --python 3.12 python 4_1_optimization_sampling.py
 # After human review, place approved/rejected in folders
 uv run --python 3.12 python 4_2_tune_graph_method.py
+# Stage 4.3 consumes the JSON artifact emitted by Stage 4.2 and fails fast without it
 uv run --python 3.12 python 4_3_cleaner_script.py
 
 # 5. Create HDF5 TRAIN/VALIDATION/TEST splits

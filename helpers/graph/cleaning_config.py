@@ -11,20 +11,6 @@ from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
 
-def _parse_int(value: str | None, variable_name: str, default: int | None = None) -> int:
-    candidate = value if value not in {None, ""} else default
-    if candidate is None:
-        raise ValueError(f"The '{variable_name}' environment variable is required.")
-    return int(candidate)
-
-
-def _parse_float(value: str | None, variable_name: str, default: float | None = None) -> float:
-    candidate = value if value not in {None, ""} else default
-    if candidate is None:
-        raise ValueError(f"The '{variable_name}' environment variable is required.")
-    return float(candidate)
-
-
 def _required_path(
     environment: Mapping[str, str | None],
     variable_name: str,
@@ -73,7 +59,7 @@ class GraphCleaningConfig:
     output_base_dir: Path
     log_folder: Path
     log_file_name: str
-    params_path: Path | None
+    params_path: Path
     num_workers: int
     graph_params: GraphContaminationParameters
     tau: float
@@ -96,14 +82,12 @@ def load_graph_cleaning_config(
         "GRAPH_CLEANING_SOURCE_HDF5_PATH",
         system_name=system_name,
     )
-    params_path = resolve_env_path(
-        values.get("GRAPH_CLEANING_PARAMS_PATH"),
+    params_path = _required_path(
+        values,
         "GRAPH_CLEANING_PARAMS_PATH",
         system_name=system_name,
     )
-    artifact = (
-        load_graph_cleaning_parameter_artifact(params_path) if params_path is not None else None
-    )
+    artifact = load_graph_cleaning_parameter_artifact(params_path)
     return GraphCleaningConfig(
         source_hdf5_path=source_hdf5_path,
         output_base_dir=_required_path(
@@ -124,37 +108,8 @@ def load_graph_cleaning_config(
         params_path=params_path,
         num_workers=max(
             1,
-            _parse_int(
-                values.get("GRAPH_CLEANING_NUM_WORKERS"),
-                "GRAPH_CLEANING_NUM_WORKERS",
-                default=os.cpu_count() or 1,
-            ),
+            int(values.get("GRAPH_CLEANING_NUM_WORKERS") or (os.cpu_count() or 1)),
         ),
-        graph_params=(
-            artifact.graph_params
-            if artifact is not None
-            else GraphContaminationParameters(
-                bg_intensity_thresh=_parse_int(
-                    values.get("GRAPH_CLEANING_BG_INTENSITY_THRESH"),
-                    "GRAPH_CLEANING_BG_INTENSITY_THRESH",
-                    default=198,
-                ),
-                k=_parse_float(values.get("GRAPH_CLEANING_K"), "GRAPH_CLEANING_K", default=386.0),
-                min_size=_parse_int(
-                    values.get("GRAPH_CLEANING_MIN_SIZE"),
-                    "GRAPH_CLEANING_MIN_SIZE",
-                    default=200,
-                ),
-                erosion_px=_parse_int(
-                    values.get("GRAPH_CLEANING_EROSION_PX"),
-                    "GRAPH_CLEANING_EROSION_PX",
-                    default=0,
-                ),
-            )
-        ),
-        tau=(
-            artifact.tau
-            if artifact is not None
-            else _parse_float(values.get("GRAPH_CLEANING_TAU"), "GRAPH_CLEANING_TAU", default=0.24)
-        ),
+        graph_params=artifact.graph_params,
+        tau=artifact.tau,
     )

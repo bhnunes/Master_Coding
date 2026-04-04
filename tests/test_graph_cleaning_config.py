@@ -7,59 +7,7 @@ from helpers.graph.cleaning_config import load_graph_cleaning_config
 from helpers.graph.contamination import GraphContaminationParameters
 
 
-def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    source_path.write_bytes(b"placeholder")
-    config = load_graph_cleaning_config(
-        {
-            "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(source_path),
-            "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
-            "GRAPH_CLEANING_LOG_FOLDER": str(tmp_path / "logs"),
-            "GRAPH_CLEANING_LOG_FILE": "cleaning.log",
-            "GRAPH_CLEANING_NUM_WORKERS": "3",
-            "GRAPH_CLEANING_BG_INTENSITY_THRESH": "198",
-            "GRAPH_CLEANING_K": "386",
-            "GRAPH_CLEANING_MIN_SIZE": "200",
-            "GRAPH_CLEANING_EROSION_PX": "0",
-            "GRAPH_CLEANING_TAU": "0.24",
-        }
-    )
-
-    assert config.source_hdf5_path == source_path
-    assert config.output_base_dir == tmp_path / "output"
-    assert config.log_folder == tmp_path / "logs"
-    assert config.log_file_name == "cleaning.log"
-    assert config.num_workers == 3
-    assert config.tau == 0.24
-    assert config.graph_params == GraphContaminationParameters(
-        bg_intensity_thresh=198,
-        k=386.0,
-        min_size=200,
-        erosion_px=0,
-    )
-
-
-def test_load_graph_cleaning_config_requires_hdf5_source() -> None:
-    with pytest.raises(ValueError, match="GRAPH_CLEANING_SOURCE_HDF5_PATH"):
-        load_graph_cleaning_config({})
-
-
-def test_load_graph_cleaning_config_allows_hdf5_source_without_png_dirs(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    source_path.write_bytes(b"placeholder")
-
-    config = load_graph_cleaning_config(
-        {
-            "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(source_path),
-            "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
-        }
-    )
-
-    assert config.source_hdf5_path == source_path
-
-
-def test_load_graph_cleaning_config_prefers_parameter_artifact(tmp_path: Path) -> None:
-    artifact_path = tmp_path / "graph_cleaning_params.json"
+def _write_artifact(artifact_path: Path) -> None:
     artifact_path.write_text(
         json.dumps(
             {
@@ -81,16 +29,69 @@ def test_load_graph_cleaning_config_prefers_parameter_artifact(tmp_path: Path) -
         encoding="utf-8",
     )
 
+
+def test_load_graph_cleaning_config_reads_expected_environment(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
+    artifact_path = tmp_path / "graph_cleaning_params.json"
+    _write_artifact(artifact_path)
+    config = load_graph_cleaning_config(
+        {
+            "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(source_path),
+            "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
+            "GRAPH_CLEANING_LOG_FOLDER": str(tmp_path / "logs"),
+            "GRAPH_CLEANING_LOG_FILE": "cleaning.log",
+            "GRAPH_CLEANING_PARAMS_PATH": str(artifact_path),
+            "GRAPH_CLEANING_NUM_WORKERS": "3",
+        }
+    )
+
+    assert config.source_hdf5_path == source_path
+    assert config.output_base_dir == tmp_path / "output"
+    assert config.log_folder == tmp_path / "logs"
+    assert config.log_file_name == "cleaning.log"
+    assert config.params_path == artifact_path
+    assert config.num_workers == 3
+    assert config.tau == 0.5
+    assert config.graph_params == GraphContaminationParameters(
+        bg_intensity_thresh=111,
+        k=222.0,
+        min_size=33,
+        erosion_px=4,
+    )
+
+
+def test_load_graph_cleaning_config_requires_hdf5_source() -> None:
+    with pytest.raises(ValueError, match="GRAPH_CLEANING_SOURCE_HDF5_PATH"):
+        load_graph_cleaning_config({})
+
+
+def test_load_graph_cleaning_config_requires_parameter_artifact(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path.write_bytes(b"placeholder")
+
+    with pytest.raises(ValueError, match="GRAPH_CLEANING_PARAMS_PATH"):
+        load_graph_cleaning_config(
+            {
+                "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(source_path),
+                "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
+            }
+        )
+
+
+def test_load_graph_cleaning_config_reads_parameter_artifact(tmp_path: Path) -> None:
+    artifact_path = tmp_path / "graph_cleaning_params.json"
+    _write_artifact(artifact_path)
+
     config = load_graph_cleaning_config(
         {
             "GRAPH_CLEANING_SOURCE_HDF5_PATH": str(tmp_path / "SOURCE_DATASET.h5"),
             "GRAPH_CLEANING_OUTPUT_BASE_DIR": str(tmp_path / "output"),
             "GRAPH_CLEANING_PARAMS_PATH": str(artifact_path),
-            "GRAPH_CLEANING_TAU": "0.24",
-            "GRAPH_CLEANING_K": "386",
         }
     )
 
+    assert config.params_path == artifact_path
     assert config.tau == 0.5
     assert config.graph_params == GraphContaminationParameters(
         bg_intensity_thresh=111,
