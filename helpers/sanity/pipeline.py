@@ -16,6 +16,7 @@ from helpers.sanity.disk_checks import (
     check_manifest_disk_parity,
     check_mask_pixel_values,
     check_paths_exist_and_relative,
+    collect_hdf5_row_inspections,
 )
 from helpers.sanity.manifest_checks import (
     check_duplicate_rows,
@@ -75,6 +76,7 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
     split_checks: dict[str, dict[str, CheckResult]] = {}
     for split_name in SPLITS:
         split_df = _split_dataframe(manifest_df, split_name)
+        row_inspections = collect_hdf5_row_inspections(split_df, base_dir, split_name)
         split_checks[split_name] = {
             "Disk Parity": check_manifest_disk_parity(split_df, base_dir, split_name),
             "Paths Exist": check_paths_exist_and_relative(
@@ -86,6 +88,7 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
                 split_name,
                 sample_n=config.sample_pairs,
                 full_scan=config.full_shape_scan,
+                row_inspections=row_inspections,
             ),
             "Mask Pixel Values": check_mask_pixel_values(
                 split_df,
@@ -93,6 +96,7 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
                 split_name,
                 sample_n=config.sample_pairs,
                 full_scan=config.full_mask_scan,
+                row_inspections=row_inspections,
             ),
             "Mask/Label Semantics": check_mask_label_semantics(
                 split_df,
@@ -100,6 +104,7 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
                 split_name,
                 fail_on_empty_cancer_mask=config.fail_on_empty_cancer_mask,
                 fail_on_positive_not_cancer_mask=config.fail_on_positive_not_cancer_mask,
+                row_inspections=row_inspections,
             ),
             "Patch Class Balance": check_class_balance_visibility(split_df),
             "Patient Class Balance": check_patient_level_balance(split_df),

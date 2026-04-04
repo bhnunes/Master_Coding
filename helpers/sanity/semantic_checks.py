@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-from helpers.sanity.disk_checks import inspect_hdf5_row
+from helpers.sanity.disk_checks import IndexedInspection, inspect_hdf5_row
 from helpers.sanity.models import CheckResult
 
 
@@ -16,27 +16,32 @@ def check_mask_label_semantics(
     *,
     fail_on_empty_cancer_mask: bool = True,
     fail_on_positive_not_cancer_mask: bool = True,
+    row_inspections: dict[int, IndexedInspection] | None = None,
 ) -> CheckResult:
     if manifest_split.empty:
         return CheckResult("PASS", "Split is empty; nothing to check.")
+    scan_df = manifest_split.reset_index()
     positive_not_cancer: list[str] = []
     empty_cancer: list[str] = []
-    for row in tqdm(
-        manifest_split.itertuples(index=False),
-        total=len(manifest_split),
+    for record in tqdm(
+        scan_df.to_dict("records"),
+        total=len(scan_df),
         desc=f"{split}: mask semantics",
         leave=False,
     ):
-        inspection = inspect_hdf5_row(
-            str(base_dir / str(row.relative_hdf5_path)), int(row.hdf5_row_index)
-        )
+        if row_inspections is not None:
+            inspection = row_inspections[int(record["index"])].inspection
+        else:
+            inspection = inspect_hdf5_row(
+                str(base_dir / str(record["relative_hdf5_path"])), int(record["hdf5_row_index"])
+            )
         has_positive_pixels = inspection["mask_has_positive_pixels"]
         if has_positive_pixels is None:
-            return CheckResult("FAIL", f"Unreadable mask encountered for {row.filename}.")
-        if int(row.label) == 0 and has_positive_pixels:
-            positive_not_cancer.append(str(row.filename))
-        if int(row.label) == 1 and not has_positive_pixels:
-            empty_cancer.append(str(row.filename))
+            return CheckResult("FAIL", f"Unreadable mask encountered for {record['filename']}.")
+        if int(record["label"]) == 0 and has_positive_pixels:
+            positive_not_cancer.append(str(record["filename"]))
+        if int(record["label"]) == 1 and not has_positive_pixels:
+            empty_cancer.append(str(record["filename"]))
     failures: list[str] = []
     if fail_on_positive_not_cancer_mask and positive_not_cancer:
         failures.append(f"NOT_CANCER masks contain positive pixels: {positive_not_cancer[:10]}")

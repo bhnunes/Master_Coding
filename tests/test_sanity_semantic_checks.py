@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
+from helpers.sanity.disk_checks import IndexedInspection
 from helpers.sanity.semantic_checks import check_mask_label_semantics
 
 
@@ -59,3 +60,36 @@ def test_check_mask_label_semantics_fails_for_empty_cancer_hdf5_mask(tmp_path: P
 
     assert result.status == "FAIL"
     assert "cancer" in result.details.lower()
+
+
+def test_check_mask_label_semantics_accepts_precomputed_row_inspections(tmp_path: Path) -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {
+                "label": 0,
+                "filename": "PATIENT_1_PATCH_001.png",
+                "relative_hdf5_path": "missing.h5",
+                "hdf5_row_index": 0,
+            }
+        ]
+    )
+
+    result = check_mask_label_semantics(
+        manifest_df,
+        tmp_path,
+        "TRAIN",
+        row_inspections={
+            0: IndexedInspection(
+                manifest_index=0,
+                filename="PATIENT_1_PATCH_001.png",
+                inspection={
+                    "image_shape": (4, 4),
+                    "mask_shape": (4, 4),
+                    "mask_unique_values": (0,),
+                    "mask_has_positive_pixels": False,
+                },
+            )
+        },
+    )
+
+    assert result.status == "PASS"
