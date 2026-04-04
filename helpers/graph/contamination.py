@@ -115,6 +115,26 @@ def load_graph_sources(
     return cast("npt.NDArray[np.uint8] | None", image), cast("npt.NDArray[np.uint8] | None", mask)
 
 
+def load_graph_source_batch(
+    source_hdf5_path: Path | str,
+    start_index: int,
+    end_index: int,
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
+    """Load a contiguous HDF5 image/mask batch for graph cleaning."""
+
+    handle = _get_cached_hdf5_handle(Path(source_hdf5_path))
+    handle_any = cast(Any, handle)
+    images = cast(
+        npt.NDArray[np.uint8],
+        np.asarray(handle_any["images"][start_index:end_index], dtype=np.uint8),
+    )
+    masks = cast(
+        npt.NDArray[np.uint8],
+        np.asarray(handle_any["masks"][start_index:end_index], dtype=np.uint8),
+    )
+    return images[..., ::-1], cast(npt.NDArray[np.uint8], np.asarray(masks * 255, dtype=np.uint8))
+
+
 def _calculate_contamination_rate(
     *,
     image: npt.NDArray[np.uint8],

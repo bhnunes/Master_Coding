@@ -11,16 +11,23 @@ from typing import Any, cast
 
 import h5py
 import numpy as np
+import numpy.typing as npt
 
-from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
-from helpers.optimization_sampling.sampling import discover_hdf5_image_mask_pairs
+from helpers.graph.contamination import (
+    GraphContaminationParameters,
+    calculate_roi_contamination,
+    calculate_roi_contamination_from_arrays,
+    load_graph_source_batch,
+)
 from helpers.provenance import hash_file_sha256
 
 ACCEPTED = "accepted"
 REJECTED = "rejected"
 
 Scorer = Callable[[Path | str, Path | str, GraphContaminationParameters], float | None]
-type ProgressFactory = Callable[[Iterable[str]], Iterable[str]]
+ProgressFactory = Callable[[Iterable[Any]], Iterable[Any]]
+
+_HDF5_SCORING_BATCH_SIZE = 512
 
 
 @dataclass(frozen=True)
@@ -152,41 +159,47 @@ def _list_hdf5_candidates(
         if len(filenames) == 0:
             logger.error("No rows found in the source HDF5 dataset: '%s'.", source_hdf5_path)
             return []
-    pairs = discover_hdf5_image_mask_pairs(source_hdf5_path)
-    source_hdf5_sha256 = hash_file_sha256(source_hdf5_path)
-    candidates: list[SourceCandidateRecord] = []
-    with h5py.File(source_hdf5_path, "r") as handle:
+
+        source_signature = handle.attrs.get("source_signature")
+        source_hdf5_sha256 = (
+            source_signature.decode("utf-8")
+            if isinstance(source_signature, bytes)
+            else str(source_signature)
+            if source_signature is not None
+            else hash_file_sha256(source_hdf5_path)
+        )
         patient_ids = cast(Any, handle["patient_ids"])
-        filenames = cast(Any, handle["filenames"])
-        slide_ids = handle.get("slide_ids")
-        for index in range(len(filenames)):
-            filename_value = filenames[index]
-            filename = (
-                filename_value.decode("utf-8")
-                if isinstance(filename_value, bytes)
-                else str(filename_value)
-            )
-            stem = Path(filename).stem
-            pair = pairs[stem]
-            slide_value = cast(Any, slide_ids)[index] if slide_ids is not None else None
-            candidates.append(
-                SourceCandidateRecord(
-                    filename=filename,
-                    image_path=pair.image_path,
-                    mask_path=pair.mask_path,
-                    patient_id=str(int(patient_ids[index])),
-                    slide_id=(
-                        slide_value.decode("utf-8")
-                        if isinstance(slide_value, bytes)
-                        else str(slide_value)
-                    )
-                    if slide_value is not None
-                    else None,
-                    source_hdf5_path=str(source_hdf5_path),
-                    source_hdf5_sha256=source_hdf5_sha256,
-                    source_row_index=index,
+        filename_values = filenames[:]
+        patient_id_values = patient_ids[:]
+        slide_values = cast(Any, handle["slide_ids"])[:] if "slide_ids" in handle else None
+
+    candidates: list[SourceCandidateRecord] = []
+    source_hdf5_path_text = str(source_hdf5_path)
+    for index, filename_value in enumerate(filename_values):
+        filename = (
+            filename_value.decode("utf-8")
+            if isinstance(filename_value, bytes)
+            else str(filename_value)
+        )
+        slide_value = slide_values[index] if slide_values is not None else None
+        candidates.append(
+            SourceCandidateRecord(
+                filename=filename,
+                image_path=f"{source_hdf5_path_text}::images[{index}]",
+                mask_path=f"{source_hdf5_path_text}::masks[{index}]",
+                patient_id=str(int(patient_id_values[index])),
+                slide_id=(
+                    slide_value.decode("utf-8")
+                    if isinstance(slide_value, bytes)
+                    else str(slide_value)
                 )
+                if slide_value is not None
+                else None,
+                source_hdf5_path=source_hdf5_path_text,
+                source_hdf5_sha256=source_hdf5_sha256,
+                source_row_index=index,
             )
+        )
     return candidates
 
 
@@ -198,6 +211,14 @@ def _process_hdf5_candidates(
     scorer: Scorer,
     progress_factory: ProgressFactory | None,
 ) -> list[CleaningDecisionRecord]:
+    if scorer is calculate_roi_contamination and _can_batch_hdf5_candidates(candidates):
+        return _process_hdf5_candidates_batched(
+            candidates=candidates,
+            graph_params=graph_params,
+            tau=tau,
+            progress_factory=progress_factory,
+        )
+
     iterable: Iterable[SourceCandidateRecord] = candidates
     if progress_factory is not None:
         iterable = cast(
@@ -208,28 +229,109 @@ def _process_hdf5_candidates(
     decisions: list[CleaningDecisionRecord] = []
     for candidate in iterable:
         contamination_rate = scorer(candidate.image_path, candidate.mask_path, graph_params)
-        decision = (
-            REJECTED
-            if contamination_rate is not None
-            and not np.isnan(contamination_rate)
-            and contamination_rate > tau
-            else ACCEPTED
-        )
-        decisions.append(
-            CleaningDecisionRecord(
-                filename=candidate.filename,
-                decision=decision,
-                contamination_rate=float(contamination_rate)
-                if contamination_rate is not None and not np.isnan(contamination_rate)
-                else None,
-                patient_id=candidate.patient_id,
-                slide_id=candidate.slide_id,
-                source_hdf5_path=candidate.source_hdf5_path,
-                source_hdf5_sha256=candidate.source_hdf5_sha256,
-                source_row_index=candidate.source_row_index,
-            )
-        )
+        decisions.append(_build_decision_record(candidate, contamination_rate, tau))
     return decisions
+
+
+def _process_hdf5_candidates_batched(
+    *,
+    candidates: Sequence[SourceCandidateRecord],
+    graph_params: GraphContaminationParameters,
+    tau: float,
+    progress_factory: ProgressFactory | None,
+) -> list[CleaningDecisionRecord]:
+    iterable: Iterable[int] = range(len(candidates))
+    if progress_factory is not None:
+        iterable = cast(Iterable[int], progress_factory(list(iterable)))
+
+    decisions: list[CleaningDecisionRecord] = []
+    active_batch_start = -1
+    active_batch_candidates: Sequence[SourceCandidateRecord] = ()
+    active_images: npt.NDArray[np.uint8] | None = None
+    active_masks: npt.NDArray[np.uint8] | None = None
+
+    for candidate_index in iterable:
+        batch_start = (candidate_index // _HDF5_SCORING_BATCH_SIZE) * _HDF5_SCORING_BATCH_SIZE
+        if batch_start != active_batch_start:
+            active_batch_start = batch_start
+            active_batch_candidates = candidates[
+                batch_start : batch_start + _HDF5_SCORING_BATCH_SIZE
+            ]
+            active_images, active_masks = _load_hdf5_candidate_batch(active_batch_candidates)
+
+        assert active_images is not None
+        assert active_masks is not None
+
+        batch_offset = candidate_index - active_batch_start
+        candidate = candidates[candidate_index]
+        contamination_rate = calculate_roi_contamination_from_arrays(
+            active_images[batch_offset],
+            active_masks[batch_offset],
+            graph_params,
+            base_name=candidate.filename,
+        )
+        decisions.append(_build_decision_record(candidate, contamination_rate, tau))
+
+    return decisions
+
+
+def _can_batch_hdf5_candidates(candidates: Sequence[SourceCandidateRecord]) -> bool:
+    if not candidates:
+        return False
+
+    source_hdf5_path = candidates[0].source_hdf5_path
+    first_row_index = candidates[0].source_row_index
+    if source_hdf5_path is None or first_row_index is None:
+        return False
+
+    expected_row_index = first_row_index
+    for candidate in candidates:
+        if candidate.source_hdf5_path != source_hdf5_path:
+            return False
+        if candidate.source_row_index != expected_row_index:
+            return False
+        expected_row_index += 1
+    return True
+
+
+def _load_hdf5_candidate_batch(
+    candidates: Sequence[SourceCandidateRecord],
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
+    first_candidate = candidates[0]
+    assert first_candidate.source_hdf5_path is not None
+    assert first_candidate.source_row_index is not None
+    last_candidate = candidates[-1]
+    assert last_candidate.source_row_index is not None
+
+    start_index = first_candidate.source_row_index
+    end_index = last_candidate.source_row_index + 1
+    return load_graph_source_batch(first_candidate.source_hdf5_path, start_index, end_index)
+
+
+def _build_decision_record(
+    candidate: SourceCandidateRecord,
+    contamination_rate: float | None,
+    tau: float,
+) -> CleaningDecisionRecord:
+    decision = (
+        REJECTED
+        if contamination_rate is not None
+        and not np.isnan(contamination_rate)
+        and contamination_rate > tau
+        else ACCEPTED
+    )
+    return CleaningDecisionRecord(
+        filename=candidate.filename,
+        decision=decision,
+        contamination_rate=float(contamination_rate)
+        if contamination_rate is not None and not np.isnan(contamination_rate)
+        else None,
+        patient_id=candidate.patient_id,
+        slide_id=candidate.slide_id,
+        source_hdf5_path=candidate.source_hdf5_path,
+        source_hdf5_sha256=candidate.source_hdf5_sha256,
+        source_row_index=candidate.source_row_index,
+    )
 
 
 def _write_decision_manifest(

@@ -238,6 +238,18 @@ Agent guide for coding agents working in this repository.
   - the later progress-logging pass showed no evidence of meaningful slowdown on one measured objective-off rerun (`99.3s`)
 - When optimizing Stage 5, benchmark entropy, provenance hashing, split search, and split writing separately before changing scientific validation behavior.
 
+## Stage 4 Performance Notes
+- Use `analysis/stage4_2_graph_tuning_performance_findings.md` as the canonical handoff document for Stage 4.2 tuning-performance work.
+- Use `analysis/stage4_3_graph_cleaning_performance_findings.md` as the canonical handoff document for Stage 4.3 cleaning-performance work.
+- Stage 4.2 no longer depends on OpenCV contrib graph segmentation; it now uses `skimage.segmentation.felzenszwalb` in `helpers/graph/contamination.py`.
+- The biggest confirmed Stage 4.2 win so far was removing duplicate fold-by-fold rescoring in grouped CV by scoring each reviewed record once per parameter set and reusing those scores across folds.
+- Stage 4.3 now requires `GRAPH_CLEANING_PARAMS_PATH` and loads graph parameters and `tau` only from the Stage 4.2 JSON artifact; there is no raw env-var fallback.
+- The biggest confirmed Stage 4.3 wins so far were:
+  - reusing HDF5 `source_signature` instead of hashing the full source file during candidate discovery when the attribute is present
+  - replacing row-at-a-time HDF5 image/mask reads with contiguous batched reads during cleaning
+- Current best-known Stage 4.3 behavior on the measured sample source HDF5 uses the default batched HDF5 fast path in `helpers/graph/cleaning_pipeline.py` with `_HDF5_SCORING_BATCH_SIZE = 512`.
+- Established Stage 4.3 finding: larger contiguous HDF5 batches produced better gains than a simple multiprocessing prototype on the measured 4-core sample machine, so the code currently favors larger batched reads over added parallel complexity.
+
 ## Agent Heuristics
 - Prefer minimal local edits.
 - Prefer existing helpers and established patterns over reinvention.

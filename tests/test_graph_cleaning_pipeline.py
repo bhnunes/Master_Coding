@@ -3,12 +3,16 @@ from __future__ import annotations
 import csv
 import logging
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
+import numpy.typing as npt
+import pytest
 
-from helpers.graph.cleaning_pipeline import run_graph_cleaning_pipeline
-from helpers.graph.contamination import GraphContaminationParameters
+from helpers.graph import cleaning_pipeline
+from helpers.graph.cleaning_pipeline import SourceCandidateRecord, run_graph_cleaning_pipeline
+from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
 
 
 def test_run_graph_cleaning_pipeline_reports_empty_source_dataset(tmp_path: Path) -> None:
@@ -96,3 +100,95 @@ def test_run_graph_cleaning_pipeline_writes_hdf5_manifests(tmp_path: Path) -> No
     assert rejected_rows[0]["filename"] == "rejected_PATIENT_2.png"
     assert rejected_rows[0]["source_hdf5_sha256"] != ""
     assert rejected_rows[0]["source_row_index"] == "1"
+
+
+def test_list_hdf5_candidates_uses_source_signature_when_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.zeros((1,), dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"sample.png"]))
+        handle.attrs["source_signature"] = "known-signature"
+
+    def fail_hash(path: Path) -> str:
+        raise AssertionError(f"hash_file_sha256 should not be called for {path}")
+
+    monkeypatch.setattr(cleaning_pipeline, "hash_file_sha256", fail_hash)
+
+    candidates = cleaning_pipeline._list_hdf5_candidates(
+        source_path, logging.getLogger("test_graph_cleaning_source_signature")
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].source_hdf5_sha256 == "known-signature"
+
+
+def test_process_hdf5_candidates_batches_contiguous_hdf5_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cleaning_pipeline, "_HDF5_SCORING_BATCH_SIZE", 64)
+    batch_starts: list[tuple[str, int, int]] = []
+
+    def fake_load_graph_source_batch(
+        source_hdf5_path: Path | str,
+        start_index: int,
+        end_index: int,
+    ) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
+        batch_starts.append((str(source_hdf5_path), start_index, end_index))
+        batch_size = end_index - start_index
+        images = np.zeros((batch_size, 2, 2, 3), dtype=np.uint8)
+        for offset in range(batch_size):
+            images[offset, 0, 0, 0] = start_index + offset
+        masks = cast(
+            npt.NDArray[np.uint8],
+            np.asarray(np.ones((batch_size, 2, 2), dtype=np.uint8) * 255, dtype=np.uint8),
+        )
+        return images, masks
+
+    def fake_calculate_roi_contamination_from_arrays(
+        image: npt.NDArray[np.uint8],
+        roi_mask: npt.NDArray[np.uint8],
+        params: GraphContaminationParameters,
+        *,
+        logger: logging.Logger | None = None,
+        base_name: str = "preloaded_record",
+    ) -> float:
+        del roi_mask, params, logger, base_name
+        return float(image[0, 0, 0]) / 100.0
+
+    monkeypatch.setattr(cleaning_pipeline, "load_graph_source_batch", fake_load_graph_source_batch)
+    monkeypatch.setattr(
+        cleaning_pipeline,
+        "calculate_roi_contamination_from_arrays",
+        fake_calculate_roi_contamination_from_arrays,
+    )
+
+    candidates = [
+        SourceCandidateRecord(
+            filename=f"sample_{index}.png",
+            image_path=f"fake.h5::images[{index}]",
+            mask_path=f"fake.h5::masks[{index}]",
+            source_hdf5_path="fake.h5",
+            source_hdf5_sha256="sig",
+            source_row_index=index,
+        )
+        for index in range(70)
+    ]
+
+    decisions = cleaning_pipeline._process_hdf5_candidates(
+        candidates=candidates,
+        graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
+        tau=0.5,
+        scorer=calculate_roi_contamination,
+        progress_factory=None,
+    )
+
+    assert len(batch_starts) == 2
+    assert batch_starts == [("fake.h5", 0, 64), ("fake.h5", 64, 70)]
+    assert decisions[0].decision == "accepted"
+    assert decisions[-1].decision == "rejected"
+    assert decisions[-1].contamination_rate == pytest.approx(0.69)
