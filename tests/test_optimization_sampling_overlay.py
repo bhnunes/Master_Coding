@@ -3,10 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import cv2
+import h5py
 import numpy as np
 import pytest
 
 from helpers.optimization_sampling.overlay import (
+    _close_worker_hdf5_handles,
+    _overlay_task_order_key,
+    _parse_hdf5_ref,
     _process_overlay_task,
     _to_grayscale_mask,
     generate_overlay_images,
@@ -93,8 +97,73 @@ def test_overlay_mask_edges_returns_false_on_opencv_error(
     assert result is False
 
 
+def test_overlay_mask_edges_reads_hdf5_image_and_mask_sources(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    output_path = tmp_path / "output" / "overlay.png"
+    with h5py.File(source_path, "w") as handle:
+        image = np.zeros((1, 6, 6, 3), dtype=np.uint8)
+        image[0, 2:4, 2:4, 0] = 255
+        mask = np.zeros((1, 6, 6), dtype=np.uint8)
+        mask[0, 2:4, 2:4] = 1
+        handle.create_dataset("images", data=image)
+        handle.create_dataset("masks", data=mask)
+
+    result = overlay_mask_edges(
+        f"{source_path}::images[0]",
+        f"{source_path}::masks[0]",
+        output_path,
+        alpha=0.5,
+    )
+
+    _close_worker_hdf5_handles()
+
+    assert result is True
+    assert output_path.exists()
+    overlay = cv2.imread(str(output_path), cv2.IMREAD_COLOR)
+    assert overlay is not None
+    assert int(overlay[:, :, 2].sum()) > 0
+
+
 def test_generate_overlay_images_returns_empty_list_for_no_tasks() -> None:
     assert generate_overlay_images([], num_processes=2) == []
+
+
+def test_overlay_task_order_key_prefers_hdf5_rows_then_non_hdf5_paths(tmp_path: Path) -> None:
+    hdf5_task_late = OverlayTask(
+        image_path=f"{tmp_path / 'source.h5'}::images[8]",
+        mask_path=f"{tmp_path / 'source.h5'}::masks[8]",
+        output_path=tmp_path / "late.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+    hdf5_task_early = OverlayTask(
+        image_path=f"{tmp_path / 'source.h5'}::images[3]",
+        mask_path=f"{tmp_path / 'source.h5'}::masks[3]",
+        output_path=tmp_path / "early.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+    png_task = OverlayTask(
+        image_path=tmp_path / "image.png",
+        mask_path=tmp_path / "mask.png",
+        output_path=tmp_path / "png.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+
+    ordered = sorted([hdf5_task_late, png_task, hdf5_task_early], key=_overlay_task_order_key)
+
+    assert ordered == [hdf5_task_early, hdf5_task_late, png_task]
+
+
+def test_parse_hdf5_ref_extracts_path_and_index(tmp_path: Path) -> None:
+    source = tmp_path / "source.h5"
+
+    assert _parse_hdf5_ref(f"{source}::images[12]", "images") == (source, 12)
+    assert _parse_hdf5_ref(source / "image.png", "images") is None
 
 
 def test_process_overlay_task_forwards_parameters(tmp_path: Path) -> None:

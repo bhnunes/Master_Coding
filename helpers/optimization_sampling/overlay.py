@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import logging
 from collections.abc import Sequence
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import cv2
 import h5py
@@ -12,6 +13,9 @@ import numpy as np
 from tqdm import tqdm
 
 from helpers.optimization_sampling.sampling import OverlayTask
+
+_WORKER_HDF5_HANDLES: dict[Path, h5py.File] = {}
+_WORKER_HDF5_CLEANUP_REGISTERED = False
 
 
 def overlay_mask_edges(
@@ -28,12 +32,10 @@ def overlay_mask_edges(
 
     active_logger = logger or logging.getLogger("optimization_sampling")
     try:
-        image: Any = _read_image_source(image_path)
+        image, mask = _read_overlay_sources(image_path, mask_path)
         if image is None:
             active_logger.error("Could not read image: %s", image_path)
             return False
-
-        mask: Any = _read_mask_source(mask_path)
         if mask is None:
             active_logger.error("Could not read mask: %s", mask_path)
             return False
@@ -73,11 +75,13 @@ def generate_overlay_images(tasks: Sequence[OverlayTask], num_processes: int) ->
     if not tasks:
         return []
 
+    ordered_tasks = sorted(tasks, key=_overlay_task_order_key)
+    chunksize = max(1, len(ordered_tasks) // max(1, num_processes * 4))
     with Pool(processes=num_processes) as pool:
         return list(
             tqdm(
-                pool.imap_unordered(_process_overlay_task, tasks),
-                total=len(tasks),
+                pool.imap_unordered(_process_overlay_task, ordered_tasks, chunksize=chunksize),
+                total=len(ordered_tasks),
                 desc="Generating Samples",
             )
         )
@@ -111,13 +115,58 @@ def _parse_hdf5_ref(source: Path | str, dataset_name: str) -> tuple[Path, int] |
     return Path(path_text), int(index_text[:-1])
 
 
+def _overlay_task_order_key(task: OverlayTask) -> tuple[int, str, int, str]:
+    image_ref = _parse_hdf5_ref(task.image_path, "images")
+    if image_ref is None:
+        return (1, str(task.image_path), 0, str(task.output_path))
+    source_hdf5_path, row_index = image_ref
+    return (0, str(source_hdf5_path), row_index, str(task.output_path))
+
+
+def _read_overlay_sources(image_path: Path | str, mask_path: Path | str) -> tuple[Any, Any]:
+    image_ref = _parse_hdf5_ref(image_path, "images")
+    mask_ref = _parse_hdf5_ref(mask_path, "masks")
+    if image_ref is not None and mask_ref is not None and image_ref == mask_ref:
+        source_hdf5_path, row_index = image_ref
+        handle = _get_cached_hdf5_handle(source_hdf5_path)
+        handle_any = cast(Any, handle)
+        images = handle_any["images"]
+        masks = handle_any["masks"]
+        image = np.asarray(images[row_index], dtype=np.uint8)
+        mask = np.asarray(masks[row_index], dtype=np.uint8)
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR), (mask * 255).astype(np.uint8)
+    return _read_image_source(image_path), _read_mask_source(mask_path)
+
+
+def _get_cached_hdf5_handle(source_hdf5_path: Path) -> h5py.File:
+    global _WORKER_HDF5_CLEANUP_REGISTERED
+
+    resolved_path = source_hdf5_path.resolve()
+    handle = _WORKER_HDF5_HANDLES.get(resolved_path)
+    if handle is None:
+        handle = h5py.File(resolved_path, "r")
+        _WORKER_HDF5_HANDLES[resolved_path] = handle
+        if not _WORKER_HDF5_CLEANUP_REGISTERED:
+            atexit.register(_close_worker_hdf5_handles)
+            _WORKER_HDF5_CLEANUP_REGISTERED = True
+    return handle
+
+
+def _close_worker_hdf5_handles() -> None:
+    for handle in _WORKER_HDF5_HANDLES.values():
+        handle.close()
+    _WORKER_HDF5_HANDLES.clear()
+
+
 def _read_image_source(image_path: Path | str) -> Any:
     parsed = _parse_hdf5_ref(image_path, "images")
     if parsed is None:
         return cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     source_hdf5_path, row_index = parsed
-    with h5py.File(source_hdf5_path, "r") as handle:
-        image = np.asarray(handle["images"][row_index], dtype=np.uint8)
+    handle = _get_cached_hdf5_handle(source_hdf5_path)
+    handle_any = cast(Any, handle)
+    images = handle_any["images"]
+    image = np.asarray(images[row_index], dtype=np.uint8)
     return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
 
@@ -126,6 +175,8 @@ def _read_mask_source(mask_path: Path | str) -> Any:
     if parsed is None:
         return cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
     source_hdf5_path, row_index = parsed
-    with h5py.File(source_hdf5_path, "r") as handle:
-        mask = np.asarray(handle["masks"][row_index], dtype=np.uint8)
+    handle = _get_cached_hdf5_handle(source_hdf5_path)
+    handle_any = cast(Any, handle)
+    masks = handle_any["masks"]
+    mask = np.asarray(masks[row_index], dtype=np.uint8)
     return (mask * 255).astype(np.uint8)

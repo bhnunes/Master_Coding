@@ -70,8 +70,8 @@ def discover_hdf5_image_mask_pairs(source_hdf5_path: Path) -> dict[str, ImageMas
     pairs: dict[str, ImageMaskPair] = {}
     with h5py.File(source_hdf5_path, "r") as handle:
         filenames = cast(h5py.Dataset, handle["filenames"])
-        for index in range(len(filenames)):
-            filename_value = filenames[index]
+        filename_values = filenames[:]
+        for index, filename_value in enumerate(filename_values):
             filename = (
                 filename_value.decode("utf-8")
                 if isinstance(filename_value, bytes)
