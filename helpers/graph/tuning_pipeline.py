@@ -6,16 +6,22 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import numpy as np
+import numpy.typing as npt
 from numpy.typing import NDArray
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import StratifiedGroupKFold
 from skopt import gp_minimize
 from skopt.space import Integer
 
-from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
+from helpers.graph.contamination import (
+    GraphContaminationParameters,
+    calculate_roi_contamination,
+    calculate_roi_contamination_from_arrays,
+    load_graph_sources,
+)
 from helpers.graph.parameter_store import GraphCleaningParameterArtifact
 from helpers.optimization_sampling.sampling import (
     ImageMaskPair,
@@ -41,6 +47,14 @@ class LabeledSourceRecord:
     pair: ImageMaskPair
     label: str
     group_id: str
+
+
+@dataclass(frozen=True)
+class PreloadedGraphSources:
+    """In-memory image and mask arrays for one reviewed source record."""
+
+    image: npt.NDArray[np.uint8]
+    mask: npt.NDArray[np.uint8]
 
 
 @dataclass(frozen=True)
@@ -147,19 +161,30 @@ def evaluate_on_test_set(
     logger: logging.Logger,
     scorer: Scorer,
     progress_factory: RecordProgressFactory | None = None,
+    preloaded_sources: dict[str, PreloadedGraphSources] | None = None,
 ) -> float:
     """Evaluate the tuned parameters on the held-out test set and return final tau."""
 
     logger.info("\n--- Evaluating final model on the held-out test set ---")
     logger.info("Step 1: Finding final contamination threshold using all training data...")
-    train_rates, train_labels = _score_records(train_records, best_params, scorer)
+    train_rates, train_labels = _score_records(
+        train_records,
+        best_params,
+        scorer,
+        preloaded_sources=preloaded_sources,
+    )
     final_tau = select_best_contamination_threshold(train_rates, train_labels)
     logger.info(" > Final optimal contamination threshold (tau) found: %.2f", final_tau)
     logger.info("Step 2: Evaluating performance on test set...")
     test_iterable: Iterable[LabeledSourceRecord] = test_records
     if progress_factory is not None:
         test_iterable = progress_factory(test_records)
-    test_rates, test_labels = _score_records(test_iterable, best_params, scorer)
+    test_rates, test_labels = _score_records(
+        test_iterable,
+        best_params,
+        scorer,
+        preloaded_sources=preloaded_sources,
+    )
     predictions = [REJECTED_LABEL if rate > final_tau else APPROVED_LABEL for rate in test_rates]
     accuracy = accuracy_score(test_labels, predictions)
     f1 = f1_score(
@@ -203,6 +228,7 @@ def run_graph_tuning_pipeline(
         source_hdf5_path=source_hdf5_path,
         logger=logger,
     )
+    preloaded_sources = _preload_record_sources(records, scorer=scorer, logger=logger)
 
     train_records, test_records = _split_records(
         records, test_set_size=test_set_size, random_state=random_state
@@ -229,6 +255,7 @@ def run_graph_tuning_pipeline(
         n_splits_inner_cv=n_splits_inner_cv,
         random_state=random_state,
         scorer=scorer,
+        preloaded_sources=preloaded_sources,
     )
     optimization_result = (
         optimizer(objective=objective, search_space=search_space)
@@ -257,11 +284,15 @@ def run_graph_tuning_pipeline(
             logger=logger,
             scorer=scorer,
             progress_factory=progress_factory,
+            preloaded_sources=preloaded_sources,
         )
     else:
         logger.warning("Test set is empty. Skipping final evaluation.")
         train_rates, train_labels = _score_records(
-            train_records, optimization_result.best_params, scorer
+            train_records,
+            optimization_result.best_params,
+            scorer,
+            preloaded_sources=preloaded_sources,
         )
         final_tau = select_best_contamination_threshold(train_rates, train_labels)
 
@@ -346,6 +377,7 @@ def _build_objective(
     n_splits_inner_cv: int,
     random_state: int,
     scorer: Scorer,
+    preloaded_sources: dict[str, PreloadedGraphSources] | None = None,
 ) -> Callable[[list[int]], float]:
     labels = np.array([record.label for record in train_records])
     record_array = np.array(train_records, dtype=object)
@@ -365,12 +397,24 @@ def _build_objective(
             erosion_px=int(values[3]),
         )
         fold_f1_scores: list[float] = []
+        scored_rates = _score_record_rates(
+            record_array,
+            params,
+            scorer,
+            preloaded_sources=preloaded_sources,
+        )
         for train_indices, validation_indices in cv_splits:
-            train_fold = list(record_array[train_indices])
-            validation_fold = list(record_array[validation_indices])
-            train_rates, train_labels = _score_records(train_fold, params, scorer)
+            train_rates, train_labels = _collect_scored_fold(
+                record_array,
+                train_indices,
+                scored_rates,
+            )
             optimal_tau = select_best_contamination_threshold(train_rates, train_labels)
-            validation_rates, validation_labels = _score_records(validation_fold, params, scorer)
+            validation_rates, validation_labels = _collect_scored_fold(
+                record_array,
+                validation_indices,
+                scored_rates,
+            )
             predictions = [
                 REJECTED_LABEL if rate > optimal_tau else APPROVED_LABEL
                 for rate in validation_rates
@@ -432,16 +476,95 @@ def _score_records(
     records: Iterable[LabeledSourceRecord],
     params: GraphContaminationParameters,
     scorer: Scorer,
+    *,
+    preloaded_sources: dict[str, PreloadedGraphSources] | None = None,
 ) -> tuple[list[float], list[str]]:
     rates: list[float] = []
     labels: list[str] = []
     for record in records:
-        rate = scorer(record.pair.image_path, record.pair.mask_path, params)
+        rate = _score_record(
+            record,
+            params,
+            scorer,
+            preloaded_sources=preloaded_sources,
+        )
         if rate is None or np.isnan(rate):
             continue
         rates.append(float(rate))
         labels.append(record.label)
     return rates, labels
+
+
+def _score_record_rates(
+    records: NDArray[np.object_],
+    params: GraphContaminationParameters,
+    scorer: Scorer,
+    *,
+    preloaded_sources: dict[str, PreloadedGraphSources] | None = None,
+) -> list[float | None]:
+    return [
+        _score_record(
+            cast(LabeledSourceRecord, record),
+            params,
+            scorer,
+            preloaded_sources=preloaded_sources,
+        )
+        for record in records.tolist()
+    ]
+
+
+def _collect_scored_fold(
+    records: NDArray[np.object_],
+    indices: NDArray[np.int64],
+    scored_rates: Sequence[float | None],
+) -> tuple[list[float], list[str]]:
+    rates: list[float] = []
+    labels: list[str] = []
+    for index in indices.tolist():
+        rate = scored_rates[index]
+        if rate is None or np.isnan(rate):
+            continue
+        record = cast(LabeledSourceRecord, records[index])
+        rates.append(float(rate))
+        labels.append(record.label)
+    return rates, labels
+
+
+def _score_record(
+    record: LabeledSourceRecord,
+    params: GraphContaminationParameters,
+    scorer: Scorer,
+    *,
+    preloaded_sources: dict[str, PreloadedGraphSources] | None = None,
+) -> float | None:
+    preloaded = preloaded_sources.get(record.pair.stem) if preloaded_sources is not None else None
+    if preloaded is not None and scorer is calculate_roi_contamination:
+        return calculate_roi_contamination_from_arrays(
+            preloaded.image,
+            preloaded.mask,
+            params,
+            base_name=record.pair.output_name,
+        )
+    return scorer(record.pair.image_path, record.pair.mask_path, params)
+
+
+def _preload_record_sources(
+    records: Sequence[LabeledSourceRecord],
+    *,
+    scorer: Scorer,
+    logger: logging.Logger,
+) -> dict[str, PreloadedGraphSources] | None:
+    if scorer is not calculate_roi_contamination:
+        return None
+
+    preloaded_sources: dict[str, PreloadedGraphSources] = {}
+    for record in records:
+        image, mask = load_graph_sources(record.pair.image_path, record.pair.mask_path)
+        if image is None or mask is None:
+            logger.warning("Failed to preload graph tuning source: %s", record.pair.output_name)
+            continue
+        preloaded_sources[record.pair.stem] = PreloadedGraphSources(image=image, mask=mask)
+    return preloaded_sources
 
 
 def _build_grouped_cv_splits(

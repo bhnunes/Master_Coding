@@ -14,6 +14,7 @@ from helpers.graph.tuning_pipeline import (
     GraphTuningSummary,
     LabeledSourceRecord,
     _build_grouped_cv_splits,
+    _build_objective,
     _split_records,
     build_graph_cleaning_parameter_artifact,
     build_recommendation_message,
@@ -313,6 +314,40 @@ def test_build_grouped_cv_splits_keeps_groups_disjoint_between_train_and_validat
         train_groups = {groups[index] for index in train_indices.tolist()}
         validation_groups = {groups[index] for index in validation_indices.tolist()}
         assert train_groups.isdisjoint(validation_groups)
+
+
+def test_build_objective_scores_each_record_once_per_parameter_set() -> None:
+    records = [
+        _make_record("a_PATIENT_1", "Approved"),
+        _make_record("b_PATIENT_2", "Approved"),
+        _make_record("c_PATIENT_3", "Approved"),
+        _make_record("d_PATIENT_4", "Approved"),
+        _make_record("e_PATIENT_5", "Rejected"),
+        _make_record("f_PATIENT_6", "Rejected"),
+        _make_record("g_PATIENT_7", "Rejected"),
+        _make_record("h_PATIENT_8", "Rejected"),
+    ]
+    scored_paths: list[str] = []
+
+    def fake_scorer(
+        image_path: Path | str, mask_path: Path | str, params: GraphContaminationParameters
+    ) -> float | None:
+        del mask_path, params
+        scored_paths.append(str(image_path))
+        return 0.9 if any(token in str(image_path) for token in ("e_", "f_", "g_", "h_")) else 0.1
+
+    objective = _build_objective(
+        train_records=records,
+        n_splits_inner_cv=2,
+        random_state=42,
+        scorer=fake_scorer,
+    )
+
+    score = objective([198, 386, 200, 0])
+
+    assert score <= 0.0
+    assert len(scored_paths) == len(records)
+    assert set(scored_paths) == {str(record.pair.image_path) for record in records}
 
 
 def test_build_recommendation_message_includes_final_tau() -> None:
