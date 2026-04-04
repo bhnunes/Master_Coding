@@ -27,6 +27,15 @@ def test_resolve_env_path_normalizes_windows_separators() -> None:
     assert resolved == Path("C:/OpenSlide/bin")
 
 
+def test_resolve_env_path_rejects_control_characters() -> None:
+    with pytest.raises(ValueError, match="contains control characters"):
+        resolve_env_path(
+            "F:\\CHILE_OUTPUT\\PATCHES\x07ccepted_manifest.csv",
+            "PACKAGING_ACCEPTED_MANIFEST_PATH",
+            system_name="Windows",
+        )
+
+
 def test_load_openslide_module_bypasses_openslide_path_on_linux() -> None:
     imported_modules: list[str] = []
     sentinel = object()

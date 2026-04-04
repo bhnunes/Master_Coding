@@ -10,7 +10,6 @@ from helpers.packaging.writer import (
     filter_source_hdf5_by_manifest,
     merge_source_hdf5_shards,
 )
-from helpers.provenance import hash_file_sha256
 
 
 def test_copy_source_hdf5_dataset_preserves_contract_and_records_upstream_signature(
@@ -210,6 +209,10 @@ def test_filter_source_hdf5_by_manifest_writes_only_accepted_rows(tmp_path: Path
             "filenames",
             data=np.array([b"PATIENT_11_PATCH_001.png", b"PATIENT_22_PATCH_001.png"]),
         )
+        handle.attrs["source_signature"] = "stage2-signature"
+        handle.attrs["source_signature"] = "stage2-signature"
+        handle.attrs["source_signature"] = "stage2-signature"
+        handle.attrs["source_signature"] = "stage2-signature"
         handle.create_dataset(
             "source_image_paths",
             data=np.array(
@@ -224,11 +227,9 @@ def test_filter_source_hdf5_by_manifest_writes_only_accepted_rows(tmp_path: Path
         )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a", b"slide_b"]))
         handle.attrs["source_signature"] = "stage2-signature"
-    source_sha256 = hash_file_sha256(source_path)
-
     manifest_path.write_text(
         "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
-        f"PATIENT_22_PATCH_001.png,accepted,0.1,22,slide_b,{source_path},{source_sha256},1\n",
+        f"PATIENT_22_PATCH_001.png,accepted,0.1,22,slide_b,{source_path},stage2-signature,1\n",
         encoding="utf-8",
     )
 
@@ -265,12 +266,11 @@ def test_filter_source_hdf5_by_manifest_logs_progress(
             "filenames",
             data=np.array([b"PATIENT_11_PATCH_001.png", b"PATIENT_22_PATCH_001.png"]),
         )
-    source_sha256 = hash_file_sha256(source_path)
-
+        handle.attrs["source_signature"] = "stage2-signature"
     manifest_path.write_text(
         "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
-        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,,{source_path},{source_sha256},0\n"
-        f"PATIENT_22_PATCH_001.png,accepted,0.1,22,,{source_path},{source_sha256},1\n",
+        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,,{source_path},stage2-signature,0\n"
+        f"PATIENT_22_PATCH_001.png,accepted,0.1,22,,{source_path},stage2-signature,1\n",
         encoding="utf-8",
     )
     caplog.set_level(logging.INFO)
@@ -312,12 +312,10 @@ def test_filter_source_hdf5_by_manifest_preserves_manifest_row_order(tmp_path: P
         )
         handle.create_dataset("slide_ids", data=np.array([b"slide_a", b"slide_b", b"slide_c"]))
         handle.attrs["source_signature"] = "stage2-signature"
-    source_sha256 = hash_file_sha256(source_path)
-
     manifest_path.write_text(
         "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
-        f"PATIENT_33_PATCH_001.png,accepted,0.1,33,slide_c,{source_path},{source_sha256},2\n"
-        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,slide_a,{source_path},{source_sha256},0\n",
+        f"PATIENT_33_PATCH_001.png,accepted,0.1,33,slide_c,{source_path},stage2-signature,2\n"
+        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,slide_a,{source_path},stage2-signature,0\n",
         encoding="utf-8",
     )
 
@@ -348,6 +346,7 @@ def test_filter_source_hdf5_by_manifest_rejects_row_from_other_source(tmp_path: 
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
+        handle.attrs["source_signature"] = "stage2-signature"
 
     manifest_path.write_text(
         "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
@@ -376,15 +375,69 @@ def test_filter_source_hdf5_by_manifest_rejects_stale_row_metadata(tmp_path: Pat
         handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
         handle.create_dataset("slide_ids", data=np.array([b"slide_a"]))
-    source_sha256 = hash_file_sha256(source_path)
-
+        handle.attrs["source_signature"] = "stage2-signature"
     manifest_path.write_text(
         "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
-        f"WRONG.png,accepted,0.1,11,slide_a,{source_path},{source_sha256},0\n",
+        f"WRONG.png,accepted,0.1,11,slide_a,{source_path},stage2-signature,0\n",
         encoding="utf-8",
     )
 
     with pytest.raises(ValueError, match="row metadata does not match"):
+        filter_source_hdf5_by_manifest(
+            source_path,
+            manifest_path,
+            tmp_path / "packaged" / "SOURCE_DATASET.h5",
+            overwrite=True,
+            compression=None,
+            copy_batch_size=256,
+        )
+
+
+def test_filter_source_hdf5_by_manifest_requires_source_signature(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    manifest_path = tmp_path / "accepted_manifest.csv"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
+
+    manifest_path.write_text(
+        "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
+        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,,{source_path},stage2-signature,0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing required source_signature"):
+        filter_source_hdf5_by_manifest(
+            source_path,
+            manifest_path,
+            tmp_path / "packaged" / "SOURCE_DATASET.h5",
+            overwrite=True,
+            compression=None,
+            copy_batch_size=256,
+        )
+
+
+def test_filter_source_hdf5_by_manifest_rejects_stale_manifest_provenance(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    manifest_path = tmp_path / "accepted_manifest.csv"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([11], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"PATIENT_11_PATCH_001.png"]))
+        handle.attrs["source_signature"] = "current-signature"
+
+    manifest_path.write_text(
+        "filename,decision,contamination_rate,patient_id,slide_id,source_hdf5_path,source_hdf5_sha256,source_row_index\n"
+        f"PATIENT_11_PATCH_001.png,accepted,0.1,11,,{source_path},stale-signature,0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="current source HDF5 source_signature"):
         filter_source_hdf5_by_manifest(
             source_path,
             manifest_path,

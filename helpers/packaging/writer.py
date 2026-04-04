@@ -321,7 +321,7 @@ def _load_accepted_manifest_rows(
     source_path: Path,
     manifest_path: Path,
     *,
-    source_hdf5_sha256: str,
+    source_signature: str,
 ) -> list[dict[str, Any]]:
     with manifest_path.open(encoding="utf-8", newline="") as handle:
         rows = [row for row in csv.DictReader(handle) if row.get("decision") == "accepted"]
@@ -336,10 +336,16 @@ def _load_accepted_manifest_rows(
         if row_source and row_source != expected_source:
             raise ValueError(f"Accepted manifest row does not match source_hdf5_path: {row_source}")
         row_source_sha256 = row.get("source_hdf5_sha256", "")
-        if row_source_sha256 != source_hdf5_sha256:
+        if not row_source_sha256:
             raise ValueError(
-                "Accepted manifest row does not match the current source_hdf5_sha256. "
-                "Regenerate accepted_manifest.csv from the current source HDF5 before packaging."
+                "Accepted manifest row is missing source_hdf5_sha256. "
+                "Regenerate accepted_manifest.csv from Stage 4.3 for the current source HDF5."
+            )
+        if row_source_sha256 != source_signature:
+            raise ValueError(
+                "Accepted manifest row does not match the current source HDF5 source_signature. "
+                "Regenerate accepted_manifest.csv from Stage 4.3 for the current canonical "
+                "source HDF5 before packaging."
             )
         source_row_index = int(row["source_row_index"])
         if source_row_index in seen_indices:
@@ -423,15 +429,23 @@ def filter_source_hdf5_by_manifest(
     copy_batch_size: int,
 ) -> Path:
     _validate_source_hdf5_contract(source_path)
-    source_hdf5_sha256 = hash_file_sha256(source_path)
+    with h5py.File(source_path, "r") as source_handle:
+        raw_source_signature = source_handle.attrs.get("source_signature")
+    if raw_source_signature is None:
+        raise ValueError(
+            "Source HDF5 is missing required source_signature. "
+            "Stage 3 accepted-manifest filtering requires a canonical source HDF5 with "
+            "source_signature."
+        )
+    canonical_source_signature = _normalize_hdf5_string(raw_source_signature)
     selected_rows = _load_accepted_manifest_rows(
         source_path,
         manifest_path,
-        source_hdf5_sha256=source_hdf5_sha256,
+        source_signature=canonical_source_signature,
     )
     source_signature = _signature_hexdigest(
         {
-            "source_hdf5_sha256": source_hdf5_sha256,
+            "source_hdf5_signature": canonical_source_signature,
             "accepted_manifest_sha256": hash_file_sha256(manifest_path),
             "source_row_indices": [row["source_row_index"] for row in selected_rows],
         }

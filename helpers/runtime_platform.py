@@ -35,6 +35,14 @@ def resolve_env_path(
             raise ValueError(f"The '{variable_name}' environment variable is required.")
         return None
 
+    if any(ord(character) < 32 for character in stripped):
+        raise ValueError(
+            f"The '{variable_name}' environment variable contains control characters. "
+            "This often happens when a Windows path in .env uses backslashes that are "
+            "interpreted as escapes. Prefer forward slashes, for example "
+            "'F:/CHILE_OUTPUT/PATCHES/accepted_manifest.csv'."
+        )
+
     runtime_os = get_runtime_os(system_name)
     windows_style = _is_windows_style_path(stripped)
     posix_absolute = stripped.startswith("/")
