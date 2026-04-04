@@ -128,27 +128,20 @@ def test_calculate_roi_contamination_returns_expected_rate(
     mask = np.array([[255, 255], [0, 255]], dtype=np.uint8)
     segment_map = np.array([[0, 1], [0, 1]], dtype=np.int32)
 
-    class DummySegmentator:
-        def processImage(self, image_input: npt.NDArray[np.uint8]) -> npt.NDArray[np.int32]:
-            assert np.array_equal(image_input, image)
-            return segment_map
-
-    class DummySegmentation:
-        @staticmethod
-        def createGraphSegmentation(sigma: float, k: float, min_size: int) -> DummySegmentator:
-            assert sigma == 0.5
-            assert k == 100.0
-            assert min_size == 10
-            return DummySegmentator()
+    def fake_felzenszwalb(
+        image_input: npt.NDArray[np.uint8], *, scale: float, sigma: float, min_size: int
+    ) -> npt.NDArray[np.int32]:
+        assert np.array_equal(image_input, image)
+        assert scale == 100.0
+        assert sigma == 0.5
+        assert min_size == 10
+        return segment_map
 
     monkeypatch.setattr(
         "helpers.graph.contamination.cv2.imread",
         lambda path, flag=None: mask if flag == cv2.IMREAD_GRAYSCALE else image,
     )
-    monkeypatch.setattr(
-        "helpers.graph.contamination.cv2.ximgproc",
-        type("XImgProc", (), {"segmentation": DummySegmentation})(),
-    )
+    monkeypatch.setattr("helpers.graph.contamination.felzenszwalb", fake_felzenszwalb)
 
     result = calculate_roi_contamination(
         tmp_path / "image.png",
@@ -160,7 +153,7 @@ def test_calculate_roi_contamination_returns_expected_rate(
     assert result == pytest.approx(1 / 3)
 
 
-def test_calculate_roi_contamination_returns_none_on_opencv_error(
+def test_calculate_roi_contamination_returns_none_on_segmentation_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     image = np.zeros((2, 2, 3), dtype=np.uint8)
@@ -169,22 +162,12 @@ def test_calculate_roi_contamination_returns_none_on_opencv_error(
     def fake_imread(_path: str, flag: int | None = None) -> Any:
         return mask if flag == cv2.IMREAD_GRAYSCALE else image
 
-    class RaisingSegmentator:
-        def processImage(self, image_input: npt.NDArray[np.uint8]) -> npt.NDArray[np.int32]:
-            del image_input
-            raise cv2.error("graph", "processImage", "boom")
-
-    class DummySegmentation:
-        @staticmethod
-        def createGraphSegmentation(**kwargs: Any) -> RaisingSegmentator:
-            del kwargs
-            return RaisingSegmentator()
+    def raising_felzenszwalb(_image: npt.NDArray[np.uint8], **kwargs: Any) -> npt.NDArray[np.int32]:
+        del kwargs
+        raise RuntimeError("boom")
 
     monkeypatch.setattr("helpers.graph.contamination.cv2.imread", fake_imread)
-    monkeypatch.setattr(
-        "helpers.graph.contamination.cv2.ximgproc",
-        type("XImgProc", (), {"segmentation": DummySegmentation})(),
-    )
+    monkeypatch.setattr("helpers.graph.contamination.felzenszwalb", raising_felzenszwalb)
 
     result = calculate_roi_contamination(
         tmp_path / "image.png",

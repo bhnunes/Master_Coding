@@ -8,6 +8,8 @@ from typing import Any, cast
 import cv2
 import h5py
 import numpy as np
+import numpy.typing as npt
+from skimage.segmentation import felzenszwalb
 
 
 @dataclass(frozen=True)
@@ -86,13 +88,7 @@ def calculate_roi_contamination(
                 active_logger.debug("[%s] FAILED: Initial ROI area was zero.", base_name)
             return float("nan")
 
-        ximgproc = cast(Any, cv2).ximgproc
-        segmentator = ximgproc.segmentation.createGraphSegmentation(
-            sigma=0.5,
-            k=normalized_params.k,
-            min_size=normalized_params.min_size,
-        )
-        segment_map = segmentator.processImage(image)
+        segment_map = _segment_image(image, normalized_params)
         background_mask = np.zeros(image.shape[:2], dtype=bool)
         num_segments = int(np.max(segment_map)) + 1
 
@@ -116,9 +112,23 @@ def calculate_roi_contamination(
             normalized_params.erosion_px,
         )
         return contamination_rate
-    except cv2.error as error:
+    except (cv2.error, ValueError, RuntimeError) as error:
         active_logger.error("[%s] CRITICAL EXCEPTION: %s", base_name, error, exc_info=True)
         return None
+
+
+def _segment_image(
+    image: npt.NDArray[np.uint8], params: GraphContaminationParameters
+) -> npt.NDArray[np.int32]:
+    """Return Felzenszwalb graph segments for one RGB image."""
+
+    segment_map = felzenszwalb(
+        image,
+        scale=params.k,
+        sigma=0.5,
+        min_size=params.min_size,
+    )
+    return np.asarray(segment_map, dtype=np.int32)
 
 
 def _parse_hdf5_ref(source: Path | str, dataset_name: str) -> tuple[Path, int] | None:
