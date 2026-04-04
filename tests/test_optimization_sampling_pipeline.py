@@ -12,11 +12,9 @@ from helpers.optimization_sampling.pipeline import run_optimization_sampling
 from helpers.optimization_sampling.sampling import (
     ImageMaskPair,
     OverlayTask,
-    build_group_representatives,
     build_overlay_tasks,
     calculate_cochran_sample_size,
     discover_hdf5_image_mask_pairs,
-    infer_sampling_group_id,
     select_sample_stems,
 )
 
@@ -43,28 +41,7 @@ def test_select_sample_stems_returns_non_overlapping_groups() -> None:
     assert set(selection.master_pool_stems).isdisjoint(selection.pilot_sample_stems)
 
 
-def test_infer_sampling_group_id_prefers_patient_ids() -> None:
-    assert infer_sampling_group_id("CANCER_PATIENT_42_SLIDE_a_X_1_Y_2") == "42"
-    assert infer_sampling_group_id("NOT_CANCER_SLIDE_slide7_PATCH_3") == "slide7"
-    assert infer_sampling_group_id("case_1") == "case_1"
-
-
-def test_build_group_representatives_selects_one_stem_per_patient() -> None:
-    representatives = build_group_representatives(
-        [
-            "CANCER_PATIENT_1_PATCH_A",
-            "CANCER_PATIENT_1_PATCH_B",
-            "CANCER_PATIENT_2_PATCH_A",
-        ],
-        rng=random.Random(4),
-    )
-
-    assert set(representatives) == {"1", "2"}
-    assert representatives["1"] in {"CANCER_PATIENT_1_PATCH_A", "CANCER_PATIENT_1_PATCH_B"}
-    assert representatives["2"] == "CANCER_PATIENT_2_PATCH_A"
-
-
-def test_select_sample_stems_uses_patient_aware_population_and_disjoint_groups() -> None:
+def test_select_sample_stems_uses_image_level_population_even_with_repeated_patients() -> None:
     stems = [
         f"CANCER_PATIENT_{patient}_PATCH_{patch}" for patient in range(1, 251) for patch in (1, 2)
     ]
@@ -79,12 +56,29 @@ def test_select_sample_stems_uses_patient_aware_population_and_disjoint_groups()
         rng=random.Random(9),
     )
 
-    assert selection.total_population == 250
-    master_groups = {infer_sampling_group_id(stem) for stem in selection.master_pool_stems}
-    pilot_groups = {infer_sampling_group_id(stem) for stem in selection.pilot_sample_stems}
-    assert len(selection.master_pool_stems) == len(master_groups)
-    assert len(selection.pilot_sample_stems) == len(pilot_groups)
-    assert master_groups.isdisjoint(pilot_groups)
+    assert selection.total_population == 500
+    assert len(selection.master_pool_stems) == 100
+    assert len(selection.pilot_sample_stems) == 50
+    assert set(selection.master_pool_stems).isdisjoint(selection.pilot_sample_stems)
+
+
+def test_select_sample_stems_does_not_collapse_large_image_population_by_filename_pattern() -> None:
+    stems = [f"CANCER_PATIENT_shared_SLIDE_shared_X_{index}_Y_{index}" for index in range(1200)]
+
+    selection = select_sample_stems(
+        stems=stems,
+        pilot_sample_size=100,
+        master_pool_fraction=0.10,
+        confidence_level=0.95,
+        margin_of_error=0.05,
+        proportion=0.5,
+        rng=random.Random(5),
+    )
+
+    assert selection.total_population == 1200
+    assert len(selection.master_pool_stems) == 120
+    assert len(selection.pilot_sample_stems) == 100
+    assert set(selection.master_pool_stems).isdisjoint(selection.pilot_sample_stems)
 
 
 def test_select_sample_stems_rejects_small_population() -> None:

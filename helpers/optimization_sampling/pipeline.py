@@ -67,7 +67,7 @@ def run_optimization_sampling(
         rng=rng,
     )
     active_logger.info(
-        "Identified %s patient-aware sampling units from valid image-mask pairs.",
+        "Identified %s valid image-mask pairs for image-level sampling.",
         selection.total_population,
     )
     active_logger.info("--- Experiment Parameters ---")
@@ -86,11 +86,11 @@ def run_optimization_sampling(
         selection.master_pool_size,
     )
     active_logger.info(
-        "Randomly selected %s patient-disjoint representatives for the master pool.",
+        "Randomly selected %s non-overlapping images for the master pool.",
         len(selection.master_pool_stems),
     )
     active_logger.info(
-        "Randomly selected %s patient-disjoint representatives for the pilot sample.",
+        "Randomly selected %s non-overlapping images for the pilot sample.",
         len(selection.pilot_sample_stems),
     )
 
