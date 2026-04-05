@@ -20,6 +20,8 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.output_dir == tmp_path / "out"
     assert config.output_filename == "TRAIN_FILTERED.h5"
     assert config.stage_input_locally is False
+    assert config.stage_outputs_locally is False
+    assert config.clean_local_work_dir is True
     assert config.write_sidecars is True
     assert config.seed == 42
     assert config.n_start == 512

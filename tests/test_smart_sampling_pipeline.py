@@ -80,6 +80,8 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",
@@ -118,3 +120,110 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
 
     dataset = HybridProstateDataset(str(outputs.filtered_h5_path), mode="train")
     assert len(dataset) == 4
+
+
+def test_run_smart_sampling_pipeline_stages_outputs_locally_and_publishes_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    _write_training_hdf5(source_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    remote_output_dir = tmp_path / "drive"
+    local_work_dir = tmp_path / "content"
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=remote_output_dir,
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=local_work_dir,
+        stage_input_locally=True,
+        stage_outputs_locally=True,
+        clean_local_work_dir=True,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+    )
+
+    outputs = run_smart_sampling_pipeline(
+        config,
+        extractor_factory=_DummyEmbeddingExtractor,
+    )
+
+    assert outputs.filtered_h5_path == remote_output_dir / "TRAIN_FILTERED.h5"
+    assert outputs.selection_csv_path == remote_output_dir / "train_filtered_selection.csv"
+    assert outputs.stats_csv_path == remote_output_dir / "patient_filter_stats.csv"
+    assert outputs.run_config_path == remote_output_dir / "filter_run_config.json"
+    assert not local_work_dir.exists()
+    assert outputs.filtered_h5_path.exists()
+
+
+def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    _write_training_hdf5(source_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    remote_output_dir = tmp_path / "drive"
+    local_work_dir = tmp_path / "content"
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=remote_output_dir,
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=local_work_dir,
+        stage_input_locally=True,
+        stage_outputs_locally=True,
+        clean_local_work_dir=True,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+    )
+
+    def fail_publish(*args: object, **kwargs: object) -> object:
+        raise OSError("drive unavailable")
+
+    monkeypatch.setattr("helpers.smart_sampling.pipeline.publish_outputs", fail_publish)
+
+    with pytest.raises(OSError, match="drive unavailable"):
+        run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
+
+    assert (local_work_dir / "input" / source_path.name).exists()
+    assert (local_work_dir / "output" / "TRAIN_FILTERED.h5").exists()

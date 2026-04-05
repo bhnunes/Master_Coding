@@ -56,6 +56,8 @@ class SmartSamplerConfig:
     output_filename: str
     local_work_dir: Path | None
     stage_input_locally: bool
+    stage_outputs_locally: bool
+    clean_local_work_dir: bool
     write_sidecars: bool
     overwrite_output: bool
     encoder_name: str
@@ -119,6 +121,16 @@ def load_smart_sampler_config(
             values.get("SMART_SAMPLER_STAGE_INPUT_LOCALLY"),
             "SMART_SAMPLER_STAGE_INPUT_LOCALLY",
             False,
+        ),
+        stage_outputs_locally=_parse_bool(
+            values.get("SMART_SAMPLER_STAGE_OUTPUTS_LOCALLY"),
+            "SMART_SAMPLER_STAGE_OUTPUTS_LOCALLY",
+            False,
+        ),
+        clean_local_work_dir=_parse_bool(
+            values.get("SMART_SAMPLER_CLEAN_LOCAL_WORK_DIR"),
+            "SMART_SAMPLER_CLEAN_LOCAL_WORK_DIR",
+            True,
         ),
         write_sidecars=_parse_bool(
             values.get("SMART_SAMPLER_WRITE_SIDECARS"),

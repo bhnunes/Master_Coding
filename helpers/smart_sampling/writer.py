@@ -28,11 +28,14 @@ def _build_sampling_signature(
     *,
     source_path: Path,
     output_filename: str,
+    signature_source_path: Path | None = None,
 ) -> str:
     source_provenance = collect_hdf5_provenance(source_path)
+    if signature_source_path is not None:
+        source_provenance["path"] = str(signature_source_path)
     payload = {
         "selected_indices": np.asarray(selected_indices, dtype=np.int64).tolist(),
-        "source_path": str(source_path),
+        "source_path": str(signature_source_path or source_path),
         "source_provenance": source_provenance,
         "output_filename": output_filename,
     }
@@ -55,13 +58,16 @@ def write_filtered_hdf5(
     selected_indices: npt.NDArray[np.int64],
     *,
     source_h5_path: Path | None = None,
+    output_dir: Path | None = None,
+    signature_source_path: Path | None = None,
 ) -> Path:
     source_path = source_h5_path or config.source_h5_path
-    output_path = config.output_dir / config.output_filename
+    output_path = (output_dir or config.output_dir) / config.output_filename
     selected_indices = np.asarray(selected_indices, dtype=np.int64)
     selection_signature = _build_sampling_signature(
         selected_indices,
         source_path=source_path,
+        signature_source_path=signature_source_path,
         output_filename=config.output_filename,
     )
     if output_path.exists() and not config.overwrite_output:
@@ -120,14 +126,16 @@ def write_sidecar_artifacts(
     *,
     selection_manifest: list[dict[str, Any]],
     stats_log: list[dict[str, Any]],
+    output_dir: Path | None = None,
 ) -> tuple[Path | None, Path | None, Path | None]:
     if not config.write_sidecars:
         return None, None, None
 
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    selection_csv_path = config.output_dir / "train_filtered_selection.csv"
-    stats_csv_path = config.output_dir / "patient_filter_stats.csv"
-    run_config_path = config.output_dir / "filter_run_config.json"
+    resolved_output_dir = output_dir or config.output_dir
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    selection_csv_path = resolved_output_dir / "train_filtered_selection.csv"
+    stats_csv_path = resolved_output_dir / "patient_filter_stats.csv"
+    run_config_path = resolved_output_dir / "filter_run_config.json"
 
     pd.DataFrame(selection_manifest).to_csv(selection_csv_path, index=False)
     pd.DataFrame(stats_log).to_csv(stats_csv_path, index=False)

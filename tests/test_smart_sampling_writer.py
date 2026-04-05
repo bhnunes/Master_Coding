@@ -42,6 +42,8 @@ def test_write_filtered_hdf5_propagates_upstream_lineage_attrs(tmp_path: Path) -
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",
@@ -86,6 +88,8 @@ def test_write_filtered_hdf5_writes_plural_filenames_for_legacy_input(tmp_path: 
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",
@@ -131,6 +135,8 @@ def test_write_filtered_hdf5_reuses_existing_output_when_selection_matches(tmp_p
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",
@@ -174,6 +180,8 @@ def test_write_filtered_hdf5_rejects_existing_output_when_selection_mismatches(
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",
@@ -220,6 +228,8 @@ def test_write_filtered_hdf5_rejects_reuse_when_source_contents_change_in_place(
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",
@@ -250,3 +260,63 @@ def test_write_filtered_hdf5_rejects_reuse_when_source_contents_change_in_place(
 
     with pytest.raises(ValueError, match="does not match the current selection"):
         write_filtered_hdf5(reuse_config, np.array([1, 2], dtype=np.int64))
+
+
+def test_write_filtered_hdf5_keeps_selection_signature_stable_when_input_is_staged(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    output_dir = tmp_path / "output"
+    staged_dir = tmp_path / "content"
+    output_dir.mkdir()
+    staged_dir.mkdir()
+    _write_source_hdf5(source_path)
+    staged_source_path = staged_dir / source_path.name
+    staged_source_path.write_bytes(source_path.read_bytes())
+
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=output_dir,
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=staged_dir,
+        stage_input_locally=True,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+    )
+
+    direct_output = write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    direct_signature = None
+    with h5py.File(direct_output, "r") as handle:
+        direct_signature = handle.attrs["selection_signature"]
+
+    staged_output = write_filtered_hdf5(
+        config,
+        np.array([1, 2], dtype=np.int64),
+        source_h5_path=staged_source_path,
+        output_dir=staged_dir,
+        signature_source_path=source_path,
+    )
+    with h5py.File(staged_output, "r") as handle:
+        staged_signature = handle.attrs["selection_signature"]
+
+    assert staged_signature == direct_signature

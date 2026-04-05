@@ -28,6 +28,8 @@ def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) 
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
         stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
         encoder_name="resnet50",

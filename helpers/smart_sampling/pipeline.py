@@ -12,7 +12,7 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.embeddings import EmbeddingExtractor
 from helpers.smart_sampling.index import H5MetadataIndex
 from helpers.smart_sampling.selection import select_patient_samples
-from helpers.smart_sampling.storage import prepare_source_h5
+from helpers.smart_sampling.storage import cleanup_local_work_dir, prepare_storage, publish_outputs
 from helpers.smart_sampling.writer import write_filtered_hdf5, write_sidecar_artifacts
 
 
@@ -31,7 +31,8 @@ def run_smart_sampling_pipeline(
     extractor_factory: type[EmbeddingExtractor] | Any = EmbeddingExtractor,
 ) -> SmartSamplingOutputs:
     logging.info("Starting Stage 8 smart sampling from %s", config.source_h5_path)
-    source_h5_path = prepare_source_h5(config)
+    storage = prepare_storage(config)
+    source_h5_path = storage.source_h5_path
     h5_index = H5MetadataIndex.build(source_h5_path)
     extractor = extractor_factory(config)
 
@@ -78,12 +79,24 @@ def run_smart_sampling_pipeline(
         config,
         unique_selected_indices,
         source_h5_path=source_h5_path,
+        output_dir=storage.output_dir,
+        signature_source_path=config.source_h5_path,
     )
     selection_csv_path, stats_csv_path, run_config_path = write_sidecar_artifacts(
         config,
         selection_manifest=selection_manifest,
         stats_log=stats_log,
+        output_dir=storage.output_dir,
     )
+    if storage.should_publish_outputs:
+        filtered_h5_path, selection_csv_path, stats_csv_path, run_config_path = publish_outputs(
+            config,
+            filtered_h5_path=filtered_h5_path,
+            selection_csv_path=selection_csv_path,
+            stats_csv_path=stats_csv_path,
+            run_config_path=run_config_path,
+        )
+    cleanup_local_work_dir(config)
     return SmartSamplingOutputs(
         filtered_h5_path=filtered_h5_path,
         selection_csv_path=selection_csv_path,
