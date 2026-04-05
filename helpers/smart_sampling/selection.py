@@ -26,6 +26,7 @@ class PatientSelectionResult:
     k_clusters: int
     selection_method: str
     stability_history: list[tuple[int, float]]
+    retention_history: list[tuple[int, float]]
 
 
 def compute_k(n_samples: int, config: Any) -> int:
@@ -85,14 +86,15 @@ def select_diverse_samples(
     global_indices: npt.NDArray[np.int64],
     m_target: int,
     config: Any,
-) -> tuple[npt.NDArray[np.int64], int, str]:
+) -> tuple[npt.NDArray[np.int64], int, str, list[tuple[int, float]]]:
     n_samples = len(embeddings)
     if n_samples <= m_target:
-        return global_indices, n_samples, "keep_all"
+        return global_indices, n_samples, "keep_all", [(n_samples, 0.0)]
 
     k = compute_k(n_samples, config)
     if k <= 1:
-        return global_indices[:m_target], k, "uniform"
+        kept = global_indices[:m_target]
+        return kept, k, "uniform", [(len(kept), 0.0)]
 
     clusterer = MiniBatchKMeans(
         n_clusters=k,
@@ -101,6 +103,16 @@ def select_diverse_samples(
         random_state=config.SEED,
     ).fit(embeddings)
     labels = clusterer.labels_
+    if getattr(config, "ADAPTIVE_KEEP_ENABLED", False):
+        return _select_diverse_samples_adaptive(
+            embeddings,
+            global_indices,
+            labels,
+            k,
+            m_target,
+            config,
+        )
+
     dataframe = pd.DataFrame({"idx": global_indices, "label": labels})
     quota = int(np.ceil(m_target / k))
 
@@ -118,7 +130,7 @@ def select_diverse_samples(
         needed = m_target - len(selected_indices)
         selected_indices.extend(sorted(overflow_pool)[:needed])
 
-    return np.asarray(sorted(selected_indices), dtype=np.int64), k, "uniform"
+    return np.asarray(sorted(selected_indices), dtype=np.int64), k, "uniform", [(m_target, 0.0)]
 
 
 def select_patient_samples(
@@ -195,7 +207,7 @@ def select_patient_samples(
         candidate_pool = np.sort(rng.choice(patient_indices, n_curr, replace=False))
         final_embeddings = fetch_embeddings(candidate_pool)
 
-    selected_indices, k_used, method = select_diverse_samples(
+    selected_indices, k_used, method, retention_history = select_diverse_samples(
         final_embeddings,
         candidate_pool,
         min(config.m_max, patch_count),
@@ -209,7 +221,99 @@ def select_patient_samples(
         k_clusters=k_used,
         selection_method=method,
         stability_history=stability_history,
+        retention_history=retention_history,
     )
+
+
+def _select_diverse_samples_adaptive(
+    embeddings: npt.NDArray[np.float32],
+    global_indices: npt.NDArray[np.int64],
+    labels: npt.NDArray[np.int32] | npt.NDArray[np.int64],
+    k: int,
+    m_target: int,
+    config: Any,
+) -> tuple[npt.NDArray[np.int64], int, str, list[tuple[int, float]]]:
+    max_keep = min(m_target, len(global_indices))
+    min_keep = min(max_keep, getattr(config, "KEEP_MIN", max_keep))
+    keep_step = max(1, getattr(config, "KEEP_STEP", 1))
+    keep_patience = max(1, getattr(config, "KEEP_PATIENCE", 1))
+    improvement_threshold = float(getattr(config, "KEEP_IMPROVEMENT_THRESHOLD", 0.0))
+    selection_order = _build_cluster_balanced_order(global_indices, labels, seed=config.SEED)
+
+    if min_keep >= max_keep:
+        return selection_order[:max_keep], k, "adaptive_keep_all", [(max_keep, 0.0)]
+
+    retention_history: list[tuple[int, float]] = []
+    previous_score: float | None = None
+    previous_count: int | None = None
+    plateau_steps = 0
+    selected_count = min_keep
+    best_count = max_keep
+
+    while selected_count <= max_keep:
+        score = _coverage_score(embeddings, selection_order[:selected_count], global_indices)
+        retention_history.append((selected_count, score))
+        if previous_score is not None:
+            relative_improvement = (previous_score - score) / max(previous_score, 1e-12)
+            if relative_improvement < improvement_threshold:
+                plateau_steps += 1
+            else:
+                plateau_steps = 0
+            if plateau_steps >= keep_patience:
+                best_count = previous_count if previous_count is not None else selected_count
+                break
+        previous_score = score
+        previous_count = selected_count
+        if selected_count == max_keep:
+            best_count = max_keep
+            break
+        selected_count = min(max_keep, selected_count + keep_step)
+
+    return selection_order[:best_count], k, "adaptive_plateau", retention_history
+
+
+def _build_cluster_balanced_order(
+    global_indices: npt.NDArray[np.int64],
+    labels: npt.NDArray[np.int32] | npt.NDArray[np.int64],
+    *,
+    seed: int,
+) -> npt.NDArray[np.int64]:
+    dataframe = pd.DataFrame({"idx": global_indices, "label": labels})
+    rng = np.random.default_rng(seed)
+    grouped_indices: list[list[int]] = []
+    for _, group in dataframe.groupby("label", sort=True):
+        values = group["idx"].tolist()
+        shuffled = np.asarray(values, dtype=np.int64)
+        rng.shuffle(shuffled)
+        grouped_indices.append(shuffled.tolist())
+
+    ordered: list[int] = []
+    while grouped_indices:
+        next_groups: list[list[int]] = []
+        for group in grouped_indices:
+            if not group:
+                continue
+            ordered.append(int(group.pop(0)))
+            if group:
+                next_groups.append(group)
+        grouped_indices = next_groups
+    return np.asarray(ordered, dtype=np.int64)
+
+
+def _coverage_score(
+    embeddings: npt.NDArray[np.float32],
+    selected_indices: npt.NDArray[np.int64],
+    global_indices: npt.NDArray[np.int64],
+) -> float:
+    selection_mask = np.isin(global_indices, selected_indices)
+    selected_embeddings = embeddings[selection_mask]
+    if len(selected_embeddings) == 0:
+        return float("inf")
+    distances = np.linalg.norm(
+        embeddings[:, None, :] - selected_embeddings[None, :, :],
+        axis=2,
+    )
+    return float(np.mean(np.min(distances, axis=1)))
 
 
 def _selection_namespace(config: SmartSamplerConfig) -> Any:
@@ -218,5 +322,10 @@ def _selection_namespace(config: SmartSamplerConfig) -> Any:
         K_MAX = config.k_max
         SEED = config.seed
         INTERSECTION_RATIO_THRESHOLD = config.intersection_ratio_threshold
+        ADAPTIVE_KEEP_ENABLED = config.adaptive_keep_enabled
+        KEEP_MIN = config.keep_min
+        KEEP_STEP = config.keep_step
+        KEEP_IMPROVEMENT_THRESHOLD = config.keep_improvement_threshold
+        KEEP_PATIENCE = config.keep_patience
 
     return _Namespace()

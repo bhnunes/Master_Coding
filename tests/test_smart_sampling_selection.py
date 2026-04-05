@@ -21,11 +21,20 @@ def test_compute_k_respects_bounds() -> None:
 
 
 def test_select_diverse_samples_keeps_all_when_target_exceeds_pool() -> None:
-    config = SimpleNamespace(K_MIN=20, K_MAX=80, SEED=42)
+    config = SimpleNamespace(
+        K_MIN=20,
+        K_MAX=80,
+        SEED=42,
+        ADAPTIVE_KEEP_ENABLED=True,
+        KEEP_MIN=2,
+        KEEP_STEP=1,
+        KEEP_IMPROVEMENT_THRESHOLD=0.02,
+        KEEP_PATIENCE=2,
+    )
     embeddings = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32)
     global_indices = np.array([10, 20], dtype=np.int64)
 
-    selected_indices, k_used, method = select_diverse_samples(
+    selected_indices, k_used, method, retention_history = select_diverse_samples(
         embeddings,
         global_indices,
         m_target=5,
@@ -35,6 +44,44 @@ def test_select_diverse_samples_keeps_all_when_target_exceeds_pool() -> None:
     assert np.array_equal(selected_indices, global_indices)
     assert k_used == 2
     assert method == "keep_all"
+    assert retention_history == [(2, 0.0)]
+
+
+def test_select_diverse_samples_stops_when_coverage_improvement_plateaus() -> None:
+    config = SimpleNamespace(
+        K_MIN=2,
+        K_MAX=4,
+        SEED=42,
+        ADAPTIVE_KEEP_ENABLED=True,
+        KEEP_MIN=2,
+        KEEP_STEP=1,
+        KEEP_IMPROVEMENT_THRESHOLD=0.3,
+        KEEP_PATIENCE=1,
+    )
+    embeddings = np.array(
+        [
+            [0.0, 0.0],
+            [0.05, 0.0],
+            [10.0, 10.0],
+            [10.05, 10.0],
+            [20.0, 20.0],
+            [20.05, 20.0],
+        ],
+        dtype=np.float32,
+    )
+    global_indices = np.arange(len(embeddings), dtype=np.int64)
+
+    selected_indices, k_used, method, retention_history = select_diverse_samples(
+        embeddings,
+        global_indices,
+        m_target=5,
+        config=config,
+    )
+
+    assert method == "adaptive_plateau"
+    assert k_used >= 2
+    assert len(selected_indices) < 5
+    assert len(retention_history) >= 2
 
 
 def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets() -> None:
@@ -58,6 +105,11 @@ def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets
         intersection_ratio_threshold=0.2,
         k_min=2,
         k_max=4,
+        adaptive_keep_enabled=True,
+        keep_min=2,
+        keep_step=1,
+        keep_improvement_threshold=0.02,
+        keep_patience=2,
         m_max=2,
         seed=7,
     )
@@ -105,6 +157,11 @@ def test_select_patient_samples_computes_stability_once_when_repeats_are_determi
         intersection_ratio_threshold=0.2,
         k_min=2,
         k_max=4,
+        adaptive_keep_enabled=True,
+        keep_min=2,
+        keep_step=1,
+        keep_improvement_threshold=0.02,
+        keep_patience=2,
         m_max=2,
         seed=5,
     )
@@ -118,3 +175,42 @@ def test_select_patient_samples_computes_stability_once_when_repeats_are_determi
     )
 
     assert stability_calls == 1
+
+
+def test_select_patient_samples_reports_retention_history() -> None:
+    class FakeExtractor:
+        def get_embeddings(
+            self, _h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
+        ) -> np.ndarray[Any, np.dtype[np.float32]]:
+            values = indices.astype(np.float32).reshape(-1, 1)
+            return np.concatenate([values, values + 0.5], axis=1)
+
+    config = SimpleNamespace(
+        n_start=6,
+        n_max=6,
+        growth_factor=2.0,
+        stability_threshold=0.5,
+        stability_repeats=2,
+        max_steps=1,
+        intersection_ratio_threshold=0.2,
+        k_min=2,
+        k_max=4,
+        adaptive_keep_enabled=True,
+        keep_min=2,
+        keep_step=1,
+        keep_improvement_threshold=0.1,
+        keep_patience=1,
+        m_max=6,
+        seed=11,
+    )
+
+    result = select_patient_samples(
+        "ignored.h5",
+        1,
+        np.array([0, 1, 2, 3, 4, 5], dtype=np.int64),
+        FakeExtractor(),
+        cast(Any, config),
+    )
+
+    assert result.retention_history
+    assert result.selection_method in {"adaptive_plateau", "adaptive_keep_all", "keep_all"}

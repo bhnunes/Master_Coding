@@ -74,6 +74,11 @@ class SmartSamplerConfig:
     intersection_ratio_threshold: float
     k_min: int
     k_max: int
+    adaptive_keep_enabled: bool
+    keep_min: int
+    keep_step: int
+    keep_improvement_threshold: float
+    keep_patience: int
     m_max: int
     selection_strategy: str
     seed: int
@@ -182,6 +187,31 @@ def load_smart_sampler_config(
         ),
         k_min=_parse_positive_int(values.get("SMART_SAMPLER_K_MIN"), "SMART_SAMPLER_K_MIN", 20),
         k_max=_parse_positive_int(values.get("SMART_SAMPLER_K_MAX"), "SMART_SAMPLER_K_MAX", 80),
+        adaptive_keep_enabled=_parse_bool(
+            values.get("SMART_SAMPLER_ADAPTIVE_KEEP_ENABLED"),
+            "SMART_SAMPLER_ADAPTIVE_KEEP_ENABLED",
+            True,
+        ),
+        keep_min=_parse_positive_int(
+            values.get("SMART_SAMPLER_KEEP_MIN"),
+            "SMART_SAMPLER_KEEP_MIN",
+            64,
+        ),
+        keep_step=_parse_positive_int(
+            values.get("SMART_SAMPLER_KEEP_STEP"),
+            "SMART_SAMPLER_KEEP_STEP",
+            64,
+        ),
+        keep_improvement_threshold=_parse_probability(
+            values.get("SMART_SAMPLER_KEEP_IMPROVEMENT_THRESHOLD"),
+            "SMART_SAMPLER_KEEP_IMPROVEMENT_THRESHOLD",
+            0.02,
+        ),
+        keep_patience=_parse_positive_int(
+            values.get("SMART_SAMPLER_KEEP_PATIENCE"),
+            "SMART_SAMPLER_KEEP_PATIENCE",
+            2,
+        ),
         m_max=_parse_positive_int(values.get("SMART_SAMPLER_M_MAX"), "SMART_SAMPLER_M_MAX", 2000),
         selection_strategy=(values.get("SMART_SAMPLER_SELECTION_STRATEGY") or "uniform").strip(),
         seed=_parse_positive_int(values.get("SMART_SAMPLER_SEED"), "SMART_SAMPLER_SEED", 42),

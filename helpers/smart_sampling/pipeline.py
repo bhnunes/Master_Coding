@@ -96,6 +96,7 @@ def run_smart_sampling_pipeline(
                 "selected_m": len(selected_indices),
                 "runtime_sec": round(time.time() - start_time, 2),
                 "stability_trace": str(result.stability_history),
+                "retention_trace": str(result.retention_history),
             }
         )
         for selected_index in selected_indices:

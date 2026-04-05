@@ -22,6 +22,11 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.stage_input_locally is False
     assert config.stage_outputs_locally is False
     assert config.clean_local_work_dir is True
+    assert config.adaptive_keep_enabled is True
+    assert config.keep_min == 64
+    assert config.keep_step == 64
+    assert config.keep_improvement_threshold == pytest.approx(0.02)
+    assert config.keep_patience == 2
     assert config.write_sidecars is True
     assert config.seed == 42
     assert config.n_start == 512
