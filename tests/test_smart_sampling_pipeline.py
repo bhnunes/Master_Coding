@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import h5py
@@ -113,10 +114,24 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     assert outputs.selection_csv_path is not None
     assert outputs.stats_csv_path is not None
     assert outputs.run_config_path is not None
+    assert outputs.summary_json_path == tmp_path / "out" / "filter_summary.json"
+    assert outputs.total_input_samples == 6
+    assert outputs.selected_sample_count == 4
+    assert outputs.rejected_sample_count == 2
+    assert outputs.kept_fraction == pytest.approx(4 / 6)
+    assert outputs.patient_count == 2
+    assert outputs.patients_reduced_count == 2
 
     with h5py.File(outputs.filtered_h5_path, "r") as handle:
         assert set(handle.keys()) == {"filenames", "images", "labels", "masks", "patient_ids"}
         assert handle["patient_ids"][:].tolist() == [1, 1, 2, 2]
+
+    assert outputs.summary_json_path is not None
+    summary = json.loads(outputs.summary_json_path.read_text(encoding="utf-8"))
+    assert summary["total_input_samples"] == 6
+    assert summary["kept_samples"] == 4
+    assert summary["rejected_samples"] == 2
+    assert summary["patients_reduced_count"] == 2
 
     dataset = HybridProstateDataset(str(outputs.filtered_h5_path), mode="train")
     assert len(dataset) == 4
@@ -172,8 +187,10 @@ def test_run_smart_sampling_pipeline_stages_outputs_locally_and_publishes_on_suc
     assert outputs.selection_csv_path == remote_output_dir / "train_filtered_selection.csv"
     assert outputs.stats_csv_path == remote_output_dir / "patient_filter_stats.csv"
     assert outputs.run_config_path == remote_output_dir / "filter_run_config.json"
+    assert outputs.summary_json_path == remote_output_dir / "filter_summary.json"
     assert not local_work_dir.exists()
     assert outputs.filtered_h5_path.exists()
+    assert outputs.summary_json_path.exists()
 
 
 def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
@@ -227,3 +244,52 @@ def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
 
     assert (local_work_dir / "input" / source_path.name).exists()
     assert (local_work_dir / "output" / "TRAIN_FILTERED.h5").exists()
+    assert (local_work_dir / "output" / "filter_summary.json").exists()
+
+
+def test_run_smart_sampling_pipeline_reports_noop_summary_when_every_patch_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    _write_training_hdf5(source_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=tmp_path / "out",
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=None,
+        stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        m_max=6,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+    )
+
+    outputs = run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
+
+    assert outputs.total_input_samples == 6
+    assert outputs.selected_sample_count == 6
+    assert outputs.rejected_sample_count == 0
+    assert outputs.kept_fraction == pytest.approx(1.0)
+    assert outputs.patients_reduced_count == 0

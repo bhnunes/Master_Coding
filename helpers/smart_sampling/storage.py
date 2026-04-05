@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ def prepare_storage(config: SmartSamplerConfig) -> PreparedSmartSamplerStorage:
         staged_input_dir = _input_stage_dir(local_work_dir)
         staged_input_dir.mkdir(parents=True, exist_ok=True)
         staged_path = staged_input_dir / config.source_h5_path.name
+        logging.info("Staging source HDF5 locally: %s -> %s", config.source_h5_path, staged_path)
         shutil.copy2(config.source_h5_path, staged_path)
         source_h5_path = staged_path
 
@@ -32,6 +34,7 @@ def prepare_storage(config: SmartSamplerConfig) -> PreparedSmartSamplerStorage:
         assert local_work_dir is not None
         output_dir = _output_stage_dir(local_work_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        logging.info("Writing Stage 7 outputs locally first in %s", output_dir)
 
     return PreparedSmartSamplerStorage(
         source_h5_path=source_h5_path,
@@ -49,6 +52,7 @@ def publish_outputs(
     run_config_path: Path | None,
 ) -> tuple[Path, Path | None, Path | None, Path | None]:
     config.output_dir.mkdir(parents=True, exist_ok=True)
+    logging.info("Publishing Stage 7 outputs back to %s", config.output_dir)
     published_filtered_h5_path = _publish_file(filtered_h5_path, config.output_dir)
     published_selection_csv_path = _publish_optional_file(selection_csv_path, config.output_dir)
     published_stats_csv_path = _publish_optional_file(stats_csv_path, config.output_dir)
@@ -69,6 +73,7 @@ def cleanup_local_work_dir(config: SmartSamplerConfig) -> None:
     ):
         return
     if config.local_work_dir.exists():
+        logging.info("Cleaning local smart-sampling work dir %s", config.local_work_dir)
         shutil.rmtree(config.local_work_dir)
 
 

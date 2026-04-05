@@ -40,6 +40,18 @@ def main() -> None:
 
     logging.info("Stage 8 smart sampling completed successfully")
     print("Stage 8 smart sampling completed successfully:")
+    logging.info("Total input patches: %d", outputs.total_input_samples)
+    logging.info("Kept patches: %d", outputs.selected_sample_count)
+    logging.info("Rejected patches: %d", outputs.rejected_sample_count)
+    logging.info("Kept percentage: %.2f%%", outputs.kept_fraction * 100.0)
+    logging.info("Patients processed: %d", outputs.patient_count)
+    logging.info("Patients reduced: %d", outputs.patients_reduced_count)
+    print(f"- Total input patches: {outputs.total_input_samples}")
+    print(f"- Kept patches: {outputs.selected_sample_count}")
+    print(f"- Rejected patches: {outputs.rejected_sample_count}")
+    print(f"- Kept percentage: {outputs.kept_fraction * 100.0:.2f}%")
+    print(f"- Patients processed: {outputs.patient_count}")
+    print(f"- Patients reduced: {outputs.patients_reduced_count}")
     logging.info("Filtered HDF5: %s", outputs.filtered_h5_path)
     print(f"- Filtered HDF5: {outputs.filtered_h5_path}")
     if outputs.selection_csv_path is not None:
@@ -51,6 +63,16 @@ def main() -> None:
     if outputs.run_config_path is not None:
         logging.info("Run config JSON: %s", outputs.run_config_path)
         print(f"- Run config JSON: {outputs.run_config_path}")
+    if outputs.summary_json_path is not None:
+        logging.info("Summary JSON: %s", outputs.summary_json_path)
+        print(f"- Summary JSON: {outputs.summary_json_path}")
+    if outputs.rejected_sample_count == 0:
+        warning_message = (
+            "Warning: smart sampling kept every patch in this run; "
+            "size differences may come only from compression."
+        )
+        logging.warning(warning_message)
+        print(f"- {warning_message}")
     raise SystemExit(0)
 
 
