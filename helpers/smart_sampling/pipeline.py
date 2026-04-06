@@ -42,6 +42,10 @@ def run_smart_sampling_pipeline(
     extractor_factory: type[EmbeddingExtractor] | Any = EmbeddingExtractor,
 ) -> SmartSamplingOutputs:
     logging.info("Starting Stage 8 smart sampling from %s", config.source_h5_path)
+    logging.info(
+        "Using Stage 7 selector: %s",
+        "GIST facility-location" if config.use_gist else "legacy adaptive coverage",
+    )
     logging.info("Preparing Stage 7 storage")
     storage = prepare_storage(config)
     source_h5_path = storage.source_h5_path

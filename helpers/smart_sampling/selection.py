@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -10,6 +11,9 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score
 
 from helpers.smart_sampling.config import SmartSamplerConfig
+from helpers.smart_sampling.gist import select_gist_facility_location
+
+_GIST_MAX_CANDIDATE_POOL = 4096
 
 
 class EmbeddingProvider(Protocol):
@@ -133,6 +137,40 @@ def select_diverse_samples(
     return np.asarray(sorted(selected_indices), dtype=np.int64), k, "uniform", [(m_target, 0.0)]
 
 
+def select_diverse_samples_gist(
+    embeddings: npt.NDArray[np.float32],
+    global_indices: npt.NDArray[np.int64],
+    m_target: int,
+    config: Any,
+) -> tuple[npt.NDArray[np.int64], int, str, list[tuple[int, float]]]:
+    n_samples = len(embeddings)
+    if n_samples <= m_target:
+        return global_indices, 0, "gist_keep_all", [(n_samples, 0.0)]
+
+    if n_samples > _GIST_MAX_CANDIDATE_POOL:
+        logging.warning(
+            "GIST candidate pool size %d exceeds safe limit %d; falling back to legacy selector",
+            n_samples,
+            _GIST_MAX_CANDIDATE_POOL,
+        )
+        selected_indices, k_used, method, retention_history = select_diverse_samples(
+            embeddings,
+            global_indices,
+            m_target,
+            config,
+        )
+        return selected_indices, k_used, f"{method}_gist_fallback", retention_history
+
+    gist_result = select_gist_facility_location(embeddings, max_selected=m_target)
+    selected_indices = global_indices[gist_result.selected_positions]
+    return (
+        np.asarray(sorted(selected_indices.tolist()), dtype=np.int64),
+        0,
+        "gist_facility_location",
+        gist_result.objective_trace,
+    )
+
+
 def select_patient_samples(
     h5_path: str,
     patient_id: int,
@@ -207,12 +245,21 @@ def select_patient_samples(
         candidate_pool = np.sort(rng.choice(patient_indices, n_curr, replace=False))
         final_embeddings = fetch_embeddings(candidate_pool)
 
-    selected_indices, k_used, method, retention_history = select_diverse_samples(
-        final_embeddings,
-        candidate_pool,
-        min(config.m_max, patch_count),
-        _selection_namespace(config),
-    )
+    m_target = min(config.m_max, patch_count)
+    if getattr(config, "use_gist", False):
+        selected_indices, k_used, method, retention_history = select_diverse_samples_gist(
+            final_embeddings,
+            candidate_pool,
+            m_target,
+            _selection_namespace(config),
+        )
+    else:
+        selected_indices, k_used, method, retention_history = select_diverse_samples(
+            final_embeddings,
+            candidate_pool,
+            m_target,
+            _selection_namespace(config),
+        )
 
     return PatientSelectionResult(
         patient_id=patient_id,

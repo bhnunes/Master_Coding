@@ -31,6 +31,7 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.seed == 42
     assert config.n_start == 512
     assert config.device in {"cpu", "cuda"}
+    assert config.use_gist is False
     assert config.log_path == Path("logs/smart_sampler.log")
 
 
@@ -46,3 +47,26 @@ def test_load_smart_sampler_config_rejects_invalid_growth_factor(tmp_path: Path)
                 "SMART_SAMPLER_GROWTH_FACTOR": "1.0",
             }
         )
+
+
+def test_load_smart_sampler_config_reads_gist_flag_and_legacy_alias(tmp_path: Path) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    source_path.write_bytes(b"h5")
+
+    config = load_smart_sampler_config(
+        {
+            "SMART_SAMPLER_SOURCE_H5": str(source_path),
+            "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
+            "SMART_SAMPLER_USE_GIST": "true",
+        }
+    )
+    alias_config = load_smart_sampler_config(
+        {
+            "SMART_SAMPLER_SOURCE_H5": str(source_path),
+            "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out2"),
+            "USE_GIST_SCRIPT": "true",
+        }
+    )
+
+    assert config.use_gist is True
+    assert alias_config.use_gist is True

@@ -83,6 +83,7 @@ class SmartSamplerConfig:
     selection_strategy: str
     seed: int
     num_workers: int
+    use_gist: bool = False
     log_folder: Path = Path("logs")
     log_file_name: str = "smart_sampler.log"
 
@@ -95,6 +96,9 @@ def load_smart_sampler_config(
     env: Mapping[str, str] | os._Environ[str] | None = None,
 ) -> SmartSamplerConfig:
     values = env if env is not None else os.environ
+    use_gist_value = values.get("SMART_SAMPLER_USE_GIST")
+    if use_gist_value is None:
+        use_gist_value = values.get("USE_GIST_SCRIPT")
     source_h5_path = _required_path(
         values.get("SMART_SAMPLER_SOURCE_H5"), "SMART_SAMPLER_SOURCE_H5"
     )
@@ -218,6 +222,11 @@ def load_smart_sampler_config(
         num_workers=max(
             0,
             int(values.get("SMART_SAMPLER_NUM_WORKERS") or 2),
+        ),
+        use_gist=_parse_bool(
+            use_gist_value,
+            "SMART_SAMPLER_USE_GIST",
+            False,
         ),
         log_folder=resolve_log_folder(
             values,

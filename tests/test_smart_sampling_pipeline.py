@@ -6,6 +6,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 import pytest
 import torch
 
@@ -313,3 +314,59 @@ def test_run_smart_sampling_pipeline_reports_noop_summary_when_every_patch_is_ke
     assert outputs.rejected_sample_count == 0
     assert outputs.kept_fraction == pytest.approx(1.0)
     assert outputs.patients_reduced_count == 0
+
+
+def test_run_smart_sampling_pipeline_can_use_gist_selector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    _write_training_hdf5(source_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    config = SmartSamplerConfig(
+        source_h5_path=source_path,
+        output_dir=tmp_path / "out",
+        output_filename="TRAIN_FILTERED.h5",
+        local_work_dir=None,
+        stage_input_locally=False,
+        stage_outputs_locally=False,
+        clean_local_work_dir=True,
+        write_sidecars=True,
+        overwrite_output=True,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
+        input_size=224,
+        batch_size=8,
+        device="cpu",
+        n_start=8,
+        n_max=8,
+        growth_factor=2.0,
+        stability_threshold=0.85,
+        stability_repeats=2,
+        max_steps=2,
+        intersection_ratio_threshold=0.2,
+        k_min=20,
+        k_max=80,
+        adaptive_keep_enabled=True,
+        keep_min=2,
+        keep_step=1,
+        keep_improvement_threshold=0.02,
+        keep_patience=2,
+        m_max=2,
+        selection_strategy="uniform",
+        seed=42,
+        num_workers=0,
+        use_gist=True,
+    )
+
+    outputs = run_smart_sampling_pipeline(
+        config,
+        extractor_factory=_DummyEmbeddingExtractor,
+    )
+
+    assert outputs.selected_sample_count == 4
+    assert outputs.selection_csv_path is not None
+    selection_manifest = pd.read_csv(outputs.selection_csv_path)
+    assert set(selection_manifest["selection_method"].unique()) == {"gist_facility_location"}
