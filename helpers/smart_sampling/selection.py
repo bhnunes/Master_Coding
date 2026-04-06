@@ -36,8 +36,32 @@ class PatientSelectionResult:
     retention_history: list[tuple[int, float]]
     protected_count: int
     reducible_count: int
+    adaptive_m_target: int
+    heldout_count: int
+    plateau_threshold: float | None
+    plateau_trigger_improvement: float | None
+    plateau_trigger_keep_count: int | None
+    plateau_trigger_step: int | None
+    plateau_stop_reason: str | None
+    plateau_evaluation_mode: str | None
     selected_reducible_count: int
     rejected_reducible_count: int
+
+
+@dataclass(frozen=True)
+class SelectionDecision:
+    selected_indices: npt.NDArray[np.int64]
+    k_clusters: int
+    adaptive_m_target: int
+    selection_method: str
+    retention_history: list[tuple[int, float]]
+    heldout_count: int
+    plateau_threshold: float | None
+    plateau_trigger_improvement: float | None
+    plateau_trigger_keep_count: int | None
+    plateau_trigger_step: int | None
+    plateau_stop_reason: str | None
+    plateau_evaluation_mode: str | None
 
 
 def compute_k(n_samples: int, config: Any) -> int:
@@ -95,17 +119,51 @@ def calculate_stability_score(
 def select_diverse_samples(
     embeddings: npt.NDArray[np.float32],
     global_indices: npt.NDArray[np.int64],
-    m_target: int,
+    m_ceiling: int,
     config: Any,
-) -> tuple[npt.NDArray[np.int64], int, str, list[tuple[int, float]]]:
+    *,
+    evaluation_embeddings: npt.NDArray[np.float32] | None = None,
+) -> SelectionDecision:
     n_samples = len(embeddings)
-    if n_samples <= m_target:
-        return global_indices, n_samples, "keep_all", [(n_samples, 0.0)]
+    if n_samples <= m_ceiling:
+        return SelectionDecision(
+            selected_indices=global_indices,
+            k_clusters=n_samples,
+            adaptive_m_target=n_samples,
+            selection_method="keep_all",
+            retention_history=[(n_samples, 0.0)],
+            heldout_count=0 if evaluation_embeddings is None else len(evaluation_embeddings),
+            plateau_threshold=None,
+            plateau_trigger_improvement=None,
+            plateau_trigger_keep_count=None,
+            plateau_trigger_step=None,
+            plateau_stop_reason="keep_all",
+            plateau_evaluation_mode=None,
+        )
 
     k = compute_k(n_samples, config)
+    adaptive_m_target = _compute_adaptive_m_target(
+        reducible_count=n_samples,
+        m_ceiling=m_ceiling,
+        k_used=k,
+        config=config,
+    )
     if k <= 1:
-        kept = global_indices[:m_target]
-        return kept, k, "uniform", [(len(kept), 0.0)]
+        kept = global_indices[:adaptive_m_target]
+        return SelectionDecision(
+            selected_indices=kept,
+            k_clusters=k,
+            adaptive_m_target=len(kept),
+            selection_method="uniform",
+            retention_history=[(len(kept), 0.0)],
+            heldout_count=0 if evaluation_embeddings is None else len(evaluation_embeddings),
+            plateau_threshold=None,
+            plateau_trigger_improvement=None,
+            plateau_trigger_keep_count=None,
+            plateau_trigger_step=None,
+            plateau_stop_reason="uniform_single_cluster",
+            plateau_evaluation_mode=None,
+        )
 
     clusterer = MiniBatchKMeans(
         n_clusters=k,
@@ -120,12 +178,13 @@ def select_diverse_samples(
             global_indices,
             labels,
             k,
-            m_target,
+            adaptive_m_target,
             config,
+            evaluation_embeddings=evaluation_embeddings,
         )
 
     dataframe = pd.DataFrame({"idx": global_indices, "label": labels})
-    quota = int(np.ceil(m_target / k))
+    quota = int(np.ceil(adaptive_m_target / k))
 
     selected_indices: list[int] = []
     overflow_pool: list[int] = []
@@ -137,22 +196,56 @@ def select_diverse_samples(
             selected_indices.extend(selected["idx"].tolist())
             overflow_pool.extend(group.loc[~group.index.isin(selected.index), "idx"].tolist())
 
-    if len(selected_indices) < m_target and overflow_pool:
-        needed = m_target - len(selected_indices)
+    if len(selected_indices) < adaptive_m_target and overflow_pool:
+        needed = adaptive_m_target - len(selected_indices)
         selected_indices.extend(sorted(overflow_pool)[:needed])
 
-    return np.asarray(sorted(selected_indices), dtype=np.int64), k, "uniform", [(m_target, 0.0)]
+    return SelectionDecision(
+        selected_indices=np.asarray(sorted(selected_indices), dtype=np.int64),
+        k_clusters=k,
+        adaptive_m_target=adaptive_m_target,
+        selection_method="uniform",
+        retention_history=[(adaptive_m_target, 0.0)],
+        heldout_count=0 if evaluation_embeddings is None else len(evaluation_embeddings),
+        plateau_threshold=None,
+        plateau_trigger_improvement=None,
+        plateau_trigger_keep_count=None,
+        plateau_trigger_step=None,
+        plateau_stop_reason="uniform_budget",
+        plateau_evaluation_mode=None,
+    )
 
 
 def select_diverse_samples_gist(
     embeddings: npt.NDArray[np.float32],
     global_indices: npt.NDArray[np.int64],
-    m_target: int,
+    m_ceiling: int,
     config: Any,
-) -> tuple[npt.NDArray[np.int64], int, str, list[tuple[int, float]]]:
+    *,
+    evaluation_embeddings: npt.NDArray[np.float32] | None = None,
+) -> SelectionDecision:
     n_samples = len(embeddings)
-    if n_samples <= m_target:
-        return global_indices, 0, "gist_keep_all", [(n_samples, 0.0)]
+    adaptive_m_target = _compute_adaptive_m_target(
+        reducible_count=n_samples,
+        m_ceiling=m_ceiling,
+        k_used=compute_k(n_samples, config),
+        config=config,
+    )
+    if n_samples <= adaptive_m_target:
+        return SelectionDecision(
+            selected_indices=global_indices,
+            k_clusters=0,
+            adaptive_m_target=n_samples,
+            selection_method="gist_keep_all",
+            retention_history=[(n_samples, 0.0)],
+            heldout_count=0 if evaluation_embeddings is None else len(evaluation_embeddings),
+            plateau_threshold=None,
+            plateau_trigger_improvement=None,
+            plateau_trigger_keep_count=None,
+            plateau_trigger_step=None,
+            plateau_stop_reason="keep_all",
+            plateau_evaluation_mode=None,
+        )
 
     if n_samples > _GIST_MAX_CANDIDATE_POOL:
         logging.warning(
@@ -160,21 +253,43 @@ def select_diverse_samples_gist(
             n_samples,
             _GIST_MAX_CANDIDATE_POOL,
         )
-        selected_indices, k_used, method, retention_history = select_diverse_samples(
+        fallback_decision = select_diverse_samples(
             embeddings,
             global_indices,
-            m_target,
+            adaptive_m_target,
             config,
+            evaluation_embeddings=evaluation_embeddings,
         )
-        return selected_indices, k_used, f"{method}_gist_fallback", retention_history
+        return SelectionDecision(
+            selected_indices=fallback_decision.selected_indices,
+            k_clusters=fallback_decision.k_clusters,
+            adaptive_m_target=fallback_decision.adaptive_m_target,
+            selection_method=f"{fallback_decision.selection_method}_gist_fallback",
+            retention_history=fallback_decision.retention_history,
+            heldout_count=fallback_decision.heldout_count,
+            plateau_threshold=fallback_decision.plateau_threshold,
+            plateau_trigger_improvement=fallback_decision.plateau_trigger_improvement,
+            plateau_trigger_keep_count=fallback_decision.plateau_trigger_keep_count,
+            plateau_trigger_step=fallback_decision.plateau_trigger_step,
+            plateau_stop_reason=fallback_decision.plateau_stop_reason,
+            plateau_evaluation_mode=fallback_decision.plateau_evaluation_mode,
+        )
 
-    gist_result = select_gist_facility_location(embeddings, max_selected=m_target)
+    gist_result = select_gist_facility_location(embeddings, max_selected=adaptive_m_target)
     selected_indices = global_indices[gist_result.selected_positions]
-    return (
-        np.asarray(sorted(selected_indices.tolist()), dtype=np.int64),
-        0,
-        "gist_facility_location",
-        gist_result.objective_trace,
+    return SelectionDecision(
+        selected_indices=np.asarray(sorted(selected_indices.tolist()), dtype=np.int64),
+        k_clusters=0,
+        adaptive_m_target=adaptive_m_target,
+        selection_method="gist_facility_location",
+        retention_history=gist_result.objective_trace,
+        heldout_count=0 if evaluation_embeddings is None else len(evaluation_embeddings),
+        plateau_threshold=None,
+        plateau_trigger_improvement=None,
+        plateau_trigger_keep_count=None,
+        plateau_trigger_step=None,
+        plateau_stop_reason="gist_objective",
+        plateau_evaluation_mode=None,
     )
 
 
@@ -204,6 +319,14 @@ def select_patient_samples(
             retention_history=[],
             protected_count=len(protected_indices),
             reducible_count=0,
+            adaptive_m_target=0,
+            heldout_count=0,
+            plateau_threshold=None,
+            plateau_trigger_improvement=None,
+            plateau_trigger_keep_count=None,
+            plateau_trigger_step=None,
+            plateau_stop_reason=None,
+            plateau_evaluation_mode=None,
             selected_reducible_count=0,
             rejected_reducible_count=0,
         )
@@ -243,20 +366,33 @@ def select_patient_samples(
                 final_embeddings = fetch_embeddings(candidate_pool)
                 break
 
-            idx_s1 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
-            idx_s2 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
-            emb_s1 = fetch_embeddings(idx_s1)
-            emb_s2 = fetch_embeddings(idx_s2)
-            avg_score = float(
-                calculate_stability_score(
-                    emb_s1, emb_s2, idx_s1, idx_s2, _selection_namespace(config)
+            repeat_scores: list[float] = []
+            accepted_idx_s1: npt.NDArray[np.int64] | None = None
+            accepted_emb_s1: npt.NDArray[np.float32] | None = None
+            for _ in range(config.stability_repeats):
+                idx_s1 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
+                idx_s2 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
+                emb_s1 = fetch_embeddings(idx_s1)
+                emb_s2 = fetch_embeddings(idx_s2)
+                repeat_scores.append(
+                    float(
+                        calculate_stability_score(
+                            emb_s1, emb_s2, idx_s1, idx_s2, _selection_namespace(config)
+                        )
+                    )
                 )
-            )
+                if accepted_idx_s1 is None:
+                    accepted_idx_s1 = idx_s1
+                    accepted_emb_s1 = emb_s1
+
+            avg_score = float(np.mean(repeat_scores))
             stability_history.append((n_curr, avg_score))
 
             if avg_score >= config.stability_threshold:
-                final_embeddings = emb_s1
-                candidate_pool = idx_s1
+                assert accepted_idx_s1 is not None
+                assert accepted_emb_s1 is not None
+                final_embeddings = accepted_emb_s1
+                candidate_pool = accepted_idx_s1
                 break
 
             new_n = int(n_curr * config.growth_factor)
@@ -273,21 +409,36 @@ def select_patient_samples(
         candidate_pool = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
         final_embeddings = fetch_embeddings(candidate_pool)
 
-    m_target = min(config.m_max, reducible_count)
+    selection_pool, heldout_indices = _split_selection_and_holdout(
+        reducible_indices=reducible_indices,
+        candidate_pool=candidate_pool,
+        config=config,
+        rng=rng,
+    )
+    final_embeddings = fetch_embeddings(selection_pool)
+    heldout_embeddings = (
+        fetch_embeddings(heldout_indices)
+        if len(heldout_indices) > 0
+        else np.empty((0, 0), dtype=np.float32)
+    )
+    m_ceiling = min(config.m_max, reducible_count)
     if getattr(config, "use_gist", False):
-        sampled_indices, k_used, method, retention_history = select_diverse_samples_gist(
+        selection_decision = select_diverse_samples_gist(
             final_embeddings,
-            candidate_pool,
-            m_target,
+            selection_pool,
+            m_ceiling,
             _selection_namespace(config),
+            evaluation_embeddings=heldout_embeddings if len(heldout_indices) > 0 else None,
         )
     else:
-        sampled_indices, k_used, method, retention_history = select_diverse_samples(
+        selection_decision = select_diverse_samples(
             final_embeddings,
-            candidate_pool,
-            m_target,
+            selection_pool,
+            m_ceiling,
             _selection_namespace(config),
+            evaluation_embeddings=heldout_embeddings if len(heldout_indices) > 0 else None,
         )
+    sampled_indices = selection_decision.selected_indices
 
     selected_indices = np.asarray(
         sorted(np.concatenate([protected_indices, sampled_indices]).tolist()),
@@ -301,12 +452,20 @@ def select_patient_samples(
         protected_indices=protected_indices,
         sampled_indices=sampled_indices,
         chosen_n_embed=len(final_embeddings),
-        k_clusters=k_used,
-        selection_method=method,
+        k_clusters=selection_decision.k_clusters,
+        selection_method=selection_decision.selection_method,
         stability_history=stability_history,
-        retention_history=retention_history,
+        retention_history=selection_decision.retention_history,
         protected_count=len(protected_indices),
         reducible_count=reducible_count,
+        adaptive_m_target=selection_decision.adaptive_m_target,
+        heldout_count=selection_decision.heldout_count,
+        plateau_threshold=selection_decision.plateau_threshold,
+        plateau_trigger_improvement=selection_decision.plateau_trigger_improvement,
+        plateau_trigger_keep_count=selection_decision.plateau_trigger_keep_count,
+        plateau_trigger_step=selection_decision.plateau_trigger_step,
+        plateau_stop_reason=selection_decision.plateau_stop_reason,
+        plateau_evaluation_mode=selection_decision.plateau_evaluation_mode,
         selected_reducible_count=len(sampled_indices),
         rejected_reducible_count=reducible_count - len(sampled_indices),
     )
@@ -342,16 +501,52 @@ def _select_diverse_samples_adaptive(
     k: int,
     m_target: int,
     config: Any,
-) -> tuple[npt.NDArray[np.int64], int, str, list[tuple[int, float]]]:
+    *,
+    evaluation_embeddings: npt.NDArray[np.float32] | None,
+) -> SelectionDecision:
     max_keep = min(m_target, len(global_indices))
     min_keep = min(max_keep, getattr(config, "KEEP_MIN", max_keep))
     keep_step = max(1, getattr(config, "KEEP_STEP", 1))
     keep_patience = max(1, getattr(config, "KEEP_PATIENCE", 1))
     improvement_threshold = float(getattr(config, "KEEP_IMPROVEMENT_THRESHOLD", 0.0))
     selection_order = _build_cluster_balanced_order(global_indices, labels, seed=config.SEED)
+    heldout_count = 0 if evaluation_embeddings is None else len(evaluation_embeddings)
+    evaluation_mode = "heldout_patient_split" if heldout_count > 0 else "candidate_pool"
 
     if min_keep >= max_keep:
-        return selection_order[:max_keep], k, "adaptive_keep_all", [(max_keep, 0.0)]
+        return SelectionDecision(
+            selected_indices=selection_order[:max_keep],
+            k_clusters=k,
+            adaptive_m_target=max_keep,
+            selection_method="adaptive_keep_all",
+            retention_history=[(max_keep, 0.0)],
+            heldout_count=heldout_count,
+            plateau_threshold=improvement_threshold,
+            plateau_trigger_improvement=None,
+            plateau_trigger_keep_count=max_keep,
+            plateau_trigger_step=0,
+            plateau_stop_reason="max_keep_reached",
+            plateau_evaluation_mode=evaluation_mode,
+        )
+
+    if evaluation_embeddings is not None and len(evaluation_embeddings) == 0:
+        evaluation_embeddings = None
+
+    if evaluation_embeddings is None:
+        return SelectionDecision(
+            selected_indices=selection_order[:max_keep],
+            k_clusters=k,
+            adaptive_m_target=max_keep,
+            selection_method="adaptive_holdout_unavailable",
+            retention_history=[],
+            heldout_count=0,
+            plateau_threshold=improvement_threshold,
+            plateau_trigger_improvement=None,
+            plateau_trigger_keep_count=max_keep,
+            plateau_trigger_step=None,
+            plateau_stop_reason="holdout_unavailable",
+            plateau_evaluation_mode="holdout_unavailable",
+        )
 
     retention_history: list[tuple[int, float]] = []
     previous_score: float | None = None
@@ -361,7 +556,12 @@ def _select_diverse_samples_adaptive(
     best_count = max_keep
 
     while selected_count <= max_keep:
-        score = _coverage_score(embeddings, selection_order[:selected_count], global_indices)
+        score = _coverage_score(
+            embeddings,
+            selection_order[:selected_count],
+            global_indices,
+            evaluation_embeddings=evaluation_embeddings,
+        )
         retention_history.append((selected_count, score))
         if previous_score is not None:
             relative_improvement = (previous_score - score) / max(previous_score, 1e-12)
@@ -371,7 +571,20 @@ def _select_diverse_samples_adaptive(
                 plateau_steps = 0
             if plateau_steps >= keep_patience:
                 best_count = previous_count if previous_count is not None else selected_count
-                break
+                return SelectionDecision(
+                    selected_indices=selection_order[:best_count],
+                    k_clusters=k,
+                    adaptive_m_target=max_keep,
+                    selection_method="adaptive_plateau",
+                    retention_history=retention_history,
+                    heldout_count=heldout_count,
+                    plateau_threshold=improvement_threshold,
+                    plateau_trigger_improvement=relative_improvement,
+                    plateau_trigger_keep_count=best_count,
+                    plateau_trigger_step=len(retention_history) - 1,
+                    plateau_stop_reason="plateau_threshold",
+                    plateau_evaluation_mode=evaluation_mode,
+                )
         previous_score = score
         previous_count = selected_count
         if selected_count == max_keep:
@@ -379,7 +592,20 @@ def _select_diverse_samples_adaptive(
             break
         selected_count = min(max_keep, selected_count + keep_step)
 
-    return selection_order[:best_count], k, "adaptive_plateau", retention_history
+    return SelectionDecision(
+        selected_indices=selection_order[:best_count],
+        k_clusters=k,
+        adaptive_m_target=max_keep,
+        selection_method="adaptive_plateau",
+        retention_history=retention_history,
+        heldout_count=heldout_count,
+        plateau_threshold=improvement_threshold,
+        plateau_trigger_improvement=None,
+        plateau_trigger_keep_count=best_count,
+        plateau_trigger_step=len(retention_history) - 1 if retention_history else None,
+        plateau_stop_reason="max_keep_reached",
+        plateau_evaluation_mode=evaluation_mode,
+    )
 
 
 def _build_cluster_balanced_order(
@@ -414,16 +640,75 @@ def _coverage_score(
     embeddings: npt.NDArray[np.float32],
     selected_indices: npt.NDArray[np.int64],
     global_indices: npt.NDArray[np.int64],
+    *,
+    evaluation_embeddings: npt.NDArray[np.float32] | None = None,
 ) -> float:
     selection_mask = np.isin(global_indices, selected_indices)
     selected_embeddings = embeddings[selection_mask]
     if len(selected_embeddings) == 0:
         return float("inf")
+    target_embeddings = embeddings if evaluation_embeddings is None else evaluation_embeddings
     distances = np.linalg.norm(
-        embeddings[:, None, :] - selected_embeddings[None, :, :],
+        target_embeddings[:, None, :] - selected_embeddings[None, :, :],
         axis=2,
     )
     return float(np.mean(np.min(distances, axis=1)))
+
+
+def _compute_adaptive_m_target(
+    *,
+    reducible_count: int,
+    m_ceiling: int,
+    k_used: int,
+    config: Any,
+) -> int:
+    bounded_ceiling = min(reducible_count, m_ceiling)
+    if bounded_ceiling <= 0:
+        return 0
+
+    min_target = min(bounded_ceiling, max(1, getattr(config, "KEEP_MIN", 1)))
+    k_max = max(1, int(getattr(config, "K_MAX", max(k_used, 1))))
+    if bounded_ceiling <= min_target or k_max <= 1:
+        return bounded_ceiling
+
+    heterogeneity_ratio = min(1.0, max(0.0, float(k_used - 1) / float(k_max - 1)))
+    scaled_target = min_target + (bounded_ceiling - min_target) * heterogeneity_ratio
+    return int(min(bounded_ceiling, max(min_target, np.ceil(scaled_target))))
+
+
+def _split_selection_and_holdout(
+    *,
+    reducible_indices: npt.NDArray[np.int64],
+    candidate_pool: npt.NDArray[np.int64],
+    config: SmartSamplerConfig,
+    rng: np.random.Generator,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    if not getattr(config, "adaptive_keep_enabled", False):
+        return np.asarray(candidate_pool, dtype=np.int64), np.empty(0, dtype=np.int64)
+
+    selection_pool = np.asarray(candidate_pool, dtype=np.int64)
+    holdout_indices = np.setdiff1d(reducible_indices, selection_pool, assume_unique=False)
+    desired_holdout = int(np.ceil(len(reducible_indices) * 0.2))
+    if desired_holdout <= 0:
+        return selection_pool, np.asarray(holdout_indices, dtype=np.int64)
+
+    min_selection_pool = max(1, min(len(selection_pool), min(config.keep_min, config.m_max)))
+    removable = max(0, len(selection_pool) - min_selection_pool)
+    extra_needed = max(0, desired_holdout - len(holdout_indices))
+    extra_holdout = min(removable, extra_needed)
+    if extra_holdout <= 0:
+        return selection_pool, np.asarray(sorted(holdout_indices.tolist()), dtype=np.int64)
+
+    holdout_positions = np.sort(rng.choice(len(selection_pool), size=extra_holdout, replace=False))
+    holdout_mask = np.zeros(len(selection_pool), dtype=bool)
+    holdout_mask[holdout_positions] = True
+    promoted_holdout = selection_pool[holdout_mask]
+    final_selection_pool = selection_pool[~holdout_mask]
+    final_holdout = np.asarray(
+        sorted(np.concatenate([holdout_indices, promoted_holdout]).tolist()),
+        dtype=np.int64,
+    )
+    return np.asarray(sorted(final_selection_pool.tolist()), dtype=np.int64), final_holdout
 
 
 def _selection_namespace(config: SmartSamplerConfig) -> Any:

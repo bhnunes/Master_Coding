@@ -36,7 +36,6 @@ def _build_config(source_path: Path, output_dir: Path) -> SmartSamplerConfig:
         keep_improvement_threshold=0.02,
         keep_patience=2,
         m_max=2,
-        selection_strategy="uniform",
         seed=42,
         num_workers=0,
     )

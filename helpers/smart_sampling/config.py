@@ -78,7 +78,6 @@ class SmartSamplerConfig:
     keep_improvement_threshold: float
     keep_patience: int
     m_max: int
-    selection_strategy: str
     seed: int
     num_workers: int
     use_gist: bool = False
@@ -212,7 +211,6 @@ def load_smart_sampler_config(
             2,
         ),
         m_max=_parse_positive_int(values.get("SMART_SAMPLER_M_MAX"), "SMART_SAMPLER_M_MAX", 2000),
-        selection_strategy=(values.get("SMART_SAMPLER_SELECTION_STRATEGY") or "uniform").strip(),
         seed=_parse_positive_int(values.get("SMART_SAMPLER_SEED"), "SMART_SAMPLER_SEED", 42),
         num_workers=max(
             0,

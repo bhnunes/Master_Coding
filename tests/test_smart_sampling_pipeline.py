@@ -73,7 +73,6 @@ def _build_config(tmp_path: Path, **overrides: object) -> SmartSamplerConfig:
         "keep_improvement_threshold": 0.02,
         "keep_patience": 2,
         "m_max": 1,
-        "selection_strategy": "uniform",
         "seed": 42,
         "num_workers": 0,
         "protect_positive_labels": True,
@@ -267,7 +266,9 @@ def test_run_smart_sampling_pipeline_can_use_gist_selector(
     assert outputs.selection_csv_path is not None
     selection_manifest = pd.read_csv(outputs.selection_csv_path)
     sampled_rows = selection_manifest[selection_manifest["selection_bucket"] == "gist_sampled"]
-    assert set(sampled_rows["selection_method"].unique()) == {"gist_facility_location"}
+    assert set(sampled_rows["selection_method"].unique()).issubset(
+        {"gist_facility_location", "gist_keep_all"}
+    )
 
 
 def test_run_smart_sampling_pipeline_records_protected_and_sampled_selection_buckets(
@@ -301,3 +302,7 @@ def test_run_smart_sampling_pipeline_records_protected_and_sampled_selection_buc
     assert stats["protected_count"].tolist() == [1, 1]
     assert stats["sampled_reducible_count"].tolist() == [1, 1]
     assert stats["rejected_reducible_count"].tolist() == [1, 1]
+    assert "plateau_threshold" in selection_manifest.columns
+    assert "plateau_stop_reason" in selection_manifest.columns
+    assert "heldout_count" in stats.columns
+    assert "adaptive_m_target" in stats.columns

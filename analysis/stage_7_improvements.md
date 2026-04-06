@@ -1,41 +1,19 @@
-1. Scientific & Clinical Upgrades (Addressing Major Risks)
-The most glaring issue is that the algorithm is label-agnostic, risking the deletion of rare, clinically vital pathology.
+2. Algorithmic & Statistical Fixes (Addressing Moderate Risks)
 
-Implement Stratified Hybrid Sampling: Do not treat all patches equally. Modify the pipeline to read the labels and masks datasets. Establish a "protected class" rule: if a patch contains a rare label or a positive mask area above a certain threshold, bypass the sampling reduction and keep it automatically. Only apply the K-Means clustering and reduction to the overrepresented classes (e.g., healthy background tissue).
+The internal logic has a few statistical brittle points that undermine the "smart" aspect of the sampler.
 
-Upgrade the Encoder (Domain Shift): The generic ImageNet-weighted U-Net encoder is a massive blind spot for pathology. Swap the feature extractor for a domain-specific foundation model (e.g., UNI, Phikon, or a ResNet self-supervised on TCGA).  This ensures that the Euclidean distances calculated during the coverage phase represent actual histopathological similarity, rather than mere color or texture artifacts.
+a) Enforce Stability Repeats: The review noted that stability_repeats is in the config but ignored in the code. Fix this. A single subset pair ($S1$ and $S2$) is statistically unsafe. Update the code to loop over the subset pairing $N$ times, compute the Adjusted Rand Index ($\text{ARI}$) for each, and require the mean $\text{ARI}$ to pass the stability_threshold.
 
-Introduce a Task-Aware Weighting Mechanism: Pure geometric coverage in embedding space does not equal clinical utility. If you have a baseline model, extract the loss or entropy for each patch. You can weight the sampling probability toward patches with higher uncertainty, bridging the gap between diversity sampling and active learning.
+b) Implement a Dynamic, Patient-Adaptive Cap: Replace the hard $m_{max}$ limit. A patient with a highly heterogeneous tumor should have a larger representation budget than a patient with entirely homogeneous healthy tissue. Make $m_{max}$ scale dynamically based on the optimal $k$ found during the stability check, or based on the variance of the patient's embeddings.
 
-## PHIKON on Hugginface
+c) Fix Circular Coverage Scoring: Currently, the plateau stopping rule evaluates coverage on the exact same pool used to define the clusters. To prevent optimistic bias, implement a cross-validation approach: calculate the coverage score against a held-out fraction of the patient's patches that were not in the candidate pool.
 
-```
-from PIL import Image
-import torch
-from transformers import AutoImageProcessor, AutoModel
+3. Codebase Health & Transparency (Addressing Minor Risks)
 
+Technical debt and misleading logs will erode trust in the pipeline's outputs.
 
-# Load an image
-image = Image.open(
-    requests.get(
-        "https://github.com/owkin/HistoSSLscaling/blob/main/assets/example.tif?raw=true",
-        stream=True
-    ).raw
-)
+d) Remove or Implement Dead Code: The selection_strategy parameter is a broken promise in the configuration. Either build out the alternative strategies (e.g., replacing uniform sampling with density-based sampling) or delete the variable from helpers/smart_sampling/config.py to ensure the codebase matches the actual math.
 
-# Load phikon-v2
-processor = AutoImageProcessor.from_pretrained("owkin/phikon-v2")
-model = AutoModel.from_pretrained("owkin/phikon-v2")
-model.eval()
+e) Unify the Naming Convention: The "Stage 7 vs. Stage 8" inconsistency is a minor but irritating bug that ruins audit trails. Standardize the logger.info statements across the orchestrator and all helper modules to read "Stage 7" uniformly.
 
-# Process the image
-inputs = processor(image, return_tensors="pt")
-
-# Get the features
-with torch.inference_mode():
-    outputs = model(**inputs)
-    features = outputs.last_hidden_state[:, 0, :]  # (1, 1024) shape
-
-assert features.shape == (1, 1024)
-
-```
+f) Enhance the Provenance Sidecar: In train_filtered_selection.csv, explicitly log the exact threshold at which the plateau rule triggered for each patient. This allows researchers to audit why the algorithm stopped sampling, rather than just seeing the final count.

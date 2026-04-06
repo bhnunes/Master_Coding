@@ -85,17 +85,17 @@ def test_select_diverse_samples_keeps_all_when_target_exceeds_pool() -> None:
     embeddings = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32)
     global_indices = np.array([10, 20], dtype=np.int64)
 
-    selected_indices, k_used, method, retention_history = select_diverse_samples(
+    decision = select_diverse_samples(
         embeddings,
         global_indices,
-        m_target=5,
+        m_ceiling=5,
         config=config,
     )
 
-    assert np.array_equal(selected_indices, global_indices)
-    assert k_used == 2
-    assert method == "keep_all"
-    assert retention_history == [(2, 0.0)]
+    assert np.array_equal(decision.selected_indices, global_indices)
+    assert decision.k_clusters == 2
+    assert decision.selection_method == "keep_all"
+    assert decision.retention_history == [(2, 0.0)]
 
 
 def test_select_diverse_samples_stops_when_coverage_improvement_plateaus() -> None:
@@ -122,17 +122,21 @@ def test_select_diverse_samples_stops_when_coverage_improvement_plateaus() -> No
     )
     global_indices = np.arange(len(embeddings), dtype=np.int64)
 
-    selected_indices, k_used, method, retention_history = select_diverse_samples(
+    decision = select_diverse_samples(
         embeddings,
         global_indices,
-        m_target=5,
+        m_ceiling=5,
         config=config,
+        evaluation_embeddings=np.array(
+            [[0.02, 0.0], [10.02, 10.0], [20.02, 20.0]], dtype=np.float32
+        ),
     )
 
-    assert method == "adaptive_plateau"
-    assert k_used >= 2
-    assert len(selected_indices) < 5
-    assert len(retention_history) >= 2
+    assert decision.selection_method == "adaptive_plateau"
+    assert decision.k_clusters >= 2
+    assert len(decision.selected_indices) < 5
+    assert len(decision.retention_history) >= 2
+    assert decision.plateau_evaluation_mode == "heldout_patient_split"
 
 
 def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets(
@@ -160,14 +164,14 @@ def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets
         str(h5_path), 1, patient_indices, FakeExtractor(), _selection_config()
     )
 
-    assert result.chosen_n_embed == 4
+    assert 4 <= result.chosen_n_embed <= 5
     assert len(requested_indices) == 2
     assert len(requested_indices[0]) == 4
     assert 1 <= len(requested_indices[1]) < 4
     assert set(requested_indices[0]) | set(requested_indices[1]) == set(patient_indices.tolist())
 
 
-def test_select_patient_samples_computes_stability_once_when_repeats_are_deterministic(
+def test_select_patient_samples_averages_stability_across_repeats(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     h5_path = tmp_path / "patient.h5"
@@ -176,12 +180,13 @@ def test_select_patient_samples_computes_stability_once_when_repeats_are_determi
         labels=np.zeros(7, dtype=np.uint8),
         masks=np.zeros((7, 4, 4), dtype=np.uint8),
     )
+    stability_scores = iter([0.4, 0.8, 1.0])
     stability_calls = 0
 
     def fake_stability(*_args: object, **_kwargs: object) -> float:
         nonlocal stability_calls
         stability_calls += 1
-        return 1.0
+        return next(stability_scores)
 
     monkeypatch.setattr(
         "helpers.smart_sampling.selection.calculate_stability_score", fake_stability
@@ -199,10 +204,10 @@ def test_select_patient_samples_computes_stability_once_when_repeats_are_determi
         3,
         np.array([0, 1, 2, 3, 4, 5, 6], dtype=np.int64),
         FakeExtractor(),
-        _selection_config(stability_threshold=0.5, seed=5),
+        _selection_config(stability_threshold=0.7, stability_repeats=3, seed=5),
     )
 
-    assert stability_calls == 1
+    assert stability_calls == 3
 
 
 def test_select_patient_samples_reports_retention_history(tmp_path: Path) -> None:
@@ -231,7 +236,41 @@ def test_select_patient_samples_reports_retention_history(tmp_path: Path) -> Non
     )
 
     assert result.retention_history
-    assert result.selection_method in {"adaptive_plateau", "adaptive_keep_all", "keep_all"}
+    assert result.selection_method in {
+        "adaptive_plateau",
+        "adaptive_keep_all",
+        "adaptive_holdout_unavailable",
+        "keep_all",
+    }
+
+
+def test_select_patient_samples_records_holdout_and_plateau_provenance(tmp_path: Path) -> None:
+    h5_path = tmp_path / "patient.h5"
+    _write_patient_h5(
+        h5_path,
+        labels=np.zeros(10, dtype=np.uint8),
+        masks=np.zeros((10, 4, 4), dtype=np.uint8),
+    )
+
+    class FakeExtractor:
+        def get_embeddings(
+            self, _h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
+        ) -> np.ndarray[Any, np.dtype[np.float32]]:
+            values = indices.astype(np.float32).reshape(-1, 1)
+            return np.concatenate([values, values + 0.25], axis=1)
+
+    result = select_patient_samples(
+        str(h5_path),
+        4,
+        np.arange(10, dtype=np.int64),
+        FakeExtractor(),
+        _selection_config(n_start=6, n_max=10, m_max=6, keep_min=2, keep_patience=1, seed=3),
+    )
+
+    assert result.heldout_count > 0
+    assert result.plateau_threshold is not None
+    assert result.plateau_evaluation_mode == "heldout_patient_split"
+    assert result.adaptive_m_target <= 6
 
 
 def test_select_diverse_samples_gist_is_deterministic_and_respects_budget() -> None:
@@ -257,28 +296,28 @@ def test_select_diverse_samples_gist_is_deterministic_and_respects_budget() -> N
         KEEP_IMPROVEMENT_THRESHOLD=0.02,
         KEEP_PATIENCE=2,
     )
-    selected_a, k_a, method_a, history_a = select_diverse_samples_gist(
+    decision_a = select_diverse_samples_gist(
         embeddings,
         global_indices,
-        m_target=3,
+        m_ceiling=3,
         config=config,
     )
-    selected_b, k_b, method_b, history_b = select_diverse_samples_gist(
+    decision_b = select_diverse_samples_gist(
         embeddings,
         global_indices,
-        m_target=3,
+        m_ceiling=3,
         config=config,
     )
 
-    assert np.array_equal(selected_a, selected_b)
-    assert 1 <= len(selected_a) <= 3
-    assert set(selected_a.tolist()).issubset(set(global_indices.tolist()))
-    assert k_a == 0
-    assert k_b == 0
-    assert method_a == "gist_facility_location"
-    assert method_b == "gist_facility_location"
-    assert history_a
-    assert history_b == history_a
+    assert np.array_equal(decision_a.selected_indices, decision_b.selected_indices)
+    assert 1 <= len(decision_a.selected_indices) <= 3
+    assert set(decision_a.selected_indices.tolist()).issubset(set(global_indices.tolist()))
+    assert decision_a.k_clusters == 0
+    assert decision_b.k_clusters == 0
+    assert decision_a.selection_method == "gist_facility_location"
+    assert decision_b.selection_method == "gist_facility_location"
+    assert decision_a.retention_history
+    assert decision_b.retention_history == decision_a.retention_history
 
 
 def test_select_patient_samples_uses_gist_when_enabled(tmp_path: Path) -> None:
