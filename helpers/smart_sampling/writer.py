@@ -27,6 +27,7 @@ def _hash_json_payload(payload: dict[str, Any]) -> str:
 def _build_sampling_signature(
     selected_indices: npt.NDArray[np.int64],
     *,
+    config: SmartSamplerConfig,
     source_path: Path,
     output_filename: str,
     signature_source_path: Path | None = None,
@@ -39,8 +40,31 @@ def _build_sampling_signature(
         "source_path": str(signature_source_path or source_path),
         "source_provenance": source_provenance,
         "output_filename": output_filename,
+        "stage7_metadata": _stage7_metadata_payload(config),
     }
     return _hash_json_payload(payload)
+
+
+def _stage7_metadata_payload(config: SmartSamplerConfig) -> dict[str, Any]:
+    return {
+        "stage7_label_aware": True,
+        "stage7_selector": "gist_facility_location"
+        if config.use_gist
+        else "legacy_adaptive_coverage",
+        "stage7_model_name": config.model_name,
+        "stage7_seed": config.seed,
+        "stage7_stability_threshold": config.stability_threshold,
+        "stage7_stability_repeats": config.stability_repeats,
+        "stage7_keep_improvement_threshold": config.keep_improvement_threshold,
+        "stage7_keep_patience": config.keep_patience,
+        "stage7_keep_min": config.keep_min,
+        "stage7_keep_step": config.keep_step,
+        "stage7_m_max": config.m_max,
+        "stage7_holdout_mode": "within_patient_patch_holdout",
+        "stage7_protect_positive_labels": config.protect_positive_labels,
+        "stage7_protect_mask_positive": config.protect_mask_positive,
+        "stage7_positive_mask_fraction_threshold": config.positive_mask_fraction_threshold,
+    }
 
 
 def _validate_existing_filtered_hdf5(output_path: Path, expected_signature: str) -> Path:
@@ -80,6 +104,7 @@ def write_filtered_hdf5(
     selected_indices = np.asarray(selected_indices, dtype=np.int64)
     selection_signature = _build_sampling_signature(
         selected_indices,
+        config=config,
         source_path=source_path,
         signature_source_path=signature_source_path,
         output_filename=config.output_filename,
@@ -95,6 +120,8 @@ def write_filtered_hdf5(
     with h5py.File(source_path, "r") as source_handle, h5py.File(output_path, "w") as dest_handle:
         dest_handle.attrs["selection_signature"] = selection_signature
         dest_handle.attrs["source_hdf5_sha256"] = collect_hdf5_provenance(source_path)["sha256"]
+        for attr_name, attr_value in _stage7_metadata_payload(config).items():
+            dest_handle.attrs[attr_name] = attr_value
         for attr_name in (
             "source_signature",
             "upstream_source_signature",

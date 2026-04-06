@@ -136,7 +136,7 @@ def test_select_diverse_samples_stops_when_coverage_improvement_plateaus() -> No
     assert decision.k_clusters >= 2
     assert len(decision.selected_indices) < 5
     assert len(decision.retention_history) >= 2
-    assert decision.plateau_evaluation_mode == "heldout_patient_split"
+    assert decision.plateau_evaluation_mode == "within_patient_patch_holdout"
 
 
 def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets(
@@ -164,7 +164,7 @@ def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets
         str(h5_path), 1, patient_indices, FakeExtractor(), _selection_config()
     )
 
-    assert 4 <= result.chosen_n_embed <= 5
+    assert result.chosen_n_embed == 5
     assert len(requested_indices) == 2
     assert len(requested_indices[0]) == 4
     assert 1 <= len(requested_indices[1]) < 4
@@ -269,8 +269,41 @@ def test_select_patient_samples_records_holdout_and_plateau_provenance(tmp_path:
 
     assert result.heldout_count > 0
     assert result.plateau_threshold is not None
-    assert result.plateau_evaluation_mode == "heldout_patient_split"
+    assert result.plateau_evaluation_mode == "within_patient_patch_holdout"
     assert result.adaptive_m_target <= 6
+
+
+def test_select_patient_samples_runs_final_selection_on_full_reducible_pool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    h5_path = tmp_path / "patient.h5"
+    _write_patient_h5(
+        h5_path,
+        labels=np.zeros(10, dtype=np.uint8),
+        masks=np.zeros((10, 4, 4), dtype=np.uint8),
+    )
+
+    monkeypatch.setattr(
+        "helpers.smart_sampling.selection.calculate_stability_score", lambda *_args, **_kwargs: 1.0
+    )
+
+    class FakeExtractor:
+        def get_embeddings(
+            self, _h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
+        ) -> np.ndarray[Any, np.dtype[np.float32]]:
+            values = indices.astype(np.float32).reshape(-1, 1)
+            return np.concatenate([values, values + 0.5], axis=1)
+
+    result = select_patient_samples(
+        str(h5_path),
+        9,
+        np.arange(10, dtype=np.int64),
+        FakeExtractor(),
+        _selection_config(n_start=4, n_max=8, m_max=6, keep_min=2, seed=5),
+    )
+
+    assert result.chosen_n_embed == 8
+    assert result.heldout_count == 2
 
 
 def test_select_diverse_samples_gist_is_deterministic_and_respects_budget() -> None:

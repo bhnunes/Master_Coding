@@ -30,6 +30,11 @@ def _build_dataset_provenance(dataset: str) -> dict[str, Any]:
         "source_signature": dataset_provenance.get("source_signature"),
         "selection_signature": dataset_provenance.get("selection_signature"),
         "smart_sampling_enabled": dataset_provenance.get("selection_signature") is not None,
+        "smart_sampling_metadata": {
+            key: value
+            for key, value in dataset_provenance.get("attrs", {}).items()
+            if str(key).startswith("stage7_")
+        },
     }
 
 
@@ -90,6 +95,24 @@ def _build_training_provenance(
         "smart_sampling_lineage": {
             "enabled": dataset_provenance["smart_sampling_enabled"],
             "selection_signature": dataset_provenance["selection_signature"],
+            "label_aware": dataset_provenance["smart_sampling_metadata"].get("stage7_label_aware"),
+            "selector": dataset_provenance["smart_sampling_metadata"].get("stage7_selector"),
+            "model_name": dataset_provenance["smart_sampling_metadata"].get("stage7_model_name"),
+            "seed": dataset_provenance["smart_sampling_metadata"].get("stage7_seed"),
+            "holdout_mode": dataset_provenance["smart_sampling_metadata"].get(
+                "stage7_holdout_mode"
+            ),
+            "protection_settings": {
+                "protect_positive_labels": dataset_provenance["smart_sampling_metadata"].get(
+                    "stage7_protect_positive_labels"
+                ),
+                "protect_mask_positive": dataset_provenance["smart_sampling_metadata"].get(
+                    "stage7_protect_mask_positive"
+                ),
+                "positive_mask_fraction_threshold": dataset_provenance[
+                    "smart_sampling_metadata"
+                ].get("stage7_positive_mask_fraction_threshold"),
+            },
         },
         "validation_lineage": {
             "dataset_sha256": validation_dataset_provenance["sha256"],

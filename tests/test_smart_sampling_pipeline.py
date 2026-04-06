@@ -136,6 +136,8 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     with h5py.File(outputs.filtered_h5_path, "r") as handle:
         assert set(handle.keys()) == {"filenames", "images", "labels", "masks", "patient_ids"}
         assert handle["patient_ids"][:].tolist() == [1, 1, 2, 2]
+        assert bool(handle.attrs["stage7_label_aware"])
+        assert handle.attrs["stage7_holdout_mode"] == "within_patient_patch_holdout"
 
     assert outputs.summary_json_path is not None
     summary = json.loads(outputs.summary_json_path.read_text(encoding="utf-8"))
@@ -144,8 +146,15 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     assert summary["rejected_samples"] == 2
     assert summary["patients_reduced_count"] == 2
     assert summary["protected_kept_samples"] == 2
+    assert summary["protected_positive_label_kept_samples"] == 2
+    assert summary["protected_mask_positive_kept_samples"] == 2
     assert summary["sampled_reducible_samples"] == 2
     assert summary["rejected_reducible_samples"] == 2
+    assert summary["label_aware_stage7"] is True
+    assert summary["holdout_evaluation_mode"] == "within_patient_patch_holdout"
+    assert summary["total_positive_label_count"] == 2
+    assert summary["selected_positive_label_count"] == 2
+    assert summary["selected_negative_label_count"] == 2
     assert summary["model_name"] == "owkin/phikon-v2"
 
     dataset = HybridProstateDataset(str(outputs.filtered_h5_path), mode="train")
@@ -306,3 +315,6 @@ def test_run_smart_sampling_pipeline_records_protected_and_sampled_selection_buc
     assert "plateau_stop_reason" in selection_manifest.columns
     assert "heldout_count" in stats.columns
     assert "adaptive_m_target" in stats.columns
+    assert "label_aware_stage7" in selection_manifest.columns
+    assert "protected_positive_label_count" in stats.columns
+    assert "selected_positive_label_count" in stats.columns

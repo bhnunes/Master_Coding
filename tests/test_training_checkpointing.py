@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import h5py
 import pytest
 import torch
 
@@ -378,6 +379,58 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
     assert provenance["validation_lineage"]["dataset_sha256"]
     assert provenance["artifact_aware_loss"]["enabled"] is True
     assert provenance["artifact_aware_loss"]["artifact_index_sha256"]
+
+
+def test_save_metadata_records_stage7_lineage_details_from_filtered_hdf5(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "TRAIN_FILTERED.h5"
+    validation_path = tmp_path / "VALIDATION.h5"
+    with h5py.File(dataset_path, "w") as handle:
+        handle.attrs["selection_signature"] = "sig-123"
+        handle.attrs["stage7_label_aware"] = True
+        handle.attrs["stage7_selector"] = "legacy_adaptive_coverage"
+        handle.attrs["stage7_model_name"] = "owkin/phikon-v2"
+        handle.attrs["stage7_seed"] = 42
+        handle.attrs["stage7_holdout_mode"] = "within_patient_patch_holdout"
+        handle.attrs["stage7_protect_positive_labels"] = True
+        handle.attrs["stage7_protect_mask_positive"] = True
+        handle.attrs["stage7_positive_mask_fraction_threshold"] = 0.0
+    with h5py.File(validation_path, "w"):
+        pass
+
+    save_metadata(
+        best_val_score=0.9,
+        checkpoint={"epoch": 5},
+        encoder="resnet34",
+        architecture="UNET++",
+        metadata_best_path=str(tmp_path / "best_model.pth"),
+        val_loss=0.2,
+        val_mcc=0.7,
+        val_auroc=0.8,
+        metadata_dir=str(tmp_path),
+        amp_log={"precision": "fp32"},
+        base_learning_rate=1e-3,
+        weight_decay=1e-4,
+        batch_size=8,
+        num_epochs=10,
+        workers=2,
+        seed=7,
+        dataset=str(dataset_path),
+        validation_dataset=str(validation_path),
+        patience=3,
+        optimizer_name="AdamW",
+        alpha_bce=0.6,
+        beta_dice_bg=0.2,
+        gamma_dice_fg=0.8,
+    )
+
+    payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
+    smart_sampling = payload["provenance"]["smart_sampling_lineage"]
+    assert smart_sampling["enabled"] is True
+    assert smart_sampling["selection_signature"] == "sig-123"
+    assert smart_sampling["label_aware"] is True
+    assert smart_sampling["selector"] == "legacy_adaptive_coverage"
+    assert smart_sampling["model_name"] == "owkin/phikon-v2"
+    assert smart_sampling["holdout_mode"] == "within_patient_patch_holdout"
 
 
 def test_build_training_compatibility_signature_changes_with_validation_dataset(

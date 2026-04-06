@@ -41,12 +41,17 @@ def run_smart_sampling_pipeline(
     *,
     extractor_factory: type[EmbeddingExtractor] | Any = EmbeddingExtractor,
 ) -> SmartSamplingOutputs:
-    logging.info("Starting Stage 7 smart sampling from %s", config.source_h5_path)
+    logging.info("Starting Stage 7 label-aware smart sampling from %s", config.source_h5_path)
     logging.info(
         "Using Stage 7 selector: %s",
         "GIST facility-location" if config.use_gist else "legacy adaptive coverage",
     )
     logging.info("Using Stage 7 embedding model: %s", config.model_name)
+    logging.info(
+        "Stage 7 preserves positive labels=%s and mask-positive rows=%s before reducible sampling",
+        config.protect_positive_labels,
+        config.protect_mask_positive,
+    )
     logging.info("Preparing Stage 7 storage")
     storage = prepare_storage(config)
     source_h5_path = storage.source_h5_path
@@ -69,6 +74,12 @@ def run_smart_sampling_pipeline(
     sampled_reducible_total = 0
     rejected_reducible_total = 0
     reduced_patients = 0
+    total_positive_label_count = 0
+    total_negative_label_count = 0
+    selected_positive_label_count = 0
+    selected_negative_label_count = 0
+    protected_positive_label_total = 0
+    protected_mask_positive_total = 0
 
     patient_ids = sorted(h5_index.patient_map.keys())
     patient_progress = tqdm(patient_ids, desc="Selecting patients", unit="patient")
@@ -88,8 +99,14 @@ def run_smart_sampling_pipeline(
         kept_total += len(selected_indices)
         rejected_total += patient_rejected
         protected_total += result.protected_count
+        protected_positive_label_total += result.protected_positive_label_count
+        protected_mask_positive_total += result.protected_mask_positive_count
         sampled_reducible_total += result.selected_reducible_count
         rejected_reducible_total += result.rejected_reducible_count
+        total_positive_label_count += result.total_positive_label_count
+        total_negative_label_count += result.total_negative_label_count
+        selected_positive_label_count += result.selected_positive_label_count
+        selected_negative_label_count += result.selected_negative_label_count
         if patient_rejected > 0:
             reduced_patients += 1
         patient_progress.set_postfix(
@@ -103,7 +120,13 @@ def run_smart_sampling_pipeline(
                 "patient_id": patient_id,
                 "total_patches": len(patient_indices),
                 "protected_count": result.protected_count,
+                "protected_positive_label_count": result.protected_positive_label_count,
+                "protected_mask_positive_count": result.protected_mask_positive_count,
                 "reducible_count": result.reducible_count,
+                "total_positive_label_count": result.total_positive_label_count,
+                "total_negative_label_count": result.total_negative_label_count,
+                "selected_positive_label_count": result.selected_positive_label_count,
+                "selected_negative_label_count": result.selected_negative_label_count,
                 "chosen_n_embed": result.chosen_n_embed,
                 "k_clusters": result.k_clusters,
                 "adaptive_m_target": result.adaptive_m_target,
@@ -131,8 +154,11 @@ def run_smart_sampling_pipeline(
                     "k_clusters": 0,
                     "adaptive_m_target": result.adaptive_m_target,
                     "heldout_count": result.heldout_count,
+                    "label_aware_stage7": True,
                     "selection_method": "protected_retention",
                     "selection_bucket": "protected_kept",
+                    "protected_positive_label_count": result.protected_positive_label_count,
+                    "protected_mask_positive_count": result.protected_mask_positive_count,
                     "plateau_threshold": result.plateau_threshold,
                     "plateau_trigger_improvement": result.plateau_trigger_improvement,
                     "plateau_trigger_keep_count": result.plateau_trigger_keep_count,
@@ -151,8 +177,11 @@ def run_smart_sampling_pipeline(
                     "k_clusters": result.k_clusters,
                     "adaptive_m_target": result.adaptive_m_target,
                     "heldout_count": result.heldout_count,
+                    "label_aware_stage7": True,
                     "selection_method": result.selection_method,
                     "selection_bucket": sampled_bucket,
+                    "protected_positive_label_count": result.protected_positive_label_count,
+                    "protected_mask_positive_count": result.protected_mask_positive_count,
                     "plateau_threshold": result.plateau_threshold,
                     "plateau_trigger_improvement": result.plateau_trigger_improvement,
                     "plateau_trigger_keep_count": result.plateau_trigger_keep_count,
@@ -176,9 +205,27 @@ def run_smart_sampling_pipeline(
         "kept_fraction": kept_fraction,
         "patient_count": len(patient_ids),
         "patients_reduced_count": reduced_patients,
+        "label_aware_stage7": True,
         "protected_kept_samples": protected_total,
+        "protected_positive_label_kept_samples": protected_positive_label_total,
+        "protected_mask_positive_kept_samples": protected_mask_positive_total,
         "sampled_reducible_samples": sampled_reducible_total,
         "rejected_reducible_samples": rejected_reducible_total,
+        "total_positive_label_count": total_positive_label_count,
+        "total_negative_label_count": total_negative_label_count,
+        "selected_positive_label_count": selected_positive_label_count,
+        "selected_negative_label_count": selected_negative_label_count,
+        "selected_positive_label_fraction": (
+            0.0
+            if total_positive_label_count == 0
+            else selected_positive_label_count / total_positive_label_count
+        ),
+        "selected_negative_label_fraction": (
+            0.0
+            if total_negative_label_count == 0
+            else selected_negative_label_count / total_negative_label_count
+        ),
+        "holdout_evaluation_mode": "within_patient_patch_holdout",
         "source_h5_path": str(config.source_h5_path),
         "filtered_h5_filename": config.output_filename,
         "model_name": config.model_name,

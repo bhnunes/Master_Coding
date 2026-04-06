@@ -14,7 +14,7 @@ from helpers.training.runtime import seed_everything
 
 
 def main() -> None:
-    """Filter TRAIN.h5 into TRAIN_FILTERED.h5 using patient-wise smart sampling."""
+    """Filter TRAIN.h5 into TRAIN_FILTERED.h5 using patient-wise label-aware smart sampling."""
 
     load_dotenv(override=True)
 
@@ -38,8 +38,8 @@ def main() -> None:
         print(f"Stage 7 smart sampling failed: {error}")
         raise SystemExit(2) from error
 
-    logging.info("Stage 7 smart sampling completed successfully")
-    print("Stage 7 smart sampling completed successfully:")
+    logging.info("Stage 7 label-aware smart sampling completed successfully")
+    print("Stage 7 label-aware smart sampling completed successfully:")
     logging.info("Total input patches: %d", outputs.total_input_samples)
     logging.info("Kept patches: %d", outputs.selected_sample_count)
     logging.info("Rejected patches: %d", outputs.rejected_sample_count)

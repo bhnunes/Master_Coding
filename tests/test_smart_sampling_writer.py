@@ -82,6 +82,9 @@ def test_write_filtered_hdf5_propagates_upstream_lineage_attrs(tmp_path: Path) -
         assert handle.attrs["stage4_cleaning_manifest_path"] == "/tmp/accepted_manifest.csv"
         assert handle.attrs["stage4_cleaning_manifest_sha256"] == "abc123"
         assert handle.attrs["stage4_cleaning_selected_rows"] == 3
+        assert bool(handle.attrs["stage7_label_aware"])
+        assert handle.attrs["stage7_model_name"] == "owkin/phikon-v2"
+        assert handle.attrs["stage7_holdout_mode"] == "within_patient_patch_holdout"
 
 
 def test_write_filtered_hdf5_writes_plural_filenames_for_legacy_input(tmp_path: Path) -> None:

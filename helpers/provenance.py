@@ -101,8 +101,7 @@ def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
             source_signature = handle.attrs.get("source_signature")
             selection_signature = handle.attrs.get("selection_signature")
             attrs = {
-                str(key): (value.decode("utf-8") if isinstance(value, bytes) else value)
-                for key, value in handle.attrs.items()
+                str(key): _normalize_hdf5_attr_value(value) for key, value in handle.attrs.items()
             }
     except Exception:
         source_signature = None
@@ -121,6 +120,17 @@ def collect_hdf5_provenance(path: str | Path) -> dict[str, Any]:
     )
     payload["attrs"] = attrs
     return payload
+
+
+def _normalize_hdf5_attr_value(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
 
 
 def build_split_fingerprint(
