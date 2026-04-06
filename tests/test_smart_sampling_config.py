@@ -22,6 +22,7 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.stage_input_locally is False
     assert config.stage_outputs_locally is False
     assert config.clean_local_work_dir is True
+    assert config.model_name == "owkin/phikon-v2"
     assert config.adaptive_keep_enabled is True
     assert config.keep_min == 64
     assert config.keep_step == 64
@@ -32,6 +33,9 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.n_start == 512
     assert config.device in {"cpu", "cuda"}
     assert config.use_gist is False
+    assert config.protect_positive_labels is True
+    assert config.protect_mask_positive is True
+    assert config.positive_mask_fraction_threshold == pytest.approx(0.0)
     assert config.log_path == Path("logs/smart_sampler.log")
 
 
@@ -70,3 +74,24 @@ def test_load_smart_sampler_config_reads_gist_flag_and_legacy_alias(tmp_path: Pa
 
     assert config.use_gist is True
     assert alias_config.use_gist is True
+
+
+def test_load_smart_sampler_config_reads_protection_settings(tmp_path: Path) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    source_path.write_bytes(b"h5")
+
+    config = load_smart_sampler_config(
+        {
+            "SMART_SAMPLER_SOURCE_H5": str(source_path),
+            "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
+            "SMART_SAMPLER_MODEL_NAME": "custom/phikon",
+            "SMART_SAMPLER_PROTECT_POSITIVE_LABELS": "false",
+            "SMART_SAMPLER_PROTECT_MASK_POSITIVE": "true",
+            "SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD": "0.25",
+        }
+    )
+
+    assert config.model_name == "custom/phikon"
+    assert config.protect_positive_labels is False
+    assert config.protect_mask_positive is True
+    assert config.positive_mask_fraction_threshold == pytest.approx(0.25)

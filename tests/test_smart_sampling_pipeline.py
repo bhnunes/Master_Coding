@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
@@ -43,6 +44,46 @@ def _write_training_hdf5(path: Path) -> None:
         handle.create_dataset("filenames", data=filenames)
 
 
+def _build_config(tmp_path: Path, **overrides: object) -> SmartSamplerConfig:
+    values: dict[str, Any] = {
+        "source_h5_path": tmp_path / "TRAIN.h5",
+        "output_dir": tmp_path / "out",
+        "output_filename": "TRAIN_FILTERED.h5",
+        "local_work_dir": None,
+        "stage_input_locally": False,
+        "stage_outputs_locally": False,
+        "clean_local_work_dir": True,
+        "write_sidecars": True,
+        "overwrite_output": True,
+        "model_name": "owkin/phikon-v2",
+        "batch_size": 8,
+        "device": "cpu",
+        "n_start": 8,
+        "n_max": 8,
+        "growth_factor": 2.0,
+        "stability_threshold": 0.85,
+        "stability_repeats": 2,
+        "max_steps": 2,
+        "intersection_ratio_threshold": 0.2,
+        "k_min": 20,
+        "k_max": 80,
+        "adaptive_keep_enabled": True,
+        "keep_min": 2,
+        "keep_step": 1,
+        "keep_improvement_threshold": 0.02,
+        "keep_patience": 2,
+        "m_max": 1,
+        "selection_strategy": "uniform",
+        "seed": 42,
+        "num_workers": 0,
+        "protect_positive_labels": True,
+        "protect_mask_positive": True,
+        "positive_mask_fraction_threshold": 0.0,
+    }
+    values.update(overrides)
+    return SmartSamplerConfig(**values)
+
+
 class _DummyEmbeddingExtractor:
     def __init__(self, config: SmartSamplerConfig) -> None:
         self.config = config
@@ -76,43 +117,8 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
 
-    config = SmartSamplerConfig(
-        source_h5_path=source_path,
-        output_dir=tmp_path / "out",
-        output_filename="TRAIN_FILTERED.h5",
-        local_work_dir=None,
-        stage_input_locally=False,
-        stage_outputs_locally=False,
-        clean_local_work_dir=True,
-        write_sidecars=True,
-        overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=224,
-        batch_size=8,
-        device="cpu",
-        n_start=8,
-        n_max=8,
-        growth_factor=2.0,
-        stability_threshold=0.85,
-        stability_repeats=2,
-        max_steps=2,
-        intersection_ratio_threshold=0.2,
-        k_min=20,
-        k_max=80,
-        adaptive_keep_enabled=True,
-        keep_min=2,
-        keep_step=1,
-        keep_improvement_threshold=0.02,
-        keep_patience=2,
-        m_max=2,
-        selection_strategy="uniform",
-        seed=42,
-        num_workers=0,
-    )
-
     outputs = run_smart_sampling_pipeline(
-        config,
+        _build_config(tmp_path, source_h5_path=source_path),
         extractor_factory=_DummyEmbeddingExtractor,
     )
 
@@ -138,6 +144,10 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     assert summary["kept_samples"] == 4
     assert summary["rejected_samples"] == 2
     assert summary["patients_reduced_count"] == 2
+    assert summary["protected_kept_samples"] == 2
+    assert summary["sampled_reducible_samples"] == 2
+    assert summary["rejected_reducible_samples"] == 2
+    assert summary["model_name"] == "owkin/phikon-v2"
 
     dataset = HybridProstateDataset(str(outputs.filtered_h5_path), mode="train")
     assert len(dataset) == 4
@@ -154,45 +164,16 @@ def test_run_smart_sampling_pipeline_stages_outputs_locally_and_publishes_on_suc
 
     remote_output_dir = tmp_path / "drive"
     local_work_dir = tmp_path / "content"
-    config = SmartSamplerConfig(
+    config = _build_config(
+        tmp_path,
         source_h5_path=source_path,
         output_dir=remote_output_dir,
-        output_filename="TRAIN_FILTERED.h5",
         local_work_dir=local_work_dir,
         stage_input_locally=True,
         stage_outputs_locally=True,
-        clean_local_work_dir=True,
-        write_sidecars=True,
-        overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=224,
-        batch_size=8,
-        device="cpu",
-        n_start=8,
-        n_max=8,
-        growth_factor=2.0,
-        stability_threshold=0.85,
-        stability_repeats=2,
-        max_steps=2,
-        intersection_ratio_threshold=0.2,
-        k_min=20,
-        k_max=80,
-        adaptive_keep_enabled=True,
-        keep_min=2,
-        keep_step=1,
-        keep_improvement_threshold=0.02,
-        keep_patience=2,
-        m_max=2,
-        selection_strategy="uniform",
-        seed=42,
-        num_workers=0,
     )
 
-    outputs = run_smart_sampling_pipeline(
-        config,
-        extractor_factory=_DummyEmbeddingExtractor,
-    )
+    outputs = run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
 
     assert outputs.filtered_h5_path == remote_output_dir / "TRAIN_FILTERED.h5"
     assert outputs.selection_csv_path == remote_output_dir / "train_filtered_selection.csv"
@@ -215,39 +196,13 @@ def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
 
     remote_output_dir = tmp_path / "drive"
     local_work_dir = tmp_path / "content"
-    config = SmartSamplerConfig(
+    config = _build_config(
+        tmp_path,
         source_h5_path=source_path,
         output_dir=remote_output_dir,
-        output_filename="TRAIN_FILTERED.h5",
         local_work_dir=local_work_dir,
         stage_input_locally=True,
         stage_outputs_locally=True,
-        clean_local_work_dir=True,
-        write_sidecars=True,
-        overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=224,
-        batch_size=8,
-        device="cpu",
-        n_start=8,
-        n_max=8,
-        growth_factor=2.0,
-        stability_threshold=0.85,
-        stability_repeats=2,
-        max_steps=2,
-        intersection_ratio_threshold=0.2,
-        k_min=20,
-        k_max=80,
-        adaptive_keep_enabled=True,
-        keep_min=2,
-        keep_step=1,
-        keep_improvement_threshold=0.02,
-        keep_patience=2,
-        m_max=2,
-        selection_strategy="uniform",
-        seed=42,
-        num_workers=0,
     )
 
     def fail_publish(*args: object, **kwargs: object) -> object:
@@ -272,42 +227,20 @@ def test_run_smart_sampling_pipeline_reports_noop_summary_when_every_patch_is_ke
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
 
-    config = SmartSamplerConfig(
-        source_h5_path=source_path,
-        output_dir=tmp_path / "out",
-        output_filename="TRAIN_FILTERED.h5",
-        local_work_dir=None,
-        stage_input_locally=False,
-        stage_outputs_locally=False,
-        clean_local_work_dir=True,
-        write_sidecars=True,
-        overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=224,
-        batch_size=8,
-        device="cpu",
-        n_start=8,
-        n_max=8,
-        growth_factor=2.0,
-        stability_threshold=0.85,
-        stability_repeats=2,
-        max_steps=2,
-        intersection_ratio_threshold=0.2,
-        k_min=20,
-        k_max=80,
-        adaptive_keep_enabled=False,
-        keep_min=6,
-        keep_step=1,
-        keep_improvement_threshold=0.5,
-        keep_patience=1,
-        m_max=6,
-        selection_strategy="uniform",
-        seed=42,
-        num_workers=0,
+    outputs = run_smart_sampling_pipeline(
+        _build_config(
+            tmp_path,
+            source_h5_path=source_path,
+            adaptive_keep_enabled=False,
+            keep_min=6,
+            keep_improvement_threshold=0.5,
+            keep_patience=1,
+            m_max=6,
+            protect_positive_labels=False,
+            protect_mask_positive=False,
+        ),
+        extractor_factory=_DummyEmbeddingExtractor,
     )
-
-    outputs = run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
 
     assert outputs.total_input_samples == 6
     assert outputs.selected_sample_count == 6
@@ -325,48 +258,46 @@ def test_run_smart_sampling_pipeline_can_use_gist_selector(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
 
-    config = SmartSamplerConfig(
-        source_h5_path=source_path,
-        output_dir=tmp_path / "out",
-        output_filename="TRAIN_FILTERED.h5",
-        local_work_dir=None,
-        stage_input_locally=False,
-        stage_outputs_locally=False,
-        clean_local_work_dir=True,
-        write_sidecars=True,
-        overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=224,
-        batch_size=8,
-        device="cpu",
-        n_start=8,
-        n_max=8,
-        growth_factor=2.0,
-        stability_threshold=0.85,
-        stability_repeats=2,
-        max_steps=2,
-        intersection_ratio_threshold=0.2,
-        k_min=20,
-        k_max=80,
-        adaptive_keep_enabled=True,
-        keep_min=2,
-        keep_step=1,
-        keep_improvement_threshold=0.02,
-        keep_patience=2,
-        m_max=2,
-        selection_strategy="uniform",
-        seed=42,
-        num_workers=0,
-        use_gist=True,
-    )
-
     outputs = run_smart_sampling_pipeline(
-        config,
+        _build_config(tmp_path, source_h5_path=source_path, use_gist=True),
         extractor_factory=_DummyEmbeddingExtractor,
     )
 
     assert outputs.selected_sample_count == 4
     assert outputs.selection_csv_path is not None
     selection_manifest = pd.read_csv(outputs.selection_csv_path)
-    assert set(selection_manifest["selection_method"].unique()) == {"gist_facility_location"}
+    sampled_rows = selection_manifest[selection_manifest["selection_bucket"] == "gist_sampled"]
+    assert set(sampled_rows["selection_method"].unique()) == {"gist_facility_location"}
+
+
+def test_run_smart_sampling_pipeline_records_protected_and_sampled_selection_buckets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    _write_training_hdf5(source_path)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    outputs = run_smart_sampling_pipeline(
+        _build_config(tmp_path, source_h5_path=source_path),
+        extractor_factory=_DummyEmbeddingExtractor,
+    )
+
+    assert outputs.selection_csv_path is not None
+    assert outputs.stats_csv_path is not None
+    selection_manifest = pd.read_csv(outputs.selection_csv_path)
+    stats = pd.read_csv(outputs.stats_csv_path)
+
+    assert set(selection_manifest["selection_bucket"].unique()) == {
+        "protected_kept",
+        "legacy_sampled",
+    }
+    assert set(
+        selection_manifest.loc[
+            selection_manifest["selection_bucket"] == "protected_kept", "selection_method"
+        ].unique()
+    ) == {"protected_retention"}
+    assert stats["protected_count"].tolist() == [1, 1]
+    assert stats["sampled_reducible_count"].tolist() == [1, 1]
+    assert stats["rejected_reducible_count"].tolist() == [1, 1]

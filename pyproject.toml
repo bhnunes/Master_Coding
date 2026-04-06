@@ -35,6 +35,8 @@ dependencies = [
     "psutil",
     "pyarrow",
     "orjson",
+    "transformers==5.5.0",
+    "xformers==0.0.32.post2",
 ]
 
 [dependency-groups]

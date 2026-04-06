@@ -7,22 +7,8 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.writer import write_filtered_hdf5
 
 
-def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-
-    with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((2, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((2, 4, 4), dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.array([1, 2], dtype=np.int32))
-        handle.create_dataset("labels", data=np.array([0, 1], dtype=np.uint8))
-        handle.create_dataset(
-            "filenames",
-            data=np.array([b"PATIENT_1_a.png", b"PATIENT_2_b.png"], dtype="S32"),
-        )
-
-    config = SmartSamplerConfig(
+def _build_config(source_path: Path, output_dir: Path) -> SmartSamplerConfig:
+    return SmartSamplerConfig(
         source_h5_path=source_path,
         output_dir=output_dir,
         output_filename="TRAIN_FILTERED.h5",
@@ -32,9 +18,7 @@ def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) 
         clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=224,
+        model_name="owkin/phikon-v2",
         batch_size=8,
         device="cpu",
         n_start=8,
@@ -56,6 +40,24 @@ def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) 
         seed=42,
         num_workers=0,
     )
+
+
+def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) -> None:
+    source_path = tmp_path / "TRAIN.h5"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((2, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((2, 4, 4), dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([1, 2], dtype=np.int32))
+        handle.create_dataset("labels", data=np.array([0, 1], dtype=np.uint8))
+        handle.create_dataset(
+            "filenames",
+            data=np.array([b"PATIENT_1_a.png", b"PATIENT_2_b.png"], dtype="S32"),
+        )
+
+    config = _build_config(source_path, output_dir)
 
     write_filtered_hdf5(config, np.array([1], dtype=np.int64))
 

@@ -60,9 +60,7 @@ class SmartSamplerConfig:
     clean_local_work_dir: bool
     write_sidecars: bool
     overwrite_output: bool
-    encoder_name: str
-    encoder_weights: str | None
-    input_size: int
+    model_name: str
     batch_size: int
     device: str
     n_start: int
@@ -84,6 +82,9 @@ class SmartSamplerConfig:
     seed: int
     num_workers: int
     use_gist: bool = False
+    protect_positive_labels: bool = True
+    protect_mask_positive: bool = True
+    positive_mask_fraction_threshold: float = 0.0
     log_folder: Path = Path("logs")
     log_file_name: str = "smart_sampler.log"
 
@@ -151,13 +152,7 @@ def load_smart_sampler_config(
             "SMART_SAMPLER_OVERWRITE_OUTPUT",
             False,
         ),
-        encoder_name=(values.get("SMART_SAMPLER_ENCODER_NAME") or "resnet50").strip(),
-        encoder_weights=(values.get("SMART_SAMPLER_ENCODER_WEIGHTS") or "imagenet").strip() or None,
-        input_size=_parse_positive_int(
-            values.get("SMART_SAMPLER_INPUT_SIZE"),
-            "SMART_SAMPLER_INPUT_SIZE",
-            224,
-        ),
+        model_name=(values.get("SMART_SAMPLER_MODEL_NAME") or "owkin/phikon-v2").strip(),
         batch_size=_parse_positive_int(
             values.get("SMART_SAMPLER_BATCH_SIZE"),
             "SMART_SAMPLER_BATCH_SIZE",
@@ -227,6 +222,21 @@ def load_smart_sampler_config(
             use_gist_value,
             "SMART_SAMPLER_USE_GIST",
             False,
+        ),
+        protect_positive_labels=_parse_bool(
+            values.get("SMART_SAMPLER_PROTECT_POSITIVE_LABELS"),
+            "SMART_SAMPLER_PROTECT_POSITIVE_LABELS",
+            True,
+        ),
+        protect_mask_positive=_parse_bool(
+            values.get("SMART_SAMPLER_PROTECT_MASK_POSITIVE"),
+            "SMART_SAMPLER_PROTECT_MASK_POSITIVE",
+            True,
+        ),
+        positive_mask_fraction_threshold=_parse_probability(
+            values.get("SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD"),
+            "SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD",
+            0.0,
         ),
         log_folder=resolve_log_folder(
             values,

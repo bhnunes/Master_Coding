@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import os
+from collections.abc import Sequence
 from typing import Any, cast
 
 import h5py
@@ -9,7 +10,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+from transformers import AutoImageProcessor, AutoModel
 
 from helpers.smart_sampling.config import SmartSamplerConfig
 
@@ -19,11 +20,9 @@ class H5PatchDataset(Dataset[Any]):
         self,
         h5_path: str,
         indices: npt.NDArray[np.int64],
-        transform: transforms.Compose,
     ) -> None:
         self.h5_path = h5_path
         self.indices = indices
-        self.transform = transform
         self.h5_file: h5py.File | None = None
         self.images_dset: Any = None
         self._opened_pid: int | None = None
@@ -50,15 +49,16 @@ class H5PatchDataset(Dataset[Any]):
                 atexit.register(self.close)
                 self._atexit_registered = True
 
-    def __getitem__(self, idx: int) -> torch.Tensor:
+    def __getitem__(self, idx: int) -> npt.NDArray[np.uint8]:
         if self.h5_file is None:
             self._open_file()
         global_idx = int(self.indices[idx])
         image_data = np.asarray(cast(Any, self.images_dset)[global_idx])
+        if image_data.ndim != 3:
+            raise ValueError(f"Expected 3D image tensor for Stage 7, got shape {image_data.shape}.")
         if image_data.shape[0] <= 4:
             image_data = np.transpose(image_data, (1, 2, 0))
-        transformed = self.transform(image_data)
-        return torch.as_tensor(transformed)
+        return np.asarray(image_data, dtype=np.uint8)
 
     def close(self) -> None:
         if self.h5_file is not None:
@@ -89,45 +89,46 @@ class H5PatchDataset(Dataset[Any]):
         self._atexit_registered = False
 
 
-def get_preprocessing_transforms(input_size: int) -> transforms.Compose:
-    return transforms.Compose(
-        [
-            transforms.ToPILImage(),
-            transforms.Resize((input_size, input_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
+def _collate_images(batch: Sequence[npt.NDArray[np.uint8]]) -> list[npt.NDArray[np.uint8]]:
+    return [np.asarray(image, dtype=np.uint8) for image in batch]
 
 
 class EmbeddingExtractor:
     def __init__(self, config: SmartSamplerConfig) -> None:
         self.config = config
         self.device = torch.device(config.device)
+        self.processor = self._init_processor()
         self.model = self._init_model()
-        self.transform = get_preprocessing_transforms(config.input_size)
+
+    def _init_processor(self) -> Any:
+        try:
+            processor_factory = cast(Any, AutoImageProcessor)
+            return processor_factory.from_pretrained(self.config.model_name)
+        except Exception as error:
+            raise RuntimeError(
+                f"Failed to initialize Stage 7 image processor '{self.config.model_name}'."
+            ) from error
 
     def _init_model(self) -> torch.nn.Module:
-        import segmentation_models_pytorch as smp
+        try:
+            model_factory = cast(Any, AutoModel)
+            model = model_factory.from_pretrained(self.config.model_name)
+        except Exception as error:
+            raise RuntimeError(
+                f"Failed to initialize Stage 7 model '{self.config.model_name}'."
+            ) from error
+        model = cast(torch.nn.Module, model).to(self.device)
+        model.eval()
+        return model
 
-        model = smp.Unet(
-            encoder_name=self.config.encoder_name,
-            encoder_weights=self.config.encoder_weights,
-            in_channels=3,
-            classes=1,
-        )
-        encoder = model.encoder.to(self.device)
-        encoder.eval()
-        return cast(torch.nn.Module, encoder)
-
-    @torch.no_grad()
+    @torch.inference_mode()
     def get_embeddings(
         self, h5_path: str, indices: npt.NDArray[np.int64]
     ) -> npt.NDArray[np.float32]:
         if len(indices) == 0:
             return np.empty((0, 0), dtype=np.float32)
 
-        dataset = H5PatchDataset(h5_path, indices, transform=self.transform)
+        dataset = H5PatchDataset(h5_path, indices)
         loader = DataLoader(
             dataset,
             batch_size=self.config.batch_size,
@@ -136,15 +137,22 @@ class EmbeddingExtractor:
             pin_memory=self.device.type == "cuda",
             persistent_workers=self.config.num_workers > 0,
             prefetch_factor=4 if self.config.num_workers > 0 else None,
+            collate_fn=_collate_images,
         )
 
         embeddings_list: list[npt.NDArray[np.float32]] = []
         try:
             for batch in loader:
-                features = self.model(batch.to(self.device, non_blocking=True))
-                last_map = features[-1]
-                gap = torch.mean(last_map, dim=[2, 3])
-                embeddings_list.append(gap.cpu().numpy().astype(np.float32))
+                inputs = self.processor(images=batch, return_tensors="pt")
+                inputs = {
+                    name: tensor.to(self.device, non_blocking=self.device.type == "cuda")
+                    if isinstance(tensor, torch.Tensor)
+                    else tensor
+                    for name, tensor in inputs.items()
+                }
+                outputs = self.model(**inputs)
+                cls_features = outputs.last_hidden_state[:, 0, :]
+                embeddings_list.append(cls_features.cpu().numpy().astype(np.float32, copy=False))
         finally:
             dataset.close()
 

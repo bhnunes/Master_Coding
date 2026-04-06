@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import h5py
@@ -13,11 +12,7 @@ import pytest
 import torch
 
 from helpers.smart_sampling.config import SmartSamplerConfig
-from helpers.smart_sampling.embeddings import (
-    EmbeddingExtractor,
-    H5PatchDataset,
-    get_preprocessing_transforms,
-)
+from helpers.smart_sampling.embeddings import EmbeddingExtractor, H5PatchDataset
 
 
 def _build_config(tmp_path: Path) -> SmartSamplerConfig:
@@ -31,9 +26,7 @@ def _build_config(tmp_path: Path) -> SmartSamplerConfig:
         clean_local_work_dir=True,
         write_sidecars=True,
         overwrite_output=True,
-        encoder_name="resnet50",
-        encoder_weights="imagenet",
-        input_size=16,
+        model_name="owkin/phikon-v2",
         batch_size=2,
         device="cpu",
         n_start=4,
@@ -67,19 +60,12 @@ def _write_h5(path: Path) -> None:
 def test_h5_patch_dataset_transposes_chw_images(tmp_path: Path) -> None:
     h5_path = tmp_path / "patches.h5"
     _write_h5(h5_path)
-    seen_shapes: list[tuple[int, ...]] = []
 
-    def transform(image: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
-        seen_shapes.append(tuple(image.shape))
-        return image
-
-    dataset = H5PatchDataset(
-        str(h5_path), np.array([0], dtype=np.int64), transform=cast(Any, transform)
-    )
+    dataset = H5PatchDataset(str(h5_path), np.array([0], dtype=np.int64))
     item = dataset[0]
 
-    assert seen_shapes == [(4, 4, 3)]
     assert tuple(item.shape) == (4, 4, 3)
+    assert item.dtype == np.uint8
 
 
 def test_h5_patch_dataset_reuses_single_hdf5_handle_per_process(
@@ -97,9 +83,7 @@ def test_h5_patch_dataset_reuses_single_hdf5_handle_per_process(
 
     monkeypatch.setattr("helpers.smart_sampling.embeddings.h5py.File", counting_file)
 
-    dataset = H5PatchDataset(
-        str(h5_path), np.array([0, 1], dtype=np.int64), transform=cast(Any, lambda image: image)
-    )
+    dataset = H5PatchDataset(str(h5_path), np.array([0, 1], dtype=np.int64))
 
     _ = dataset[0]
     _ = dataset[1]
@@ -108,51 +92,85 @@ def test_h5_patch_dataset_reuses_single_hdf5_handle_per_process(
     assert open_calls == 1
 
 
-def test_get_preprocessing_transforms_returns_tensor_output() -> None:
-    transform = get_preprocessing_transforms(8)
-    image = np.zeros((4, 4, 3), dtype=np.uint8)
-    tensor = transform(image)
-
-    assert isinstance(tensor, torch.Tensor)
-    assert tuple(tensor.shape) == (3, 8, 8)
-
-
-def test_embedding_extractor_init_uses_encoder_and_eval(
+def test_embedding_extractor_init_uses_hugging_face_processor_and_eval(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = _build_config(tmp_path)
 
-    class FakeEncoder:
+    class FakeProcessorFactory:
         def __init__(self) -> None:
-            self.device: object | None = None
+            self.requested_model_names: list[str] = []
+
+        def from_pretrained(self, model_name: str) -> object:
+            self.requested_model_names.append(model_name)
+            return object()
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.device_seen: object | None = None
             self.eval_called = False
 
-        def to(self, device: object) -> FakeEncoder:
-            self.device = device
+        def to(self, device: object) -> FakeModel:
+            self.device_seen = device
             return self
 
-        def eval(self) -> None:
+        def eval(self) -> FakeModel:
             self.eval_called = True
+            return self
 
-    encoder = FakeEncoder()
-    fake_smp = SimpleNamespace(Unet=lambda **kwargs: SimpleNamespace(encoder=encoder))
-    import sys
+    class FakeModelFactory:
+        def __init__(self, model: FakeModel) -> None:
+            self.model = model
+            self.requested_model_names: list[str] = []
 
-    monkeypatch.setitem(sys.modules, "segmentation_models_pytorch", fake_smp)
+        def from_pretrained(self, model_name: str) -> FakeModel:
+            self.requested_model_names.append(model_name)
+            return self.model
+
+    processor_factory = FakeProcessorFactory()
+    model = FakeModel()
+    model_factory = FakeModelFactory(model)
+    monkeypatch.setattr("helpers.smart_sampling.embeddings.AutoImageProcessor", processor_factory)
+    monkeypatch.setattr("helpers.smart_sampling.embeddings.AutoModel", model_factory)
 
     extractor = EmbeddingExtractor(config)
 
-    assert cast(Any, extractor.model) is encoder
-    assert encoder.device == extractor.device
-    assert encoder.eval_called is True
+    assert extractor.processor is not None
+    assert cast(Any, extractor.model) is model
+    assert processor_factory.requested_model_names == [config.model_name]
+    assert model_factory.requested_model_names == [config.model_name]
+    assert model.device_seen == extractor.device
+    assert model.eval_called is True
+
+
+def test_embedding_extractor_raises_clear_error_when_model_init_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _build_config(tmp_path)
+
+    class FakeProcessorFactory:
+        def from_pretrained(self, model_name: str) -> object:
+            return object()
+
+    class BrokenModelFactory:
+        def from_pretrained(self, model_name: str) -> object:
+            raise OSError("download failed")
+
+    monkeypatch.setattr(
+        "helpers.smart_sampling.embeddings.AutoImageProcessor", FakeProcessorFactory()
+    )
+    monkeypatch.setattr("helpers.smart_sampling.embeddings.AutoModel", BrokenModelFactory())
+
+    with pytest.raises(RuntimeError, match="Failed to initialize Stage 7 model"):
+        EmbeddingExtractor(config)
 
 
 def test_get_embeddings_returns_empty_array_for_empty_indices(tmp_path: Path) -> None:
     extractor = cast(Any, object.__new__(EmbeddingExtractor))
     extractor.config = _build_config(tmp_path)
     extractor.device = torch.device("cpu")
+    extractor.processor = object()
     extractor.model = object()
-    extractor.transform = lambda image: image
 
     embeddings = EmbeddingExtractor.get_embeddings(
         extractor, "/tmp/none.h5", np.array([], dtype=np.int64)
@@ -162,35 +180,52 @@ def test_get_embeddings_returns_empty_array_for_empty_indices(tmp_path: Path) ->
     assert embeddings.dtype == np.float32
 
 
-def test_get_embeddings_stacks_batches_and_uses_cpu_pin_memory(
+def test_get_embeddings_stacks_cls_batches_and_uses_cpu_pin_memory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     h5_path = tmp_path / "patches.h5"
     with h5py.File(h5_path, "w") as handle:
         handle.create_dataset("images", data=np.zeros((3, 4, 4, 3), dtype=np.uint8))
 
-    class FakeEncoder:
-        def __call__(self, batch: torch.Tensor) -> list[torch.Tensor]:
-            batch_size = batch.shape[0]
-            features = torch.arange(batch_size * 8, dtype=torch.float32).reshape(
-                batch_size, 2, 2, 2
+    class FakeBatch(dict[str, torch.Tensor]):
+        def items(self) -> Any:
+            return super().items()
+
+    class FakeProcessor:
+        def __call__(
+            self, *, images: list[npt.NDArray[np.uint8]], return_tensors: str
+        ) -> FakeBatch:
+            assert return_tensors == "pt"
+            return FakeBatch(
+                pixel_values=torch.zeros((len(images), 3, 224, 224), dtype=torch.float32)
             )
-            return [features]
+
+    class FakeOutput:
+        def __init__(self, batch_size: int) -> None:
+            self.last_hidden_state = torch.arange(
+                batch_size * 3 * 4,
+                dtype=torch.float32,
+            ).reshape(batch_size, 3, 4)
+
+    class FakeModel:
+        def __call__(self, **kwargs: torch.Tensor) -> FakeOutput:
+            batch_size = kwargs["pixel_values"].shape[0]
+            return FakeOutput(batch_size)
 
     observed: dict[str, Any] = {}
 
-    def fake_dataloader(_dataset: object, **kwargs: object) -> list[torch.Tensor]:
+    def fake_dataloader(_dataset: object, **kwargs: object) -> list[list[npt.NDArray[np.uint8]]]:
         observed.update(kwargs)
         return [
-            torch.zeros((2, 3, 4, 4), dtype=torch.float32),
-            torch.zeros((1, 3, 4, 4), dtype=torch.float32),
+            [np.zeros((4, 4, 3), dtype=np.uint8), np.zeros((4, 4, 3), dtype=np.uint8)],
+            [np.zeros((4, 4, 3), dtype=np.uint8)],
         ]
 
     extractor = cast(Any, object.__new__(EmbeddingExtractor))
     extractor.config = _build_config(tmp_path)
     extractor.device = torch.device("cpu")
-    extractor.model = FakeEncoder()
-    extractor.transform = lambda image: torch.from_numpy(np.moveaxis(image, -1, 0)).float()
+    extractor.processor = FakeProcessor()
+    extractor.model = FakeModel()
 
     monkeypatch.setattr("helpers.smart_sampling.embeddings.DataLoader", fake_dataloader)
 
@@ -201,5 +236,6 @@ def test_get_embeddings_stacks_batches_and_uses_cpu_pin_memory(
     )
 
     assert observed["pin_memory"] is False
-    assert embeddings.shape == (3, 2)
+    assert callable(observed["collate_fn"])
+    assert embeddings.shape == (3, 4)
     assert embeddings.dtype == np.float32
