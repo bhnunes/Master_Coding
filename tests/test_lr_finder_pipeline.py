@@ -61,6 +61,9 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
             lhs_samples_path=lhs_path,
             summary_all_path=summary_path,
             architecture_summary_paths={"FPN": config.output_dir / "FPN" / "summary.csv"},
+            architecture_trial_stats={
+                "FPN": {"valid_records": 1, "completed_trials": 2, "failed_trials": 0}
+            },
             completed_trials=2,
             failed_trials=0,
         )
@@ -87,9 +90,19 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
 
     assert outputs.pdf_path == output_dir / "report.pdf"
     assert outputs.tex_path == output_dir / "report.tex"
+    assert outputs.valid_records == 1
+    assert outputs.completed_trials == 2
+    assert outputs.failed_trials == 0
+    assert outputs.architecture_trial_stats == {
+        "FPN": {"valid_records": 1, "completed_trials": 2, "failed_trials": 0}
+    }
     run_config = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert run_config["pdf_name"] == "report.pdf"
+    assert run_config["valid_records"] == 1
     assert run_config["completed_trials"] == 2
     assert run_config["failed_trials"] == 0
+    assert run_config["architecture_trial_stats"] == {
+        "FPN": {"valid_records": 1, "completed_trials": 2, "failed_trials": 0}
+    }
     assert "runtime_environment" in run_config
     assert "git_commit" in run_config["runtime_environment"]

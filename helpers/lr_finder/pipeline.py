@@ -24,6 +24,10 @@ class LRFinderOutputs:
     run_config_path: Path
     summary_all_path: Path
     lhs_samples_path: Path
+    valid_records: int
+    completed_trials: int
+    failed_trials: int
+    architecture_trial_stats: dict[str, dict[str, int]]
 
 
 def _prepare_output_dir(config: LRFinderConfig) -> None:
@@ -92,8 +96,10 @@ def run_lr_finder_pipeline(
     run_config_payload = _serialize_config(config)
     run_config_payload.update(
         {
+            "valid_records": len(screening_outputs.records),
             "completed_trials": screening_outputs.completed_trials,
             "failed_trials": screening_outputs.failed_trials,
+            "architecture_trial_stats": screening_outputs.architecture_trial_stats,
             "generated_at": meta["timestamp"],
             "runtime_environment": collect_runtime_environment(),
             "summary_all_path": str(screening_outputs.summary_all_path),
@@ -109,4 +115,8 @@ def run_lr_finder_pipeline(
         run_config_path=run_config_path,
         summary_all_path=screening_outputs.summary_all_path,
         lhs_samples_path=screening_outputs.lhs_samples_path,
+        valid_records=len(screening_outputs.records),
+        completed_trials=screening_outputs.completed_trials,
+        failed_trials=screening_outputs.failed_trials,
+        architecture_trial_stats=screening_outputs.architecture_trial_stats,
     )

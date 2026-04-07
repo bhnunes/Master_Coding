@@ -517,6 +517,9 @@ def test_run_lr_finder_screening_writes_summaries(
 
     assert outputs.completed_trials == 1
     assert outputs.failed_trials == 1
+    assert outputs.architecture_trial_stats == {
+        "FPN": {"valid_records": 1, "completed_trials": 1, "failed_trials": 1}
+    }
     assert outputs.summary_all_path.is_file()
     assert outputs.lhs_samples_path.is_file()
     assert outputs.architecture_summary_paths["FPN"].is_file()

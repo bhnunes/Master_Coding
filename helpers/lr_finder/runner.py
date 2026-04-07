@@ -40,6 +40,7 @@ class ScreeningOutputs:
     lhs_samples_path: Path
     summary_all_path: Path
     architecture_summary_paths: dict[str, Path]
+    architecture_trial_stats: dict[str, dict[str, int]]
     completed_trials: int
     failed_trials: int
 
@@ -185,7 +186,7 @@ def run_lr_finder_once(
     except _NonFiniteLossError:
         history = getattr(lr_finder, "history", None)
         completed_steps = 0 if history is None else len(history.get("loss", []))
-        logger.warning(
+        logger.info(
             (
                 "LR finder stopped early after non-finite loss: architecture=%s "
                 "completed_steps=%s requested_steps=%s"
@@ -331,7 +332,7 @@ def _run_single_loss_config(
             stats = compute_curve_stats(history["lr"], history["loss"], skip_start=10, skip_end=5)
             if not np.isfinite(stats.min_loss):
                 failed_trials += 1
-                logger.warning(
+                logger.info(
                     (
                         "LR finder repeat produced no finite minimum loss: "
                         "architecture=%s alpha=%.3f beta=%.3f gamma=%.3f repeat=%s"
@@ -422,18 +423,14 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
     completed_trials = 0
     failed_trials = 0
     architecture_summary_paths: dict[str, Path] = {}
+    architecture_trial_stats: dict[str, dict[str, int]] = {}
     total_trials = len(config.model_plans) * len(lhs_samples) * config.num_repeats
     progress_bar = tqdm(total=total_trials, desc="Stage 8 LR Finder", unit="trial")
     try:
         for model_plan in config.model_plans:
-            logger.info(
-                "Starting LR finder architecture %s (%s) with %s sampled loss configs x %s repeats",
-                model_plan.architecture,
-                model_plan.encoder,
-                len(lhs_samples),
-                config.num_repeats,
-            )
             initial_state_dict = _capture_pretrained_model_state(model_plan, device)
+            architecture_completed_before = completed_trials
+            architecture_failed_before = failed_trials
             for config_index, params in enumerate(lhs_samples, start=1):
                 progress_bar.set_postfix_str(
                     (
@@ -465,18 +462,6 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                     },
                     refresh=False,
                 )
-                logger.info(
-                    (
-                        "Finished LR finder config architecture=%s encoder=%s sample=%s/%s "
-                        "completed=%s failed=%s"
-                    ),
-                    model_plan.architecture,
-                    model_plan.encoder,
-                    config_index,
-                    len(lhs_samples),
-                    completed_trials,
-                    failed_trials,
-                )
                 if record is not None:
                     records.append(record)
 
@@ -494,11 +479,11 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                     index=False,
                 )
                 architecture_summary_paths[model_plan.architecture] = architecture_summary_path
-            logger.info(
-                "Completed LR finder architecture %s with %s valid records",
-                model_plan.architecture,
-                len(architecture_records),
-            )
+            architecture_trial_stats[model_plan.architecture] = {
+                "valid_records": len(architecture_records),
+                "completed_trials": completed_trials - architecture_completed_before,
+                "failed_trials": failed_trials - architecture_failed_before,
+            }
     finally:
         progress_bar.close()
         data_bundle.dataset.close()
@@ -510,6 +495,7 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
         lhs_samples_path=lhs_samples_path,
         summary_all_path=summary_all_path,
         architecture_summary_paths=architecture_summary_paths,
+        architecture_trial_stats=architecture_trial_stats,
         completed_trials=completed_trials,
         failed_trials=failed_trials,
     )
