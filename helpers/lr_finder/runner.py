@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ from helpers.training.models import create_model
 from helpers.training.runtime import autocast_ctx, seed_everything, setup_precision
 
 matplotlib.use("Agg")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,59 @@ def clear_gpu() -> None:
             pass
 
 
+def _prepare_lr_finder_batch(
+    batch_data: Any,
+    *,
+    device: torch.device,
+    gpu_normalizer: GPUNormalizer,
+    gpu_downscale: GPUDownscale,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if batch_data is None:
+        raise RuntimeError("LR finder received an empty batch.")
+    if len(batch_data) < 2:
+        raise RuntimeError("LR finder batch is missing images or masks.")
+
+    images, masks = batch_data[:2]
+    if images is None or masks is None:
+        raise RuntimeError("LR finder batch contains missing images or masks.")
+    if images.shape[0] == 0:
+        raise RuntimeError("LR finder batch has zero samples.")
+
+    images = images.to(device, non_blocking=True, memory_format=torch.channels_last)
+    masks = masks.to(device, non_blocking=True, dtype=torch.long)
+    images = gpu_normalizer(images)
+    images = gpu_downscale(images)
+
+    if masks.ndim == 4 and masks.size(1) == 1:
+        masks = masks[:, 0, :, :]
+    elif masks.ndim == 4 and masks.size(-1) == 1:
+        masks = masks[..., 0]
+    if masks.ndim != 3:
+        raise RuntimeError(f"LR finder masks must be rank-3 after squeeze, got {masks.ndim}.")
+    return images, masks
+
+
+def _validate_lr_finder_outputs(outputs_raw: Any, masks: torch.Tensor) -> torch.Tensor:
+    if isinstance(outputs_raw, (tuple, list)):
+        if len(outputs_raw) == 0:
+            raise RuntimeError("LR finder model returned an empty tuple/list output.")
+        outputs = outputs_raw[0]
+    else:
+        outputs = outputs_raw
+
+    if not isinstance(outputs, torch.Tensor):
+        raise RuntimeError("LR finder model output is not a tensor.")
+    if outputs.ndim != 4:
+        raise RuntimeError(f"LR finder model output must be rank-4, got {outputs.ndim}.")
+    if outputs.shape[1] != 2:
+        raise RuntimeError(f"LR finder model output must have 2 channels, got {outputs.shape[1]}.")
+    if outputs.shape[-2:] != masks.shape[-2:]:
+        raise RuntimeError(
+            "LR finder model output spatial dimensions do not match mask dimensions."
+        )
+    return outputs
+
+
 def run_lr_finder_once(
     *,
     model: torch.nn.Module,
@@ -86,30 +142,27 @@ def run_lr_finder_once(
             batch_data = next(train_iter)
         except StopIteration:
             return float("nan")
-        if batch_data is None:
-            return float("nan")
-
-        images, masks = batch_data[:2]
-        images = images.to(self.device, non_blocking=True, memory_format=torch.channels_last)
-        masks = masks.to(self.device, non_blocking=True)
-        images = gpu_normalizer(images)
-        images = gpu_downscale(images)
+        images, masks = _prepare_lr_finder_batch(
+            batch_data,
+            device=self.device,
+            gpu_normalizer=gpu_normalizer,
+            gpu_downscale=gpu_downscale,
+        )
         self.optimizer.zero_grad(set_to_none=True)
-        try:
-            with autocast_ctx(images, amp_dtype):
-                outputs = self.model(images)
-                loss = self.criterion(outputs, masks)
-            if scaler is not None:
-                scaler.scale(loss).backward()
-                scaler.unscale_(self.optimizer)
-                scaler.step(self.optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                self.optimizer.step()
-            return float(loss.item())
-        except Exception:
-            return float("nan")
+        with autocast_ctx(images, amp_dtype):
+            outputs = _validate_lr_finder_outputs(self.model(images), masks)
+            loss = self.criterion(outputs, masks)
+        if not torch.isfinite(loss):
+            raise RuntimeError("LR finder produced a non-finite loss.")
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(self.optimizer)
+            scaler.step(self.optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            self.optimizer.step()
+        return float(loss.item())
 
     lr_finder._train_batch = _train_batch_patched.__get__(lr_finder, LRFinder)
     history: dict[str, Any] | None = None
@@ -117,7 +170,8 @@ def run_lr_finder_once(
         lr_finder.range_test(train_loader, end_lr=end_lr, num_iter=num_iter, step_mode="exp")
         history = lr_finder.history
     except Exception:
-        history = None
+        logger.exception("LR finder range test failed for architecture %s", architecture)
+        raise
     finally:
         if hasattr(lr_finder, "model"):
             lr_finder.model = None
@@ -227,11 +281,36 @@ def _run_single_loss_config(
                 gpu_downscale=gpu_downscale,
             )
             stats = compute_curve_stats(history["lr"], history["loss"], skip_start=10, skip_end=5)
+            if not np.isfinite(stats.min_loss):
+                failed_trials += 1
+                logger.warning(
+                    (
+                        "LR finder repeat produced no finite minimum loss: "
+                        "architecture=%s alpha=%.3f beta=%.3f gamma=%.3f repeat=%s"
+                    ),
+                    model_plan.architecture,
+                    params.alpha,
+                    params.beta,
+                    params.gamma,
+                    repeat_index + 1,
+                )
+                continue
             repeated_lrs.append(history["lr"])
             repeated_losses.append(history["loss"])
             repeated_stats.append(stats)
             completed_trials += 1
         except Exception:
+            logger.exception(
+                (
+                    "LR finder repeat failed: architecture=%s alpha=%.3f "
+                    "beta=%.3f gamma=%.3f repeat=%s"
+                ),
+                model_plan.architecture,
+                params.alpha,
+                params.beta,
+                params.gamma,
+                repeat_index + 1,
+            )
             failed_trials += 1
         finally:
             del train_loader
@@ -259,15 +338,13 @@ def _run_single_loss_config(
         ),
         out_png=plot_path,
     )
-    min_losses = [stats.min_loss for stats in repeated_stats if np.isfinite(stats.min_loss)]
-    median_min_loss = float(np.median(min_losses)) if min_losses else float("inf")
     record = RunRecord(
         architecture=model_plan.architecture,
         encoder=model_plan.encoder,
         alpha=params.alpha,
         beta=params.beta,
         gamma=params.gamma,
-        median_min_loss=median_min_loss,
+        median_min_loss=float(np.median([stats.min_loss for stats in repeated_stats])),
         plot_path=plot_path,
         csv_path=output_dir / f"SUMMARY_{model_plan.architecture}_STABILITY.csv",
     )

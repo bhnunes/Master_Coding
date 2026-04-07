@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
 import pytest
+import torch
 
 from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
 from helpers.lr_finder.reporting import RunRecord
@@ -74,7 +76,7 @@ def test_clear_gpu_calls_optional_ipc_collect(monkeypatch: pytest.MonkeyPatch) -
     assert calls == ["empty_cache", "ipc_collect"]
 
 
-def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
+def test_run_lr_finder_once_raises_when_range_test_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeLRFinder:
@@ -99,9 +101,53 @@ def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.autocast_ctx",
-        lambda images, amp_dtype: SimpleNamespace(
-            __enter__=lambda self: None, __exit__=lambda self, exc_type, exc, tb: None
-        ),
+        lambda images, amp_dtype: nullcontext(),
+    )
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
+
+    with pytest.raises(RuntimeError, match="range test failed"):
+        run_lr_finder_once(
+            model=cast(Any, SimpleNamespace()),
+            optimizer=cast(Any, SimpleNamespace()),
+            criterion=cast(Any, SimpleNamespace()),
+            train_loader=[],
+            device=cast(Any, "cpu"),
+            end_lr=0.1,
+            num_iter=5,
+            architecture="FPN",
+            amp_precision="fp16",
+            gpu_normalizer=cast(GPUNormalizer, lambda x: x),
+            gpu_downscale=cast(GPUDownscale, lambda x: x),
+        )
+
+
+def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLRFinder:
+        def __init__(
+            self, model: object, optimizer: object, criterion: object, device: object
+        ) -> None:
+            self.model = model
+            self.optimizer = optimizer
+            self.criterion = criterion
+            self.device = device
+            self.history: dict[str, list[float]] | None = None
+
+        def range_test(
+            self, train_loader: object, end_lr: float, num_iter: int, step_mode: str
+        ) -> None:
+            del train_loader, end_lr, num_iter, step_mode
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
     )
     import sys
 
@@ -163,6 +209,59 @@ def test_run_single_loss_config_returns_none_when_all_repeats_fail(
     record, completed, failed = _run_single_loss_config(
         config,
         device=cast(Any, "cpu"),
+        data_bundle=data_bundle,
+        model_plan=model_plan,
+        params=params,
+        config_index=1,
+        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
+        gpu_downscale=cast(GPUDownscale, lambda x: x),
+    )
+
+    assert record is None
+    assert completed == 0
+    assert failed == config.num_repeats
+
+
+def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _build_config(tmp_path)
+    model_plan = ModelPlan(architecture="FPN", encoder="resnet34")
+    params = BCEDiceParams(alpha=0.1, beta=0.2, gamma=0.3)
+    dataset = SimpleNamespace(close=lambda: None)
+    data_bundle = SimpleNamespace(dataset=dataset, sample_weights=np.array([1.0], dtype=np.float32))
+
+    monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.build_train_loader",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.create_model",
+        lambda architecture, encoder: SimpleNamespace(
+            to=lambda device: SimpleNamespace(parameters=lambda: [])
+        ),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.torch.optim.AdamW",
+        lambda params, lr, weight_decay: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.BCEDiceHybridLossPaper",
+        lambda alpha, beta, gamma: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.run_lr_finder_once",
+        lambda **kwargs: {
+            "lr": np.array([1e-5, 1e-4], dtype=np.float64),
+            "loss": np.array([np.nan, np.nan], dtype=np.float64),
+        },
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.clear_gpu", lambda: None)
+
+    record, completed, failed = _run_single_loss_config(
+        config,
+        device=torch.device("cpu"),
         data_bundle=data_bundle,
         model_plan=model_plan,
         params=params,
