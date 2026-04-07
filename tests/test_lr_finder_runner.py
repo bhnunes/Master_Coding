@@ -171,6 +171,86 @@ def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
     assert history["loss"].size == 0
 
 
+def test_run_lr_finder_once_supports_non_blocking_transfer_keyword(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeModel:
+        def train(self) -> None:
+            return None
+
+        def __call__(self, images: torch.Tensor) -> torch.Tensor:
+            batch_size, _, height, width = images.shape
+            return torch.zeros((batch_size, 2, height, width), dtype=torch.float32)
+
+    class FakeOptimizer:
+        def zero_grad(self, set_to_none: bool = True) -> None:
+            del set_to_none
+
+        def step(self) -> None:
+            return None
+
+    class FakeLoss:
+        def __call__(self, outputs: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+            del outputs, masks
+            return torch.tensor(0.25, dtype=torch.float32, requires_grad=True)
+
+    class FakeLRFinder:
+        def __init__(
+            self, model: object, optimizer: object, criterion: object, device: object
+        ) -> None:
+            self.model = model
+            self.optimizer = optimizer
+            self.criterion = criterion
+            self.device = device
+            self.history: dict[str, list[float]] = {"lr": [], "loss": []}
+            self._train_batch: Any
+
+        def range_test(
+            self, train_loader: object, end_lr: float, num_iter: int, step_mode: str
+        ) -> None:
+            del end_lr, step_mode
+            train_iter = iter(cast(Any, train_loader))
+            for _ in range(num_iter):
+                loss = self._train_batch(
+                    train_iter,
+                    accumulation_steps=1,
+                    non_blocking_transfer=True,
+                )
+                self.history["lr"].append(1e-4)
+                self.history["loss"].append(loss)
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
+    )
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
+
+    images = torch.zeros((1, 3, 8, 8), dtype=torch.float32)
+    masks = torch.zeros((1, 8, 8), dtype=torch.long)
+    history = run_lr_finder_once(
+        model=cast(Any, FakeModel()),
+        optimizer=cast(Any, FakeOptimizer()),
+        criterion=cast(Any, FakeLoss()),
+        train_loader=[(images, masks)],
+        device=torch.device("cpu"),
+        end_lr=0.1,
+        num_iter=1,
+        architecture="FPN",
+        amp_precision="fp16",
+        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
+        gpu_downscale=cast(GPUDownscale, lambda x: x),
+    )
+
+    assert history["lr"].tolist() == [1e-4]
+    assert history["loss"].tolist() == [0.25]
+
+
 def test_plot_stability_curves_writes_png(tmp_path: Path) -> None:
     out_png = tmp_path / "plot.png"
 

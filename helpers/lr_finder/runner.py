@@ -134,9 +134,13 @@ def run_lr_finder_once(
     lr_finder = LRFinder(model, optimizer, criterion, device=device)
 
     def _train_batch_patched(
-        self: Any, train_iter: Any, accumulation_steps: int, non_blocking: bool
+        self: Any,
+        train_iter: Any,
+        accumulation_steps: int,
+        non_blocking_transfer: bool = True,
+        **kwargs: Any,
     ) -> float:
-        del accumulation_steps, non_blocking
+        del accumulation_steps, non_blocking_transfer, kwargs
         self.model.train()
         try:
             batch_data = next(train_iter)
