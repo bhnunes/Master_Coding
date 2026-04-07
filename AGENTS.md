@@ -134,6 +134,8 @@ Agent guide for coding agents working in this repository.
 - `TAG=HISEG` enables the HISEG-specific Stage 2 SVS/XML annotation path.
 - `TAG=Chile` enables the CHILE-specific Stage 2 SVS/XML annotation path.
 - Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
+- Stage 8 LR-finder auth now accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both env vars before model creation.
+- Stage 8 LR-finder AMP now defaults to `fp32`; set `LR_FINDER_AMP_PRECISION` explicitly to override it.
 - Stage 2 performance-related env vars now include:
   - `STAGE2_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `OPENSLIDE_CACHE_BYTES` with default `0`
@@ -249,6 +251,12 @@ Agent guide for coding agents working in this repository.
   - replacing row-at-a-time HDF5 image/mask reads with contiguous batched reads during cleaning
 - Current best-known Stage 4.3 behavior on the measured sample source HDF5 uses the default batched HDF5 fast path in `helpers/graph/cleaning_pipeline.py` with `_HDF5_SCORING_BATCH_SIZE = 512`.
 - Established Stage 4.3 finding: larger contiguous HDF5 batches produced better gains than a simple multiprocessing prototype on the measured 4-core sample machine, so the code currently favors larger batched reads over added parallel complexity.
+
+## Stage 8 Operational Notes
+- Stage 8 loads pretrained weights once per architecture/encoder pair, snapshots the initialized state to CPU, and reuses that state across all sampled loss configurations and repeats instead of re-fetching pretrained weights inside the nested screening loops.
+- Expected LR-range-test divergence now stops the current sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure.
+- Console UX for Stage 8 is intentionally compact for notebook environments such as Google Colab: one startup line, periodic snapshot progress lines, and one final summary. Detailed per-run traces stay in `logs/lr_finder.log`.
+- The final Stage 8 summary now reports valid records, completed trials, failed trials, and a per-architecture breakdown.
 
 ## Agent Heuristics
 - Prefer minimal local edits.

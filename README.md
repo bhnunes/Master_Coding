@@ -322,6 +322,11 @@ Current training behavior:
 
 - `8_lr_finder.py` is now orchestration-focused; Stage 8 config loading, HDF5 staging, LR screening, curve analysis, and LaTeX reporting live in `helpers/lr_finder/*.py`
 - Stage 8 derives the screened architecture/encoder plan from `training_model_registry.json` instead of hardcoded lists
+- Stage 8 loads pretrained weights once per architecture/encoder pair, snapshots the initialized weights to CPU, and reuses that state across sampled loss configurations and repeats instead of reloading pretrained weights inside the nested screening loops
+- Stage 8 accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both environment variables before model creation
+- Stage 8 defaults `LR_FINDER_AMP_PRECISION` to `fp32`; set it explicitly in `.env` when a different precision is desired
+- Expected LR-range-test divergence now stops the active sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure
+- Stage 8 console UX is notebook-friendly by design: one startup line, compact periodic progress snapshots, and one final summary with valid-record, completed-trial, failed-trial, and per-architecture counts
 - Stage 8 writes both `report.tex` and `report.pdf`, plus `SUMMARY_ALL.csv`, per-architecture CSV summaries, `LHS_SAMPLES.json`, and `lr_finder_run_config.json`
 - `9_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
 - `10_optimizer_ensemble.py` is now orchestration-focused; Stage 10 config, metadata ranking, validation staging, model loading, patient holdout splitting, Optuna optimization, and JSON reporting live in `helpers/ensemble_optimizer/*.py`
@@ -360,8 +365,10 @@ ARTIFACT_OVERWRITE_EXISTING=false
 LR_FINDER_HDF5_DRIVE_DIR=./data/CAMELYON16
 LR_FINDER_OUTPUT_DIR=./reports/lr_finder
 LR_FINDER_ARCHITECTURES=FPN,SEGFORMER
-# Optional for `tu-*` encoders that resolve pretrained weights from the HF Hub
+# Optional HF auth for pretrained encoders resolved from the Hugging Face Hub
 HF_TOKEN=
+# HUGGINGFACE_HUB_TOKEN=  # equivalent alias; Stage 8 mirrors either token to both names
+LR_FINDER_AMP_PRECISION=fp32
 
 # Stage 3 - Packaging
 PACKAGING_HDF5_COMPRESSION=none
@@ -394,6 +401,12 @@ OPENSLIDE_PATH=
 For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Stage 2 resolves the supported label colors internally and does not require manual SQLite color setup.
 
 See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 3 packaging, Stage 4 cleaning, Stage 5/6/7 HDF5-native preparation, Stage 8 LR-finder reporting, the Stage 9 training matrix, and Stage 10 ensemble-optimizer settings.
+
+Stage 8 runtime notes:
+
+- Stage 8 accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` and applies the detected token to both environment variables before model creation.
+- The default `LR_FINDER_AMP_PRECISION` is `fp32`.
+- Console output is intentionally compact for Colab and other notebook environments: one startup line, periodic snapshot progress lines, and one final summary. Detailed trace logging stays in `logs/lr_finder.log`.
 
 For Stage 3 packaging, the current best-known performance settings are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`. The benchmark write-up lives in `analysis/stage3_packaging_performance_findings.md`.
 
