@@ -45,11 +45,32 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     assert config.num_repeats == 2
     assert config.log_path == Path("logs/lr_finder.log")
     assert config.execution_mode == "PAPER"
+    assert config.amp_precision == "fp32"
+    assert config.hf_token is None
     assert [(plan.architecture, plan.encoder) for plan in config.model_plans] == [
         ("FPN", "senet154"),
         ("SEGFORMER", "mit_b5"),
         ("SEGFORMER", "mit_b4"),
     ]
+
+
+def test_load_lr_finder_config_reads_huggingface_token_aliases(tmp_path: Path) -> None:
+    hdf5_dir = tmp_path / "h5"
+    hdf5_dir.mkdir()
+    output_dir = tmp_path / "reports"
+    local_dir = tmp_path / "local"
+
+    config = load_lr_finder_config(
+        {
+            "LR_FINDER_HDF5_DRIVE_DIR": str(hdf5_dir),
+            "LR_FINDER_OUTPUT_DIR": str(output_dir),
+            "LR_FINDER_LOCAL_DATA_DIR": str(local_dir),
+            "HF_TOKEN": "hf_primary",
+            "HUGGINGFACE_HUB_TOKEN": "hf_secondary",
+        }
+    )
+
+    assert config.hf_token == "hf_primary"
 
 
 def test_load_lr_finder_config_rejects_unknown_architecture_filter(

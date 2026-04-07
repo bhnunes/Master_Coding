@@ -30,6 +30,10 @@ matplotlib.use("Agg")
 logger = logging.getLogger(__name__)
 
 
+class _NonFiniteLossError(RuntimeError):
+    """Signal an LR-range test that diverged to a non-finite loss."""
+
+
 @dataclass(frozen=True)
 class ScreeningOutputs:
     records: list[RunRecord]
@@ -115,6 +119,10 @@ def _validate_lr_finder_outputs(outputs_raw: Any, masks: torch.Tensor) -> torch.
     return outputs
 
 
+def _clone_state_dict_to_cpu(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    return {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
+
+
 def run_lr_finder_once(
     *,
     model: torch.nn.Module,
@@ -158,7 +166,7 @@ def run_lr_finder_once(
             outputs = _validate_lr_finder_outputs(self.model(images), masks)
             loss = self.criterion(outputs, masks)
         if not torch.isfinite(loss):
-            raise RuntimeError("LR finder produced a non-finite loss.")
+            raise _NonFiniteLossError("LR finder produced a non-finite loss.")
         if scaler is not None:
             scaler.scale(loss).backward()
             scaler.unscale_(self.optimizer)
@@ -174,6 +182,18 @@ def run_lr_finder_once(
     try:
         lr_finder.range_test(train_loader, end_lr=end_lr, num_iter=num_iter, step_mode="exp")
         history = lr_finder.history
+    except _NonFiniteLossError:
+        history = getattr(lr_finder, "history", None)
+        completed_steps = 0 if history is None else len(history.get("loss", []))
+        logger.warning(
+            (
+                "LR finder stopped early after non-finite loss: architecture=%s "
+                "completed_steps=%s requested_steps=%s"
+            ),
+            architecture,
+            completed_steps,
+            num_iter,
+        )
     except Exception:
         logger.exception("LR finder range test failed for architecture %s", architecture)
         raise
@@ -230,18 +250,21 @@ def plot_stability_curves(
     plt.close()
 
 
-def _warmup_model_encoder(model_plan: ModelPlan, device: torch.device) -> None:
+def _capture_pretrained_model_state(
+    model_plan: ModelPlan, device: torch.device
+) -> dict[str, torch.Tensor]:
     logger.info(
-        "Warming pretrained encoder cache for architecture=%s encoder=%s",
+        "Loading pretrained encoder once for architecture=%s encoder=%s",
         model_plan.architecture,
         model_plan.encoder,
     )
-    warmup_model = None
+    model = None
     try:
-        warmup_model = create_model(model_plan.architecture, model_plan.encoder).to(device)
+        model = create_model(model_plan.architecture, model_plan.encoder).to(device)
+        return _clone_state_dict_to_cpu(model)
     finally:
-        if warmup_model is not None:
-            del warmup_model
+        if model is not None:
+            del model
         gc.collect()
         clear_gpu()
 
@@ -256,6 +279,7 @@ def _run_single_loss_config(
     config_index: int,
     gpu_normalizer: GPUNormalizer,
     gpu_downscale: GPUDownscale,
+    initial_state_dict: dict[str, torch.Tensor],
 ) -> tuple[RunRecord | None, int, int]:
     repeated_lrs: list[npt.NDArray[np.float64]] = []
     repeated_losses: list[npt.NDArray[np.float64]] = []
@@ -277,7 +301,10 @@ def _run_single_loss_config(
         optimizer = None
         criterion = None
         try:
-            model = create_model(model_plan.architecture, model_plan.encoder).to(device)
+            model = create_model(model_plan.architecture, model_plan.encoder, validation=True).to(
+                device
+            )
+            model.load_state_dict(initial_state_dict)
             optimizer = torch.optim.AdamW(
                 model.parameters(),
                 lr=config.optimizer_start_lr,
@@ -406,7 +433,7 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                 len(lhs_samples),
                 config.num_repeats,
             )
-            _warmup_model_encoder(model_plan, device)
+            initial_state_dict = _capture_pretrained_model_state(model_plan, device)
             for config_index, params in enumerate(lhs_samples, start=1):
                 progress_bar.set_postfix_str(
                     (
@@ -424,6 +451,7 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                     config_index=config_index,
                     gpu_normalizer=gpu_normalizer,
                     gpu_downscale=gpu_downscale,
+                    initial_state_dict=initial_state_dict,
                 )
                 completed_trials += ok_count
                 failed_trials += fail_count

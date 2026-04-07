@@ -32,6 +32,7 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
         optimizer_weight_decay=1e-4,
         optimizer_start_lr=1e-8,
         pdf_name="report.pdf",
+        hf_token=None,
         search_space=BCEDiceSearchSpace(),
         model_plans=[ModelPlan(architecture="FPN", encoder="senet154")],
     )

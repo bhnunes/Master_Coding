@@ -44,6 +44,7 @@ class LRFinderConfig:
     optimizer_weight_decay: float
     optimizer_start_lr: float
     pdf_name: str
+    hf_token: str | None
     search_space: BCEDiceSearchSpace
     model_plans: list[ModelPlan]
     log_folder: Path = Path("logs")
@@ -97,6 +98,16 @@ def _parse_architecture_filter(value: str | None) -> tuple[str, ...] | None:
     if value is None or value.strip() == "":
         return None
     return tuple(part.strip().upper() for part in value.split(",") if part.strip())
+
+
+def _parse_optional_token(*values: str | None) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        candidate = value.strip()
+        if candidate:
+            return candidate
+    return None
 
 
 def _build_model_plans(architecture_filter: tuple[str, ...] | None) -> list[ModelPlan]:
@@ -161,7 +172,7 @@ def load_lr_finder_config(
         ),
         amp_precision=_parse_choice(
             values.get("LR_FINDER_AMP_PRECISION"),
-            default="fp16",
+            default="fp32",
             valid=VALID_AMP_PRECISIONS,
         ),
         seed=_parse_int(values.get("LR_FINDER_SEED"), default=24),
@@ -178,6 +189,10 @@ def load_lr_finder_config(
         ),
         optimizer_start_lr=_parse_float(values.get("LR_FINDER_OPTIMIZER_START_LR"), default=1e-8),
         pdf_name=pdf_name,
+        hf_token=_parse_optional_token(
+            values.get("HF_TOKEN"),
+            values.get("HUGGINGFACE_HUB_TOKEN"),
+        ),
         search_space=BCEDiceSearchSpace(
             alpha_min=_parse_float(values.get("LR_FINDER_ALPHA_MIN"), default=0.1),
             alpha_max=_parse_float(values.get("LR_FINDER_ALPHA_MAX"), default=1.0),

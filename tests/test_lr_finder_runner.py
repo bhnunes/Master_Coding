@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import torch
 
+from helpers.lr_finder import runner as runner_module
 from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
 from helpers.lr_finder.reporting import RunRecord
 from helpers.lr_finder.runner import (
@@ -47,6 +48,7 @@ def _build_config(tmp_path: Path) -> LRFinderConfig:
         optimizer_weight_decay=1e-4,
         optimizer_start_lr=1e-8,
         pdf_name="report.pdf",
+        hf_token=None,
         search_space=BCEDiceSearchSpace(),
         model_plans=[ModelPlan(architecture="FPN", encoder="resnet34")],
     )
@@ -171,6 +173,55 @@ def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
     assert history["loss"].size == 0
 
 
+def test_run_lr_finder_once_returns_partial_history_after_non_finite_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLRFinder:
+        def __init__(
+            self, model: object, optimizer: object, criterion: object, device: object
+        ) -> None:
+            self.model = model
+            self.optimizer = optimizer
+            self.criterion = criterion
+            self.device = device
+            self.history: dict[str, list[float]] = {"lr": [1e-5, 1e-4], "loss": [0.9, 0.7]}
+
+        def range_test(
+            self, train_loader: object, end_lr: float, num_iter: int, step_mode: str
+        ) -> None:
+            del train_loader, end_lr, num_iter, step_mode
+            raise runner_module._NonFiniteLossError("LR finder produced a non-finite loss.")
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
+    )
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
+
+    history = run_lr_finder_once(
+        model=cast(Any, SimpleNamespace()),
+        optimizer=cast(Any, SimpleNamespace()),
+        criterion=cast(Any, SimpleNamespace()),
+        train_loader=[],
+        device=cast(Any, "cpu"),
+        end_lr=0.1,
+        num_iter=5,
+        architecture="FPN",
+        amp_precision="fp16",
+        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
+        gpu_downscale=cast(GPUDownscale, lambda x: x),
+    )
+
+    assert history["lr"].tolist() == [1e-5, 1e-4]
+    assert history["loss"].tolist() == [0.9, 0.7]
+
+
 def test_run_lr_finder_once_supports_non_blocking_transfer_keyword(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -282,7 +333,9 @@ def test_run_single_loss_config_returns_none_when_all_repeats_fail(
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.create_model",
-        lambda architecture, encoder: (_ for _ in ()).throw(RuntimeError("model failed")),
+        lambda architecture, encoder, validation=False: (_ for _ in ()).throw(
+            RuntimeError("model failed")
+        ),
     )
     monkeypatch.setattr("helpers.lr_finder.runner.clear_gpu", lambda: None)
 
@@ -295,6 +348,7 @@ def test_run_single_loss_config_returns_none_when_all_repeats_fail(
         config_index=1,
         gpu_normalizer=cast(GPUNormalizer, lambda x: x),
         gpu_downscale=cast(GPUDownscale, lambda x: x),
+        initial_state_dict={},
     )
 
     assert record is None
@@ -316,11 +370,24 @@ def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
         "helpers.lr_finder.runner.build_train_loader",
         lambda *args, **kwargs: object(),
     )
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.loaded_state_dict: dict[str, torch.Tensor] | None = None
+
+        def to(self, device: object) -> FakeModel:
+            del device
+            return self
+
+        def parameters(self) -> list[object]:
+            return []
+
+        def load_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
+            self.loaded_state_dict = state_dict
+
     monkeypatch.setattr(
         "helpers.lr_finder.runner.create_model",
-        lambda architecture, encoder: SimpleNamespace(
-            to=lambda device: SimpleNamespace(parameters=lambda: [])
-        ),
+        lambda architecture, encoder, validation=False: FakeModel(),
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.torch.optim.AdamW",
@@ -348,6 +415,7 @@ def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
         config_index=1,
         gpu_normalizer=cast(GPUNormalizer, lambda x: x),
         gpu_downscale=cast(GPUDownscale, lambda x: x),
+        initial_state_dict={"weight": torch.tensor([1.0])},
     )
 
     assert record is None
@@ -372,7 +440,7 @@ def test_run_lr_finder_screening_writes_summaries(
         BCEDiceParams(alpha=0.4, beta=0.5, gamma=0.6),
     ]
     call_count = {"value": 0}
-    warmup_calls: list[tuple[str, str]] = []
+    preload_calls: list[tuple[str, str]] = []
 
     class DummyProgress:
         def __init__(self) -> None:
@@ -411,11 +479,17 @@ def test_run_lr_finder_screening_writes_summaries(
     )
     monkeypatch.setattr("helpers.lr_finder.runner.torch.cuda.is_available", lambda: False)
     monkeypatch.setattr("helpers.lr_finder.runner.torch.device", lambda device_type: device_type)
+
+    def fake_capture_pretrained_model_state(
+        model_plan: ModelPlan, device: object
+    ) -> dict[str, torch.Tensor]:
+        del device
+        preload_calls.append((model_plan.architecture, model_plan.encoder))
+        return {"weight": torch.tensor([1.0])}
+
     monkeypatch.setattr(
-        "helpers.lr_finder.runner._warmup_model_encoder",
-        lambda model_plan, device: warmup_calls.append(
-            (model_plan.architecture, model_plan.encoder)
-        ),
+        "helpers.lr_finder.runner._capture_pretrained_model_state",
+        fake_capture_pretrained_model_state,
     )
 
     def fake_run_single(*_args: object, **_kwargs: object) -> tuple[RunRecord | None, int, int]:
@@ -447,6 +521,6 @@ def test_run_lr_finder_screening_writes_summaries(
     assert outputs.lhs_samples_path.is_file()
     assert outputs.architecture_summary_paths["FPN"].is_file()
     assert dataset.closed is True
-    assert warmup_calls == [("FPN", "resnet34")]
+    assert preload_calls == [("FPN", "resnet34")]
     assert progress.updated == len(samples) * config.num_repeats
     assert progress.closed is True

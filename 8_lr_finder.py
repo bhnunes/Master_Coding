@@ -13,6 +13,15 @@ from helpers.lr_finder.pipeline import run_lr_finder_pipeline
 from helpers.training.runtime import seed_everything
 
 
+def _apply_huggingface_token(hf_token: str | None) -> None:
+    if hf_token is None:
+        logging.info("Stage 8 Hugging Face token not configured; relying on ambient auth state")
+        return
+    os.environ["HF_TOKEN"] = hf_token
+    os.environ["HUGGINGFACE_HUB_TOKEN"] = hf_token
+    logging.info("Stage 8 Hugging Face token detected and applied to environment")
+
+
 def main() -> None:
     """Run Stage 8 LR Finder screening and build the LaTeX PDF report."""
 
@@ -29,6 +38,7 @@ def main() -> None:
             file_pattern="%(asctime)s - %(levelname)s - %(message)s",
             console_pattern="%(message)s",
         )
+        _apply_huggingface_token(config.hf_token)
         total_trials = len(config.model_plans) * config.num_lhs_samples * config.num_repeats
         logging.info(
             (
