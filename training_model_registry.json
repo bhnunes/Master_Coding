@@ -1,6 +1,6 @@
 {
   "SWIN": {
-    "lr": 0.0003,
+    "lr": 0.001,
     "wd": 0.0001,
     "encoders": [
       "tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k"
@@ -14,42 +14,42 @@
     ]
   },
   "UNET++": {
-    "lr": 0.0005,
+    "lr": 0.002,
     "wd": 0.0001,
     "encoders": [
       "efficientnet-b7"
     ]
   },
   "FPN": {
-    "lr": 0.0003,
+    "lr": 0.002,
     "wd": 0.0001,
     "encoders": [
       "senet154"
     ]
   },
   "SEGFORMER": {
-    "lr": 0.001,
+    "lr": 0.0007,
     "wd": 0.0001,
     "encoders": [
       "mit_b5"
     ]
   },
   "MANET": {
-    "lr": 0.0004,
+    "lr": 0.0005,
     "wd": 0.0001,
     "encoders": [
       "resnet152"
     ]
   },
   "DPT": {
-    "lr": 0.0003,
+    "lr": 0.0005,
     "wd": 0.0001,
     "encoders": [
       "tu-vit_large_patch16_224.augreg_in21k_ft_in1k"
     ]
   },
   "UPERNET": {
-    "lr": 0.0002,
+    "lr": 0.0007,
     "wd": 0.0001,
     "encoders": [
       "tu-hiera_large_224"
