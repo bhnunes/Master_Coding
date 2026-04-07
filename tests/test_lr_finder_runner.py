@@ -445,21 +445,34 @@ def test_run_lr_finder_screening_writes_summaries(
     class DummyProgress:
         def __init__(self) -> None:
             self.updated = 0
-            self.closed = False
+            self.finished = False
+            self.calls: list[dict[str, object]] = []
 
-        def update(self, value: int) -> None:
-            self.updated += value
-
-        def set_postfix(
-            self, ordered_dict: object | None = None, refresh: bool = True, **kwargs: object
+        def advance(
+            self,
+            value: int,
+            *,
+            architecture: str,
+            encoder: str,
+            sample_index: int,
+            total_samples: int,
+            completed_trials: int,
+            failed_trials: int,
         ) -> None:
-            del ordered_dict, refresh, kwargs
+            self.updated += value
+            self.calls.append(
+                {
+                    "architecture": architecture,
+                    "encoder": encoder,
+                    "sample_index": sample_index,
+                    "total_samples": total_samples,
+                    "completed_trials": completed_trials,
+                    "failed_trials": failed_trials,
+                }
+            )
 
-        def set_postfix_str(self, s: str = "", refresh: bool = True) -> None:
-            del s, refresh
-
-        def close(self) -> None:
-            self.closed = True
+        def finish(self) -> None:
+            self.finished = True
 
     progress = DummyProgress()
 
@@ -472,7 +485,9 @@ def test_run_lr_finder_screening_writes_summaries(
     monkeypatch.setattr("helpers.lr_finder.runner.configure_execution_mode", lambda mode: None)
     monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
     monkeypatch.setattr("helpers.lr_finder.runner.GPUNormalizer", lambda **kwargs: lambda x: x)
-    monkeypatch.setattr("helpers.lr_finder.runner.tqdm", lambda *args, **kwargs: progress)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner._SnapshotProgressReporter", lambda total_trials: progress
+    )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.GPUDownscale",
         lambda p: SimpleNamespace(to=lambda device: lambda x: x),
@@ -526,4 +541,22 @@ def test_run_lr_finder_screening_writes_summaries(
     assert dataset.closed is True
     assert preload_calls == [("FPN", "resnet34")]
     assert progress.updated == len(samples) * config.num_repeats
-    assert progress.closed is True
+    assert progress.finished is True
+    assert progress.calls == [
+        {
+            "architecture": "FPN",
+            "encoder": "resnet34",
+            "sample_index": 1,
+            "total_samples": 2,
+            "completed_trials": 1,
+            "failed_trials": 0,
+        },
+        {
+            "architecture": "FPN",
+            "encoder": "resnet34",
+            "sample_index": 2,
+            "total_samples": 2,
+            "completed_trials": 1,
+            "failed_trials": 1,
+        },
+    ]

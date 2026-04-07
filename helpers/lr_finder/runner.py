@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,6 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import torch
-from tqdm import tqdm
 
 from helpers.lr_finder.analysis import compute_curve_stats
 from helpers.lr_finder.config import LRFinderConfig, ModelPlan
@@ -43,6 +43,51 @@ class ScreeningOutputs:
     architecture_trial_stats: dict[str, dict[str, int]]
     completed_trials: int
     failed_trials: int
+
+
+class _SnapshotProgressReporter:
+    """Emit compact periodic progress snapshots instead of a live progress bar."""
+
+    def __init__(self, total_trials: int) -> None:
+        self._total_trials = total_trials
+        self._completed = 0
+        self._started_at = time.monotonic()
+        self._snapshot_every = max(1, min(25, max(5, total_trials // 20)))
+        self._next_snapshot_at = min(total_trials, self._snapshot_every)
+
+    def advance(
+        self,
+        increment: int,
+        *,
+        architecture: str,
+        encoder: str,
+        sample_index: int,
+        total_samples: int,
+        completed_trials: int,
+        failed_trials: int,
+    ) -> None:
+        self._completed += increment
+        if self._completed < self._next_snapshot_at and self._completed < self._total_trials:
+            return
+
+        elapsed_seconds = max(1.0, time.monotonic() - self._started_at)
+        rate = self._completed / elapsed_seconds
+        percent_complete = (
+            (100.0 * self._completed / self._total_trials) if self._total_trials else 100.0
+        )
+        print(
+            "Progress: "
+            f"{self._completed}/{self._total_trials} ({percent_complete:.1f}%) | "
+            f"arch={architecture} | encoder={encoder} | "
+            f"sample={sample_index}/{total_samples} | "
+            f"ok={completed_trials} | fail={failed_trials} | "
+            f"rate={rate:.2f} trials/s"
+        )
+        while self._next_snapshot_at <= self._completed:
+            self._next_snapshot_at += self._snapshot_every
+
+    def finish(self) -> None:
+        return None
 
 
 def configure_execution_mode(execution_mode: str) -> None:
@@ -425,20 +470,13 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
     architecture_summary_paths: dict[str, Path] = {}
     architecture_trial_stats: dict[str, dict[str, int]] = {}
     total_trials = len(config.model_plans) * len(lhs_samples) * config.num_repeats
-    progress_bar = tqdm(total=total_trials, desc="Stage 8 LR Finder", unit="trial")
+    progress = _SnapshotProgressReporter(total_trials)
     try:
         for model_plan in config.model_plans:
             initial_state_dict = _capture_pretrained_model_state(model_plan, device)
             architecture_completed_before = completed_trials
             architecture_failed_before = failed_trials
             for config_index, params in enumerate(lhs_samples, start=1):
-                progress_bar.set_postfix_str(
-                    (
-                        f"arch={model_plan.architecture} encoder={model_plan.encoder} "
-                        f"config={config_index}/{len(lhs_samples)}"
-                    ),
-                    refresh=False,
-                )
                 record, ok_count, fail_count = _run_single_loss_config(
                     config,
                     device=device,
@@ -452,15 +490,14 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                 )
                 completed_trials += ok_count
                 failed_trials += fail_count
-                progress_bar.update(config.num_repeats)
-                progress_bar.set_postfix(
-                    {
-                        "arch": model_plan.architecture,
-                        "config": f"{config_index}/{len(lhs_samples)}",
-                        "ok": completed_trials,
-                        "fail": failed_trials,
-                    },
-                    refresh=False,
+                progress.advance(
+                    config.num_repeats,
+                    architecture=model_plan.architecture,
+                    encoder=model_plan.encoder,
+                    sample_index=config_index,
+                    total_samples=len(lhs_samples),
+                    completed_trials=completed_trials,
+                    failed_trials=failed_trials,
                 )
                 if record is not None:
                     records.append(record)
@@ -485,7 +522,7 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                 "failed_trials": failed_trials - architecture_failed_before,
             }
     finally:
-        progress_bar.close()
+        progress.finish()
         data_bundle.dataset.close()
 
     summary_all_path = config.output_dir / "SUMMARY_ALL.csv"
