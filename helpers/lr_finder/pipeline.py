@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -12,6 +13,8 @@ from helpers.lr_finder.config import LRFinderConfig
 from helpers.lr_finder.reporting import build_latex_report
 from helpers.lr_finder.runner import ScreeningOutputs, run_lr_finder_screening
 from helpers.provenance import collect_runtime_environment
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,9 @@ def run_lr_finder_pipeline(
     screening_runner: Callable[[LRFinderConfig], ScreeningOutputs] = run_lr_finder_screening,
     report_builder: Callable[..., tuple[Path, Path]] = build_latex_report,
 ) -> LRFinderOutputs:
+    logger.info("Preparing LR finder output directory at %s", config.output_dir)
     _prepare_output_dir(config)
+    logger.info("Starting LR finder screening")
     screening_outputs = screening_runner(config)
     meta = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -71,6 +76,11 @@ def run_lr_finder_pipeline(
         "completed_trials": str(screening_outputs.completed_trials),
         "failed_trials": str(screening_outputs.failed_trials),
     }
+    logger.info(
+        "Building LR finder report with %s valid records (%s failed trials)",
+        len(screening_outputs.records),
+        screening_outputs.failed_trials,
+    )
     tex_path, pdf_path = report_builder(
         screening_outputs.records,
         config.output_dir,
@@ -78,6 +88,7 @@ def run_lr_finder_pipeline(
         config.pdf_name,
     )
     run_config_path = config.output_dir / "lr_finder_run_config.json"
+    logger.info("Writing LR finder run config to %s", run_config_path)
     run_config_payload = _serialize_config(config)
     run_config_payload.update(
         {

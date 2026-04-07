@@ -360,6 +360,8 @@ ARTIFACT_OVERWRITE_EXISTING=false
 LR_FINDER_HDF5_DRIVE_DIR=./data/CAMELYON16
 LR_FINDER_OUTPUT_DIR=./reports/lr_finder
 LR_FINDER_ARCHITECTURES=FPN,SEGFORMER
+# Optional for `tu-*` encoders that resolve pretrained weights from the HF Hub
+HF_TOKEN=
 
 # Stage 3 - Packaging
 PACKAGING_HDF5_COMPRESSION=none

@@ -7,6 +7,7 @@ import random
 import cv2
 import numpy as np
 import torch
+from torch.amp.grad_scaler import GradScaler
 
 
 def seed_everything(seed: int = 42) -> None:
@@ -59,7 +60,7 @@ def _resolve_amp_precision(
     amp_precision: str,
     architecture: str,
     prefer_bf16_if_available: bool = True,
-) -> tuple[torch.dtype, torch.cuda.amp.GradScaler | None, dict[str, str]]:
+) -> tuple[torch.dtype, GradScaler | None, dict[str, str]]:
     """Resolve effective AMP behavior for the active device and architecture."""
 
     arch = architecture.upper()
@@ -119,7 +120,7 @@ def _resolve_amp_precision(
     if choice == "fp16":
         return (
             torch.float16,
-            torch.cuda.amp.GradScaler(),
+            GradScaler("cuda"),
             {
                 "amp_precision_requested": choice,
                 "amp_dtype_effective": "float16",
@@ -140,7 +141,7 @@ def _resolve_amp_precision(
             )
         return (
             torch.float16,
-            torch.cuda.amp.GradScaler(),
+            GradScaler("cuda"),
             {
                 "amp_precision_requested": choice,
                 "amp_dtype_effective": "float16",
@@ -156,7 +157,7 @@ def _resolve_amp_precision(
 def setup_precision(
     architecture: str,
     amp_precision: str = "auto",
-) -> tuple[torch.dtype, torch.cuda.amp.GradScaler | None, dict[str, str]]:
+) -> tuple[torch.dtype, GradScaler | None, dict[str, str]]:
     """Set matmul precision policy and resolve effective AMP settings."""
 
     matmul_precision = _set_matmul_precision_for_arch(architecture)

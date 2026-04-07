@@ -109,6 +109,27 @@ def test_create_model_uses_expected_builder_and_imagenet_weights(
     assert recorder.calls[0][1]["activation"] is None
 
 
+def test_create_model_uses_true_encoder_weights_for_timm_universal_encoders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder = _Recorder()
+    fake_smp = SimpleNamespace(
+        Unet=recorder.make_builder("Unet"),
+        DeepLabV3Plus=recorder.make_builder("DeepLabV3Plus"),
+        DPT=recorder.make_builder("DPT"),
+        UnetPlusPlus=recorder.make_builder("UnetPlusPlus"),
+        FPN=recorder.make_builder("FPN"),
+        Segformer=recorder.make_builder("Segformer"),
+        MAnet=recorder.make_builder("MAnet"),
+        UPerNet=recorder.make_builder("UPerNet"),
+    )
+    monkeypatch.setattr(training_models, "smp", fake_smp)
+
+    create_model("DEEPLABV3PLUS", "tu-resnest101e", validation=False)
+
+    assert recorder.calls[0][1]["encoder_weights"] is True
+
+
 def test_create_model_disables_encoder_weights_for_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

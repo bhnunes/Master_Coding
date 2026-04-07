@@ -14,7 +14,7 @@ from helpers.training.runtime import seed_everything
 
 
 def main() -> None:
-    """Run Stage 9 LR Finder screening and build the LaTeX PDF report."""
+    """Run Stage 8 LR Finder screening and build the LaTeX PDF report."""
 
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     load_dotenv(override=True)
@@ -29,17 +29,29 @@ def main() -> None:
             file_pattern="%(asctime)s - %(levelname)s - %(message)s",
             console_pattern="%(message)s",
         )
+        total_trials = len(config.model_plans) * config.num_lhs_samples * config.num_repeats
+        logging.info(
+            (
+                "Stage 8 LR Finder starting: architectures=%s lhs_samples=%s repeats=%s "
+                "expected_trials=%s output_dir=%s"
+            ),
+            len(config.model_plans),
+            config.num_lhs_samples,
+            config.num_repeats,
+            total_trials,
+            config.output_dir,
+        )
         seed_everything(config.seed)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
         outputs = run_lr_finder_pipeline(config)
     except Exception as error:
-        print(f"Stage 9 LR Finder failed: {error}")
+        print(f"Stage 8 LR Finder failed: {error}")
         raise SystemExit(2) from error
 
-    logging.info("Stage 9 LR Finder completed successfully")
-    print("Stage 9 LR Finder completed successfully:")
+    logging.info("Stage 8 LR Finder completed successfully")
+    print("Stage 8 LR Finder completed successfully:")
     logging.info("PDF report: %s", outputs.pdf_path)
     print(f"- PDF report: {outputs.pdf_path}")
     logging.info("LaTeX source: %s", outputs.tex_path)

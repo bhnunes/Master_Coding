@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import torch
@@ -78,7 +80,7 @@ def build_train_loader(
     seed: int,
 ) -> DataLoader[object]:
     sampler = WeightedRandomSampler(
-        weights=sample_weights.tolist(),
+        weights=cast(Sequence[float], sample_weights.numpy()),
         num_samples=len(sample_weights),
         replacement=True,
         generator=torch.Generator().manual_seed(seed),

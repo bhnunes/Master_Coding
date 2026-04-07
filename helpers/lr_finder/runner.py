@@ -13,6 +13,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 from helpers.lr_finder.analysis import compute_curve_stats
 from helpers.lr_finder.config import LRFinderConfig, ModelPlan
@@ -229,6 +230,22 @@ def plot_stability_curves(
     plt.close()
 
 
+def _warmup_model_encoder(model_plan: ModelPlan, device: torch.device) -> None:
+    logger.info(
+        "Warming pretrained encoder cache for architecture=%s encoder=%s",
+        model_plan.architecture,
+        model_plan.encoder,
+    )
+    warmup_model = None
+    try:
+        warmup_model = create_model(model_plan.architecture, model_plan.encoder).to(device)
+    finally:
+        if warmup_model is not None:
+            del warmup_model
+        gc.collect()
+        clear_gpu()
+
+
 def _run_single_loss_config(
     config: LRFinderConfig,
     *,
@@ -378,9 +395,26 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
     completed_trials = 0
     failed_trials = 0
     architecture_summary_paths: dict[str, Path] = {}
+    total_trials = len(config.model_plans) * len(lhs_samples) * config.num_repeats
+    progress_bar = tqdm(total=total_trials, desc="Stage 8 LR Finder", unit="trial")
     try:
         for model_plan in config.model_plans:
+            logger.info(
+                "Starting LR finder architecture %s (%s) with %s sampled loss configs x %s repeats",
+                model_plan.architecture,
+                model_plan.encoder,
+                len(lhs_samples),
+                config.num_repeats,
+            )
+            _warmup_model_encoder(model_plan, device)
             for config_index, params in enumerate(lhs_samples, start=1):
+                progress_bar.set_postfix_str(
+                    (
+                        f"arch={model_plan.architecture} encoder={model_plan.encoder} "
+                        f"config={config_index}/{len(lhs_samples)}"
+                    ),
+                    refresh=False,
+                )
                 record, ok_count, fail_count = _run_single_loss_config(
                     config,
                     device=device,
@@ -393,6 +427,28 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                 )
                 completed_trials += ok_count
                 failed_trials += fail_count
+                progress_bar.update(config.num_repeats)
+                progress_bar.set_postfix(
+                    {
+                        "arch": model_plan.architecture,
+                        "config": f"{config_index}/{len(lhs_samples)}",
+                        "ok": completed_trials,
+                        "fail": failed_trials,
+                    },
+                    refresh=False,
+                )
+                logger.info(
+                    (
+                        "Finished LR finder config architecture=%s encoder=%s sample=%s/%s "
+                        "completed=%s failed=%s"
+                    ),
+                    model_plan.architecture,
+                    model_plan.encoder,
+                    config_index,
+                    len(lhs_samples),
+                    completed_trials,
+                    failed_trials,
+                )
                 if record is not None:
                     records.append(record)
 
@@ -410,7 +466,13 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
                     index=False,
                 )
                 architecture_summary_paths[model_plan.architecture] = architecture_summary_path
+            logger.info(
+                "Completed LR finder architecture %s with %s valid records",
+                model_plan.architecture,
+                len(architecture_records),
+            )
     finally:
+        progress_bar.close()
         data_bundle.dataset.close()
 
     summary_all_path = config.output_dir / "SUMMARY_ALL.csv"

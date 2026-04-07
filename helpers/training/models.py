@@ -26,7 +26,12 @@ def get_learning_rate(architecture: str) -> tuple[float, float]:
 def create_model(architecture: str, encoder: str, validation: bool = False) -> nn.Module:
     """Create the configured segmentation model."""
 
-    encoder_weights = None if validation else "imagenet"
+    if validation:
+        encoder_weights: str | bool | None = None
+    elif encoder.startswith("tu-"):
+        encoder_weights = True
+    else:
+        encoder_weights = "imagenet"
     common_args = {
         "encoder_name": encoder,
         "encoder_weights": encoder_weights,

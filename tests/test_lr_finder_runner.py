@@ -372,6 +372,28 @@ def test_run_lr_finder_screening_writes_summaries(
         BCEDiceParams(alpha=0.4, beta=0.5, gamma=0.6),
     ]
     call_count = {"value": 0}
+    warmup_calls: list[tuple[str, str]] = []
+
+    class DummyProgress:
+        def __init__(self) -> None:
+            self.updated = 0
+            self.closed = False
+
+        def update(self, value: int) -> None:
+            self.updated += value
+
+        def set_postfix(
+            self, ordered_dict: object | None = None, refresh: bool = True, **kwargs: object
+        ) -> None:
+            del ordered_dict, refresh, kwargs
+
+        def set_postfix_str(self, s: str = "", refresh: bool = True) -> None:
+            del s, refresh
+
+        def close(self) -> None:
+            self.closed = True
+
+    progress = DummyProgress()
 
     monkeypatch.setattr(
         "helpers.lr_finder.runner.prepare_training_data", lambda config: data_bundle
@@ -382,12 +404,19 @@ def test_run_lr_finder_screening_writes_summaries(
     monkeypatch.setattr("helpers.lr_finder.runner.configure_execution_mode", lambda mode: None)
     monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
     monkeypatch.setattr("helpers.lr_finder.runner.GPUNormalizer", lambda **kwargs: lambda x: x)
+    monkeypatch.setattr("helpers.lr_finder.runner.tqdm", lambda *args, **kwargs: progress)
     monkeypatch.setattr(
         "helpers.lr_finder.runner.GPUDownscale",
         lambda p: SimpleNamespace(to=lambda device: lambda x: x),
     )
     monkeypatch.setattr("helpers.lr_finder.runner.torch.cuda.is_available", lambda: False)
     monkeypatch.setattr("helpers.lr_finder.runner.torch.device", lambda device_type: device_type)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner._warmup_model_encoder",
+        lambda model_plan, device: warmup_calls.append(
+            (model_plan.architecture, model_plan.encoder)
+        ),
+    )
 
     def fake_run_single(*_args: object, **_kwargs: object) -> tuple[RunRecord | None, int, int]:
         call_count["value"] += 1
@@ -418,3 +447,6 @@ def test_run_lr_finder_screening_writes_summaries(
     assert outputs.lhs_samples_path.is_file()
     assert outputs.architecture_summary_paths["FPN"].is_file()
     assert dataset.closed is True
+    assert warmup_calls == [("FPN", "resnet34")]
+    assert progress.updated == len(samples) * config.num_repeats
+    assert progress.closed is True
