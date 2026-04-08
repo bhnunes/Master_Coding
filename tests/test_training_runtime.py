@@ -1,10 +1,12 @@
 import contextlib
 import random
+from typing import cast
 
 import numpy as np
 import pytest
 import torch
 
+from helpers.training import runtime as training_runtime
 from helpers.training.runtime import (
     _resolve_amp_precision,
     autocast_ctx,
@@ -140,7 +142,7 @@ def test_autocast_ctx_uses_torch_autocast_for_cuda_tensor(monkeypatch: pytest.Mo
 def test_resolve_amp_precision_supports_fp32_and_fp16(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
-    monkeypatch.setattr(torch.cuda.amp, "GradScaler", lambda: "scaler")
+    monkeypatch.setattr(training_runtime, "GradScaler", lambda *_args, **_kwargs: "scaler")
 
     fp32_dtype, fp32_scaler, fp32_log = _resolve_amp_precision("fp32", "FPN")
     fp16_dtype, fp16_scaler, fp16_log = _resolve_amp_precision("fp16", "FPN")
@@ -149,7 +151,7 @@ def test_resolve_amp_precision_supports_fp32_and_fp16(monkeypatch: pytest.Monkey
     assert fp32_scaler is None
     assert fp32_log["amp_reason"] == "user_forced_fp32"
     assert fp16_dtype is torch.float16
-    assert fp16_scaler == "scaler"
+    assert cast(object, fp16_scaler) == "scaler"
     assert fp16_log["amp_reason"] == "user_forced_fp16"
 
 

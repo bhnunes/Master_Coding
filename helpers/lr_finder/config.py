@@ -122,9 +122,7 @@ def _build_model_plans(architecture_filter: tuple[str, ...] | None) -> list[Mode
 
     model_plans: list[ModelPlan] = []
     for architecture in selected_architectures:
-        encoders = registry[architecture]["encoders"]
-        assert isinstance(encoders, tuple)
-        for encoder in encoders:
+        for encoder in registry[architecture].encoders:
             model_plans.append(ModelPlan(architecture=architecture, encoder=encoder))
     if not model_plans:
         raise ValueError("LR Finder model plan is empty after registry filtering.")

@@ -33,13 +33,16 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from typing import cast
 
 import numpy as np
+import numpy.typing as npt
 
 # ---------------------------------------------------------------------------
 # Type aliases
 # ---------------------------------------------------------------------------
-Points = np.ndarray  # shape (n, d) – rows are point vectors
+FloatArray = npt.NDArray[np.float64]
+Points = FloatArray  # shape (n, d) – rows are point vectors
 UtilityFn = Callable[[list[int], int | None], float]
 # g(S_indices, new_index) → marginal gain g(new | S)
 # When new_index is None → g(S_indices) absolute value
@@ -50,7 +53,7 @@ UtilityFn = Callable[[list[int], int | None], float]
 # ---------------------------------------------------------------------------
 
 
-def linear_utility(weights: np.ndarray) -> UtilityFn:
+def linear_utility(weights: FloatArray) -> UtilityFn:
     """
     g(S) = Σ w(v)  for v in S  (linear / modular function).
 
@@ -84,13 +87,12 @@ def facility_location_utility(
         reference = points
     # Pre-compute all pairwise similarities (n_ref × n_points)
     n_ref = len(reference)
-    n_pts = len(points)
-    dists = np.linalg.norm(reference[:, None, :] - points[None, :, :], axis=-1)  # (n_ref, n_pts)
+    dists = cast(FloatArray, np.linalg.norm(reference[:, None, :] - points[None, :, :], axis=-1))
     diam = dists.max() or 1.0
     sims = 1.0 - dists / diam  # (n_ref, n_pts)
 
     # covered[i] = current best similarity for reference point i
-    covered = np.zeros(n_ref)
+    covered: FloatArray = np.zeros(n_ref, dtype=np.float64)
 
     def _g(selected: list[int], new_idx: int | None) -> float:
         if new_idx is None:
@@ -114,22 +116,21 @@ def facility_location_utility(
 # ---------------------------------------------------------------------------
 
 
-def _pairwise_distance_matrix(points: Points) -> np.ndarray:
+def _pairwise_distance_matrix(points: Points) -> FloatArray:
     """Compute full n×n Euclidean distance matrix."""
     diff = points[:, None, :] - points[None, :, :]  # (n, n, d)
-    return np.linalg.norm(diff, axis=-1)  # (n, n)
+    return cast(FloatArray, np.linalg.norm(diff, axis=-1))  # (n, n)
 
 
-def _min_dist_to_set(v: int, S: list[int], dist_mat: np.ndarray) -> float:
+def _min_dist_to_set(v: int, S: list[int], dist_mat: FloatArray) -> float:
     """dist(v, S) = min_{u ∈ S} dist(v, u).  Returns ∞ if S is empty."""
     if not S:
         return math.inf
     return float(dist_mat[v, S].min())
 
 
-def _diversity(S: list[int], dist_mat: np.ndarray) -> float:
+def _diversity(S: list[int], dist_mat: FloatArray) -> float:
     """div(S) = min_{u≠v ∈ S} dist(u, v).  Returns d_max if |S| ≤ 1."""
-    n = dist_mat.shape[0]
     d_max = float(dist_mat.max())
     if len(S) <= 1:
         return d_max
@@ -180,7 +181,7 @@ class GIST:
         utility_fn: UtilityFn,
         k: int,
         eps: float = 0.1,
-        dist_matrix: np.ndarray | None = None,
+        dist_matrix: FloatArray | None = None,
         verbose: bool = False,
     ) -> None:
         if not (0 < eps < 0.5):
@@ -283,7 +284,7 @@ class GIST:
         """Submodular utility value g(S) of the selected set."""
         return self.g(self.selected_indices_, None)
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, float | int | list[int]]:
         """Return a summary dictionary of the solution."""
         return {
             "selected_indices": self.selected_indices_,
@@ -389,7 +390,7 @@ class GIST:
 
 def gist_linear(
     points: Points,
-    weights: np.ndarray,
+    weights: FloatArray,
     k: int,
     eps: float = 0.1,
     verbose: bool = False,

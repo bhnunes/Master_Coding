@@ -68,6 +68,10 @@ segmentation-models-pytorch = { git = "https://github.com/qubvel/segmentation_mo
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = [
+    "scripts/aim_ui.py",
+    "scripts/app_ia_medica_v3.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -76,6 +80,7 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+exclude = "^scripts/(aim_ui|app_ia_medica_v3)\\.py$"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

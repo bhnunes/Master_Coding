@@ -15,8 +15,26 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     registry_path.write_text(
         json.dumps(
             {
-                "fpn": {"lr": 3e-4, "wd": 1e-4, "encoders": ["senet154"]},
-                "segformer": {"lr": 1e-3, "wd": 1e-4, "encoders": ["mit_b5", "mit_b4"]},
+                "fpn": {
+                    "lr": 3e-4,
+                    "wd": 1e-4,
+                    "encoders": ["senet154"],
+                    "loss": {
+                        "alpha_bce": 0.6,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.8,
+                    },
+                },
+                "segformer": {
+                    "lr": 1e-3,
+                    "wd": 1e-4,
+                    "encoders": ["mit_b5", "mit_b4"],
+                    "loss": {
+                        "alpha_bce": 0.6,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.8,
+                    },
+                },
             }
         ),
         encoding="utf-8",
@@ -78,7 +96,20 @@ def test_load_lr_finder_config_rejects_unknown_architecture_filter(
 ) -> None:
     registry_path = tmp_path / "registry.json"
     registry_path.write_text(
-        json.dumps({"FPN": {"lr": 3e-4, "wd": 1e-4, "encoders": ["senet154"]}}),
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 3e-4,
+                    "wd": 1e-4,
+                    "encoders": ["senet154"],
+                    "loss": {
+                        "alpha_bce": 0.6,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.8,
+                    },
+                }
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
