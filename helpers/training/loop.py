@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from collections.abc import Iterable, Sized
 from typing import Any
 
@@ -19,6 +20,10 @@ def _progress_file() -> Any:
     """Use the real terminal stream so tqdm stays interactive under LoggerWriter."""
 
     return sys.__stderr__
+
+
+_TRAIN_PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+_VALIDATION_PROGRESS_MIN_INTERVAL_SECONDS = 5.0
 
 
 def train_epoch(
@@ -53,7 +58,7 @@ def train_epoch(
         total=total_batches,
         desc=f"Train E{current_epoch + 1}",
         leave=False,
-        mininterval=0.5,
+        mininterval=_TRAIN_PROGRESS_MIN_INTERVAL_SECONDS,
         dynamic_ncols=True,
         position=0,
         file=_progress_file(),
@@ -180,11 +185,12 @@ def validate_epoch(
         dataloader,
         desc="Validate",
         leave=False,
-        mininterval=0.5,
+        mininterval=_VALIDATION_PROGRESS_MIN_INTERVAL_SECONDS,
         dynamic_ncols=True,
-        position=1,
+        position=0,
         file=_progress_file(),
     )
+    last_postfix_update = 0.0
     with torch.inference_mode():
         for batch_data in pbar:
             if batch_data is None:
@@ -252,11 +258,17 @@ def validate_epoch(
             num_samples_processed += batch_size
             tracker.update(outputs, masks)
 
-            if num_samples_processed > 0:
+            now = time.monotonic()
+            if (
+                num_samples_processed > 0
+                and now - last_postfix_update >= _VALIDATION_PROGRESS_MIN_INTERVAL_SECONDS
+            ):
                 pbar.set_postfix(
                     loss=f"{batch_loss:.4f}",
                     avg_loss=f"{running_loss / num_samples_processed:.4f}",
+                    refresh=False,
                 )
+                last_postfix_update = now
 
     try:
         if num_samples_processed == 0:
