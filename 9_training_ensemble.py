@@ -285,7 +285,7 @@ try:
         worker_init_fn=worker_init_fn,
     )
 
-    print("DataLoaders created successfully (Train: HDF5, Val: PNG).")
+    print("DataLoaders created successfully (Train: HDF5, Val: HDF5).")
 
 except Exception as e:
     print(f"DataLoader Err: {e}")
