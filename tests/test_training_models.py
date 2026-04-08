@@ -7,21 +7,26 @@ import pytest
 import torch
 
 from helpers.training import models as training_models
-from helpers.training.models import create_model, create_optimizer, get_learning_rate
+from helpers.training.models import (
+    create_model,
+    create_optimizer,
+    get_learning_rate,
+    get_loss_weights,
+)
 from helpers.training.registry import get_supported_encoders
 
 
 @pytest.mark.parametrize(
     ("architecture", "expected_lr", "expected_weight_decay"),
     [
-        ("SWIN", 3e-4, 1e-4),
-        ("segformer", 1e-3, 1e-4),
-        ("DPT", 3e-4, 1e-4),
-        ("UPERNET", 2e-4, 1e-4),
+        ("SWIN", 1e-3, 1e-4),
+        ("segformer", 7e-4, 1e-4),
+        ("DPT", 5e-4, 1e-4),
+        ("UPERNET", 7e-4, 1e-4),
         ("DEEPLABV3PLUS", 1e-3, 1e-4),
-        ("UNET++", 5e-4, 1e-4),
-        ("FPN", 3e-4, 1e-4),
-        ("MANET", 4e-4, 1e-4),
+        ("UNET++", 2e-3, 1e-4),
+        ("FPN", 2e-3, 1e-4),
+        ("MANET", 5e-4, 1e-4),
     ],
 )
 def test_get_learning_rate_returns_existing_architecture_defaults(
@@ -45,7 +50,20 @@ def test_get_learning_rate_reads_from_registry_override(
 ) -> None:
     registry_path = tmp_path / "registry.json"
     registry_path.write_text(
-        json.dumps({"FPN": {"lr": 0.123, "wd": 0.456, "encoders": ["senet154"]}})
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 0.123,
+                    "wd": 0.456,
+                    "encoders": ["senet154"],
+                    "loss": {
+                        "alpha_bce": 0.1,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.3,
+                    },
+                }
+            }
+        )
     )
     monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
 
@@ -62,8 +80,37 @@ def test_get_learning_rate_rejects_malformed_registry(
     registry_path.write_text(json.dumps({"FPN": {"lr": 0.123, "encoders": ["senet154"]}}))
     monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
 
-    with pytest.raises(ValueError, match="must define 'lr', 'wd', and 'encoders'"):
+    with pytest.raises(ValueError, match="must define 'lr', 'wd', 'encoders', and 'loss'"):
         get_learning_rate("FPN")
+
+
+def test_get_loss_weights_reads_from_registry_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 0.123,
+                    "wd": 0.456,
+                    "encoders": ["senet154"],
+                    "loss": {
+                        "alpha_bce": 0.11,
+                        "beta_dice_bg": 0.22,
+                        "gamma_dice_fg": 0.33,
+                    },
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
+
+    loss_weights = get_loss_weights("FPN")
+
+    assert loss_weights.alpha_bce == 0.11
+    assert loss_weights.beta_dice_bg == 0.22
+    assert loss_weights.gamma_dice_fg == 0.33
 
 
 def test_get_supported_encoders_returns_approved_research_set() -> None:

@@ -2,7 +2,28 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class TrainingLossWeights:
+    """Per-architecture BCE+Dice loss weights."""
+
+    alpha_bce: float
+    beta_dice_bg: float
+    gamma_dice_fg: float
+
+
+@dataclass(frozen=True)
+class TrainingModelRegistryEntry:
+    """Normalized registry entry for one approved architecture."""
+
+    lr: float
+    wd: float
+    encoders: tuple[str, ...]
+    loss: TrainingLossWeights
+
 
 DEFAULT_MODEL_REGISTRY_PATH = (
     Path(__file__).resolve().parent.parent.parent / "training_model_registry.json"
@@ -16,7 +37,7 @@ def get_model_registry_path() -> Path:
     return Path(override_path) if override_path else DEFAULT_MODEL_REGISTRY_PATH
 
 
-def load_training_model_registry() -> dict[str, dict[str, object]]:
+def load_training_model_registry() -> dict[str, TrainingModelRegistryEntry]:
     """Load and validate the approved research architecture registry."""
 
     registry_path = get_model_registry_path()
@@ -30,11 +51,11 @@ def load_training_model_registry() -> dict[str, dict[str, object]]:
     if not isinstance(raw_registry, dict):
         raise ValueError("Training model registry must be a JSON object.")
 
-    registry: dict[str, dict[str, object]] = {}
+    registry: dict[str, TrainingModelRegistryEntry] = {}
     for architecture, config in raw_registry.items():
-        if not isinstance(config, dict) or not {"lr", "wd", "encoders"}.issubset(config):
+        if not isinstance(config, dict) or not {"lr", "wd", "encoders", "loss"}.issubset(config):
             raise ValueError(
-                f"Architecture '{architecture}' must define 'lr', 'wd', and 'encoders'."
+                f"Architecture '{architecture}' must define 'lr', 'wd', 'encoders', and 'loss'."
             )
         encoders = config["encoders"]
         if not isinstance(encoders, list) or not all(
@@ -43,11 +64,26 @@ def load_training_model_registry() -> dict[str, dict[str, object]]:
             raise ValueError(
                 f"Architecture '{architecture}' must define 'encoders' as a list of strings."
             )
-        registry[str(architecture).upper()] = {
-            "lr": float(config["lr"]),
-            "wd": float(config["wd"]),
-            "encoders": tuple(encoders),
-        }
+        loss = config["loss"]
+        if not isinstance(loss, dict) or not {
+            "alpha_bce",
+            "beta_dice_bg",
+            "gamma_dice_fg",
+        }.issubset(loss):
+            raise ValueError(
+                f"Architecture '{architecture}' must define 'loss' with "
+                "'alpha_bce', 'beta_dice_bg', and 'gamma_dice_fg'."
+            )
+        registry[str(architecture).upper()] = TrainingModelRegistryEntry(
+            lr=float(config["lr"]),
+            wd=float(config["wd"]),
+            encoders=tuple(encoders),
+            loss=TrainingLossWeights(
+                alpha_bce=float(loss["alpha_bce"]),
+                beta_dice_bg=float(loss["beta_dice_bg"]),
+                gamma_dice_fg=float(loss["gamma_dice_fg"]),
+            ),
+        )
 
     return registry
 
@@ -60,9 +96,17 @@ def get_supported_encoders(architecture: str) -> tuple[str, ...]:
         config = registry[architecture.upper()]
     except KeyError as error:
         raise ValueError(f"Unknown architecture: {architecture}") from error
-    encoders = config["encoders"]
-    assert isinstance(encoders, tuple)
-    return encoders
+    return config.encoders
+
+
+def get_training_model_registry_entry(architecture: str) -> TrainingModelRegistryEntry:
+    """Return the normalized registry entry for one approved architecture."""
+
+    registry = load_training_model_registry()
+    try:
+        return registry[architecture.upper()]
+    except KeyError as error:
+        raise ValueError(f"Unknown architecture: {architecture}") from error
 
 
 def validate_architecture_encoder_pair(architecture: str, encoder: str) -> None:

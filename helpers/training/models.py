@@ -7,20 +7,20 @@ import segmentation_models_pytorch as smp
 import torch
 from torch import nn
 
-from helpers.training.registry import load_training_model_registry
+from helpers.training.registry import TrainingLossWeights, get_training_model_registry_entry
 
 
 def get_learning_rate(architecture: str) -> tuple[float, float]:
     """Return the existing learning-rate and weight-decay defaults by architecture."""
 
-    configs = load_training_model_registry()
+    config = get_training_model_registry_entry(architecture)
+    return config.lr, config.wd
 
-    try:
-        config = configs[architecture.upper()]
-    except KeyError as error:
-        raise ValueError(f"Unknown architecture: {architecture}") from error
 
-    return cast(float, config["lr"]), cast(float, config["wd"])
+def get_loss_weights(architecture: str) -> TrainingLossWeights:
+    """Return the registry-defined BCE+Dice loss weights for an architecture."""
+
+    return get_training_model_registry_entry(architecture).loss
 
 
 def create_model(architecture: str, encoder: str, validation: bool = False) -> nn.Module:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterable, Sized
 from typing import Any
 
@@ -12,6 +13,12 @@ from helpers.training.metrics import (
     TrainingHealthTracker,
 )
 from helpers.training.runtime import autocast_ctx, setup_precision
+
+
+def _progress_file() -> Any:
+    """Use the real terminal stream so tqdm stays interactive under LoggerWriter."""
+
+    return sys.__stderr__
 
 
 def train_epoch(
@@ -46,7 +53,10 @@ def train_epoch(
         total=total_batches,
         desc=f"Train E{current_epoch + 1}",
         leave=False,
-        mininterval=10.0,
+        mininterval=0.5,
+        dynamic_ncols=True,
+        position=0,
+        file=_progress_file(),
     )
 
     for _, batch_data in pbar:
@@ -166,7 +176,15 @@ def validate_epoch(
     running_loss = 0.0
     num_samples_processed = 0
 
-    pbar = tqdm(dataloader, desc="Validate", leave=False)
+    pbar = tqdm(
+        dataloader,
+        desc="Validate",
+        leave=False,
+        mininterval=0.5,
+        dynamic_ncols=True,
+        position=1,
+        file=_progress_file(),
+    )
     with torch.inference_mode():
         for batch_data in pbar:
             if batch_data is None:

@@ -96,9 +96,6 @@ class TrainingEnsembleConfig:
     accumulation_steps: int
     val_batch_size: int
     optimizer_name: str
-    alpha_bce: float
-    beta_dice_bg: float
-    gamma_dice_fg: float
     sensitivity_target: float
     hdf5_drive_dir: Path
     metadata_dir: Path
@@ -201,17 +198,6 @@ def load_training_ensemble_config(
         ),
         val_batch_size=batch_size * val_batch_multiplier,
         optimizer_name=optimizer_name,
-        alpha_bce=_parse_float(values.get("TRAINING_ALPHA_BCE"), "TRAINING_ALPHA_BCE", 0.125),
-        beta_dice_bg=_parse_float(
-            values.get("TRAINING_BETA_DICE_BG"),
-            "TRAINING_BETA_DICE_BG",
-            0.157,
-        ),
-        gamma_dice_fg=_parse_float(
-            values.get("TRAINING_GAMMA_DICE_FG"),
-            "TRAINING_GAMMA_DICE_FG",
-            0.173,
-        ),
         sensitivity_target=_parse_float(
             values.get("TRAINING_SENSITIVITY_TARGET"),
             "TRAINING_SENSITIVITY_TARGET",

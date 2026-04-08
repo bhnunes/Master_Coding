@@ -4,16 +4,58 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from importlib import import_module
+from os import PathLike
 from typing import Any
 
 
-def create_email_body(checkpoint_path: str, encoder: str, architecture: str) -> str:
+def _format_metric(name: str, value: float | None) -> str:
+    """Format one optional metric line for email output."""
+
+    rendered = "n/a" if value is None else f"{value:.4f}"
+    return f"{name}: {rendered}"
+
+
+def create_email_body(
+    checkpoint_path: str,
+    encoder: str,
+    architecture: str,
+    val_loss: float | None,
+    val_auprc: float | None,
+    val_auroc: float | None,
+    val_mcc: float | None,
+    optimizer_name: str,
+    base_learning_rate: float,
+    weight_decay: float,
+    alpha_bce: float,
+    beta_dice_bg: float,
+    gamma_dice_fg: float,
+    use_artifact_aware_loss: bool,
+    artifact_index_path: str | PathLike[str] | None,
+) -> str:
     """Create the completion email body for a finished training run."""
 
+    artifact_index_display = (
+        os.fspath(artifact_index_path) if artifact_index_path is not None else "n/a"
+    )
+    artifact_mode_display = "enabled" if use_artifact_aware_loss else "disabled"
     return (
         f"Training {architecture} finished.\n\n"
         f"Checkpoint Path: {checkpoint_path}\n\n"
         f"--- ENCODER: {encoder} ---\n"
+        f"\nBest validation metrics\n"
+        f"{_format_metric('val_loss', val_loss)}\n"
+        f"{_format_metric('val_auprc', val_auprc)}\n"
+        f"{_format_metric('val_auroc', val_auroc)}\n"
+        f"{_format_metric('val_mcc', val_mcc)}\n"
+        f"\nRun settings\n"
+        f"optimizer: {optimizer_name}\n"
+        f"learning_rate: {base_learning_rate}\n"
+        f"weight_decay: {weight_decay}\n"
+        f"loss_alpha_bce: {alpha_bce}\n"
+        f"loss_beta_dice_bg: {beta_dice_bg}\n"
+        f"loss_gamma_dice_fg: {gamma_dice_fg}\n"
+        f"artifact_aware_loss: {artifact_mode_display}\n"
+        f"artifact_index_path: {artifact_index_display}\n"
     )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import traceback
 from dataclasses import dataclass
@@ -25,6 +26,12 @@ class EpochRunState:
     best: BestMetricState
     metadata_best_path: str
     amp_log: dict[str, str]
+
+
+def _progress_write(message: str) -> None:
+    """Write progress messages without breaking live tqdm rendering."""
+
+    print(message, file=sys.__stdout__)
 
 
 def build_run_hparams(
@@ -142,17 +149,18 @@ def run_training_epochs(
                     reason = "COLLAPSE"
                 elif health.epoch["val_invalid_metrics"] == 1:
                     reason = "INVALID_METRICS"
-                print(
+                _progress_write(
                     f"\n[Epoch {current_epoch_num}] Validation failed ({reason}). "
                     "Skipping checkpoint."
                 )
                 if health.should_emergency_stop():
-                    print("\n!!! EMERGENCY STOP !!!")
-                    print(f"Model collapsed {health.current_consecutive_collapses} times in a row.")
-                    print("Terminating training to save resources.")
+                    _progress_write("\n!!! EMERGENCY STOP !!!")
+                    _progress_write(
+                        f"Model collapsed {health.current_consecutive_collapses} times in a row."
+                    )
+                    _progress_write("Terminating training to save resources.")
                     training_successful = False
                     break
-                health.log_epoch(current_epoch_num)
                 continue
 
             health.reset_collapse_counter()
@@ -168,11 +176,12 @@ def run_training_epochs(
 
         epoch_duration = time.time() - epoch_start
         mins, secs = divmod(epoch_duration, 60)
-        print(
+        summary = (
             f"\nE{current_epoch_num}/{num_epochs} [{int(mins):02d}m{int(secs):02d}s] "
-            f"Tr L:{train_loss:.4f}|Val AUPRC:{val_auprc:.4f} "
-            f"AUROC:{val_auroc:.4f} MCC*:{val_mcc_star:.4f}"
+            f"TrL:{train_loss:.4f} | ValL:{val_loss:.4f} | "
+            f"AUPRC:{val_auprc:.4f} | AUROC:{val_auroc:.4f} | MCC*:{val_mcc_star:.4f}"
         )
+        _progress_write(summary)
 
         track_epoch_metrics_fn(
             run,
@@ -202,16 +211,22 @@ def run_training_epochs(
                     val_loss=val_loss,
                 )
                 metadata_best_path = str(early_stopping.output_best_model_path)
-                print(f"  >>> New Best Model! (AUPRC: {val_auprc:.4f})")
+                _progress_write(f"  >>> New Best Model! (AUPRC: {val_auprc:.4f})")
         except Exception as error:
             print(f"ES/Save Err: {error}")
 
         if not unleashed and bool(getattr(early_stopping, "early_stop", False)):
-            print(f"Early stopping E{current_epoch_num}.")
+            _progress_write(f"Early stopping E{current_epoch_num}.")
             break
 
-        print(f"Epoch {epoch} completed.")
-        health.log_epoch(current_epoch_num)
+        if health.epoch["train_skipped_batches"] or health.epoch["val_skipped_batches"]:
+            _progress_write(
+                f"[Health] Epoch {current_epoch_num} | "
+                f"Train skip={health.epoch['train_skipped_batches']} | "
+                f"Val skip={health.epoch['val_skipped_batches']} | "
+                f"Val collapsed={health.epoch['val_collapsed']} | "
+                f"Val invalid_metrics={health.epoch['val_invalid_metrics']}"
+            )
 
     return EpochRunState(
         training_successful=training_successful,
@@ -267,9 +282,21 @@ def finalize_training_artifacts(
 
     print("Emailing...")
     body = create_email_body_fn(
-        best_model_path,
-        save_metadata_kwargs["encoder"],
-        save_metadata_kwargs["architecture"],
+        checkpoint_path=best_model_path,
+        encoder=save_metadata_kwargs["encoder"],
+        architecture=save_metadata_kwargs["architecture"],
+        val_loss=best.val_loss,
+        val_auprc=best.val_auprc,
+        val_auroc=best.val_auroc,
+        val_mcc=best.val_mcc,
+        optimizer_name=str(save_metadata_kwargs.get("optimizer_name", "unknown")),
+        base_learning_rate=float(save_metadata_kwargs.get("base_learning_rate", 0.0)),
+        weight_decay=float(save_metadata_kwargs.get("weight_decay", 0.0)),
+        alpha_bce=float(save_metadata_kwargs.get("alpha_bce", 0.0)),
+        beta_dice_bg=float(save_metadata_kwargs.get("beta_dice_bg", 0.0)),
+        gamma_dice_fg=float(save_metadata_kwargs.get("gamma_dice_fg", 0.0)),
+        use_artifact_aware_loss=bool(save_metadata_kwargs.get("use_artifact_aware_loss", False)),
+        artifact_index_path=save_metadata_kwargs.get("artifact_index_path"),
     )
     send_email_fn(
         f"Finished: {experiment_name}",

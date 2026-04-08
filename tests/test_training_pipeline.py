@@ -128,8 +128,9 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
     def _save_metadata(**kwargs: Any) -> None:
         calls["metadata"] = kwargs
 
-    def _create_email_body(path: str, encoder: str, architecture: str) -> str:
-        return f"{path}|{encoder}|{architecture}"
+    def _create_email_body(**kwargs: Any) -> str:
+        calls["email_body"] = kwargs
+        return f"{kwargs['checkpoint_path']}|{kwargs['encoder']}|{kwargs['architecture']}"
 
     def _send_email(
         subject: str, body: str, sender: str, recipients: list[str], password: str
@@ -149,6 +150,14 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
             "architecture": "UNET++",
             "encoder": "resnet34",
             "metadata_dir": "meta",
+            "optimizer_name": "AdamW",
+            "base_learning_rate": 1e-3,
+            "weight_decay": 1e-4,
+            "alpha_bce": 0.6,
+            "beta_dice_bg": 0.2,
+            "gamma_dice_fg": 0.8,
+            "artifact_index_path": "artifact.parquet",
+            "use_artifact_aware_loss": True,
         },
         create_email_body_fn=_create_email_body,
         send_email_fn=_send_email,
@@ -162,6 +171,9 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
     assert calls["load"] == str(checkpoint_path)
     assert calls["metadata"]["best_val_score"] == 0.8
     assert calls["email"][0] == "Finished: exp"
+    assert calls["email_body"]["val_auprc"] == 0.8
+    assert calls["email_body"]["val_loss"] == 0.3
+    assert calls["email_body"]["use_artifact_aware_loss"] is True
 
 
 def test_run_training_epochs_stops_when_training_step_raises() -> None:
@@ -252,7 +264,9 @@ def test_finalize_training_artifacts_uses_fallback_checkpoint(tmp_path: Path) ->
             "encoder": "resnet34",
             "metadata_dir": "meta",
         },
-        create_email_body_fn=lambda path, encoder, architecture: f"{path}|{encoder}|{architecture}",
+        create_email_body_fn=lambda **kwargs: (
+            f"{kwargs['checkpoint_path']}|{kwargs['encoder']}|{kwargs['architecture']}"
+        ),
         send_email_fn=lambda *args: calls.setdefault("email", args),
         email_sender="sender@example.com",
         email_recipients=["a@example.com"],

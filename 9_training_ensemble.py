@@ -33,7 +33,12 @@ from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.loop import train_epoch, validate_epoch
 from helpers.training.losses import BCEDiceHybridLossPaper
 from helpers.training.metrics import TrainingHealthTracker
-from helpers.training.models import create_model, create_optimizer, get_learning_rate
+from helpers.training.models import (
+    create_model,
+    create_optimizer,
+    get_learning_rate,
+    get_loss_weights,
+)
 from helpers.training.pipeline import (
     build_run_hparams,
     finalize_training_artifacts,
@@ -98,12 +103,6 @@ optimizer_name = training_config.optimizer_name
 # =============================================================================
 # 5) Loss Function (from Khened et al., Scientific Reports 2021)
 # =============================================================================
-# Hybrid BCE + Dice loss weights
-alpha_bce = training_config.alpha_bce
-beta_dice_bg = training_config.beta_dice_bg
-gamma_dice_fg = training_config.gamma_dice_fg
-
-
 # =============================================================================
 # 7) Dataset & Normalization
 # =============================================================================
@@ -135,6 +134,7 @@ execution_mode = training_config.execution_mode
 smart_sampling = training_config.smart_sampling
 use_artifact_aware_loss = training_config.use_artifact_aware_loss
 artifact_index_path = training_config.artifact_index_path
+effective_artifact_index_path = artifact_index_path if use_artifact_aware_loss else None
 
 subset_ratio = 1.0
 use_subset = False
@@ -196,8 +196,8 @@ try:
     # Note: Ensure your preprocessing script included "patient_ids" in the HDF5
     # for the leakage check below to function.
     artifact_coverage_by_filename = (
-        load_artifact_coverage_lookup(str(artifact_index_path))
-        if use_artifact_aware_loss and artifact_index_path is not None
+        load_artifact_coverage_lookup(str(effective_artifact_index_path))
+        if effective_artifact_index_path is not None
         else None
     )
     full_train_ds_h5 = HybridProstateDataset(
@@ -308,6 +308,10 @@ gpu_downscale = GPUDownscale(p=0.07).to(device)
 for architecture, encoder, resume_checkpoint_path in [selected_run]:
     health = TrainingHealthTracker(name=f"{architecture}_{encoder}")
     base_learning_rate, weight_decay = get_learning_rate(architecture)
+    loss_weights = get_loss_weights(architecture)
+    alpha_bce = loss_weights.alpha_bce
+    beta_dice_bg = loss_weights.beta_dice_bg
+    gamma_dice_fg = loss_weights.gamma_dice_fg
 
     # --- Init Aim Run ---
     experiment_name = f"{identifier}_{architecture}_{encoder}_{get_formatted_datetime_string()}"
@@ -377,7 +381,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
     expected_compatibility_signature = build_training_compatibility_signature(
         dataset=train_h5_path,
         validation_dataset=val_h5_path,
-        artifact_index_path=artifact_index_path,
+        artifact_index_path=effective_artifact_index_path,
     )
 
     start_epoch = load_checkpoint_for_resume(
@@ -478,7 +482,8 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
                 "beta_dice_bg": beta_dice_bg,
                 "gamma_dice_fg": gamma_dice_fg,
                 "execution_mode": execution_mode,
-                "artifact_index_path": artifact_index_path,
+                "artifact_index_path": effective_artifact_index_path,
+                "use_artifact_aware_loss": use_artifact_aware_loss,
                 "resume_checkpoint": full_resume_checkpoint_path,
             },
             create_email_body_fn=create_email_body,

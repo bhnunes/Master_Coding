@@ -8,6 +8,7 @@ import pytest
 from helpers.training.registry import (
     DEFAULT_MODEL_REGISTRY_PATH,
     get_model_registry_path,
+    get_training_model_registry_entry,
     load_training_model_registry,
     validate_architecture_encoder_pair,
 )
@@ -66,7 +67,20 @@ def test_load_training_model_registry_rejects_non_string_encoders(
 ) -> None:
     registry_path = tmp_path / "invalid.json"
     registry_path.write_text(
-        json.dumps({"FPN": {"lr": 0.1, "wd": 0.01, "encoders": ["resnet34", 5]}}),
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 0.1,
+                    "wd": 0.01,
+                    "encoders": ["resnet34", 5],
+                    "loss": {
+                        "alpha_bce": 0.1,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.3,
+                    },
+                }
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
@@ -75,19 +89,103 @@ def test_load_training_model_registry_rejects_non_string_encoders(
         load_training_model_registry()
 
 
+def test_load_training_model_registry_rejects_missing_loss_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "invalid.json"
+    registry_path.write_text(
+        json.dumps({"FPN": {"lr": 0.1, "wd": 0.01, "encoders": ["resnet34"]}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
+
+    with pytest.raises(ValueError, match="must define 'lr', 'wd', 'encoders', and 'loss'"):
+        load_training_model_registry()
+
+
+def test_load_training_model_registry_rejects_missing_loss_weight_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "invalid.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 0.1,
+                    "wd": 0.01,
+                    "encoders": ["resnet34"],
+                    "loss": {"alpha_bce": 0.2},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
+
+    with pytest.raises(ValueError, match="must define 'loss' with"):
+        load_training_model_registry()
+
+
 def test_load_training_model_registry_normalizes_keys_and_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     registry_path = tmp_path / "valid.json"
     registry_path.write_text(
-        json.dumps({"fpn": {"lr": 0.123, "wd": 0.456, "encoders": ["resnet34"]}}),
+        json.dumps(
+            {
+                "fpn": {
+                    "lr": 0.123,
+                    "wd": 0.456,
+                    "encoders": ["resnet34"],
+                    "loss": {
+                        "alpha_bce": 0.1,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.3,
+                    },
+                }
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
 
     registry = load_training_model_registry()
 
-    assert registry == {"FPN": {"lr": 0.123, "wd": 0.456, "encoders": ("resnet34",)}}
+    assert registry["FPN"].lr == 0.123
+    assert registry["FPN"].wd == 0.456
+    assert registry["FPN"].encoders == ("resnet34",)
+    assert registry["FPN"].loss.alpha_bce == 0.1
+    assert registry["FPN"].loss.beta_dice_bg == 0.2
+    assert registry["FPN"].loss.gamma_dice_fg == 0.3
+
+
+def test_get_training_model_registry_entry_returns_normalized_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "valid.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "fpn": {
+                    "lr": 0.123,
+                    "wd": 0.456,
+                    "encoders": ["resnet34"],
+                    "loss": {
+                        "alpha_bce": 0.1,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.3,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
+
+    entry = get_training_model_registry_entry("FPN")
+
+    assert entry.lr == 0.123
+    assert entry.loss.gamma_dice_fg == 0.3
 
 
 def test_validate_architecture_encoder_pair_rejects_unapproved_encoder() -> None:

@@ -14,11 +14,30 @@ from helpers.training.reporting import (
 
 
 def test_create_email_body_includes_checkpoint_and_encoder() -> None:
-    body = create_email_body("/tmp/best.pth", "resnet34", "UNET++")
+    body = create_email_body(
+        checkpoint_path="/tmp/best.pth",
+        encoder="resnet34",
+        architecture="UNET++",
+        val_loss=0.2,
+        val_auprc=0.8,
+        val_auroc=0.7,
+        val_mcc=0.6,
+        optimizer_name="AdamW",
+        base_learning_rate=1e-3,
+        weight_decay=1e-4,
+        alpha_bce=0.1,
+        beta_dice_bg=0.2,
+        gamma_dice_fg=0.3,
+        use_artifact_aware_loss=True,
+        artifact_index_path="/tmp/artifacts.parquet",
+    )
 
     assert "UNET++" in body
     assert "resnet34" in body
     assert "/tmp/best.pth" in body
+    assert "val_auprc: 0.8000" in body
+    assert "loss_gamma_dice_fg: 0.3" in body
+    assert "artifact_aware_loss: enabled" in body
 
 
 def test_send_email_uses_smtp_ssl(monkeypatch: Any) -> None:
