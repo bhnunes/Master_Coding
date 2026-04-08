@@ -416,6 +416,7 @@ def save_metadata(
     beta_dice_bg: float,
     gamma_dice_fg: float,
     execution_mode: str | None = None,
+    use_artifact_aware_loss: bool = False,
     artifact_index_path: str | os.PathLike[str] | None = None,
     resume_checkpoint: str | os.PathLike[str] | None = None,
 ) -> None:
@@ -441,6 +442,7 @@ def save_metadata(
         "architecture": architecture,
         "runtime_environment": collect_runtime_environment(),
         "execution_mode": execution_mode,
+        "use_artifact_aware_loss": use_artifact_aware_loss,
         "compatibility_signature": compatibility_signature,
         "provenance": provenance,
         "artifact_index_path": (

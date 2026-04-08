@@ -323,12 +323,14 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
         beta_dice_bg=0.2,
         gamma_dice_fg=0.8,
         execution_mode="PAPER",
+        use_artifact_aware_loss=True,
         artifact_index_path=artifact_index_path,
         resume_checkpoint="resume.pth",
     )
 
     payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
     assert payload["execution_mode"] == "PAPER"
+    assert payload["use_artifact_aware_loss"] is True
     assert payload["artifact_index_path"] == str(artifact_index_path)
     assert payload["resume_checkpoint"] == "resume.pth"
     assert "git_commit" in payload["runtime_environment"]
