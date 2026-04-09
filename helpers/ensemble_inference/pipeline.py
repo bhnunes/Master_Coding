@@ -19,6 +19,7 @@ from helpers.ensemble_inference.reporting import (
     render_scientific_analysis_report,
     save_confusion_matrix_png,
     write_ensemble_report_latex,
+    write_ensemble_report_markdown,
 )
 from helpers.provenance import (
     collect_hdf5_provenance,
@@ -76,6 +77,7 @@ class EnsembleInferenceOutputs:
     recipe_copy_path: Path
     metrics_json_path: Path
     confusion_matrix_path: Path
+    markdown_report_path: Path
     csv_report_path: Path | None
     latex_report_path: Path | None
     pdf_report_path: Path | None
@@ -179,6 +181,14 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         int(confusion.get("tn", 0)),
         output_dir / "confusion_matrix.png",
     )
+    markdown_report_path = write_ensemble_report_markdown(
+        ensemble_recipe=recipe_payload,
+        ensemble_metrics=metrics,
+        train_mean=IMAGENET_MEAN,
+        train_std=IMAGENET_STD,
+        output_dir=output_dir,
+        timestamp=timestamp,
+    )
 
     csv_report_path: Path | None = None
     if config.export_csv:
@@ -238,6 +248,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
             "observed_checkpoint_hashes": observed_checkpoint_hashes,
             "metrics_json_path": str(metrics_json_path),
             "confusion_matrix_path": str(confusion_matrix_path),
+            "markdown_report_path": str(markdown_report_path),
             "csv_report_path": str(csv_report_path) if csv_report_path is not None else None,
             "latex_report_path": str(latex_report_path) if latex_report_path is not None else None,
             "pdf_report_path": str(pdf_report_path) if pdf_report_path is not None else None,
@@ -250,6 +261,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         recipe_copy_path=recipe_copy_path,
         metrics_json_path=metrics_json_path,
         confusion_matrix_path=confusion_matrix_path,
+        markdown_report_path=markdown_report_path,
         csv_report_path=csv_report_path,
         latex_report_path=latex_report_path,
         pdf_report_path=pdf_report_path,

@@ -45,6 +45,7 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
             recipe_copy_path=recipe_copy_path,
             metrics_json_path=output_dir / "metrics.json",
             confusion_matrix_path=output_dir / "confusion_matrix.png",
+            markdown_report_path=output_dir / "report.md",
             csv_report_path=output_dir / "report.csv",
             latex_report_path=output_dir / "report.tex",
             pdf_report_path=output_dir / "report.pdf",
@@ -58,6 +59,7 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
     assert "runtime_environment" in payload
     assert "git_commit" in payload["runtime_environment"]
     assert outputs.recipe_copy_path.name == "recipe.json"
+    assert outputs.markdown_report_path.name == "report.md"
 
 
 def test_execute_pipeline_rejects_checkpoint_hash_mismatch(

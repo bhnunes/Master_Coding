@@ -29,6 +29,7 @@ def main() -> None:
     print(f"Run config saved to: {outputs.run_config_path}")
     print(f"Metrics JSON saved to: {outputs.metrics_json_path}")
     print(f"Confusion matrix saved to: {outputs.confusion_matrix_path}")
+    print(f"Markdown report saved to: {outputs.markdown_report_path}")
     if outputs.csv_report_path is not None:
         print(f"CSV report saved to: {outputs.csv_report_path}")
     if outputs.pdf_report_path is not None:

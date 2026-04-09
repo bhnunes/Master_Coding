@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from helpers.ensemble_inference.reporting import (
     export_results_to_csv,
     write_ensemble_report_latex,
+    write_ensemble_report_markdown,
 )
 
 
@@ -32,6 +35,7 @@ def _sample_metrics() -> dict[str, object]:
         "micro_averaged_metrics": {"point_estimate": point_estimate, "ci": ci},
         "macro_averaged_metrics": {"point_estimate": point_estimate, "ci": ci},
         "auc": 0.91,
+        "confusion_matrix": {"tp": 8, "fp": 2, "fn": 1, "tn": 9},
         "bootstrap": {"ran": True, "n_patients": 24, "n_bootstrap_samples": 10000, "seed": 24},
         "macro_dice_rule6_split": {
             "dice_pos_only": {"point_estimate": 0.88, "ci": [0.82, 0.9]},
@@ -82,3 +86,39 @@ def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:
     assert pdf_path.exists()
     assert "Ensemble Final Evaluation Report" in tex_path.read_text(encoding="utf-8")
     assert "Decision Threshold" in tex_path.read_text(encoding="utf-8")
+
+
+def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "ARTIFACT_DEVICE=cuda\n"
+        "WINDOW_SIZE=224\n"
+        "ARTIFACT_IMAGES_ZIP=./data/slides.zip\n"
+        "HF_TOKEN=secret\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    markdown_path = write_ensemble_report_markdown(
+        ensemble_recipe=_sample_recipe(),
+        ensemble_metrics=_sample_metrics(),
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        output_dir=tmp_path,
+        timestamp="2026-03-20_12_00_00",
+    )
+
+    contents = markdown_path.read_text(encoding="utf-8")
+
+    assert markdown_path.exists()
+    assert "# Ensemble Final Evaluation Report" in contents
+    assert "## Final Metrics (Micro / Pixel-Level)" in contents
+    assert "## Environment Variables Used For This Project" in contents
+    assert "| ARTIFACT_DEVICE | cuda |" in contents
+    assert "| WINDOW_SIZE | 224 |" in contents
+    assert "Pred NoCancer" in contents
+    assert "![" not in contents
+    assert "ARTIFACT_IMAGES_ZIP" not in contents
+    assert "HF_TOKEN" not in contents
