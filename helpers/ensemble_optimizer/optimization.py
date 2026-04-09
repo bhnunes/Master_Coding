@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import gc
 import json
+import logging
 import shutil
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +29,70 @@ from helpers.ensemble_optimizer.splitting import (
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import autocast_ctx, setup_precision
 from helpers.training.utils import clear_gpu
+
+LOGGER = logging.getLogger(__name__)
+_PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+
+
+def _progress_file() -> Any:
+    """Use the real terminal stream so tqdm stays interactive under LoggerWriter."""
+
+    return sys.__stderr__
+
+
+def _progress_disabled() -> bool:
+    isatty = getattr(_progress_file(), "isatty", None)
+    return not bool(isatty() if callable(isatty) else False)
+
+
+class _StudyProgressCallback:
+    """Advance a tqdm bar once per finished Optuna trial."""
+
+    def __init__(self, progress_bar: tqdm[Any]) -> None:
+        self._progress_bar = progress_bar
+
+    def __call__(self, study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        del trial
+        self._progress_bar.update(1)
+        best_trial = getattr(study, "best_trial", None)
+        best_value = getattr(study, "best_value", None) if best_trial is not None else None
+        completed = len(
+            [
+                finished_trial
+                for finished_trial in getattr(study, "trials", [])
+                if finished_trial.state == optuna.trial.TrialState.COMPLETE
+            ]
+        )
+        pruned = len(
+            [
+                finished_trial
+                for finished_trial in getattr(study, "trials", [])
+                if finished_trial.state == optuna.trial.TrialState.PRUNED
+            ]
+        )
+        postfix = {
+            "done": str(completed),
+            "pruned": str(pruned),
+        }
+        if best_value is not None and np.isfinite(best_value):
+            postfix["best"] = f"{best_value:.4f}"
+        self._progress_bar.set_postfix(postfix)
+
+
+def _optuna_callbacks(progress_bar: tqdm[Any] | None) -> list[_StudyProgressCallback]:
+    if progress_bar is None:
+        return []
+    return [_StudyProgressCallback(progress_bar)]
+
+
+def _set_optuna_warning_verbosity() -> int:
+    current_verbosity = int(optuna.logging.get_verbosity())
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    return current_verbosity
+
+
+def _restore_optuna_verbosity(previous_verbosity: int) -> None:
+    optuna.logging.set_verbosity(previous_verbosity)
 
 
 @dataclass(frozen=True)
@@ -162,44 +228,63 @@ def cache_predictions_sequential(
 
     first_pass = True
     last_written = 0
-    for model_index, model in enumerate(models):
-        architecture = str(getattr(model, "arch_name", "UNK"))
-        prediction_path = cache_dir / f"pred_{model_index}.dat"
-        prediction_memmap = np.memmap(
-            prediction_path,
-            dtype="uint16",
-            mode="w+",
-            shape=(total_samples, height, width),
-        )
-        write_position = 0
-        for batch in tqdm(dataloader, desc=f"Infer {architecture}"):
-            if batch is None:
-                continue
-            batch_images, batch_masks, batch_patient_ids = batch
-            batch_size = int(batch_images.shape[0])
+    try:
+        total_batches = len(dataloader)
+    except TypeError:
+        total_batches = None
+    total_steps = len(models) * total_batches if total_batches is not None else None
+    with tqdm(
+        total=total_steps,
+        desc="Cache preds",
+        leave=False,
+        mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+        dynamic_ncols=True,
+        file=_progress_file(),
+        disable=_progress_disabled(),
+    ) as progress_bar:
+        for model_index, model in enumerate(models):
+            architecture = str(getattr(model, "arch_name", "UNK"))
+            progress_bar.set_postfix(
+                {"model": f"{model_index + 1}/{len(models)}", "arch": architecture}
+            )
+            prediction_path = cache_dir / f"pred_{model_index}.dat"
+            prediction_memmap = np.memmap(
+                prediction_path,
+                dtype="uint16",
+                mode="w+",
+                shape=(total_samples, height, width),
+            )
+            write_position = 0
+            for batch in dataloader:
+                if batch is None:
+                    progress_bar.update(1)
+                    continue
+                batch_images, batch_masks, batch_patient_ids = batch
+                batch_size = int(batch_images.shape[0])
+                if first_pass:
+                    trues_memmap[write_position : write_position + batch_size] = cast(
+                        npt.NDArray[np.uint8],
+                        batch_masks[:, 1, :, :].cpu().numpy().astype("uint8"),
+                    )
+                    patient_ids.extend(str(patient_id) for patient_id in batch_patient_ids)
+                batch_images = normalizer(batch_images.to(device))
+                predictions = predict_with_tta_batched(model, batch_images, architecture)
+                predictions_np = predictions.detach().float().cpu().numpy()
+                predictions_np = np.nan_to_num(predictions_np, nan=0.0, posinf=1.0, neginf=0.0)
+                predictions_np = np.clip(predictions_np, 0.0, 1.0)
+                prediction_memmap[write_position : write_position + batch_size] = (
+                    predictions_np * 65535
+                ).astype(np.uint16)
+                write_position += batch_size
+                progress_bar.update(1)
+            prediction_memmap.flush()
+            model.cpu()
+            clear_gpu()
+            prediction_paths.append(prediction_path)
+            last_written = write_position
             if first_pass:
-                trues_memmap[write_position : write_position + batch_size] = cast(
-                    npt.NDArray[np.uint8],
-                    batch_masks[:, 1, :, :].cpu().numpy().astype("uint8"),
-                )
-                patient_ids.extend(str(patient_id) for patient_id in batch_patient_ids)
-            batch_images = normalizer(batch_images.to(device))
-            predictions = predict_with_tta_batched(model, batch_images, architecture)
-            predictions_np = predictions.detach().float().cpu().numpy()
-            predictions_np = np.nan_to_num(predictions_np, nan=0.0, posinf=1.0, neginf=0.0)
-            predictions_np = np.clip(predictions_np, 0.0, 1.0)
-            prediction_memmap[write_position : write_position + batch_size] = (
-                predictions_np * 65535
-            ).astype(np.uint16)
-            write_position += batch_size
-        prediction_memmap.flush()
-        model.cpu()
-        clear_gpu()
-        prediction_paths.append(prediction_path)
-        last_written = write_position
-        if first_pass:
-            trues_memmap.flush()
-            first_pass = False
+                trues_memmap.flush()
+                first_pass = False
 
     if last_written != total_samples:
         raise RuntimeError(
@@ -368,6 +453,7 @@ def run_two_stream_optimization(
     device: torch.device,
     predefined_split: HoldoutSplit | None = None,
 ) -> OptimizationResult:
+    LOGGER.info("Caching ensemble predictions for %s models.", len(models))
     prediction_paths, _, pids_path, total_samples, height, width, truth_memmap = (
         cache_predictions_sequential(
             models,
@@ -420,6 +506,17 @@ def run_two_stream_optimization(
         raise ValueError("No semantic models found based on configuration.")
     if not spatial_indices:
         spatial_indices = semantic_indices.copy()
+
+    LOGGER.info(
+        "Prediction cache ready: %s samples across %s patients.",
+        total_samples,
+        len(patient_map),
+    )
+    LOGGER.info(
+        "Stream allocation: semantic=%s, spatial=%s.",
+        len(semantic_indices),
+        len(spatial_indices),
+    )
 
     optimization_truth = truth_memmap[optimization_idx].astype(np.uint8)
 
@@ -476,93 +573,165 @@ def run_two_stream_optimization(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    semantic_study = optuna.create_study(
-        direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=config.seed),
-    )
-    semantic_study.optimize(objective_semantic, n_trials=config.num_trials_semantic)
-    best_semantic_weights = _normalize_weights(
-        [semantic_study.best_params.get(f"w_sem_{i}", 0.0) for i in range(len(semantic_indices))]
-    )
-    best_roi_threshold = float(semantic_study.best_params["roi_thresh"])
-
-    fixed_roi_mask = np.zeros((len(optimization_idx), height, width), dtype=np.uint8)
-    chunk_size = 2048
-    for start in range(0, len(optimization_idx), chunk_size):
-        stop = min(start + chunk_size, len(optimization_idx))
-        chunk_global_indices = optimization_idx[start:stop]
-        chunk_u16 = [prediction_memmaps[index][chunk_global_indices] for index in semantic_indices]
-        chunk_probs = _weighted_ensemble_from_u16_cache(chunk_u16, best_semantic_weights)
-        chunk_roi = generate_roi_batch(
-            torch.from_numpy(chunk_probs),
-            config.roi_context_scale,
-            best_roi_threshold,
+    previous_optuna_verbosity = _set_optuna_warning_verbosity()
+    try:
+        semantic_study = optuna.create_study(
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=config.seed),
         )
-        fixed_roi_mask[start:stop] = chunk_roi.numpy().astype(np.uint8)
-
-    def objective_spatial(trial: optuna.Trial) -> float:
-        weights = _normalize_weights(
-            [trial.suggest_float(f"w_spa_{i}", 0.0, 1.0) for i in range(len(spatial_indices))]
+        LOGGER.info(
+            "Optimizing semantic stream over %s patients with %s trials.",
+            len(optimization_patients),
+            config.num_trials_semantic,
         )
-        positive_auprc_total = 0.0
-        spill_total = 0.0
-        evaluated_patients = 0
-        evaluated_positive_patients = 0
-        negative_fp_total = 0.0
-        evaluated_negative_patients = 0
-        for patient_id in optimization_patients:
-            local_slice = optimization_local_map[patient_id]
-            patient_truth = optimization_truth[local_slice]
-            patient_roi = fixed_roi_mask[local_slice]
-            is_positive_patient = bool(np.sum(patient_truth) > 0)
-            if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
-                continue
-            global_indices = optimization_idx[local_slice]
-            patient_u16 = [prediction_memmaps[index][global_indices] for index in spatial_indices]
-            patient_prediction = _weighted_ensemble_from_u16_cache(patient_u16, weights)
-            if is_positive_patient:
-                positive_auprc_total += compute_patient_auprc_in_roi(
-                    patient_truth.ravel(),
-                    patient_prediction.ravel(),
-                    patient_roi.ravel(),
+        with tqdm(
+            total=config.num_trials_semantic,
+            desc="Semantic opt",
+            leave=False,
+            mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+            dynamic_ncols=True,
+            file=_progress_file(),
+            disable=_progress_disabled(),
+        ) as semantic_progress:
+            semantic_study.optimize(
+                objective_semantic,
+                n_trials=config.num_trials_semantic,
+                callbacks=_optuna_callbacks(semantic_progress),
+            )
+        LOGGER.info(
+            "Semantic optimization complete: best_roi_threshold=%.4f best_objective=%.4f.",
+            float(semantic_study.best_params["roi_thresh"]),
+            float(getattr(semantic_study, "best_value", 0.0)),
+        )
+        best_semantic_weights = _normalize_weights(
+            [
+                semantic_study.best_params.get(f"w_sem_{i}", 0.0)
+                for i in range(len(semantic_indices))
+            ]
+        )
+        best_roi_threshold = float(semantic_study.best_params["roi_thresh"])
+
+        fixed_roi_mask = np.zeros((len(optimization_idx), height, width), dtype=np.uint8)
+        chunk_size = 2048
+        roi_chunk_count = max(1, int(np.ceil(len(optimization_idx) / chunk_size)))
+        LOGGER.info("Building fixed ROI mask over %s chunk(s).", roi_chunk_count)
+        with tqdm(
+            total=roi_chunk_count,
+            desc="Build ROI",
+            leave=False,
+            mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+            dynamic_ncols=True,
+            file=_progress_file(),
+            disable=_progress_disabled() or roi_chunk_count <= 1,
+        ) as roi_progress:
+            for start in range(0, len(optimization_idx), chunk_size):
+                stop = min(start + chunk_size, len(optimization_idx))
+                chunk_global_indices = optimization_idx[start:stop]
+                chunk_u16 = [
+                    prediction_memmaps[index][chunk_global_indices] for index in semantic_indices
+                ]
+                chunk_probs = _weighted_ensemble_from_u16_cache(chunk_u16, best_semantic_weights)
+                chunk_roi = generate_roi_batch(
+                    torch.from_numpy(chunk_probs),
+                    config.roi_context_scale,
+                    best_roi_threshold,
                 )
-                evaluated_positive_patients += 1
-            else:
-                negative_fp_total += _compute_negative_false_positive_mass(
-                    patient_prediction,
-                    patient_truth,
-                )
-                evaluated_negative_patients += 1
-            mass_total = float(np.sum(patient_prediction) + 1e-7)
-            mass_outside = float(np.sum(patient_prediction * (1 - patient_roi)))
-            spill_total += mass_outside / mass_total
-            evaluated_patients += 1
-        if evaluated_patients == 0:
-            return 0.0
-        macro_positive_auprc = (
-            positive_auprc_total / evaluated_positive_patients
-            if evaluated_positive_patients > 0
-            else 0.0
-        )
-        macro_spill = spill_total / evaluated_patients
-        macro_negative_fp = (
-            negative_fp_total / evaluated_negative_patients
-            if evaluated_negative_patients > 0
-            else 0.0
-        )
-        return float(
-            macro_positive_auprc
-            - (config.spill_penalty_lambda * macro_spill)
-            - (config.spill_penalty_lambda * macro_negative_fp)
-        )
+                fixed_roi_mask[start:stop] = chunk_roi.numpy().astype(np.uint8)
+                roi_progress.update(1)
 
-    spatial_study = optuna.create_study(
-        direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=config.seed),
-    )
-    spatial_study.optimize(objective_spatial, n_trials=config.num_trials_spatial)
-    best_spatial_weights = _normalize_weights(
-        [spatial_study.best_params.get(f"w_spa_{i}", 0.0) for i in range(len(spatial_indices))]
+        def objective_spatial(trial: optuna.Trial) -> float:
+            weights = _normalize_weights(
+                [trial.suggest_float(f"w_spa_{i}", 0.0, 1.0) for i in range(len(spatial_indices))]
+            )
+            positive_auprc_total = 0.0
+            spill_total = 0.0
+            evaluated_patients = 0
+            evaluated_positive_patients = 0
+            negative_fp_total = 0.0
+            evaluated_negative_patients = 0
+            for patient_id in optimization_patients:
+                local_slice = optimization_local_map[patient_id]
+                patient_truth = optimization_truth[local_slice]
+                patient_roi = fixed_roi_mask[local_slice]
+                is_positive_patient = bool(np.sum(patient_truth) > 0)
+                if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
+                    continue
+                global_indices = optimization_idx[local_slice]
+                patient_u16 = [
+                    prediction_memmaps[index][global_indices] for index in spatial_indices
+                ]
+                patient_prediction = _weighted_ensemble_from_u16_cache(patient_u16, weights)
+                if is_positive_patient:
+                    positive_auprc_total += compute_patient_auprc_in_roi(
+                        patient_truth.ravel(),
+                        patient_prediction.ravel(),
+                        patient_roi.ravel(),
+                    )
+                    evaluated_positive_patients += 1
+                else:
+                    negative_fp_total += _compute_negative_false_positive_mass(
+                        patient_prediction,
+                        patient_truth,
+                    )
+                    evaluated_negative_patients += 1
+                mass_total = float(np.sum(patient_prediction) + 1e-7)
+                mass_outside = float(np.sum(patient_prediction * (1 - patient_roi)))
+                spill_total += mass_outside / mass_total
+                evaluated_patients += 1
+            if evaluated_patients == 0:
+                return 0.0
+            macro_positive_auprc = (
+                positive_auprc_total / evaluated_positive_patients
+                if evaluated_positive_patients > 0
+                else 0.0
+            )
+            macro_spill = spill_total / evaluated_patients
+            macro_negative_fp = (
+                negative_fp_total / evaluated_negative_patients
+                if evaluated_negative_patients > 0
+                else 0.0
+            )
+            return float(
+                macro_positive_auprc
+                - (config.spill_penalty_lambda * macro_spill)
+                - (config.spill_penalty_lambda * macro_negative_fp)
+            )
+
+        spatial_study = optuna.create_study(
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=config.seed),
+        )
+        LOGGER.info(
+            "Optimizing spatial stream with policy=%s and %s trials.",
+            config.spatial_patient_policy,
+            config.num_trials_spatial,
+        )
+        with tqdm(
+            total=config.num_trials_spatial,
+            desc="Spatial opt",
+            leave=False,
+            mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+            dynamic_ncols=True,
+            file=_progress_file(),
+            disable=_progress_disabled(),
+        ) as spatial_progress:
+            spatial_study.optimize(
+                objective_spatial,
+                n_trials=config.num_trials_spatial,
+                callbacks=_optuna_callbacks(spatial_progress),
+            )
+        LOGGER.info(
+            "Spatial optimization complete: best_objective=%.4f.",
+            float(getattr(spatial_study, "best_value", 0.0)),
+        )
+        best_spatial_weights = _normalize_weights(
+            [spatial_study.best_params.get(f"w_spa_{i}", 0.0) for i in range(len(spatial_indices))]
+        )
+    finally:
+        _restore_optuna_verbosity(previous_optuna_verbosity)
+    LOGGER.info(
+        "Calibrating decision threshold on %s patients.",
+        len(calibration_patients),
     )
     decision_threshold, calibration_metrics = _calibrate_decision_threshold(
         patient_ids=calibration_patients,
@@ -576,6 +745,11 @@ def run_two_stream_optimization(
         spatial_weights=best_spatial_weights,
         roi_context_scale=config.roi_context_scale,
         roi_threshold=best_roi_threshold,
+    )
+    LOGGER.info(
+        "Calibration complete: threshold=%.4f best_mcc=%.4f.",
+        decision_threshold,
+        float(cast(float, calibration_metrics.get("Calibration_best_mcc", 0.0))),
     )
 
     def compute_ensemble_iterative(
@@ -602,54 +776,65 @@ def run_two_stream_optimization(
     evaluated_negative_patients = 0
     positive_patient_count = 0
     negative_patient_count = 0
-    for patient_id in tqdm(holdout_patients, desc="Eval Holdout"):
-        gc.collect()
-        local_slice = holdout_local_map[patient_id]
-        global_indices = holdout_idx[local_slice]
-        if len(global_indices) == 0:
-            continue
-        semantic_prediction = compute_ensemble_iterative(
-            semantic_indices,
-            best_semantic_weights,
-            global_indices,
-        )
-        roi_mask = (
-            generate_roi_batch(
-                torch.from_numpy(semantic_prediction),
-                config.roi_context_scale,
-                best_roi_threshold,
+    LOGGER.info("Evaluating holdout set across %s patients.", len(holdout_patients))
+    with tqdm(
+        holdout_patients,
+        total=len(holdout_patients),
+        desc="Eval holdout",
+        leave=False,
+        mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+        dynamic_ncols=True,
+        file=_progress_file(),
+        disable=_progress_disabled(),
+    ) as holdout_progress:
+        for patient_id in holdout_progress:
+            gc.collect()
+            local_slice = holdout_local_map[patient_id]
+            global_indices = holdout_idx[local_slice]
+            if len(global_indices) == 0:
+                continue
+            semantic_prediction = compute_ensemble_iterative(
+                semantic_indices,
+                best_semantic_weights,
+                global_indices,
             )
-            .numpy()
-            .astype(np.uint8)
-        )
-        spatial_prediction = compute_ensemble_iterative(
-            spatial_indices, best_spatial_weights, global_indices
-        )
-        patient_truth = truth_memmap[global_indices].astype(np.uint8)
-        is_positive_patient = bool(np.sum(patient_truth) > 0)
-        if is_positive_patient:
-            positive_patient_count += 1
-        else:
-            negative_patient_count += 1
-        if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
-            continue
-        if is_positive_patient:
-            positive_auprc_total += compute_patient_auprc_in_roi(
-                patient_truth.ravel(),
-                spatial_prediction.ravel(),
-                roi_mask.ravel(),
+            roi_mask = (
+                generate_roi_batch(
+                    torch.from_numpy(semantic_prediction),
+                    config.roi_context_scale,
+                    best_roi_threshold,
+                )
+                .numpy()
+                .astype(np.uint8)
             )
-            evaluated_positive_patients += 1
-        else:
-            negative_fp_total += _compute_negative_false_positive_mass(
-                spatial_prediction,
-                patient_truth,
+            spatial_prediction = compute_ensemble_iterative(
+                spatial_indices, best_spatial_weights, global_indices
             )
-            evaluated_negative_patients += 1
-        mass_total = float(np.sum(spatial_prediction) + 1e-7)
-        mass_outside = float(np.sum(spatial_prediction * (1 - roi_mask)))
-        spill_total += mass_outside / mass_total
-        evaluated_patients += 1
+            patient_truth = truth_memmap[global_indices].astype(np.uint8)
+            is_positive_patient = bool(np.sum(patient_truth) > 0)
+            if is_positive_patient:
+                positive_patient_count += 1
+            else:
+                negative_patient_count += 1
+            if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
+                continue
+            if is_positive_patient:
+                positive_auprc_total += compute_patient_auprc_in_roi(
+                    patient_truth.ravel(),
+                    spatial_prediction.ravel(),
+                    roi_mask.ravel(),
+                )
+                evaluated_positive_patients += 1
+            else:
+                negative_fp_total += _compute_negative_false_positive_mass(
+                    spatial_prediction,
+                    patient_truth,
+                )
+                evaluated_negative_patients += 1
+            mass_total = float(np.sum(spatial_prediction) + 1e-7)
+            mass_outside = float(np.sum(spatial_prediction * (1 - roi_mask)))
+            spill_total += mass_outside / mass_total
+            evaluated_patients += 1
 
     macro_positive_auprc = (
         float(positive_auprc_total / evaluated_positive_patients)
@@ -684,6 +869,12 @@ def run_two_stream_optimization(
         "Spatial_patient_policy": config.spatial_patient_policy,
         "Spill_lambda": float(config.spill_penalty_lambda),
     }
+    LOGGER.info(
+        "Holdout evaluation complete: objective=%.4f macro_auprc=%.4f spill=%.4f.",
+        holdout_objective,
+        macro_positive_auprc,
+        macro_spill,
+    )
     return OptimizationResult(
         semantic_indices=semantic_indices,
         spatial_indices=spatial_indices,

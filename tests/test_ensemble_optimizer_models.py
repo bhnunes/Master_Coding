@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, cast
 
 import pytest
@@ -147,6 +148,7 @@ def test_load_single_model_builds_model_loads_checkpoint_and_sets_eval(
 
 def test_load_ensemble_models_skips_failures_but_requires_two_models(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     selected_a = _selected_model()
     selected_b = SelectedModelMetadata(
@@ -176,12 +178,16 @@ def test_load_ensemble_models_skips_failures_but_requires_two_models(
         "helpers.ensemble_optimizer.models.load_single_model", fake_load_single_model
     )
 
+    caplog.set_level(logging.INFO)
+
     models, info = load_ensemble_models(
         [selected_a, selected_b, selected_c], device=cast(Any, "cpu")
     )
 
     assert len(models) == 2
     assert [entry["checkpoint_path"] for entry in info] == ["/tmp/model.ckpt", "/tmp/c.ckpt"]
+    assert "Failed to load model /tmp/b.ckpt: broken" in caplog.text
+    assert "Loaded 2/3 selected models (1 failed)." in caplog.text
 
 
 def test_load_ensemble_models_raises_when_fewer_than_two_models_load(

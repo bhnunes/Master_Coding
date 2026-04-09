@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
+import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Any, cast
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
 from helpers.ensemble_optimizer.data import (
@@ -33,6 +36,20 @@ from helpers.training.gpu import GPUNormalizer
 from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
 from helpers.training.utils import get_formatted_datetime_string
+
+LOGGER = logging.getLogger(__name__)
+_PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+
+
+def _progress_file() -> Any:
+    """Use the real terminal stream so tqdm stays interactive under LoggerWriter."""
+
+    return sys.__stderr__
+
+
+def _progress_disabled() -> bool:
+    isatty = getattr(_progress_file(), "isatty", None)
+    return not bool(isatty() if callable(isatty) else False)
 
 
 @dataclass(frozen=True)
@@ -125,14 +142,29 @@ def _select_models_from_optimization_subset(
     if len(cast(Any, dataloader.dataset)) == 0:
         raise ValueError("Optimization subset is empty; cannot rank candidate models.")
 
+    LOGGER.info("Ranking %s candidate models on the optimization subset.", len(candidates))
     subset_scores: dict[str, float] = {}
-    for candidate in candidates:
-        subset_scores[candidate.metadata_filename] = _compute_candidate_subset_score(
-            candidate,
-            dataloader,
-            sort_metric=config.sort_metric,
-            device=device,
-        )
+    with tqdm(
+        candidates,
+        total=len(candidates),
+        desc="Rank models",
+        leave=False,
+        mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+        dynamic_ncols=True,
+        file=_progress_file(),
+        disable=_progress_disabled(),
+    ) as progress_bar:
+        for candidate in progress_bar:
+            progress_bar.set_postfix(
+                {"arch": candidate.architecture, "encoder": candidate.encoder},
+                refresh=False,
+            )
+            subset_scores[candidate.metadata_filename] = _compute_candidate_subset_score(
+                candidate,
+                dataloader,
+                sort_metric=config.sort_metric,
+                device=device,
+            )
 
     filtered_candidates = [
         candidate
@@ -146,6 +178,11 @@ def _select_models_from_optimization_subset(
         filtered_candidates,
         n_top_models=config.top_models,
         score_getter=lambda item: subset_scores[item.metadata_filename],
+    )
+    LOGGER.info(
+        "Model ranking complete: %s valid candidates, %s selected.",
+        len(filtered_candidates),
+        len(selected_models),
     )
     return selected_models, subset_scores
 
@@ -166,12 +203,26 @@ def _build_validation_split(
 def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutputs:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     seed_everything(config.seed)
+    LOGGER.info(
+        "Stage 10 starting on %s. validation staging=%s output_dir=%s",
+        device,
+        "local" if config.stage_input_locally else "direct",
+        config.output_dir,
+    )
+    LOGGER.info("Preparing validation data.")
     validation_h5_path = setup_validation_hdf5(
         config.hdf5_drive_dir,
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
     )
+    LOGGER.info("Validation source ready: %s", validation_h5_path)
     split = _build_validation_split(config, validation_h5_path)
+    LOGGER.info(
+        "Split ready: optimization=%s calibration=%s holdout=%s patients.",
+        len(split.optimization_patients),
+        len(split.calibration_patients),
+        len(split.holdout_patients),
+    )
     split_fingerprint = build_split_fingerprint(
         optimization_patients=split.optimization_patients,
         calibration_patients=split.calibration_patients,
@@ -183,7 +234,13 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         split.optimization_patients,
         device,
     )
+    LOGGER.info("Loading %s selected models.", len(selected_models))
     models, _ = load_ensemble_models(selected_models, device)
+    LOGGER.info(
+        "Running two-stream optimization with %s semantic trials and %s spatial trials.",
+        config.num_trials_semantic,
+        config.num_trials_spatial,
+    )
     dataloader = create_validation_dataloader(
         validation_h5_path,
         batch_size=config.batch_size,
@@ -195,6 +252,17 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         dataloader,
         device=device,
         predefined_split=split,
+    )
+    LOGGER.info(
+        "Optimization summary: roi_threshold=%.4f decision_threshold=%.4f holdout_objective=%.4f.",
+        optimization_result.roi_threshold,
+        optimization_result.decision_threshold,
+        float(
+            optimization_result.holdout_metrics.get(
+                "Objective_Composite",
+                optimization_result.holdout_metrics.get("Macro_AUPRC_in_ROI", 0.0),
+            )
+        ),
     )
     timestamp = get_formatted_datetime_string()
     compatibility_signature = str(selected_models[0].raw_metadata["compatibility_signature"])
@@ -219,6 +287,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     )
     recipe_path = write_recipe_metadata(payload, config.output_dir, timestamp)
     run_config_path = config.output_dir / "ensemble_optimizer_run_config.json"
+    LOGGER.info("Writing recipe and run configuration.")
     run_payload = _serialize_config(config)
     run_payload.update(
         {
@@ -248,6 +317,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         }
     )
     run_config_path.write_text(json.dumps(run_payload, indent=2), encoding="utf-8")
+    LOGGER.info("Stage 10 complete: recipe=%s run_config=%s", recipe_path, run_config_path)
     return EnsembleOptimizerOutputs(recipe_path=recipe_path, run_config_path=run_config_path)
 
 

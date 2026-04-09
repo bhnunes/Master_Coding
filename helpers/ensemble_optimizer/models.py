@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, cast
 
 import torch
@@ -7,6 +8,8 @@ from torch import nn
 
 from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
 from helpers.training.models import create_model
+
+LOGGER = logging.getLogger(__name__)
 
 
 def load_checkpoint_strict_without_aux(
@@ -41,7 +44,7 @@ def load_checkpoint_strict_without_aux(
         try:
             model = cast(nn.Module, torch.compile(model))
         except Exception as error:
-            print(f"[WARN] torch.compile failed: {error}")
+            LOGGER.warning("torch.compile failed for %s: %s", checkpoint_path, error)
     return model
 
 
@@ -83,13 +86,21 @@ def load_ensemble_models(
 ) -> tuple[list[nn.Module], list[dict[str, Any]]]:
     ensemble_models: list[nn.Module] = []
     constituent_model_info: list[dict[str, Any]] = []
+    failed_loads = 0
     for selected_model in selected_models:
         try:
             model = load_single_model(selected_model, device)
             ensemble_models.append(model)
             constituent_model_info.append(build_loaded_model_info(selected_model))
         except Exception as error:
-            print(f"Error loading model {selected_model.checkpoint_path}: {error}")
+            failed_loads += 1
+            LOGGER.warning("Failed to load model %s: %s", selected_model.checkpoint_path, error)
     if len(ensemble_models) < 2:
         raise RuntimeError("Fewer than 2 models loaded. Ensemble optimization requires at least 2.")
+    LOGGER.info(
+        "Loaded %s/%s selected models%s.",
+        len(ensemble_models),
+        len(selected_models),
+        f" ({failed_loads} failed)" if failed_loads else "",
+    )
     return ensemble_models, constituent_model_info

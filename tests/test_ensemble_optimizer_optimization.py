@@ -420,9 +420,13 @@ def test_run_two_stream_optimization_falls_back_to_semantic_models_for_spatial_s
     class _FakeStudy:
         def __init__(self, best_params: dict[str, float]) -> None:
             self.best_params = best_params
+            self.best_value = 0.0
+            self.trials: list[Any] = []
 
-        def optimize(self, objective: Any, n_trials: int) -> None:
-            del objective, n_trials
+        def optimize(
+            self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
+        ) -> None:
+            del objective, n_trials, callbacks
 
     studies = iter([_FakeStudy({"w_sem_0": 1.0, "roi_thresh": 0.5}), _FakeStudy({"w_spa_0": 1.0})])
     optuna_module = optimization.optuna  # type: ignore[attr-defined]
@@ -497,9 +501,13 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
     class _FakeStudy:
         def __init__(self, best_params: dict[str, float]) -> None:
             self.best_params = best_params
+            self.best_value = 0.0
+            self.trials: list[Any] = []
 
-        def optimize(self, objective: Any, n_trials: int) -> None:
-            del objective, n_trials
+        def optimize(
+            self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
+        ) -> None:
+            del objective, n_trials, callbacks
 
     studies = iter([_FakeStudy({"w_sem_0": 1.0, "roi_thresh": 0.5}), _FakeStudy({"w_spa_0": 1.0})])
     optuna_module = optimization.optuna  # type: ignore[attr-defined]
@@ -591,10 +599,17 @@ def test_run_two_stream_optimization_all_policy_penalizes_negative_false_positiv
     class _FakeStudy:
         def __init__(self, best_params: dict[str, float]) -> None:
             self.best_params = best_params
+            self.best_value = 0.0
+            self.trials: list[Any] = []
 
-        def optimize(self, objective: Any, n_trials: int) -> None:
+        def optimize(
+            self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
+        ) -> None:
             del n_trials
-            objective(_FakeTrial())
+            self.best_value = float(objective(_FakeTrial()))
+            if callbacks:
+                for callback in callbacks:
+                    callback(self, cast(Any, object()))
 
     studies = iter([_FakeStudy({"w_sem_0": 1.0, "roi_thresh": 0.5}), _FakeStudy({"w_spa_0": 1.0})])
     optuna_module = optimization.optuna  # type: ignore[attr-defined]
