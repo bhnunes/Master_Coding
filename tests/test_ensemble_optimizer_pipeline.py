@@ -28,7 +28,6 @@ def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> No
         seed=24,
         batch_size=8,
         workers=1,
-        top_models=4,
         sort_metric="best_val_auprc_pixel_score",
         val_calibration_frac=0.25,
         val_holdout_frac=0.2,
@@ -58,7 +57,6 @@ def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> No
 
     run_config = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert outputs.recipe_path.name.startswith("ENSEMBLE_TWO_STREAM_")
-    assert run_config["top_models"] == 4
     assert run_config["semantic_architectures"] == ["SWIN"]
 
 
@@ -76,7 +74,6 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         seed=24,
         batch_size=8,
         workers=1,
-        top_models=2,
         sort_metric="best_val_auprc_pixel_score",
         val_calibration_frac=0.25,
         val_holdout_frac=0.2,
@@ -137,10 +134,10 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         validation_h5_path: Path,
         optimization_patients: set[str],
         device: Any,
-    ) -> tuple[list[SelectedModelMetadata], dict[str, float]]:
+    ) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str]]:
         del config, validation_h5_path, device
         observed["optimization_patients"] = optimization_patients
-        return selected_models, {"a_meta.json": 0.9, "b_meta.json": 0.8}
+        return selected_models, {"a_meta.json": 0.9, "b_meta.json": 0.8}, {}
 
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline._select_models_from_optimization_subset",
@@ -190,6 +187,7 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     assert run_config["decision_threshold"] == 0.6
     assert run_config["calibration_metrics"] == {"Calibration_best_mcc": 0.55}
     assert run_config["selected_models"][0]["optimization_subset_score"] == 0.9
+    assert run_config["skipped_requested_architectures"] == {}
 
 
 def test_execute_pipeline_logs_phase_summaries(
@@ -206,7 +204,6 @@ def test_execute_pipeline_logs_phase_summaries(
         seed=24,
         batch_size=8,
         workers=1,
-        top_models=2,
         sort_metric="best_val_auprc_pixel_score",
         val_calibration_frac=0.25,
         val_holdout_frac=0.2,
@@ -265,6 +262,7 @@ def test_execute_pipeline_logs_phase_summaries(
         lambda config, validation_h5_path, optimization_patients, device: (
             selected_models,
             {"a_meta.json": 0.9, "b_meta.json": 0.8},
+            {},
         ),
     )
     monkeypatch.setattr(
@@ -325,7 +323,6 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         seed=24,
         batch_size=8,
         workers=1,
-        top_models=2,
         sort_metric="best_val_auprc_pixel_score",
         val_calibration_frac=0.25,
         val_holdout_frac=0.2,
@@ -404,6 +401,7 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         lambda config, validation_h5_path, optimization_patients, device: (
             selected_models,
             {"a_meta.json": 0.9, "b_meta.json": 0.8},
+            {},
         ),
     )
     monkeypatch.setattr(

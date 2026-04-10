@@ -113,7 +113,7 @@ def get_stream_type(architecture: str, config: EnsembleOptimizerConfig) -> str:
         return "semantic"
     if architecture_upper in config.spatial_architectures:
         return "spatial"
-    return "spatial"
+    return "none"
 
 
 def generate_roi_batch(

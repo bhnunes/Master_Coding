@@ -83,7 +83,6 @@ def optimizer_config(tmp_path: Path) -> EnsembleOptimizerConfig:
         seed=24,
         batch_size=2,
         workers=0,
-        top_models=2,
         sort_metric="best_val_auprc_pixel_score",
         val_calibration_frac=0.25,
         val_holdout_frac=0.5,
@@ -126,12 +125,12 @@ def _write_prediction_cache(
     return prediction_paths, truth_path, pids_path, truths.shape[0], height, width, truth_memmap
 
 
-def test_get_stream_type_returns_semantic_spatial_or_default_spatial(
+def test_get_stream_type_returns_semantic_spatial_or_none(
     optimizer_config: EnsembleOptimizerConfig,
 ) -> None:
     assert get_stream_type("swin", optimizer_config) == "semantic"
     assert get_stream_type("fpn", optimizer_config) == "spatial"
-    assert get_stream_type("unknown", optimizer_config) == "spatial"
+    assert get_stream_type("unknown", optimizer_config) == "none"
 
 
 def test_generate_roi_batch_downscales_thresholds_and_restores_shape() -> None:

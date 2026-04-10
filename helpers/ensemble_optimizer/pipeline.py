@@ -22,7 +22,7 @@ from helpers.ensemble_optimizer.data import (
 from helpers.ensemble_optimizer.metadata import (
     SelectedModelMetadata,
     load_model_candidates,
-    select_top_models,
+    select_best_candidates_by_architecture,
 )
 from helpers.ensemble_optimizer.models import load_ensemble_models, load_single_model
 from helpers.ensemble_optimizer.optimization import (
@@ -131,7 +131,7 @@ def _select_models_from_optimization_subset(
     validation_h5_path: Path,
     optimization_patients: set[str],
     device: torch.device,
-) -> tuple[list[SelectedModelMetadata], dict[str, float]]:
+) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str]]:
     candidates = load_model_candidates(config.metadata_dir, config.sort_metric)
     dataloader = create_validation_dataloader(
         validation_h5_path,
@@ -159,32 +159,50 @@ def _select_models_from_optimization_subset(
                 {"arch": candidate.architecture, "encoder": candidate.encoder},
                 refresh=False,
             )
-            subset_scores[candidate.metadata_filename] = _compute_candidate_subset_score(
-                candidate,
-                dataloader,
-                sort_metric=config.sort_metric,
-                device=device,
-            )
+            try:
+                subset_scores[candidate.metadata_filename] = _compute_candidate_subset_score(
+                    candidate,
+                    dataloader,
+                    sort_metric=config.sort_metric,
+                    device=device,
+                )
+            except Exception as error:
+                LOGGER.warning(
+                    "Skipping candidate %s (%s/%s): %s",
+                    candidate.metadata_filename,
+                    candidate.architecture,
+                    candidate.encoder,
+                    error,
+                )
+                subset_scores[candidate.metadata_filename] = float("nan")
 
     filtered_candidates = [
         candidate
         for candidate in candidates
         if np.isfinite(subset_scores.get(candidate.metadata_filename, float("nan")))
     ]
-    if len(filtered_candidates) < 2:
-        raise ValueError("Fewer than 2 valid models remained after optimization-subset scoring.")
-
-    selected_models = select_top_models(
+    requested_architectures = tuple(
+        dict.fromkeys(config.semantic_architectures + config.spatial_architectures)
+    )
+    selected_models, skipped_architectures = select_best_candidates_by_architecture(
         filtered_candidates,
-        n_top_models=config.top_models,
+        requested_architectures=requested_architectures,
         score_getter=lambda item: subset_scores[item.metadata_filename],
     )
+    if len(selected_models) < 2:
+        raise ValueError(
+            "Fewer than 2 requested architectures had valid scored candidates. "
+            f"Requested={list(requested_architectures)} skipped={skipped_architectures}"
+        )
+    for architecture, reason in skipped_architectures.items():
+        LOGGER.warning("Skipping requested architecture %s: %s", architecture, reason)
     LOGGER.info(
-        "Model ranking complete: %s valid candidates, %s selected.",
+        "Model ranking complete: %s valid candidates, %s requested architectures, %s selected.",
         len(filtered_candidates),
+        len(requested_architectures),
         len(selected_models),
     )
-    return selected_models, subset_scores
+    return selected_models, subset_scores, skipped_architectures
 
 
 def _build_validation_split(
@@ -228,7 +246,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         calibration_patients=split.calibration_patients,
         holdout_patients=split.holdout_patients,
     )
-    selected_models, subset_scores = _select_models_from_optimization_subset(
+    selected_models, subset_scores, skipped_architectures = _select_models_from_optimization_subset(
         config,
         validation_h5_path,
         split.optimization_patients,
@@ -303,6 +321,17 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             "calibration_metrics": optimization_result.calibration_metrics,
             "validation_provenance": validation_provenance,
             "split_fingerprint": split_fingerprint,
+            "selected_semantic_architectures": [
+                model.architecture
+                for model in selected_models
+                if model.architecture in config.semantic_architectures
+            ],
+            "selected_spatial_architectures": [
+                model.architecture
+                for model in selected_models
+                if model.architecture in config.spatial_architectures
+            ],
+            "skipped_requested_architectures": skipped_architectures,
             "selected_models": [
                 {
                     "architecture": model.architecture,

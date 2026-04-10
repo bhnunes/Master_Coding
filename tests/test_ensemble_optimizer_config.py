@@ -16,7 +16,6 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_SEED": "17",
             "ENSEMBLE_OPT_BATCH_SIZE": "12",
             "ENSEMBLE_OPT_WORKERS": "3",
-            "ENSEMBLE_OPT_TOP_MODELS": "5",
             "ENSEMBLE_OPT_SORT_METRIC": "best_validation_DICE",
             "ENSEMBLE_OPT_STAGE_INPUT_LOCALLY": "false",
             "ENSEMBLE_OPT_OVERWRITE_OUTPUT": "false",
@@ -37,7 +36,6 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.seed == 17
     assert config.batch_size == 12
     assert config.workers == 3
-    assert config.top_models == 5
     assert config.sort_metric == "best_validation_DICE"
     assert config.stage_input_locally is False
     assert config.overwrite_output is False

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -101,21 +101,27 @@ def load_model_candidates(
     return selected
 
 
-def select_top_models(
+def select_best_candidates_by_architecture(
     candidates: list[SelectedModelMetadata],
     *,
-    n_top_models: int,
+    requested_architectures: Sequence[str],
     score_getter: Callable[[SelectedModelMetadata], float] | None = None,
-) -> list[SelectedModelMetadata]:
+) -> tuple[list[SelectedModelMetadata], dict[str, str]]:
     getter = score_getter or (lambda item: item.sort_metric_value)
-    ranked = sorted(candidates, key=getter, reverse=True)
-    return ranked[:n_top_models]
+    best_by_architecture: dict[str, SelectedModelMetadata] = {}
+    for candidate in candidates:
+        architecture = candidate.architecture.upper()
+        current_best = best_by_architecture.get(architecture)
+        if current_best is None or getter(candidate) > getter(current_best):
+            best_by_architecture[architecture] = candidate
 
-
-def load_and_select_models(
-    metadata_dir: Path,
-    n_top_models: int,
-    sort_metric: str,
-) -> list[SelectedModelMetadata]:
-    candidates = load_model_candidates(metadata_dir, sort_metric)
-    return select_top_models(candidates, n_top_models=n_top_models)
+    selected: list[SelectedModelMetadata] = []
+    skipped: dict[str, str] = {}
+    for architecture in requested_architectures:
+        normalized_architecture = architecture.upper()
+        selected_candidate = best_by_architecture.get(normalized_architecture)
+        if selected_candidate is None:
+            skipped[normalized_architecture] = "no valid candidate metadata found"
+            continue
+        selected.append(selected_candidate)
+    return selected, skipped

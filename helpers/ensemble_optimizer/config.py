@@ -83,7 +83,6 @@ class EnsembleOptimizerConfig:
     seed: int
     batch_size: int
     workers: int
-    top_models: int
     sort_metric: str
     val_calibration_frac: float
     val_holdout_frac: float
@@ -152,7 +151,6 @@ def load_ensemble_optimizer_config(
         seed=_parse_int(values.get("ENSEMBLE_OPT_SEED"), default=24),
         batch_size=_parse_int(values.get("ENSEMBLE_OPT_BATCH_SIZE"), default=32),
         workers=max(1, _parse_int(values.get("ENSEMBLE_OPT_WORKERS"), default=workers_default)),
-        top_models=max(2, _parse_int(values.get("ENSEMBLE_OPT_TOP_MODELS"), default=8)),
         sort_metric=_parse_choice(
             values.get("ENSEMBLE_OPT_SORT_METRIC"),
             default="best_val_auprc_pixel_score",
