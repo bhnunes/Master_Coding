@@ -16,6 +16,7 @@ from dotenv import dotenv_values, find_dotenv
 
 _METRIC_ORDER = ("dice", "iou", "tpr", "tnr", "precision", "accuracy", "fpr", "fnr")
 _SENSITIVE_ENV_TERMS = ("PASSWORD", "TOKEN", "SECRET", "PRIVATE", "CREDENTIAL")
+_EXCLUDED_REPORT_ENV_VARS = {"TRAINING_ARCHITECTURE", "TRAINING_ENCODER"}
 _PATHLIKE_SUFFIXES = (
     ".zip",
     ".db",
@@ -285,6 +286,8 @@ def _should_include_env_var(key: str, value: str | None) -> bool:
     if value is None:
         return False
     normalized_key = key.upper()
+    if normalized_key in _EXCLUDED_REPORT_ENV_VARS:
+        return False
     if any(term in normalized_key for term in _SENSITIVE_ENV_TERMS):
         return False
     if normalized_key.endswith("_KEY") or normalized_key == "KEY":

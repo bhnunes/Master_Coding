@@ -48,6 +48,9 @@ class TestHDF5Dataset(Dataset[Any]):
         self.transform = get_transforms(mode="validation", img_size=224)
         with h5py.File(self.hdf5_path, "r") as handle:
             self.full_pids = np.asarray(handle["patient_ids"][:])
+            self.full_filenames = (
+                np.asarray(handle["filenames"][:]) if "filenames" in handle else None
+            )
             self.total_len = len(self.full_pids)
         self.h5_file: Any = None
         self.images_dset: Any = None
@@ -78,23 +81,28 @@ class TestHDF5Dataset(Dataset[Any]):
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, str] | tuple[None, None, None]:
+    ) -> tuple[torch.Tensor, torch.Tensor, str, str | None] | tuple[None, None, None, None]:
         if self.h5_file is None:
             self._open_file()
 
         image = self.images_dset[idx]
         mask = (self.masks_dset[idx] != 0).astype(np.uint8)
         patient_id = _decode_patient_id(self.full_pids[idx])
+        filename = (
+            _decode_patient_id(self.full_filenames[idx])
+            if self.full_filenames is not None
+            else None
+        )
         try:
             augmented = self.transform(image=image, mask=mask)
             final_image = augmented["image"]
             final_mask = augmented["mask"]
             if not torch.is_tensor(final_mask):
                 final_mask = torch.from_numpy(final_mask)
-            return final_image, final_mask.to(torch.uint8), patient_id
+            return final_image, final_mask.to(torch.uint8), patient_id, filename
         except Exception as error:
             print(f"Error on test index {idx}: {error}")
-            return None, None, None
+            return None, None, None, None
 
     def close(self) -> None:
         try:
@@ -133,7 +141,8 @@ def collate_test_batch(batch: list[Any]) -> Any:
     images = default_collate([item[0] for item in filtered])
     masks = default_collate([item[1] for item in filtered])
     patient_ids = [item[2] for item in filtered]
-    return images, masks, patient_ids
+    filenames = [item[3] for item in filtered]
+    return images, masks, patient_ids, filenames
 
 
 def create_test_dataloader(

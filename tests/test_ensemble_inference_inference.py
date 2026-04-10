@@ -190,6 +190,7 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
                     dtype=torch.uint8,
                 ),
                 ["patient-a", "patient-b"],
+                ["a.png", "b.png"],
             ),
         ],
     )
@@ -253,6 +254,7 @@ def test_analyze_ensemble_metrics_uses_declared_threshold_for_hard_predictions(
                 torch.zeros((1, 3, 2, 2), dtype=torch.uint8),
                 torch.tensor([[[0, 1], [1, 0]]], dtype=torch.uint8),
                 ["patient-threshold"],
+                ["threshold.png"],
             ),
         ],
     )
@@ -355,6 +357,7 @@ def test_export_visualizations_writes_requested_number_of_pngs(
                     dtype=torch.uint8,
                 ),
                 ["p1", "p2"],
+                ["f1.png", "f2.png"],
             )
         ],
     )
@@ -376,3 +379,77 @@ def test_export_visualizations_writes_requested_number_of_pngs(
 
     assert len(output_paths) == 1
     assert output_paths[0].exists()
+    assert output_paths[0].name.startswith("worst_dice_01__")
+
+
+def test_export_visualizations_ranks_worst_dice_across_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_compute(
+        models: Any, meta: Any, images: torch.Tensor, roi_threshold: float, roi_scale: int
+    ) -> torch.Tensor:
+        del models, meta, roi_threshold, roi_scale
+        outputs: list[torch.Tensor] = []
+        for image in images:
+            sample_id = int(image[0, 0, 0].item())
+            if sample_id == 1:
+                outputs.append(torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=torch.float32))
+            elif sample_id == 2:
+                outputs.append(torch.tensor([[1.0, 0.0], [0.0, 0.0]], dtype=torch.float32))
+            elif sample_id == 3:
+                outputs.append(torch.tensor([[1.0, 1.0], [0.0, 0.0]], dtype=torch.float32))
+            else:
+                raise AssertionError(f"unexpected sample id: {sample_id}")
+        return torch.stack(outputs)
+
+    monkeypatch.setattr(inference, "compute_two_stream_probabilities", fake_compute)
+    dataloader = cast(
+        Any,
+        [
+            (
+                torch.tensor(
+                    [
+                        [[[1, 1], [1, 1]]] * 3,
+                        [[[2, 2], [2, 2]]] * 3,
+                    ],
+                    dtype=torch.float32,
+                ),
+                torch.tensor(
+                    [
+                        [[1, 0], [0, 0]],
+                        [[1, 0], [0, 0]],
+                    ],
+                    dtype=torch.uint8,
+                ),
+                ["p1", "p2"],
+                ["f1.png", "f2.png"],
+            ),
+            (
+                torch.tensor([[[[3, 3], [3, 3]]] * 3], dtype=torch.float32),
+                torch.tensor([[[1, 1], [0, 0]]], dtype=torch.uint8),
+                ["p3"],
+                ["f3.png"],
+            ),
+        ],
+    )
+
+    output_paths = inference.export_visualizations(
+        [nn.Identity()],
+        dataloader,
+        device=torch.device("cpu"),
+        roi_threshold=0.5,
+        decision_threshold=0.5,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
+        gpu_normalizer=_IdentityNormalizer(),
+        output_dir=tmp_path,
+        num_samples=2,
+    )
+
+    assert [path.name for path in output_paths] == [
+        "worst_dice_01__p1__f1.png",
+        "worst_dice_02__p2__f2.png",
+    ]
+    assert all(path.exists() for path in output_paths)

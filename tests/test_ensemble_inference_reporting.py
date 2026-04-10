@@ -95,6 +95,8 @@ def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
     env_path.write_text(
         "ARTIFACT_DEVICE=cuda\n"
         "WINDOW_SIZE=224\n"
+        "TRAINING_ARCHITECTURE=UNET\n"
+        "TRAINING_ENCODER=resnet34\n"
         "ARTIFACT_IMAGES_ZIP=./data/slides.zip\n"
         "HF_TOKEN=secret\n",
         encoding="utf-8",
@@ -122,3 +124,5 @@ def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
     assert "![" not in contents
     assert "ARTIFACT_IMAGES_ZIP" not in contents
     assert "HF_TOKEN" not in contents
+    assert "TRAINING_ARCHITECTURE" not in contents
+    assert "TRAINING_ENCODER" not in contents

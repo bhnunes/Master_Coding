@@ -24,6 +24,7 @@ def _write_test_hdf5(path: Path) -> None:
         handle.create_dataset("images", data=images)
         handle.create_dataset("masks", data=masks)
         handle.create_dataset("patient_ids", data=np.array([b"p1", b"p2"], dtype="S8"))
+        handle.create_dataset("filenames", data=np.array([b"f1.png", b"f2.png"], dtype="S16"))
 
 
 class _IdentityTransform:
@@ -89,12 +90,15 @@ def test_test_hdf5_dataset_reads_item_and_decodes_patient_id(
     )
 
     dataset = inference_data.TestHDF5Dataset(hdf5_path)
-    image, mask, patient_id = cast(tuple[torch.Tensor, torch.Tensor, str], dataset[1])
+    image, mask, patient_id, filename = cast(
+        tuple[torch.Tensor, torch.Tensor, str, str | None], dataset[1]
+    )
 
     assert tuple(image.shape) == (3, 4, 4)
     assert mask.dtype == torch.uint8
     assert tuple(mask.shape) == (4, 4)
     assert patient_id == "p2"
+    assert filename == "f2.png"
 
 
 def test_test_hdf5_dataset_returns_none_triplet_when_transform_fails(
@@ -116,7 +120,7 @@ def test_test_hdf5_dataset_returns_none_triplet_when_transform_fails(
 
     dataset = inference_data.TestHDF5Dataset(hdf5_path)
 
-    assert dataset[0] == (None, None, None)
+    assert dataset[0] == (None, None, None, None)
 
 
 def test_test_hdf5_dataset_reopens_file_after_pid_change(
@@ -171,17 +175,20 @@ def test_collate_test_batch_filters_invalid_items() -> None:
     image = torch.ones((3, 4, 4), dtype=torch.uint8)
     mask = torch.zeros((4, 4), dtype=torch.uint8)
 
-    batch = inference_data.collate_test_batch([(image, mask, "p1"), (None, None, None), None])
+    batch = inference_data.collate_test_batch(
+        [(image, mask, "p1", "f1.png"), (None, None, None, None), None]
+    )
 
     assert batch is not None
-    images, masks, patient_ids = batch
+    images, masks, patient_ids, filenames = batch
     assert tuple(images.shape) == (1, 3, 4, 4)
     assert tuple(masks.shape) == (1, 4, 4)
     assert patient_ids == ["p1"]
+    assert filenames == ["f1.png"]
 
 
 def test_collate_test_batch_returns_none_when_all_items_invalid() -> None:
-    assert inference_data.collate_test_batch([(None, None, None), None]) is None
+    assert inference_data.collate_test_batch([(None, None, None, None), None]) is None
 
 
 def test_create_test_dataloader_sets_worker_dependent_flags(

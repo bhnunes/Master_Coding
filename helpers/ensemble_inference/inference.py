@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, cast
@@ -13,10 +14,44 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from helpers.ensemble_inference.metrics import (
+    calculate_metrics,
     compute_auc_from_histograms,
     mask_to_binary_indices,
     summarize_patient_metrics,
 )
+
+_FILENAME_SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _compute_confusion_counts(
+    pred_mask: torch.Tensor, true_mask: torch.Tensor
+) -> tuple[int, int, int, int]:
+    pred_uint8 = pred_mask.to(torch.uint8)
+    true_uint8 = true_mask.to(torch.uint8)
+    conf = pred_uint8.mul(2).add_(true_uint8)
+    counts = torch.bincount(conf.view(-1), minlength=4).cpu().tolist()
+    return int(counts[3]), int(counts[2]), int(counts[1]), int(counts[0])
+
+
+def _sanitize_path_component(value: str) -> str:
+    sanitized = _FILENAME_SANITIZE_PATTERN.sub("_", value.strip())
+    return sanitized.strip("._") or "sample"
+
+
+def _build_visualization_filename(
+    *,
+    rank: int,
+    patient_id: str,
+    filename: str | None,
+) -> str:
+    parts = [f"worst_dice_{rank:02d}", _sanitize_path_component(patient_id)]
+    if filename is not None and filename.strip():
+        parts.append(_sanitize_path_component(Path(filename).stem))
+    return "__".join(parts) + ".png"
+
+
+def _sample_sort_key(sample: dict[str, Any]) -> tuple[float, int]:
+    return (float(sample["dice"]), int(sample["sample_index"]))
 
 
 def _autocast_context(
@@ -139,7 +174,7 @@ def analyze_ensemble_metrics(
     for batch_data in test_loader:
         if batch_data is None:
             continue
-        images, masks, patient_ids = batch_data
+        images, masks, patient_ids, *_metadata = batch_data
         images = gpu_normalizer(images.to(device, non_blocking=True))
         true_gpu = mask_to_binary_indices(masks.to(device, non_blocking=True))
         final_probs = compute_two_stream_probabilities(
@@ -203,44 +238,88 @@ def export_visualizations(
     output_dir.mkdir(parents=True, exist_ok=True)
     if num_samples <= 0:
         return []
-    try:
-        batch_data = next(iter(dataloader))
-    except StopIteration:
-        return []
-    if batch_data is None:
+    ranked_samples: list[dict[str, Any]] = []
+    sample_index = 0
+
+    for batch_data in dataloader:
+        if batch_data is None:
+            continue
+
+        if len(batch_data) == 3:
+            images, masks, patient_ids = batch_data
+            filenames = [None] * images.shape[0]
+        else:
+            images, masks, patient_ids, filenames = batch_data
+        actual = images.shape[0]
+        if actual <= 0:
+            continue
+
+        images_vis = images.to(device, non_blocking=True)
+        images_norm = gpu_normalizer(images_vis)
+        final_probs = compute_two_stream_probabilities(
+            models_list,
+            constituent_models_info,
+            images_norm,
+            roi_threshold=roi_threshold,
+            roi_scale=roi_scale,
+        )
+        pred_masks = (final_probs > decision_threshold).to(torch.uint8)
+        true_masks = mask_to_binary_indices(masks.to(device, non_blocking=True))
+        images_np = images_norm.cpu().numpy()
+        pred_masks_np = pred_masks.cpu().numpy().astype(np.uint8)
+        true_masks_np = true_masks.cpu().numpy().astype(np.uint8)
+        probs_np = final_probs.cpu().numpy()
+
+        for index in range(actual):
+            tp, fp, fn, tn = _compute_confusion_counts(pred_masks[index], true_masks[index])
+            dice = float(calculate_metrics(tp, fp, fn, tn)["dice"])
+            candidate = {
+                "dice": dice,
+                "sample_index": sample_index,
+                "patient_id": patient_ids[index],
+                "filename": filenames[index],
+                "image": images_np[index],
+                "pred_mask": pred_masks_np[index],
+                "true_mask": true_masks_np[index],
+                "probability": probs_np[index],
+            }
+            if len(ranked_samples) < num_samples:
+                ranked_samples.append(candidate)
+            else:
+                current_best_index = max(
+                    range(len(ranked_samples)),
+                    key=lambda selected_index: _sample_sort_key(ranked_samples[selected_index]),
+                )
+                if _sample_sort_key(candidate) < _sample_sort_key(
+                    ranked_samples[current_best_index]
+                ):
+                    ranked_samples[current_best_index] = candidate
+            sample_index += 1
+
+    if not ranked_samples:
         return []
 
-    images, masks, _patient_ids = batch_data
-    actual = min(num_samples, images.shape[0])
-    if actual <= 0:
-        return []
+    selected_samples = sorted(ranked_samples, key=_sample_sort_key)
 
-    images_vis = images[:actual].to(device, non_blocking=True)
-    images_norm = gpu_normalizer(images_vis)
-    final_probs = compute_two_stream_probabilities(
-        models_list,
-        constituent_models_info,
-        images_norm,
-        roi_threshold=roi_threshold,
-        roi_scale=roi_scale,
-    )
-    pred_masks = (final_probs > decision_threshold).to(torch.uint8).cpu().numpy()
-    true_masks = mask_to_binary_indices(masks[:actual]).cpu().numpy().astype(np.uint8)
-    images_np = images_norm.cpu().numpy()
     mean = np.asarray(train_mean, dtype=np.float32)
     std = np.asarray(train_std, dtype=np.float32)
 
     output_paths: list[Path] = []
-    for index in range(actual):
-        image = images_np[index].transpose(1, 2, 0)
+    for rank, sample in enumerate(selected_samples, start=1):
+        image = sample["image"].transpose(1, 2, 0)
         image = np.clip(std * image + mean, 0, 1)
-        pred_overlay = np.where(pred_masks[index] == 0, np.nan, pred_masks[index]).astype(
+        pred_overlay = np.where(sample["pred_mask"] == 0, np.nan, sample["pred_mask"]).astype(
             np.float32
         )
-        true_overlay = np.where(true_masks[index] == 0, np.nan, true_masks[index]).astype(
+        true_overlay = np.where(sample["true_mask"] == 0, np.nan, sample["true_mask"]).astype(
             np.float32
         )
         figure, axes = plt.subplots(1, 4, figsize=(18, 5))
+        filename = sample["filename"]
+        title = f"Worst Dice #{rank}: {sample['dice']:.4f} | {sample['patient_id']}"
+        if isinstance(filename, str) and filename.strip():
+            title += f" | {filename}"
+        figure.suptitle(title)
         axes[0].imshow(image)
         axes[0].set_title("Image")
         axes[1].imshow(image)
@@ -249,12 +328,16 @@ def export_visualizations(
         axes[2].imshow(image)
         axes[2].imshow(true_overlay, cmap="jet", alpha=0.5)
         axes[2].set_title("True Mask")
-        axes[3].imshow(final_probs[index].cpu().numpy(), vmin=0, vmax=1)
+        axes[3].imshow(sample["probability"], vmin=0, vmax=1)
         axes[3].set_title("Probability")
         for axis in axes:
             axis.axis("off")
-        figure.tight_layout()
-        output_path = output_dir / f"sample_{index + 1}.png"
+        figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
+        output_path = output_dir / _build_visualization_filename(
+            rank=rank,
+            patient_id=sample["patient_id"],
+            filename=filename if isinstance(filename, str) else None,
+        )
         figure.savefig(output_path, dpi=200, bbox_inches="tight")
         plt.close(figure)
         output_paths.append(output_path)
