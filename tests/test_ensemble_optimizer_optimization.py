@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
+import optuna
 import pytest
 import torch
 from torch import nn
@@ -381,6 +382,93 @@ def test_run_two_stream_optimization_raises_when_no_semantic_models_found(
         )
 
 
+def test_study_progress_callback_ignores_all_pruned_study() -> None:
+    class _RecordingProgressBar:
+        def __init__(self) -> None:
+            self.updated = 0
+            self.postfix: dict[str, str] | None = None
+
+        def update(self, value: int) -> None:
+            self.updated += value
+
+        def set_postfix(self, postfix: dict[str, str]) -> None:
+            self.postfix = postfix
+
+    progress_bar = _RecordingProgressBar()
+    callback = optimization._StudyProgressCallback(cast(Any, progress_bar))
+    pruned_trial = cast(
+        optuna.trial.FrozenTrial,
+        SimpleNamespace(state=optuna.trial.TrialState.PRUNED),
+    )
+    study = cast(Any, SimpleNamespace(trials=[pruned_trial]))
+
+    callback(study, pruned_trial)
+
+    assert progress_bar.updated == 1
+    assert progress_bar.postfix == {"done": "0", "pruned": "1"}
+
+
+def test_run_two_stream_optimization_raises_clear_error_when_semantic_trials_all_pruned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    cache_payload = _write_prediction_cache(
+        tmp_path / "pred-cache",
+        predictions=[np.full((2, 2, 2), 32768, dtype=np.uint16)],
+        truths=np.zeros((2, 2, 2), dtype=np.uint8),
+        patient_ids=["p1", "p2"],
+    )
+    monkeypatch.setattr(
+        optimization, "cache_predictions_sequential", lambda *args, **kwargs: cache_payload
+    )
+    monkeypatch.setattr(
+        optimization,
+        "build_holdout_split",
+        lambda patient_ids, positive_patients, calibration_frac, holdout_frac, seed: (
+            SimpleNamespace(
+                holdout_patients={"p2"}, calibration_patients=set(), optimization_patients={"p1"}
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        optimization,
+        "build_indices_and_local_map",
+        lambda selected_patients, patient_map: (
+            np.array([0]) if selected_patients == {"p1"} else np.array([1]),
+            {"p1": slice(0, 1)} if selected_patients == {"p1"} else {"p2": slice(0, 1)},
+            ["p1"] if selected_patients == {"p1"} else ["p2"],
+        ),
+    )
+
+    class _AllPrunedStudy:
+        def __init__(self) -> None:
+            self.trials = [SimpleNamespace(state=optuna.trial.TrialState.PRUNED)]
+
+        def optimize(
+            self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
+        ) -> None:
+            del objective, n_trials, callbacks
+
+    optuna_module = optimization.optuna  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        optuna_module,
+        "create_study",
+        lambda direction, sampler: _AllPrunedStudy(),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Semantic optimization produced no completed trials; all trials were pruned",
+    ):
+        run_two_stream_optimization(
+            optimizer_config,
+            [_ConstantBinaryModel(0.0, arch_name="SWIN")],
+            cast(Any, _ListLoader(2, [])),
+            device=torch.device("cpu"),
+        )
+
+
 def test_run_two_stream_optimization_falls_back_to_semantic_models_for_spatial_stream(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -420,7 +508,7 @@ def test_run_two_stream_optimization_falls_back_to_semantic_models_for_spatial_s
         def __init__(self, best_params: dict[str, float]) -> None:
             self.best_params = best_params
             self.best_value = 0.0
-            self.trials: list[Any] = []
+            self.trials: list[Any] = [SimpleNamespace(state=optuna.trial.TrialState.COMPLETE)]
 
         def optimize(
             self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
@@ -501,7 +589,7 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
         def __init__(self, best_params: dict[str, float]) -> None:
             self.best_params = best_params
             self.best_value = 0.0
-            self.trials: list[Any] = []
+            self.trials: list[Any] = [SimpleNamespace(state=optuna.trial.TrialState.COMPLETE)]
 
         def optimize(
             self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
@@ -599,7 +687,7 @@ def test_run_two_stream_optimization_all_policy_penalizes_negative_false_positiv
         def __init__(self, best_params: dict[str, float]) -> None:
             self.best_params = best_params
             self.best_value = 0.0
-            self.trials: list[Any] = []
+            self.trials: list[Any] = [SimpleNamespace(state=optuna.trial.TrialState.COMPLETE)]
 
         def optimize(
             self, objective: Any, n_trials: int, callbacks: list[Any] | None = None

@@ -54,22 +54,22 @@ class _StudyProgressCallback:
     def __call__(self, study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
         del trial
         self._progress_bar.update(1)
-        best_trial = getattr(study, "best_trial", None)
-        best_value = getattr(study, "best_value", None) if best_trial is not None else None
+        trials = getattr(study, "trials", [])
         completed = len(
             [
                 finished_trial
-                for finished_trial in getattr(study, "trials", [])
+                for finished_trial in trials
                 if finished_trial.state == optuna.trial.TrialState.COMPLETE
             ]
         )
         pruned = len(
             [
                 finished_trial
-                for finished_trial in getattr(study, "trials", [])
+                for finished_trial in trials
                 if finished_trial.state == optuna.trial.TrialState.PRUNED
             ]
         )
+        best_value = float(study.best_value) if completed > 0 else None
         postfix = {
             "done": str(completed),
             "pruned": str(pruned),
@@ -77,6 +77,23 @@ class _StudyProgressCallback:
         if best_value is not None and np.isfinite(best_value):
             postfix["best"] = f"{best_value:.4f}"
         self._progress_bar.set_postfix(postfix)
+
+
+def _completed_trials(study: optuna.Study) -> list[optuna.trial.FrozenTrial]:
+    return [
+        trial
+        for trial in getattr(study, "trials", [])
+        if trial.state == optuna.trial.TrialState.COMPLETE
+    ]
+
+
+def _require_completed_trials(study: optuna.Study, *, stream_name: str) -> None:
+    if _completed_trials(study):
+        return
+    raise RuntimeError(
+        f"{stream_name} optimization produced no completed trials; all trials were pruned. "
+        "Check ROI constraints and validation split."
+    )
 
 
 def _optuna_callbacks(progress_bar: tqdm[Any] | None) -> list[_StudyProgressCallback]:
@@ -598,10 +615,11 @@ def run_two_stream_optimization(
                 n_trials=config.num_trials_semantic,
                 callbacks=_optuna_callbacks(semantic_progress),
             )
+        _require_completed_trials(semantic_study, stream_name="Semantic")
         LOGGER.info(
             "Semantic optimization complete: best_roi_threshold=%.4f best_objective=%.4f.",
             float(semantic_study.best_params["roi_thresh"]),
-            float(getattr(semantic_study, "best_value", 0.0)),
+            float(semantic_study.best_value),
         )
         best_semantic_weights = _normalize_weights(
             [
@@ -720,9 +738,10 @@ def run_two_stream_optimization(
                 n_trials=config.num_trials_spatial,
                 callbacks=_optuna_callbacks(spatial_progress),
             )
+        _require_completed_trials(spatial_study, stream_name="Spatial")
         LOGGER.info(
             "Spatial optimization complete: best_objective=%.4f.",
-            float(getattr(spatial_study, "best_value", 0.0)),
+            float(spatial_study.best_value),
         )
         best_spatial_weights = _normalize_weights(
             [spatial_study.best_params.get(f"w_spa_{i}", 0.0) for i in range(len(spatial_indices))]
