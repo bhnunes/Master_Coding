@@ -30,6 +30,10 @@ def test_create_email_body_includes_checkpoint_and_encoder() -> None:
         gamma_dice_fg=0.3,
         use_artifact_aware_loss=True,
         artifact_index_path="/tmp/artifacts.parquet",
+        run_ohem=True,
+        ohem_start_epoch=2,
+        ohem_ratio=0.25,
+        ohem_min_kept=1024,
     )
 
     assert "UNET++" in body
@@ -38,6 +42,7 @@ def test_create_email_body_includes_checkpoint_and_encoder() -> None:
     assert "val_auprc: 0.8000" in body
     assert "loss_gamma_dice_fg: 0.3" in body
     assert "artifact_aware_loss: enabled" in body
+    assert "run_ohem: enabled" in body
 
 
 def test_send_email_uses_smtp_ssl(monkeypatch: Any) -> None:

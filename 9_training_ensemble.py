@@ -133,6 +133,10 @@ email_password = training_config.email_password or ""
 execution_mode = training_config.execution_mode
 smart_sampling = training_config.smart_sampling
 use_artifact_aware_loss = training_config.use_artifact_aware_loss
+run_ohem = training_config.run_ohem
+ohem_start_epoch = training_config.ohem_start_epoch
+ohem_ratio = training_config.ohem_ratio
+ohem_min_kept = training_config.ohem_min_kept
 artifact_index_path = training_config.artifact_index_path
 effective_artifact_index_path = artifact_index_path if use_artifact_aware_loss else None
 
@@ -335,6 +339,10 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
             alpha_bce=alpha_bce,
             beta_dice_bg=beta_dice_bg,
             gamma_dice_fg=gamma_dice_fg,
+            run_ohem=run_ohem,
+            ohem_start_epoch=ohem_start_epoch,
+            ohem_ratio=ohem_ratio,
+            ohem_min_kept=ohem_min_kept,
         ),
     )
 
@@ -382,6 +390,10 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         dataset=train_h5_path,
         validation_dataset=val_h5_path,
         artifact_index_path=effective_artifact_index_path,
+        run_ohem=run_ohem,
+        ohem_start_epoch=ohem_start_epoch,
+        ohem_ratio=ohem_ratio,
+        ohem_min_kept=ohem_min_kept,
     )
 
     start_epoch = load_checkpoint_for_resume(
@@ -402,11 +414,24 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
 
     print(f"Starting Training For {architecture} from epoch {start_epoch + 1}...")
 
-    loss_fn = BCEDiceHybridLossPaper(alpha=alpha_bce, beta=beta_dice_bg, gamma=gamma_dice_fg)
+    loss_fn = BCEDiceHybridLossPaper(
+        alpha=alpha_bce,
+        beta=beta_dice_bg,
+        gamma=gamma_dice_fg,
+        run_ohem=run_ohem,
+        ohem_start_epoch=ohem_start_epoch,
+        ohem_ratio=ohem_ratio,
+        ohem_min_kept=ohem_min_kept,
+    )
     print(
         f"Using BCE+Dice Hybrid Loss "
         f"(alpha={alpha_bce}, beta={beta_dice_bg}, gamma={gamma_dice_fg})"
     )
+    if run_ohem:
+        print(
+            "OHEM enabled "
+            f"(start_epoch={ohem_start_epoch}, ratio={ohem_ratio}, min_kept={ohem_min_kept})"
+        )
 
     epoch_state = run_training_epochs(
         model=model,
@@ -484,6 +509,10 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
                 "execution_mode": execution_mode,
                 "artifact_index_path": effective_artifact_index_path,
                 "use_artifact_aware_loss": use_artifact_aware_loss,
+                "run_ohem": run_ohem,
+                "ohem_start_epoch": ohem_start_epoch,
+                "ohem_ratio": ohem_ratio,
+                "ohem_min_kept": ohem_min_kept,
                 "resume_checkpoint": full_resume_checkpoint_path,
             },
             create_email_body_fn=create_email_body,

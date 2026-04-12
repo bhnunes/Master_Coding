@@ -33,12 +33,17 @@ def test_build_run_hparams_preserves_existing_fields() -> None:
         alpha_bce=0.6,
         beta_dice_bg=0.2,
         gamma_dice_fg=0.8,
+        run_ohem=True,
+        ohem_start_epoch=2,
+        ohem_ratio=0.25,
+        ohem_min_kept=1024,
     )
 
     assert hparams["label"] == "exp"
     assert hparams["model"] == "UNET++_resnet34"
     assert hparams["loss"] == "BCEDiceHybridLossPaper"
     assert hparams["loss_gamma_dice_fg"] == 0.8
+    assert hparams["run_ohem"] is True
 
 
 @dataclass
@@ -158,6 +163,10 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
             "gamma_dice_fg": 0.8,
             "artifact_index_path": "artifact.parquet",
             "use_artifact_aware_loss": True,
+            "run_ohem": True,
+            "ohem_start_epoch": 2,
+            "ohem_ratio": 0.25,
+            "ohem_min_kept": 1024,
         },
         create_email_body_fn=_create_email_body,
         send_email_fn=_send_email,
@@ -174,6 +183,7 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
     assert calls["email_body"]["val_auprc"] == 0.8
     assert calls["email_body"]["val_loss"] == 0.3
     assert calls["email_body"]["use_artifact_aware_loss"] is True
+    assert calls["email_body"]["run_ohem"] is True
 
 
 def test_run_training_epochs_stops_when_training_step_raises() -> None:

@@ -68,6 +68,11 @@ def _build_training_provenance(
     validation_dataset: str,
     artifact_index_path: str | os.PathLike[str] | None,
     resume_checkpoint: str | os.PathLike[str] | None,
+    *,
+    run_ohem: bool,
+    ohem_start_epoch: int,
+    ohem_ratio: float,
+    ohem_min_kept: int,
 ) -> tuple[dict[str, Any], str]:
     dataset_provenance = _build_dataset_provenance(dataset)
     validation_dataset_provenance = _build_dataset_provenance(validation_dataset)
@@ -119,6 +124,12 @@ def _build_training_provenance(
             "source_signature": validation_dataset_provenance["source_signature"],
         },
         "artifact_aware_loss": artifact_loss_provenance,
+        "ohem": {
+            "enabled": run_ohem,
+            "start_epoch": ohem_start_epoch,
+            "ratio": ohem_ratio,
+            "min_kept": ohem_min_kept,
+        },
         "resume_checkpoint": {
             "path": resume_path_str,
             "sha256": resume_sha256,
@@ -134,6 +145,7 @@ def _build_training_provenance(
             "smart_sampling_lineage",
             "validation_lineage",
             "artifact_aware_loss",
+            "ohem",
         )
     }
     return provenance, hash_json_payload(cast(dict[str, Any], compatibility_contract))
@@ -144,6 +156,10 @@ def build_training_compatibility_signature(
     dataset: str,
     validation_dataset: str,
     artifact_index_path: str | os.PathLike[str] | None,
+    run_ohem: bool,
+    ohem_start_epoch: int,
+    ohem_ratio: float,
+    ohem_min_kept: int,
 ) -> str:
     """Build the fail-closed compatibility signature for a training run."""
 
@@ -152,6 +168,10 @@ def build_training_compatibility_signature(
         validation_dataset,
         artifact_index_path,
         resume_checkpoint=None,
+        run_ohem=run_ohem,
+        ohem_start_epoch=ohem_start_epoch,
+        ohem_ratio=ohem_ratio,
+        ohem_min_kept=ohem_min_kept,
     )
     return compatibility_signature
 
@@ -419,6 +439,10 @@ def save_metadata(
     use_artifact_aware_loss: bool = False,
     artifact_index_path: str | os.PathLike[str] | None = None,
     resume_checkpoint: str | os.PathLike[str] | None = None,
+    run_ohem: bool = False,
+    ohem_start_epoch: int = 2,
+    ohem_ratio: float = 0.25,
+    ohem_min_kept: int = 1024,
 ) -> None:
     """Persist model metadata next to the best checkpoint."""
 
@@ -429,6 +453,10 @@ def save_metadata(
         validation_dataset,
         artifact_index_path,
         resume_checkpoint,
+        run_ohem=run_ohem,
+        ohem_start_epoch=ohem_start_epoch,
+        ohem_ratio=ohem_ratio,
+        ohem_min_kept=ohem_min_kept,
     )
 
     metadata = {
@@ -443,6 +471,7 @@ def save_metadata(
         "runtime_environment": collect_runtime_environment(),
         "execution_mode": execution_mode,
         "use_artifact_aware_loss": use_artifact_aware_loss,
+        "run_ohem": run_ohem,
         "compatibility_signature": compatibility_signature,
         "provenance": provenance,
         "artifact_index_path": (
@@ -463,6 +492,12 @@ def save_metadata(
             "Patience": patience,
             "Optimizer": optimizer_name,
             "Loss_Function": "BCEDiceHybrid",
+            "Run_OHEM": run_ohem,
+            "OHEM": {
+                "start_epoch": ohem_start_epoch,
+                "ratio": ohem_ratio,
+                "min_kept": ohem_min_kept,
+            },
             "Loss_Weights": {
                 "alpha_bce": alpha_bce,
                 "beta_dice_bg": beta_dice_bg,

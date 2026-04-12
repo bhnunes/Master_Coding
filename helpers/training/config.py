@@ -85,7 +85,15 @@ def _parse_email_recipients(value: str | None) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class TrainingEnsembleConfig:
-    """Runtime configuration for `10_training_ensemble.py`."""
+    """Runtime configuration for `10_training_ensemble.py`.
+
+    Stage 9 now supports two independent loss modifiers:
+
+    - ``use_artifact_aware_loss`` applies a sample-level discount using the
+      Stage 2 filename-keyed artifact coverage metadata.
+    - ``run_ohem`` applies pixel-level Online Hard Example Mining during
+      training only, after the configured warm-up epoch.
+    """
 
     num_epochs: int
     patience: int
@@ -109,6 +117,10 @@ class TrainingEnsembleConfig:
     execution_mode: str
     smart_sampling: bool
     amp_precision: str
+    run_ohem: bool
+    ohem_start_epoch: int
+    ohem_ratio: float
+    ohem_min_kept: int
     architecture: str
     encoder: str
     resume_checkpoint: Path | None
@@ -174,6 +186,26 @@ def load_training_ensemble_config(
         default="fp16",
         valid_values=VALID_AMP_PRECISIONS,
     )
+    run_ohem = _parse_bool(values.get("TRAINING_RUN_OHEM"), default=False)
+    ohem_start_epoch = _parse_int(
+        values.get("TRAINING_OHEM_START_EPOCH"),
+        "TRAINING_OHEM_START_EPOCH",
+        2,
+    )
+    ohem_ratio = _parse_float(values.get("TRAINING_OHEM_RATIO"), "TRAINING_OHEM_RATIO", 0.25)
+    ohem_min_kept = _parse_int(
+        values.get("TRAINING_OHEM_MIN_KEPT"),
+        "TRAINING_OHEM_MIN_KEPT",
+        1024,
+    )
+    if ohem_ratio <= 0.0 or ohem_ratio > 1.0:
+        raise ValueError("The 'TRAINING_OHEM_RATIO' environment variable must be in (0, 1].")
+    if ohem_min_kept < 1:
+        raise ValueError(
+            "The 'TRAINING_OHEM_MIN_KEPT' environment variable must be greater than 0."
+        )
+    if ohem_start_epoch < 0:
+        raise ValueError("The 'TRAINING_OHEM_START_EPOCH' environment variable must be >= 0.")
     optimizer_name = _parse_choice(
         values.get("TRAINING_OPTIMIZER_NAME"),
         "TRAINING_OPTIMIZER_NAME",
@@ -236,6 +268,10 @@ def load_training_ensemble_config(
         execution_mode=execution_mode,
         smart_sampling=_parse_bool(values.get("TRAINING_SMART_SAMPLING"), default=True),
         amp_precision=amp_precision,
+        run_ohem=run_ohem,
+        ohem_start_epoch=ohem_start_epoch,
+        ohem_ratio=ohem_ratio,
+        ohem_min_kept=ohem_min_kept,
         architecture=architecture,
         encoder=encoder,
         resume_checkpoint=resume_checkpoint,

@@ -27,6 +27,10 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
             "TRAINING_SMART_SAMPLING": "false",
             "TRAINING_UNLEASHED": "true",
             "TRAINING_USE_ARTIFACT_AWARE_LOSS": "true",
+            "TRAINING_RUN_OHEM": "true",
+            "TRAINING_OHEM_START_EPOCH": "3",
+            "TRAINING_OHEM_RATIO": "0.4",
+            "TRAINING_OHEM_MIN_KEPT": "2048",
             "TRAINING_ARTIFACT_INDEX_PATH": str(tmp_path / "artifact_patch_index.parquet"),
         }
     )
@@ -49,6 +53,10 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.execution_mode == "PAPER"
     assert config.smart_sampling is False
     assert config.unleashed is True
+    assert config.run_ohem is True
+    assert config.ohem_start_epoch == 3
+    assert config.ohem_ratio == 0.4
+    assert config.ohem_min_kept == 2048
     assert config.use_artifact_aware_loss is True
     assert config.artifact_index_path == tmp_path / "artifact_patch_index.parquet"
     assert config.log_path == Path("logs/training_ensemble.log")
@@ -71,6 +79,10 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.email_recipients == ()
     assert config.amp_precision == "fp16"
     assert config.execution_mode == "PAPER"
+    assert config.run_ohem is False
+    assert config.ohem_start_epoch == 2
+    assert config.ohem_ratio == 0.25
+    assert config.ohem_min_kept == 1024
     assert config.use_artifact_aware_loss is False
     assert config.artifact_index_path is None
     assert config.log_path == Path("logs/training_ensemble.log")
@@ -122,3 +134,16 @@ def test_load_training_ensemble_config_accepts_research_approved_pair(tmp_path: 
 
     assert config.architecture == "SWIN"
     assert config.encoder == "tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k"
+
+
+def test_load_training_ensemble_config_rejects_invalid_ohem_ratio(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="TRAINING_OHEM_RATIO"):
+        load_training_ensemble_config(
+            {
+                "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+                "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
+                "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
+                "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
+                "TRAINING_OHEM_RATIO": "0",
+            }
+        )

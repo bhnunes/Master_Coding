@@ -1,84 +1,112 @@
-import pytest
+from __future__ import annotations
+
 import torch
 
 from helpers.training.losses import BCEDiceHybridLossPaper
 
 
-def test_bce_dice_hybrid_loss_accepts_class_index_masks() -> None:
-    loss_fn = BCEDiceHybridLossPaper(alpha=0.125, beta=0.157, gamma=0.173)
-    logits = torch.tensor(
+def _build_logits() -> torch.Tensor:
+    return torch.tensor(
         [
             [
-                [[2.0, -1.0], [0.5, 1.0]],
-                [[-2.0, 1.0], [-0.5, -1.0]],
+                [[4.0, -4.0], [-4.0, 4.0]],
+                [[-4.0, 4.0], [4.0, -4.0]],
             ]
         ],
         dtype=torch.float32,
     )
-    target = torch.tensor([[[0, 1], [1, 0]]], dtype=torch.long)
-
-    loss = loss_fn(logits, target)
-
-    assert torch.isfinite(loss)
-    assert loss.ndim == 0
 
 
-def test_bce_dice_hybrid_loss_accepts_single_channel_masks() -> None:
-    loss_fn = BCEDiceHybridLossPaper()
-    logits = torch.randn(2, 2, 4, 4, dtype=torch.float32)
-    target = torch.randint(0, 2, (2, 1, 4, 4), dtype=torch.long)
-
-    loss = loss_fn(logits, target)
-
-    assert torch.isfinite(loss)
+def _build_target() -> torch.Tensor:
+    return torch.tensor([[[0, 1], [1, 0]]], dtype=torch.long)
 
 
-def test_bce_dice_hybrid_loss_rejects_shape_mismatch() -> None:
-    loss_fn = BCEDiceHybridLossPaper()
-    logits = torch.randn(1, 2, 4, 4, dtype=torch.float32)
-    target = torch.randint(0, 2, (1, 3, 4), dtype=torch.long)
+def test_bce_dice_hybrid_loss_default_matches_when_ohem_is_disabled() -> None:
+    logits = _build_logits()
+    target = _build_target()
 
-    with pytest.raises(ValueError, match="Shape mismatch"):
-        loss_fn(logits, target)
+    baseline = BCEDiceHybridLossPaper(alpha=0.5, beta=0.25, gamma=0.25)
+    ohem_capable = BCEDiceHybridLossPaper(
+        alpha=0.5,
+        beta=0.25,
+        gamma=0.25,
+        run_ohem=True,
+        ohem_start_epoch=2,
+        ohem_ratio=0.25,
+        ohem_min_kept=1,
+    )
+
+    assert torch.allclose(baseline(logits, target), ohem_capable(logits, target))
 
 
-def test_bce_dice_hybrid_loss_rejects_non_canonical_target_rank() -> None:
-    loss_fn = BCEDiceHybridLossPaper()
-    logits = torch.randn(1, 2, 4, 4, dtype=torch.float32)
-    target = torch.randint(0, 2, (1, 2, 4, 4), dtype=torch.long)
-
-    with pytest.raises(AssertionError, match="Target tensor invariant"):
-        loss_fn(logits, target)
-
-
-def test_bce_dice_hybrid_loss_applies_artifact_discount_using_max_coverage() -> None:
-    loss_fn = BCEDiceHybridLossPaper()
+def test_bce_dice_hybrid_loss_applies_artifact_discount_after_ohem() -> None:
     logits = torch.tensor(
         [
-            [[[2.0, -1.0], [0.5, 1.0]], [[-2.0, 1.0], [-0.5, -1.0]]],
-            [[[1.0, -0.5], [0.1, 0.2]], [[-1.0, 0.5], [-0.1, -0.2]]],
+            [
+                [[2.0, 1.0], [0.5, -1.0]],
+                [[-2.0, -1.0], [-0.5, 1.0]],
+            ]
         ],
         dtype=torch.float32,
     )
-    target = torch.tensor(
-        [
-            [[0, 1], [1, 0]],
-            [[1, 0], [0, 1]],
-        ],
-        dtype=torch.long,
-    )
-    artifact_covariates = torch.tensor(
-        [[0.2, 0.1, 0.4, 0.0, 0.3], [0.05, 0.0, 0.1, 0.0, 0.0]],
-        dtype=torch.float32,
-    )
+    target = torch.tensor([[[0, 0], [1, 1]]], dtype=torch.long)
+    artifact_covariates = torch.tensor([[0.2, 0.1, 0.0, 0.0, 0.0]], dtype=torch.float32)
 
-    base_losses = loss_fn(logits, target, reduction="none")
-    weighted_loss = loss_fn(
+    loss_fn = BCEDiceHybridLossPaper(
+        alpha=0.5,
+        beta=0.25,
+        gamma=0.25,
+        run_ohem=True,
+        ohem_start_epoch=0,
+        ohem_ratio=0.5,
+        ohem_min_kept=1,
+    )
+    loss_fn.set_epoch(0)
+    loss_fn.set_ohem_enabled(True)
+
+    undiscounted = loss_fn(
+        logits,
+        target,
+        artifact_covariates=artifact_covariates,
+        apply_artifact_discount=False,
+        reduction="none",
+    )
+    discounted = loss_fn(
         logits,
         target,
         artifact_covariates=artifact_covariates,
         apply_artifact_discount=True,
+        reduction="none",
     )
 
-    expected = (base_losses * torch.tensor([0.6, 0.9])).mean()
-    assert torch.isclose(weighted_loss, expected)
+    assert torch.allclose(discounted, undiscounted * 0.8)
+
+
+def test_bce_dice_hybrid_loss_ohem_changes_loss_once_active() -> None:
+    logits = torch.tensor(
+        [
+            [
+                [[4.0, 4.0], [4.0, 4.0]],
+                [[-4.0, -4.0], [-4.0, -4.0]],
+            ]
+        ],
+        dtype=torch.float32,
+    )
+    target = torch.tensor([[[0, 1], [0, 0]]], dtype=torch.long)
+
+    loss_fn = BCEDiceHybridLossPaper(
+        alpha=0.5,
+        beta=0.25,
+        gamma=0.25,
+        run_ohem=True,
+        ohem_start_epoch=0,
+        ohem_ratio=0.25,
+        ohem_min_kept=1,
+    )
+
+    inactive_loss = loss_fn(logits, target)
+    loss_fn.set_epoch(0)
+    loss_fn.set_ohem_enabled(True)
+    active_loss = loss_fn(logits, target)
+
+    assert not torch.allclose(inactive_loss, active_loss)

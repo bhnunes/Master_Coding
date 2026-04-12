@@ -31,13 +31,22 @@ def create_email_body(
     gamma_dice_fg: float,
     use_artifact_aware_loss: bool,
     artifact_index_path: str | PathLike[str] | None,
+    run_ohem: bool,
+    ohem_start_epoch: int,
+    ohem_ratio: float,
+    ohem_min_kept: int,
 ) -> str:
-    """Create the completion email body for a finished training run."""
+    """Create the completion email body for a finished training run.
+
+    The summary includes both independent loss modifiers so users can tell
+    whether a run used artifact-aware discounting, OHEM, or both.
+    """
 
     artifact_index_display = (
         os.fspath(artifact_index_path) if artifact_index_path is not None else "n/a"
     )
     artifact_mode_display = "enabled" if use_artifact_aware_loss else "disabled"
+    ohem_mode_display = "enabled" if run_ohem else "disabled"
     return (
         f"Training {architecture} finished.\n\n"
         f"Checkpoint Path: {checkpoint_path}\n\n"
@@ -56,6 +65,10 @@ def create_email_body(
         f"loss_gamma_dice_fg: {gamma_dice_fg}\n"
         f"artifact_aware_loss: {artifact_mode_display}\n"
         f"artifact_index_path: {artifact_index_display}\n"
+        f"run_ohem: {ohem_mode_display}\n"
+        f"ohem_start_epoch: {ohem_start_epoch}\n"
+        f"ohem_ratio: {ohem_ratio}\n"
+        f"ohem_min_kept: {ohem_min_kept}\n"
     )
 
 

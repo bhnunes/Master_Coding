@@ -51,8 +51,17 @@ def build_run_hparams(
     alpha_bce: float,
     beta_dice_bg: float,
     gamma_dice_fg: float,
+    run_ohem: bool,
+    ohem_start_epoch: int,
+    ohem_ratio: float,
+    ohem_min_kept: int,
 ) -> dict[str, Any]:
-    """Build the Aim hparams payload for a single architecture run."""
+    """Build the Aim hparams payload for a single architecture run.
+
+    The payload records whether Stage 9 used the baseline BCE+Dice loss or the
+    OHEM-enhanced variant so experiment comparisons and resume provenance remain
+    explicit.
+    """
 
     return {
         "base_learning_rate": base_learning_rate,
@@ -72,6 +81,10 @@ def build_run_hparams(
         "loss_alpha_bce": alpha_bce,
         "loss_beta_dice_bg": beta_dice_bg,
         "loss_gamma_dice_fg": gamma_dice_fg,
+        "run_ohem": run_ohem,
+        "ohem_start_epoch": ohem_start_epoch,
+        "ohem_ratio": ohem_ratio,
+        "ohem_min_kept": ohem_min_kept,
     }
 
 
@@ -297,6 +310,10 @@ def finalize_training_artifacts(
         gamma_dice_fg=float(save_metadata_kwargs.get("gamma_dice_fg", 0.0)),
         use_artifact_aware_loss=bool(save_metadata_kwargs.get("use_artifact_aware_loss", False)),
         artifact_index_path=save_metadata_kwargs.get("artifact_index_path"),
+        run_ohem=bool(save_metadata_kwargs.get("run_ohem", False)),
+        ohem_start_epoch=int(save_metadata_kwargs.get("ohem_start_epoch", 2)),
+        ohem_ratio=float(save_metadata_kwargs.get("ohem_ratio", 0.25)),
+        ohem_min_kept=int(save_metadata_kwargs.get("ohem_min_kept", 1024)),
     )
     send_email_fn(
         f"Finished: {experiment_name}",

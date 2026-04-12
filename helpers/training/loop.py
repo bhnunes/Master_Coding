@@ -46,6 +46,10 @@ def train_epoch(
     model.train()
     if hasattr(optimizer, "train"):
         optimizer.train()
+    if hasattr(loss_fn, "set_epoch"):
+        loss_fn.set_epoch(current_epoch)
+    if hasattr(loss_fn, "set_ohem_enabled"):
+        loss_fn.set_ohem_enabled(True)
 
     amp_dtype, scaler, precision_log = setup_precision(architecture, amp_precision=amp_precision)
     tracker_loss = RunningWeightedMetric()
@@ -175,6 +179,10 @@ def validate_epoch(
     model.eval()
     if hasattr(optimizer, "eval"):
         optimizer.eval()
+    if hasattr(loss_fn, "set_ohem_enabled"):
+        loss_fn.set_ohem_enabled(False)
+    if hasattr(loss_fn, "set_epoch"):
+        loss_fn.set_epoch(None)
 
     amp_dtype, _, _ = setup_precision(architecture, amp_precision=amp_precision)
     tracker = AdvancedMetricTracker(device=device, metric_bins=2048)
