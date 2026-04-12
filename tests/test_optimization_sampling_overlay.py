@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import cv2
@@ -12,6 +13,8 @@ from helpers.optimization_sampling.overlay import (
     _overlay_task_order_key,
     _parse_hdf5_ref,
     _process_overlay_task,
+    _progress_disabled,
+    _progress_file,
     _to_grayscale_mask,
     generate_overlay_images,
     overlay_mask_edges,
@@ -126,6 +129,78 @@ def test_overlay_mask_edges_reads_hdf5_image_and_mask_sources(tmp_path: Path) ->
 
 def test_generate_overlay_images_returns_empty_list_for_no_tasks() -> None:
     assert generate_overlay_images([], num_processes=2) == []
+
+
+def test_progress_helpers_use_real_terminal_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeStream:
+        def isatty(self) -> bool:
+            return True
+
+    fake_stream = FakeStream()
+    monkeypatch.setattr("helpers.optimization_sampling.overlay.sys.__stderr__", fake_stream)
+
+    assert _progress_file() is fake_stream
+    assert _progress_disabled() is False
+
+
+def test_generate_overlay_images_uses_live_progress_friendly_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    task = OverlayTask(
+        image_path=tmp_path / "image.png",
+        mask_path=tmp_path / "mask.png",
+        output_path=tmp_path / "out.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+    seen: dict[str, object] = {}
+
+    class FakePool:
+        def __init__(self, processes: int) -> None:
+            seen["processes"] = processes
+
+        def __enter__(self) -> FakePool:
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            return None
+
+        def imap_unordered(
+            self,
+            func: Callable[[OverlayTask], bool],
+            tasks: Iterable[OverlayTask],
+            *,
+            chunksize: int,
+        ) -> list[bool]:
+            seen["func"] = func
+            seen["tasks"] = list(tasks)
+            seen["chunksize"] = chunksize
+            return [True]
+
+    def fake_tqdm(iterable: object, **kwargs: object) -> object:
+        seen["tqdm_kwargs"] = kwargs
+        return iterable
+
+    monkeypatch.setattr("helpers.optimization_sampling.overlay.Pool", FakePool)
+    monkeypatch.setattr("helpers.optimization_sampling.overlay.tqdm", fake_tqdm)
+    monkeypatch.setattr("helpers.optimization_sampling.overlay._progress_file", lambda: "stream")
+    monkeypatch.setattr("helpers.optimization_sampling.overlay._progress_disabled", lambda: False)
+
+    result = generate_overlay_images([task], num_processes=3)
+
+    assert result == [True]
+    assert seen["processes"] == 3
+    assert seen["chunksize"] == 1
+    assert seen["tasks"] == [task]
+    assert seen["tqdm_kwargs"] == {
+        "total": 1,
+        "desc": "Generating Samples",
+        "mininterval": 0.5,
+        "dynamic_ncols": True,
+        "file": "stream",
+        "disable": False,
+    }
 
 
 def test_overlay_task_order_key_prefers_hdf5_rows_then_non_hdf5_paths(tmp_path: Path) -> None:

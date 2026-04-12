@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import sys
 from collections.abc import Sequence
 from multiprocessing import Pool
 from pathlib import Path
@@ -16,6 +17,7 @@ from helpers.optimization_sampling.sampling import OverlayTask
 
 _WORKER_HDF5_HANDLES: dict[Path, h5py.File] = {}
 _WORKER_HDF5_CLEANUP_REGISTERED = False
+_PROGRESS_MIN_INTERVAL_SECONDS = 0.5
 
 
 def overlay_mask_edges(
@@ -76,13 +78,16 @@ def generate_overlay_images(tasks: Sequence[OverlayTask], num_processes: int) ->
         return []
 
     ordered_tasks = sorted(tasks, key=_overlay_task_order_key)
-    chunksize = max(1, len(ordered_tasks) // max(1, num_processes * 4))
     with Pool(processes=num_processes) as pool:
         return list(
             tqdm(
-                pool.imap_unordered(_process_overlay_task, ordered_tasks, chunksize=chunksize),
+                pool.imap_unordered(_process_overlay_task, ordered_tasks, chunksize=1),
                 total=len(ordered_tasks),
                 desc="Generating Samples",
+                mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+                dynamic_ncols=True,
+                file=_progress_file(),
+                disable=_progress_disabled(),
             )
         )
 
@@ -96,6 +101,17 @@ def _process_overlay_task(task: OverlayTask) -> bool:
         thickness=task.thickness,
         alpha=task.alpha,
     )
+
+
+def _progress_file() -> Any:
+    """Use the real terminal stream so tqdm stays interactive under redirected stdout."""
+
+    return sys.__stderr__
+
+
+def _progress_disabled() -> bool:
+    isatty = getattr(_progress_file(), "isatty", None)
+    return not bool(isatty() if callable(isatty) else False)
 
 
 def _to_grayscale_mask(mask: Any) -> Any:
