@@ -1,4 +1,5 @@
 import sys
+from builtins import __import__ as builtins_import
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +7,7 @@ import cv2
 import h5py
 import numpy as np
 import pandas as pd
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold import normalization
@@ -151,6 +153,29 @@ def test_load_stain_normalizer_backend_uses_tiatoolbox_module(monkeypatch: Monke
     monkeypatch.setitem(sys.modules, "tiatoolbox.tools", fake_tools_module)
 
     assert normalization.load_stain_normalizer_backend() is fake_stainnorm
+
+
+def test_load_stain_normalizer_backend_raises_actionable_error_for_missing_pkg_resources(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def fake_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "tiatoolbox.tools":
+            raise ModuleNotFoundError("No module named 'pkg_resources'", name="pkg_resources")
+        return builtins_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(normalization, "load_openslide_module", lambda: object())
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(RuntimeError, match="pkg_resources") as exc_info:
+        normalization.load_stain_normalizer_backend()
+
+    assert "Upgrade TIAToolbox" in str(exc_info.value)
 
 
 def test_fit_normalizer_on_train_set_supports_hdf5_backed_template_rows(

@@ -37,6 +37,7 @@ dependencies = [
     "orjson",
     "transformers==5.5.0",
     "xformers==0.0.32.post2",
+    "setuptools<82",
 ]
 
 [dependency-groups]

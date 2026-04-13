@@ -34,7 +34,21 @@ def load_stain_normalizer_backend() -> Any:
     """Load the TIAToolbox stain normalizer backend with OpenSlide initialized."""
 
     load_openslide_module()
-    from tiatoolbox.tools import stainnorm
+    try:
+        from tiatoolbox.tools import stainnorm
+    except ModuleNotFoundError as error:
+        message = (
+            "Stage 5 normalization requires a working TIAToolbox stain normalization backend. "
+            "Install a Python 3.12-compatible TIAToolbox release."
+        )
+        if error.name == "pkg_resources":
+            message = (
+                "Stage 5 normalization could not import TIAToolbox because `pkg_resources` is "
+                "missing. This usually means an older TIAToolbox release is installed alongside "
+                "a newer setuptools version. Upgrade TIAToolbox to a Python 3.12-compatible 2.x "
+                "release, or temporarily pin `setuptools<82`."
+            )
+        raise RuntimeError(message) from error
 
     return stainnorm
 
