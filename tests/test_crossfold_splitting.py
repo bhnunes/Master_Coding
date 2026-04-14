@@ -206,18 +206,28 @@ def test_optimize_patient_split_with_optuna_uses_best_trial_weights(
             self.best_trial: TrialStub | None = None
             self.best_value: float | None = None
 
-        def optimize(self, objective, n_trials: int) -> None:  # type: ignore[no-untyped-def]
+        def optimize(self, objective, n_trials: int, callbacks) -> None:  # type: ignore[no-untyped-def]
             assert n_trials == 2
+            assert len(callbacks) == 1
             for trial in self._trials:
                 value = float(objective(trial))
                 if self.best_value is None or value < self.best_value:
                     self.best_value = value
                     self.best_trial = trial
+                callbacks[0](self, trial)
 
     study = StudyStub(trial_params)
     monkeypatch.setattr(
         "helpers.crossfold.splitting.optuna.create_study",
         lambda direction, sampler: study,
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.splitting._set_optuna_warning_verbosity",
+        lambda: 20,
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.splitting._restore_optuna_verbosity",
+        lambda previous_verbosity: None,
     )
     monkeypatch.setattr(
         "helpers.crossfold.splitting.validate_split_patient_counts",

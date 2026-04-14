@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any, Protocol, TypedDict
 
 import numpy as np
 import optuna
 import pandas as pd
+from tqdm import tqdm
 
 from helpers.crossfold.config import ObjectiveConfig, SplitConstraints
 
@@ -21,6 +23,50 @@ class SplitState(TypedDict):
     cancer_samples: int
     cancer_ratio: float
     non_cancer_samples: int
+
+
+def _progress_file() -> Any:
+    """Use the real terminal stream so tqdm stays interactive under logger redirects."""
+
+    return sys.__stderr__
+
+
+class _StudyProgressCallback:
+    """Advance the Stage 5 Optuna progress bar once per finished trial."""
+
+    def __init__(self, progress_bar: tqdm[Any]) -> None:
+        self._progress_bar = progress_bar
+
+    def __call__(self, study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        del trial
+        self._progress_bar.update(1)
+        completed = len(
+            [
+                finished_trial
+                for finished_trial in getattr(study, "trials", [])
+                if finished_trial.state == optuna.trial.TrialState.COMPLETE
+            ]
+        )
+        postfix: dict[str, str] = {"done": str(completed)}
+        if completed > 0:
+            best_value = float(study.best_value)
+            if np.isfinite(best_value):
+                postfix["best"] = f"{best_value:.4f}"
+        self._progress_bar.set_postfix(postfix)
+
+
+def _optuna_callbacks(progress_bar: tqdm[Any]) -> list[_StudyProgressCallback]:
+    return [_StudyProgressCallback(progress_bar)]
+
+
+def _set_optuna_warning_verbosity() -> int:
+    previous_verbosity = int(optuna.logging.get_verbosity())
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    return previous_verbosity
+
+
+def _restore_optuna_verbosity(previous_verbosity: int) -> None:
+    optuna.logging.set_verbosity(previous_verbosity)
 
 
 def build_patient_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -354,7 +400,27 @@ def optimize_patient_split_with_optuna(
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=random_state),
     )
-    study.optimize(objective, n_trials=optuna_trials)
+    logging.info(
+        "Running Stage 5 Optuna split search: patients=%s | trials=%s",
+        len(patient_df),
+        optuna_trials,
+    )
+    previous_verbosity = _set_optuna_warning_verbosity()
+    try:
+        with tqdm(
+            total=optuna_trials,
+            desc="Stage 5 Optuna",
+            unit="trial",
+            file=_progress_file(),
+            leave=False,
+        ) as progress_bar:
+            study.optimize(
+                objective,
+                n_trials=optuna_trials,
+                callbacks=_optuna_callbacks(progress_bar),
+            )
+    finally:
+        _restore_optuna_verbosity(previous_verbosity)
 
     best_trial = study.best_trial
     ordered_patients = patient_df.copy()
