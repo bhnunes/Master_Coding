@@ -6,6 +6,7 @@ import pandas as pd
 
 from helpers.sanity.manifest_checks import (
     check_manifest_schema,
+    check_split_constraints_from_run_config,
     check_split_stats_against_manifest,
     check_stage4_cleaning_lineage,
 )
@@ -66,6 +67,56 @@ def test_check_manifest_schema_accepts_hdf5_native_manifest_columns() -> None:
     result = check_manifest_schema(manifest_df)
 
     assert result.status == "PASS"
+
+
+def test_check_split_constraints_from_run_config_accepts_new_stage5_constraint_keys() -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {"split": "TRAIN", "patient_id": 1},
+            {"split": "VALIDATION", "patient_id": 2},
+            {"split": "VALIDATION", "patient_id": 3},
+            {"split": "TEST", "patient_id": 4},
+            {"split": "TEST", "patient_id": 5},
+        ]
+    )
+
+    result = check_split_constraints_from_run_config(
+        manifest_df,
+        {
+            "constraints": {
+                "test_patient_count": 2,
+                "validation_patient_count": 2,
+            }
+        },
+    )
+
+    assert result.status == "PASS"
+
+
+def test_check_split_constraints_from_run_config_fails_for_new_stage5_constraint_violation() -> (
+    None
+):
+    manifest_df = pd.DataFrame(
+        [
+            {"split": "TRAIN", "patient_id": 1},
+            {"split": "VALIDATION", "patient_id": 2},
+            {"split": "TEST", "patient_id": 3},
+        ]
+    )
+
+    result = check_split_constraints_from_run_config(
+        manifest_df,
+        {
+            "constraints": {
+                "test_patient_count": 2,
+                "validation_patient_count": 2,
+            }
+        },
+    )
+
+    assert result.status == "FAIL"
+    assert "VALIDATION patients 1 < 2" in result.details
+    assert "TEST patients 1 < 2" in result.details
 
 
 def test_check_stage4_cleaning_lineage_fails_on_split_attr_mismatch(tmp_path: Path) -> None:

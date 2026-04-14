@@ -145,9 +145,7 @@ def check_split_constraints_from_run_config(
             "WARN", "run_config.json missing key 'constraints'; cannot verify split constraints."
         )
     missing = [
-        key
-        for key in ("min_test_patients", "min_train_patients", "min_val_patients")
-        if key not in constraints
+        key for key in ("test_patient_count", "validation_patient_count") if key not in constraints
     ]
     if missing:
         return CheckResult(
@@ -156,14 +154,15 @@ def check_split_constraints_from_run_config(
         )
     failures: list[str] = []
     counts = {split_name: _count_unique_patients(manifest_df, split_name) for split_name in SPLITS}
-    if counts["TRAIN"] < int(constraints["min_train_patients"]):
-        failures.append(f"TRAIN patients {counts['TRAIN']} < {constraints['min_train_patients']}")
-    if counts["VALIDATION"] < int(constraints["min_val_patients"]):
+    if counts["TRAIN"] < 1:
+        failures.append("TRAIN patients 0 < 1")
+    if counts["VALIDATION"] < int(constraints["validation_patient_count"]):
         failures.append(
-            f"VALIDATION patients {counts['VALIDATION']} < {constraints['min_val_patients']}"
+            "VALIDATION patients "
+            f"{counts['VALIDATION']} < {constraints['validation_patient_count']}"
         )
-    if counts["TEST"] < int(constraints["min_test_patients"]):
-        failures.append(f"TEST patients {counts['TEST']} < {constraints['min_test_patients']}")
+    if counts["TEST"] < int(constraints["test_patient_count"]):
+        failures.append(f"TEST patients {counts['TEST']} < {constraints['test_patient_count']}")
     if failures:
         return CheckResult("FAIL", "Split constraints violated: " + "; ".join(failures))
     return CheckResult("PASS", "Split patient minima satisfy constraints in run_config.json.")

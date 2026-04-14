@@ -9,7 +9,7 @@ import pandas as pd
 
 from helpers.crossfold.config import CrossfoldConfig
 from helpers.crossfold.discovery import load_patch_dataset
-from helpers.crossfold.entropy import compute_all_patch_entropies, compute_patient_entropy_median
+from helpers.crossfold.entropy import compute_all_patch_entropies
 from helpers.crossfold.io import verify_split_hdf5_integrity, write_split_hdf5
 from helpers.crossfold.logging import configure_crossfold_logging
 from helpers.crossfold.normalization import fit_normalizer_on_train_set, save_normalizer_stats
@@ -43,7 +43,6 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     logging.info("=== Data Preparation (Refactored) ===")
     logging.info("Normalization method: %s", config.normalization_method)
     logging.info("Random state: %s", config.random_state)
-    logging.info("Optimize training set: %s", config.optimize_training_set)
     logging.info("Constraints: %s", asdict(config.constraints))
     logging.info("Objective: %s", asdict(config.objective))
     logging.info("Output: %s", output_dir)
@@ -51,10 +50,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     source_hdf5_provenance = collect_hdf5_provenance(config.source_hdf5_path)
     dataset = load_patch_dataset(config.source_hdf5_path)
     entropy_df: pd.DataFrame | None = None
-    patient_entropy_df: pd.DataFrame | None = None
-    should_compute_entropy = config.optimize_training_set and config.objective.enable_objective
-    if config.normalization_method != "NOT_NORMALIZED":
-        should_compute_entropy = True
+    should_compute_entropy = config.normalization_method != "NOT_NORMALIZED"
     if should_compute_entropy:
         entropy_df = compute_all_patch_entropies(
             df=dataset,
@@ -62,12 +58,8 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
             chunksize=config.objective.chunksize,
             entropy_thumbnail=config.objective.entropy_thumbnail,
         )
-        if config.optimize_training_set and config.objective.enable_objective:
-            patient_entropy_df = compute_patient_entropy_median(dataset, entropy_df)
         if config.save_entropy_cache_csv:
             entropy_df.to_csv(output_dir / "entropy_cache.csv", index=False)
-            if patient_entropy_df is not None:
-                patient_entropy_df.to_csv(output_dir / "patient_entropy_median.csv", index=False)
             logging.info("Saved entropy cache: %s", output_dir / "entropy_cache.csv")
 
     split_data = create_train_val_test_split_best(
@@ -75,8 +67,6 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         random_state=config.random_state,
         constraints=config.constraints,
         objective=config.objective,
-        optimize_training_set=config.optimize_training_set,
-        patient_entropy_df=patient_entropy_df,
     )
     split_data["constraints"]["random_state"] = config.random_state
     run_id = f"{config.normalization_method}_seed_{config.random_state}"
@@ -120,24 +110,15 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
 
     extra: dict[str, object] = {}
     extra["split_selection"] = {
-        "test_selection_method": "neutral_stratified",
-        "train_validation_selection_method": (
-            "entropy_guided"
-            if config.optimize_training_set and config.objective.enable_objective
-            else "neutral_stratified"
-        ),
-        "optimize_training_set": config.optimize_training_set,
-        "objective": asdict(config.objective),
+        "method": "optuna_greedy_sample_ratio_stratified",
+        "tie_break_priority": ["TEST", "VALIDATION", "TRAIN"],
+        "global_cancer_ratio": split_data["constraints"].get("global_cancer_ratio"),
+        "optuna_trials": config.objective.optuna_trials,
+        "loss_metric": "sum_absolute_split_ratio_delta",
+        "final_loss": split_data.get("objective_score"),
     }
-    if patient_entropy_df is not None and split_data.get("objective_score") is not None:
-        extra["objective_definition"] = {
-            "metric": config.objective.metric,
-            "patient_entropy": "median(patch_entropy)",
-            "split_score": (
-                f"median(patient_entropy) over {config.objective.score_split.upper()} patients"
-            ),
-            "maximize": config.objective.maximize,
-        }
+    if "verification" in split_data:
+        extra["verification"] = split_data["verification"]
     write_manifest_and_log_stats(
         output_dir=output_dir,
         run_id=run_id,

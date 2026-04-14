@@ -27,14 +27,30 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         "train_df": dataset,
         "val_df": pd.DataFrame(columns=dataset.columns),
         "test_df": pd.DataFrame(columns=dataset.columns),
-        "constraints": {"random_state": None},
+        "constraints": {"random_state": None, "global_cancer_ratio": 1.0},
         "train_patients": [1],
         "val_patients": [],
         "test_patients": [],
         "split_seed": 11,
         "split_attempt": 1,
-        "objective_score": None,
-        "objective_score_split": "TRAIN",
+        "objective_score": 0.0,
+        "verification": {
+            "TRAIN": {
+                "expected_cancer_samples": 1.0,
+                "expected_non_cancer_samples": 0.0,
+                "chi2_stat": 0.0,
+            },
+            "VALIDATION": {
+                "expected_cancer_samples": 0.0,
+                "expected_non_cancer_samples": 0.0,
+                "chi2_stat": 0.0,
+            },
+            "TEST": {
+                "expected_cancer_samples": 0.0,
+                "expected_non_cancer_samples": 0.0,
+                "chi2_stat": 0.0,
+            },
+        },
     }
     manifest_df = pd.DataFrame(
         [
@@ -47,6 +63,8 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     calls: list[str] = []
     split_kwargs: dict[str, object] = {}
     provenance_kwargs: dict[str, object] = {}
+    write_calls: list[dict[str, object]] = []
+    cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
     def record(name: str, return_value: object | None = None) -> object | None:
         calls.append(name)
@@ -62,7 +80,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.collect_hdf5_provenance",
-        lambda path: {"path": str(path), "sha256": "source-hash", "attrs": {}},
+        lambda path: cached_provenance,
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.create_train_val_test_split_best",
@@ -72,9 +90,16 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
         lambda **kwargs: record("manifest", manifest_df),
     )
+
+    def fake_write_split_hdf5(**kwargs: object) -> object:
+        write_calls.append(kwargs)
+        output_path = kwargs["output_path"]
+        assert isinstance(output_path, Path)
+        return record(f"write:{output_path.name}", output_path)
+
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_split_hdf5",
-        lambda **kwargs: record(f"write:{kwargs['output_path'].name}", kwargs["output_path"]),
+        fake_write_split_hdf5,
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.verify_split_hdf5_integrity",
@@ -91,14 +116,11 @@ def test_run_crossfold_pipeline_executes_stage_flow(
             source_hdf5_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
-            optimize_training_set=False,
             constraints=SplitConstraints(
-                min_test_patients=1,
-                min_val_patients=1,
-                min_train_patients=1,
-                max_tries=10,
+                test_patient_count=20,
+                validation_patient_count=20,
             ),
-            objective=ObjectiveConfig(enable_objective=False),
+            objective=ObjectiveConfig(optuna_trials=25),
             hdf5_compression="NONE",
             copy_batch_size=256,
             calc_checksums=False,
@@ -110,11 +132,20 @@ def test_run_crossfold_pipeline_executes_stage_flow(
 
     assert summary.output_dir == tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
     assert summary.manifest_rows == 1
-    assert split_kwargs["optimize_training_set"] is False
     split_selection = cast(dict[str, Any], provenance_kwargs["extra"])["split_selection"]
-    assert split_selection["test_selection_method"] == "neutral_stratified"
-    assert split_selection["train_validation_selection_method"] == "neutral_stratified"
-    assert split_selection["optimize_training_set"] is False
+    assert split_selection["method"] == "optuna_greedy_sample_ratio_stratified"
+    assert split_selection["tie_break_priority"] == ["TEST", "VALIDATION", "TRAIN"]
+    assert split_selection["global_cancer_ratio"] == 1.0
+    assert split_selection["optuna_trials"] == 25
+    assert split_selection["loss_metric"] == "sum_absolute_split_ratio_delta"
+    assert split_selection["final_loss"] == 0.0
+    assert len(write_calls) == 1
+    assert write_calls[0]["source_hdf5_provenance"] is cached_provenance
+    assert provenance_kwargs["source_hdf5_provenance"] is cached_provenance
+    assert (
+        cast(dict[str, Any], provenance_kwargs["extra"])["verification"]
+        == split_data["verification"]
+    )
     assert calls == [
         "log:data_preparation.log",
         "load",

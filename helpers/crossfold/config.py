@@ -15,7 +15,6 @@ VALID_NORMALIZATION_METHODS = (
     "MACENKO",
     "VAHADANE",
 )
-VALID_SCORE_SPLITS = ("TRAIN", "VALIDATION")
 VALID_HDF5_COMPRESSION = ("NONE", "LZF", "GZIP")
 
 
@@ -40,15 +39,6 @@ def _parse_int(value: str | None, variable_name: str, default: int) -> int:
     else:
         candidate = value
     return int(candidate)
-
-
-def _parse_float(value: str | None, variable_name: str, default: float) -> float:
-    del variable_name
-    if value is None or value == "":
-        candidate: float | str = default
-    else:
-        candidate = value
-    return float(candidate)
 
 
 def _required_path(
@@ -83,27 +73,13 @@ def _parse_choice(
 
 @dataclass(frozen=True)
 class SplitConstraints:
-    min_test_patients: int = 20
-    min_val_patients: int = 5
-    min_train_patients: int = 5
-    enforce_stage11_validation_sizing: bool = True
-    min_validation_patients_for_ensemble: int = 30
-    min_validation_positive_patients_for_ensemble: int = 15
-    min_validation_negative_patients_for_ensemble: int = 15
-    test_ratio: float = 0.10
-    val_ratio: float = 0.10
-    require_train_image_dominance: bool = True
-    require_both_classes_if_possible: bool = True
-    max_tries: int = 1000
-    adaptive: bool = True
+    test_patient_count: int = 20
+    validation_patient_count: int = 20
 
 
 @dataclass(frozen=True)
 class ObjectiveConfig:
-    enable_objective: bool = True
-    score_split: str = "TRAIN"
-    maximize: bool = True
-    metric: str = "entropy_median_per_patient_median"
+    optuna_trials: int = 1000
     num_workers: int = max(1, (os.cpu_count() or 1) - 1)
     chunksize: int = 128
     entropy_thumbnail: int = 128
@@ -115,7 +91,6 @@ class CrossfoldConfig:
     source_hdf5_path: Path
     overwrite_output_dir: bool
     random_state: int
-    optimize_training_set: bool
     constraints: SplitConstraints
     objective: ObjectiveConfig
     hdf5_compression: str
@@ -165,72 +140,25 @@ def load_crossfold_config(
             "supported in HDF5-native Stage 5."
         )
     constraints = SplitConstraints(
-        min_test_patients=_parse_int(
-            values.get("CROSSFOLD_MIN_TEST_PATIENTS"),
-            "CROSSFOLD_MIN_TEST_PATIENTS",
+        test_patient_count=_parse_int(
+            values.get("CROSSFOLD_TEST_PATIENT_COUNT"),
+            "CROSSFOLD_TEST_PATIENT_COUNT",
             20,
         ),
-        min_val_patients=_parse_int(
-            values.get("CROSSFOLD_MIN_VAL_PATIENTS"),
-            "CROSSFOLD_MIN_VAL_PATIENTS",
-            5,
+        validation_patient_count=_parse_int(
+            values.get("CROSSFOLD_VALIDATION_PATIENT_COUNT"),
+            "CROSSFOLD_VALIDATION_PATIENT_COUNT",
+            20,
         ),
-        min_train_patients=_parse_int(
-            values.get("CROSSFOLD_MIN_TRAIN_PATIENTS"),
-            "CROSSFOLD_MIN_TRAIN_PATIENTS",
-            5,
-        ),
-        enforce_stage11_validation_sizing=_parse_bool(
-            values.get("CROSSFOLD_ENFORCE_VALIDATION_SIZING"),
-            "CROSSFOLD_ENFORCE_VALIDATION_SIZING",
-            True,
-        ),
-        min_validation_patients_for_ensemble=_parse_int(
-            values.get("CROSSFOLD_MIN_VALIDATION_PATIENTS_FOR_ENSEMBLE"),
-            "CROSSFOLD_MIN_VALIDATION_PATIENTS_FOR_ENSEMBLE",
-            30,
-        ),
-        min_validation_positive_patients_for_ensemble=_parse_int(
-            values.get("CROSSFOLD_MIN_VALIDATION_POSITIVE_PATIENTS_FOR_ENSEMBLE"),
-            "CROSSFOLD_MIN_VALIDATION_POSITIVE_PATIENTS_FOR_ENSEMBLE",
-            15,
-        ),
-        min_validation_negative_patients_for_ensemble=_parse_int(
-            values.get("CROSSFOLD_MIN_VALIDATION_NEGATIVE_PATIENTS_FOR_ENSEMBLE"),
-            "CROSSFOLD_MIN_VALIDATION_NEGATIVE_PATIENTS_FOR_ENSEMBLE",
-            15,
-        ),
-        test_ratio=_parse_float(values.get("CROSSFOLD_TEST_RATIO"), "CROSSFOLD_TEST_RATIO", 0.10),
-        val_ratio=_parse_float(values.get("CROSSFOLD_VAL_RATIO"), "CROSSFOLD_VAL_RATIO", 0.10),
-        require_train_image_dominance=_parse_bool(
-            values.get("CROSSFOLD_REQUIRE_TRAIN_IMAGE_DOMINANCE"),
-            "CROSSFOLD_REQUIRE_TRAIN_IMAGE_DOMINANCE",
-            True,
-        ),
-        require_both_classes_if_possible=_parse_bool(
-            values.get("CROSSFOLD_REQUIRE_BOTH_CLASSES_IF_POSSIBLE"),
-            "CROSSFOLD_REQUIRE_BOTH_CLASSES_IF_POSSIBLE",
-            True,
-        ),
-        max_tries=_parse_int(values.get("CROSSFOLD_MAX_TRIES"), "CROSSFOLD_MAX_TRIES", 1000),
-        adaptive=_parse_bool(values.get("CROSSFOLD_ADAPTIVE"), "CROSSFOLD_ADAPTIVE", True),
     )
     objective = ObjectiveConfig(
-        enable_objective=_parse_bool(
-            values.get("CROSSFOLD_ENABLE_OBJECTIVE"),
-            "CROSSFOLD_ENABLE_OBJECTIVE",
-            True,
-        ),
-        score_split=_parse_choice(
-            values.get("CROSSFOLD_OBJECTIVE_SCORE_SPLIT"),
-            "CROSSFOLD_OBJECTIVE_SCORE_SPLIT",
-            default="TRAIN",
-            allowed=VALID_SCORE_SPLITS,
-        ),
-        maximize=_parse_bool(
-            values.get("CROSSFOLD_OBJECTIVE_MAXIMIZE"),
-            "CROSSFOLD_OBJECTIVE_MAXIMIZE",
-            True,
+        optuna_trials=max(
+            1,
+            _parse_int(
+                values.get("CROSSFOLD_SPLIT_OPTUNA_TRIALS"),
+                "CROSSFOLD_SPLIT_OPTUNA_TRIALS",
+                1000,
+            ),
         ),
         num_workers=max(
             1,
@@ -266,11 +194,6 @@ def load_crossfold_config(
             True,
         ),
         random_state=_parse_int(values.get("CROSSFOLD_RANDOM_STATE"), "CROSSFOLD_RANDOM_STATE", 42),
-        optimize_training_set=_parse_bool(
-            values.get("CROSSFOLD_OPTIMIZE_TRAINING_SET"),
-            "CROSSFOLD_OPTIMIZE_TRAINING_SET",
-            False,
-        ),
         constraints=constraints,
         objective=objective,
         hdf5_compression=_parse_choice(

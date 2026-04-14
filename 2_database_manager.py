@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -48,7 +49,9 @@ class Style:
 
 
 @contextmanager
-def suppress_console_logging(logger: logging.Logger, *, level: int = logging.CRITICAL + 1):
+def suppress_console_logging(
+    logger: logging.Logger, *, level: int = logging.CRITICAL + 1
+) -> Iterator[None]:
     """Temporarily silence console handlers while preserving file logging."""
 
     console_handlers: list[tuple[logging.Handler, int]] = []

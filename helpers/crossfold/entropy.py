@@ -230,16 +230,3 @@ def compute_patient_entropy_median(df: pd.DataFrame, entropy_df: pd.DataFrame) -
             "patient_entropy_median": grouped.to_numpy(dtype=np.float64),
         }
     )
-
-
-def score_split_by_patient_entropy_median(
-    patient_entropy_df: pd.DataFrame,
-    patient_ids: list[int],
-) -> float:
-    """Score one split from the patient-level entropy objective."""
-
-    subset = patient_entropy_df[patient_entropy_df["patient_id"].isin(patient_ids)]
-    if subset.empty:
-        return float("-inf")
-    entropy_values = subset["patient_entropy_median"].to_numpy(dtype=np.float64)
-    return float(np.median(entropy_values))

@@ -11,7 +11,6 @@ from helpers.crossfold.entropy import (
     calculate_image_entropy_from_path,
     compute_all_patch_entropies,
     compute_patient_entropy_median,
-    score_split_by_patient_entropy_median,
 )
 
 
@@ -24,7 +23,7 @@ def test_calculate_image_entropy_from_path_returns_zero_for_missing_file(tmp_pat
     assert entropy == 0.0
 
 
-def test_compute_patient_entropy_median_and_score_split() -> None:
+def test_compute_patient_entropy_median() -> None:
     dataset = pd.DataFrame(
         [
             {"patient_id": 1, "image_path": "a.png"},
@@ -46,7 +45,6 @@ def test_compute_patient_entropy_median_and_score_split() -> None:
         {"patient_id": 1, "patient_entropy_median": 1.0},
         {"patient_id": 2, "patient_entropy_median": 3.0},
     ]
-    assert score_split_by_patient_entropy_median(patient_entropy_df, [1, 2]) == pytest.approx(2.0)
 
 
 def test_compute_all_patch_entropies_uses_sequential_worker_path(tmp_path: Path) -> None:
@@ -66,12 +64,6 @@ def test_compute_all_patch_entropies_uses_sequential_worker_path(tmp_path: Path)
     assert entropy_df["image_path"].tolist() == [str(image_a), str(image_b)]
     assert entropy_df["entropy"].iloc[0] == pytest.approx(0.0)
     assert entropy_df["entropy"].iloc[1] > 0.0
-
-
-def test_score_split_by_patient_entropy_median_returns_negative_infinity_for_empty_split() -> None:
-    patient_entropy_df = pd.DataFrame([{"patient_id": 1, "patient_entropy_median": 1.0}])
-
-    assert score_split_by_patient_entropy_median(patient_entropy_df, [99]) == float("-inf")
 
 
 def test_compute_all_patch_entropies_supports_hdf5_backed_rows(tmp_path: Path) -> None:

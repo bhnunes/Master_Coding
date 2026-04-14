@@ -269,8 +269,8 @@ Current Stage 5 behavior:
 - Loads Stage 5 settings from `.env` / `.env_example` through `helpers/crossfold/config.py`
 - Reads one cleaned source HDF5 dataset produced by Stage 3, optionally repackaged after Stage 4.3
 - Preserves patient-level split isolation and stratifies patients by `max(patch_label)`
-- Always freezes `TEST` with a neutral patient-level stratified split before any optional TRAIN / VALIDATION optimization
-- Supports `CROSSFOLD_OPTIMIZE_TRAINING_SET` to apply entropy-guided selection only to the TRAIN / VALIDATION allocation
+- Uses explicit patient capacities for `TEST` and `VALIDATION`; `TRAIN` receives the remainder
+- Carries a Stage 5 Optuna split-search budget via `CROSSFOLD_SPLIT_OPTUNA_TRIALS`
 - Reuses cached source-HDF5 provenance inside one run instead of rehashing the same source file for every split artifact
 - Uses batched HDF5-backed entropy reads when the Stage 5 source is an HDF5 dataset
 - Fits stain normalization on TRAIN only when a normalization method other than `NOT_NORMALIZED` is configured
@@ -377,7 +377,9 @@ PACKAGING_COPY_BATCH_SIZE=256
 # Stage 5 - Crossfold
 CROSSFOLD_HDF5_COMPRESSION=none
 CROSSFOLD_COPY_BATCH_SIZE=1024
-CROSSFOLD_OPTIMIZE_TRAINING_SET=False
+CROSSFOLD_TEST_PATIENT_COUNT=20
+CROSSFOLD_VALIDATION_PATIENT_COUNT=20
+CROSSFOLD_SPLIT_OPTUNA_TRIALS=1000
 
 # Stage 9 - Training
 TRAINING_ARCHITECTURE=SEGFORMER

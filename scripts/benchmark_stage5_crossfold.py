@@ -13,7 +13,6 @@ from typing import Any
 import h5py
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import StratifiedShuffleSplit
 
 from helpers.crossfold.config import CrossfoldConfig, ObjectiveConfig, SplitConstraints
 from helpers.crossfold.discovery import load_patch_dataset
@@ -25,11 +24,7 @@ from helpers.crossfold.entropy import (
 )
 from helpers.crossfold.io import _normalize_image_array, write_split_hdf5
 from helpers.crossfold.pipeline import run_crossfold_pipeline
-from helpers.crossfold.splitting import (
-    build_patient_table,
-    create_train_val_test_split_best,
-    decide_split_sizes,
-)
+from helpers.crossfold.splitting import create_train_val_test_split_best
 from helpers.provenance import collect_hdf5_provenance
 
 
@@ -71,152 +66,23 @@ def _baseline_compute_all_patch_entropies(
     return pd.DataFrame(results, columns=["image_path", "entropy"])
 
 
-def _baseline_validation_supports_stage11(
-    patient_df: pd.DataFrame,
-    val_patients: set[int],
-    constraints: SplitConstraints,
-    *,
-    dataset_has_both_classes: bool,
-) -> bool:
-    if not constraints.enforce_stage11_validation_sizing:
-        return True
-
-    validation_rows = patient_df[patient_df["patient_id"].isin(sorted(val_patients))]
-    if len(validation_rows) < constraints.min_validation_patients_for_ensemble:
-        return False
-    if not dataset_has_both_classes:
-        return True
-
-    positive_count = int((validation_rows["patient_label"] == 1).sum())
-    negative_count = int((validation_rows["patient_label"] == 0).sum())
-    return (
-        positive_count >= constraints.min_validation_positive_patients_for_ensemble
-        and negative_count >= constraints.min_validation_negative_patients_for_ensemble
-    )
-
-
-def _baseline_score_split_by_patient_entropy_median(
-    patient_entropy_df: pd.DataFrame,
-    patient_ids: list[int],
-) -> float:
-    subset = patient_entropy_df[patient_entropy_df["patient_id"].isin(patient_ids)]
-    if subset.empty:
-        return float("-inf")
-    return float(subset["patient_entropy_median"].median())
-
-
-def _baseline_create_train_val_test_split_best(
+def _reduced_trial_split_search(
     df: pd.DataFrame,
     random_state: int,
     constraints: SplitConstraints,
     objective: ObjectiveConfig,
-    patient_entropy_df: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
-    patient_df = build_patient_table(df)
-    _, _, n_test, sizing_meta = decide_split_sizes(patient_df, constraints)
-    patient_ids = patient_df["patient_id"].to_numpy()
-    labels = patient_df["patient_label"].astype(int).to_numpy()
-    dataset_has_both_classes = patient_df["patient_label"].nunique() >= 2
-    rng = np.random.default_rng(random_state)
-
-    def image_count(patient_ids_subset: set[int]) -> int:
-        return int(
-            patient_df[patient_df["patient_id"].isin(sorted(patient_ids_subset))]["n_images"].sum()
-        )
-
-    best: tuple[set[int], set[int], set[int], int, int] | None = None
-    best_score: float | None = None
-
-    for attempt in range(constraints.max_tries):
-        seed = int(rng.integers(0, 2**31 - 1))
-        test_splitter = StratifiedShuffleSplit(
-            n_splits=1,
-            test_size=n_test,
-            random_state=seed,
-        )
-        trainval_index, test_index = next(test_splitter.split(patient_ids, labels))
-        trainval_ids = patient_ids[trainval_index]
-        trainval_labels = labels[trainval_index]
-        try:
-            validation_splitter = StratifiedShuffleSplit(
-                n_splits=1,
-                test_size=sizing_meta["n_val"],
-                random_state=seed + 1,
-            )
-            train_index, val_index = next(validation_splitter.split(trainval_ids, trainval_labels))
-        except ValueError:
-            continue
-
-        train_patients = set(trainval_ids[train_index])
-        val_patients = set(trainval_ids[val_index])
-        test_patients = set(patient_ids[test_index])
-        if constraints.require_both_classes_if_possible and dataset_has_both_classes:
-
-            def split_has_both(patient_subset: set[int]) -> bool:
-                split_labels = set(
-                    patient_df[patient_df["patient_id"].isin(sorted(patient_subset))][
-                        "patient_label"
-                    ].tolist()
-                )
-                return 0 in split_labels and 1 in split_labels
-
-            if not (
-                split_has_both(train_patients)
-                and split_has_both(val_patients)
-                and split_has_both(test_patients)
-            ):
-                continue
-        if not _baseline_validation_supports_stage11(
-            patient_df,
-            val_patients,
-            constraints,
-            dataset_has_both_classes=dataset_has_both_classes,
-        ):
-            continue
-        train_images = image_count(train_patients)
-        val_images = image_count(val_patients)
-        test_images = image_count(test_patients)
-        if constraints.require_train_image_dominance and not (
-            train_images > val_images and train_images > test_images
-        ):
-            continue
-        if not objective.enable_objective:
-            return {
-                "train_patients": sorted(train_patients),
-                "val_patients": sorted(val_patients),
-                "test_patients": sorted(test_patients),
-                "split_seed": seed,
-                "split_attempt": attempt + 1,
-            }
-        assert patient_entropy_df is not None
-        score_split = objective.score_split.upper()
-        score_ids = (
-            sorted(train_patients)
-            if score_split == "TRAIN"
-            else sorted(val_patients)
-            if score_split == "VALIDATION"
-            else sorted(test_patients)
-        )
-        score = _baseline_score_split_by_patient_entropy_median(patient_entropy_df, score_ids)
-        if best is None or best_score is None:
-            best = (train_patients, val_patients, test_patients, seed, attempt + 1)
-            best_score = score
-        elif objective.maximize and score > best_score:
-            best = (train_patients, val_patients, test_patients, seed, attempt + 1)
-            best_score = score
-        elif (not objective.maximize) and score < best_score:
-            best = (train_patients, val_patients, test_patients, seed, attempt + 1)
-            best_score = score
-    if best is None:
-        raise ValueError("No feasible split found in baseline benchmark")
-    return {
-        "train_patients": sorted(best[0]),
-        "val_patients": sorted(best[1]),
-        "test_patients": sorted(best[2]),
-        "split_seed": best[3],
-        "split_attempt": best[4],
-        "objective_score": best_score,
-    }
+    return create_train_val_test_split_best(
+        df=df,
+        random_state=random_state,
+        constraints=constraints,
+        objective=ObjectiveConfig(
+            optuna_trials=max(1, objective.optuna_trials // 4),
+            num_workers=objective.num_workers,
+            chunksize=objective.chunksize,
+            entropy_thumbnail=objective.entropy_thumbnail,
+        ),
+    )
 
 
 def _baseline_write_split_hdf5(
@@ -300,7 +166,7 @@ def _build_benchmark_config(
     *,
     source_hdf5_path: Path,
     output_dir: Path,
-    enable_objective: bool,
+    optuna_trials: int,
     hdf5_compression: str,
     copy_batch_size: int,
     chunksize: int,
@@ -313,23 +179,12 @@ def _build_benchmark_config(
         source_hdf5_path=source_hdf5_path,
         overwrite_output_dir=True,
         random_state=random_state,
-        optimize_training_set=enable_objective,
         constraints=SplitConstraints(
-            min_test_patients=2,
-            min_val_patients=2,
-            min_train_patients=2,
-            enforce_stage11_validation_sizing=False,
-            test_ratio=0.20,
-            val_ratio=0.20,
-            require_train_image_dominance=False,
-            require_both_classes_if_possible=False,
-            max_tries=1000,
-            adaptive=True,
+            test_patient_count=20,
+            validation_patient_count=20,
         ),
         objective=ObjectiveConfig(
-            enable_objective=enable_objective,
-            score_split="TRAIN",
-            maximize=True,
+            optuna_trials=optuna_trials,
             num_workers=num_workers,
             chunksize=chunksize,
             entropy_thumbnail=entropy_thumbnail,
@@ -352,6 +207,8 @@ def main() -> None:
     parser.add_argument("--chunksize", type=int, default=128)
     parser.add_argument("--entropy-thumbnail", type=int, default=128)
     parser.add_argument("--copy-batch-size", type=int, default=256)
+    parser.add_argument("--split-trials-fast", type=int, default=25)
+    parser.add_argument("--split-trials-full", type=int, default=100)
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -381,6 +238,8 @@ def main() -> None:
             "chunksize": args.chunksize,
             "entropy_thumbnail": args.entropy_thumbnail,
             "copy_batch_size": args.copy_batch_size,
+            "split_trials_fast": args.split_trials_fast,
+            "split_trials_full": args.split_trials_full,
         },
     }
 
@@ -415,93 +274,47 @@ def main() -> None:
         current_entropy_full["result"],
     )
 
-    baseline_split = _time_call(
-        "baseline_split_search",
-        _baseline_create_train_val_test_split_best,
+    fast_config = _build_benchmark_config(
+        source_hdf5_path=benchmark_source,
+        output_dir=output_dir,
+        optuna_trials=args.split_trials_fast,
+        hdf5_compression="NONE",
+        copy_batch_size=args.copy_batch_size,
+        chunksize=args.chunksize,
+        entropy_thumbnail=args.entropy_thumbnail,
+        num_workers=args.num_workers,
+        random_state=42,
+    )
+    full_config = _build_benchmark_config(
+        source_hdf5_path=benchmark_source,
+        output_dir=output_dir,
+        optuna_trials=args.split_trials_full,
+        hdf5_compression="NONE",
+        copy_batch_size=args.copy_batch_size,
+        chunksize=args.chunksize,
+        entropy_thumbnail=args.entropy_thumbnail,
+        num_workers=args.num_workers,
+        random_state=42,
+    )
+
+    reduced_trial_split = _time_call(
+        "split_search_reduced_trials",
+        _reduced_trial_split_search,
         dataset,
         42,
-        _build_benchmark_config(
-            source_hdf5_path=benchmark_source,
-            output_dir=output_dir,
-            enable_objective=True,
-            hdf5_compression="NONE",
-            copy_batch_size=args.copy_batch_size,
-            chunksize=args.chunksize,
-            entropy_thumbnail=args.entropy_thumbnail,
-            num_workers=args.num_workers,
-            random_state=42,
-        ).constraints,
-        _build_benchmark_config(
-            source_hdf5_path=benchmark_source,
-            output_dir=output_dir,
-            enable_objective=True,
-            hdf5_compression="NONE",
-            copy_batch_size=args.copy_batch_size,
-            chunksize=args.chunksize,
-            entropy_thumbnail=args.entropy_thumbnail,
-            num_workers=args.num_workers,
-            random_state=42,
-        ).objective,
-        patient_entropy["result"],
+        full_config.constraints,
+        full_config.objective,
     )
     current_split = _time_call(
-        "current_split_search",
+        "split_search_full_trials",
         create_train_val_test_split_best,
         dataset,
         42,
-        _build_benchmark_config(
-            source_hdf5_path=benchmark_source,
-            output_dir=output_dir,
-            enable_objective=True,
-            hdf5_compression="NONE",
-            copy_batch_size=args.copy_batch_size,
-            chunksize=args.chunksize,
-            entropy_thumbnail=args.entropy_thumbnail,
-            num_workers=args.num_workers,
-            random_state=42,
-        ).constraints,
-        _build_benchmark_config(
-            source_hdf5_path=benchmark_source,
-            output_dir=output_dir,
-            enable_objective=True,
-            hdf5_compression="NONE",
-            copy_batch_size=args.copy_batch_size,
-            chunksize=args.chunksize,
-            entropy_thumbnail=args.entropy_thumbnail,
-            num_workers=args.num_workers,
-            random_state=42,
-        ).objective,
-        patient_entropy["result"],
+        full_config.constraints,
+        full_config.objective,
     )
 
-    split_data = create_train_val_test_split_best(
-        df=dataset,
-        random_state=42,
-        constraints=_build_benchmark_config(
-            source_hdf5_path=benchmark_source,
-            output_dir=output_dir,
-            enable_objective=True,
-            hdf5_compression="NONE",
-            copy_batch_size=args.copy_batch_size,
-            chunksize=args.chunksize,
-            entropy_thumbnail=args.entropy_thumbnail,
-            num_workers=args.num_workers,
-            random_state=42,
-        ).constraints,
-        objective=_build_benchmark_config(
-            source_hdf5_path=benchmark_source,
-            output_dir=output_dir,
-            enable_objective=True,
-            hdf5_compression="NONE",
-            copy_batch_size=args.copy_batch_size,
-            chunksize=args.chunksize,
-            entropy_thumbnail=args.entropy_thumbnail,
-            num_workers=args.num_workers,
-            random_state=42,
-        ).objective,
-        optimize_training_set=True,
-        patient_entropy_df=patient_entropy["result"],
-    )
+    split_data = current_split["result"]
     train_df = split_data["train_df"]
 
     provenance_single = _time_call(
@@ -551,37 +364,15 @@ def main() -> None:
         overwrite=True,
     )
 
-    full_config_objective_on = _build_benchmark_config(
-        source_hdf5_path=benchmark_source,
-        output_dir=output_dir / "full_objective_on",
-        enable_objective=True,
-        hdf5_compression="NONE",
-        copy_batch_size=args.copy_batch_size,
-        chunksize=args.chunksize,
-        entropy_thumbnail=args.entropy_thumbnail,
-        num_workers=args.num_workers,
-        random_state=42,
-    )
-    full_config_objective_off = _build_benchmark_config(
-        source_hdf5_path=benchmark_source,
-        output_dir=output_dir / "full_objective_off",
-        enable_objective=False,
-        hdf5_compression="NONE",
-        copy_batch_size=args.copy_batch_size,
-        chunksize=args.chunksize,
-        entropy_thumbnail=args.entropy_thumbnail,
-        num_workers=args.num_workers,
-        random_state=43,
-    )
-    full_run_objective_on = _time_call(
-        "full_run_objective_on",
+    full_run_fast = _time_call(
+        "full_run_reduced_trials",
         run_crossfold_pipeline,
-        full_config_objective_on,
+        fast_config,
     )
-    full_run_objective_off = _time_call(
-        "full_run_objective_off",
+    full_run_full = _time_call(
+        "full_run_full_trials",
         run_crossfold_pipeline,
-        full_config_objective_off,
+        full_config,
     )
 
     summary["timings_seconds"] = {
@@ -589,24 +380,32 @@ def main() -> None:
         current_entropy_subset["label"]: current_entropy_subset["seconds"],
         current_entropy_full["label"]: current_entropy_full["seconds"],
         patient_entropy["label"]: patient_entropy["seconds"],
-        baseline_split["label"]: baseline_split["seconds"],
+        reduced_trial_split["label"]: reduced_trial_split["seconds"],
         current_split["label"]: current_split["seconds"],
         provenance_single["label"]: provenance_single["seconds"],
         provenance_seven["label"]: provenance_seven["seconds"],
         baseline_write["label"]: baseline_write["seconds"],
         current_write_none["label"]: current_write_none["seconds"],
         current_write_gzip["label"]: current_write_gzip["seconds"],
-        full_run_objective_on["label"]: full_run_objective_on["seconds"],
-        full_run_objective_off["label"]: full_run_objective_off["seconds"],
+        full_run_fast["label"]: full_run_fast["seconds"],
+        full_run_full["label"]: full_run_full["seconds"],
     }
     summary["artifacts"] = {
         "baseline_write_path": str(baseline_write_path),
         "current_write_none_path": str(current_write_none_path),
         "current_write_gzip_path": str(current_write_gzip_path),
-        "full_objective_on_output": str(full_run_objective_on["result"].output_dir),
-        "full_objective_off_output": str(full_run_objective_off["result"].output_dir),
+        "full_run_reduced_trials_output": str(full_run_fast["result"].output_dir),
+        "full_run_full_trials_output": str(full_run_full["result"].output_dir),
     }
-    summary["config_objective_on"] = asdict(full_config_objective_on)
+    summary["benchmark_config"] = asdict(full_config)
+    summary["split_selection"] = {
+        "method": "optuna_greedy_sample_ratio_stratified",
+        "tie_break_priority": ["TEST", "VALIDATION", "TRAIN"],
+        "global_cancer_ratio": split_data["constraints"]["global_cancer_ratio"],
+        "optuna_trials": full_config.objective.optuna_trials,
+        "final_loss": split_data["objective_score"],
+        "verification": split_data["verification"],
+    }
     summary_path = output_dir / "benchmark_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     print(summary_path)

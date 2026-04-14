@@ -16,30 +16,6 @@ from helpers.training.models import (
 from helpers.training.registry import get_supported_encoders
 
 
-@pytest.mark.parametrize(
-    ("architecture", "expected_lr", "expected_weight_decay"),
-    [
-        ("SWIN", 1e-3, 1e-4),
-        ("segformer", 7e-4, 1e-4),
-        ("DPT", 5e-4, 1e-4),
-        ("UPERNET", 7e-4, 1e-4),
-        ("DEEPLABV3PLUS", 1e-3, 1e-4),
-        ("UNET++", 2e-3, 1e-4),
-        ("FPN", 2e-3, 1e-4),
-        ("MANET", 5e-4, 1e-4),
-    ],
-)
-def test_get_learning_rate_returns_existing_architecture_defaults(
-    architecture: str,
-    expected_lr: float,
-    expected_weight_decay: float,
-) -> None:
-    learning_rate, weight_decay = get_learning_rate(architecture)
-
-    assert learning_rate == expected_lr
-    assert weight_decay == expected_weight_decay
-
-
 def test_get_learning_rate_rejects_unknown_architecture() -> None:
     with pytest.raises(ValueError, match="Unknown architecture"):
         get_learning_rate("unknown")

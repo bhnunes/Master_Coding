@@ -3,6 +3,7 @@ from pathlib import Path
 
 import h5py
 import pandas as pd
+from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold.provenance import (
     build_hdf5_manifest_from_split_dfs,
@@ -41,7 +42,6 @@ def _split_data() -> dict[str, object]:
         "split_seed": 99,
         "split_attempt": 1,
         "objective_score": None,
-        "objective_score_split": "TRAIN",
     }
 
 
@@ -225,3 +225,45 @@ def test_write_manifest_and_log_stats_rejects_checksum_mode_for_hdf5_manifests(
         assert "HDF5-native" in str(error)
     else:
         raise AssertionError("Expected HDF5 checksum request to be rejected.")
+
+
+def test_write_manifest_and_log_stats_reuses_cached_source_provenance(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    split_data = _split_data()
+    manifest_df = build_hdf5_manifest_from_split_dfs(
+        output_dir=tmp_path,
+        run_id="run-1",
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
+        split_data=split_data,
+    )
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=[[[[0, 0, 0]]]], dtype="uint8")
+        handle.create_dataset("masks", data=[[[0]]], dtype="uint8")
+        handle.create_dataset("labels", data=[0], dtype="uint8")
+        handle.create_dataset("patient_ids", data=[1], dtype="int32")
+        handle.create_dataset("filenames", data=[b"PATIENT_1_PATCH_001.png"])
+
+    def fail_collect(_: Path) -> dict[str, object]:
+        raise AssertionError("collect_hdf5_provenance should not run when provenance is cached")
+
+    monkeypatch.setattr("helpers.crossfold.provenance.collect_hdf5_provenance", fail_collect)
+
+    cached_provenance = {"path": str(source_path), "sha256": "cached-hash", "attrs": {}}
+    write_manifest_and_log_stats(
+        output_dir=tmp_path,
+        run_id="run-1",
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
+        source_hdf5_path=source_path,
+        split_data=split_data,
+        manifest_df=manifest_df,
+        calc_checksums=False,
+        source_hdf5_provenance=cached_provenance,
+    )
+
+    payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
+    assert payload["source_hdf5_provenance"] == cached_provenance
