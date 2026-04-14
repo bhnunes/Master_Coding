@@ -54,7 +54,8 @@ Agent guide for coding agents working in this repository.
 - Stage 4.3: `4_3_cleaner_script.py`
 - Stage 5: `5_crossfold.py`
 - Stage 6: `6_sanity_checks.py`
-- Stage 7: `7_smart_sampler.py`
+- Stage 6.5 / 7.1: `7_1_patient_shards.py`
+- Stage 7.2: `7_2_smart_sampler.py`
 - Stage 8: `8_lr_finder.py`
 - Stage 9: `9_training_ensemble.py`
 - Stage 10: `10_optimizer_ensemble.py`
@@ -168,7 +169,9 @@ Agent guide for coding agents working in this repository.
 - Keep Stage 4.2 and 4.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
 - Keep Stage 5 split and normalization logic in `helpers/crossfold/*`.
 - Keep Stage 6 integrity checks in `helpers/sanity/*`.
-- Keep Stage 7 smart-sampling logic in `helpers/smart_sampling/*`.
+- Keep Stage 6.5 patient-sharding logic in `helpers/patient_shards/*`.
+- Keep patient-shard local cache behavior in `helpers/patient_shard_cache.py`.
+- Keep Stage 7.2 smart-sampling logic in `helpers/smart_sampling/*`.
 - Keep Stage 8 learning-rate finder logic in `helpers/lr_finder/*`.
 - Keep Stage 9 training logic in `helpers/training/*`.
 - Keep Stage 10 ensemble optimization logic in `helpers/ensemble_optimizer/*`.

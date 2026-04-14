@@ -25,8 +25,9 @@ Master_Coding/
 ├── 4_2_tune_graph_method.py         # Tune graph segmentation parameters
 ├── 4_3_cleaner_script.py            # Apply cleaning to remove incorrect annotations
 ├── 5_crossfold.py                   # HDF5-native patient-level dataset splitting
-├── 6_sanity_checks.py               # HDF5-native scientific integrity checks
-├── 7_smart_sampler.py               # Select most informative training samples
+├── 6_sanity_checks.py               # HDF5-native scientific integrity checks for Stage 5 singleton splits
+├── 7_1_patient_shards.py            # Generate patient-isolated TRAIN/VALIDATION/TEST shard directories
+├── 7_2_smart_sampler.py             # Select most informative training samples from TRAIN_shards
 ├── 8_lr_finder.py                   # Find optimal learning rates
 ├── 9_training_ensemble.py           # Train one approved model per execution
 ├── 10_optimizer_ensemble.py         # Optimize ensemble parameters
@@ -90,6 +91,10 @@ Master_Coding/
 │   │   ├── provenance.py
 │   │   ├── reporting.py
 │   │   └── semantic_checks.py
+│   ├── patient_shards/              # Stage 6.5 / 7.1 patient-sharding domain
+│   │   ├── config.py
+│   │   ├── io.py
+│   │   └── pipeline.py
 │   ├── smart_sampling/              # Stage 7 smart-sampling domain
 │   │   ├── config.py
 │   │   ├── embeddings.py
@@ -98,6 +103,7 @@ Master_Coding/
 │   │   ├── selection.py
 │   │   ├── storage.py
 │   │   └── writer.py
+│   ├── patient_shard_cache.py       # Shared Drive-to-local patient-shard cache
 │   ├── lr_finder/                   # Stage 8 LR-finder domain
 │   │   ├── analysis.py
 │   │   ├── config.py
@@ -138,6 +144,8 @@ Master_Coding/
 │   │   ├── pipeline.py
 │   │   ├── recipe.py
 │   │   └── reporting.py
+│   ├── provenance.py                # Shared hashing/provenance helpers
+│   ├── stage_contracts.py           # Shared Stage 5/6 contract constants
 │   └── wsi/                         # Shared WSI/image-processing helpers
 │       ├── colors.py
 │       ├── maps.py
@@ -160,7 +168,7 @@ Master_Coding/
 
 ## Pipeline Architecture
 
-The pipeline follows a monolithic script-driven architecture where each script performs a distinct stage of the workflow. Scripts are designed to be standalone applications that can be executed independently, with defined inputs and outputs.
+The pipeline follows a script-driven architecture where each root script performs a distinct stage of the workflow. Scripts are designed to be standalone applications that can be executed independently, with defined inputs and outputs.
 
 Helper modules are organized by domain under `helpers/<domain>/`. New domain-specific helpers should be added to the matching domain package instead of recreating a flat `helpers/*.py` layout. Only broadly shared cross-domain utilities, such as `helpers/runtime_platform.py`, remain at the top level.
 
@@ -172,10 +180,11 @@ Helper modules are organized by domain under `helpers/<domain>/`. New domain-spe
 | 2 | `2_database_manager.py` | Extract canonical HDF5 patch shards from WSIs based on annotations. Output: HDF5 patch data, artifact coverage Parquet metadata, and optional PNG exports when explicitly enabled |
 | 3 | `3_pack_splits_to_hdf5.py` | Package Stage 2 HDF5 shards into the canonical source dataset consumed by Stage 4.1 and rerun after Stage 4.3 when accepted-manifest filtering is needed |
 | 4.1-4.3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script.py` | HDF5-backed human-in-the-loop review plus graph-based cleaning, with PNG retained only for review/export workflows |
-| 5 | `5_crossfold.py` | Create patient-level TRAIN/VALIDATION/TEST HDF5 splits and fit stain normalization on `TRAIN` only |
-| 6 | `6_sanity_checks.py` | Validate HDF5 split integrity, provenance, leakage, and mask/label semantics |
-| 7 | `7_smart_sampler.py` | Select the most informative training samples from `TRAIN.h5` into `TRAIN_FILTERED.h5` (optional) |
-| 8-11 | `8_lr_finder.py` → `9_training_ensemble.py` → `10_optimizer_ensemble.py` → `11_inference_ensemble.py` | Tune LR, train one approved model per run, optimize the ensemble recipe, and generate final test predictions |
+| 5 | `5_crossfold.py` | Create patient-level singleton `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5` splits and fit stain normalization on `TRAIN` only |
+| 6 | `6_sanity_checks.py` | Validate Stage 5 singleton split integrity, provenance, leakage, and mask/label semantics |
+| 6.5 / 7.1 | `7_1_patient_shards.py` | Convert Stage 5 singleton splits into patient-isolated shard directories with manifests and provenance |
+| 7.2 | `7_2_smart_sampler.py` | Select informative training samples from `TRAIN_shards` into `TRAIN_FILTERED_shards` with patient-wise resume semantics |
+| 8-11 | `8_lr_finder.py` → `9_training_ensemble.py` → `10_optimizer_ensemble.py` → `11_inference_ensemble.py` | Consume shard-backed TRAIN/VALIDATION/TEST inputs to tune LR, train one approved model per run, optimize the ensemble recipe, and generate final test predictions |
 
 ## Script Documentation
 
@@ -295,32 +304,48 @@ Current Stage 6 behavior:
 - Adds scientific label checks such as empty positive masks and positive pixels inside negative masks
 - Reports class balance and patches-per-patient skew to support reviewer interpretation
 
-### Stage 7: Smart Sampling
+### Stage 6.5 / 7.1: Patient Shards
 
 | Script | Purpose |
 |--------|---------|
-| `7_smart_sampler.py` | Thin smart-sampling orchestrator that loads `.env`, filters `TRAIN.h5` patient-by-patient, and writes `TRAIN_FILTERED.h5` for downstream LR finding and training. |
+| `7_1_patient_shards.py` | Thin patient-sharding orchestrator that loads `.env`, reads Stage 5 singleton splits, and writes patient-isolated shard directories plus manifests for downstream stages. |
 
-Current Stage 7 smart-sampling behavior:
+Current Stage 6.5 / 7.1 behavior:
+
+- Reads `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5` from Stage 5 and emits `TRAIN_shards`, `VALIDATION_shards`, and `TEST_shards`
+- Enforces one-patient-per-shard isolation and preserves `images`, `masks`, `labels`, `patient_ids`, and `filenames`
+- Writes split-level `manifest.parquet`, sample-level `sample_manifest.parquet`, and `summary.json` beside each shard directory
+- Preserves shard provenance such as source split path, source split SHA, selected source rows, and selection signatures needed by downstream validation and resume logic
+- Serves as the shard source of truth for Stages 7.2 through 11; Stage 6 intentionally remains focused on the Stage 5 singleton outputs
+
+### Stage 7.2: Smart Sampling
+
+| Script | Purpose |
+|--------|---------|
+| `7_2_smart_sampler.py` | Thin smart-sampling orchestrator that loads `.env`, filters `TRAIN_shards` patient-by-patient, and writes `TRAIN_FILTERED_shards` for downstream LR finding and training. |
+
+Current Stage 7.2 smart-sampling behavior:
 
 - Loads smart-sampling settings from `.env` / `.env_example` through `helpers/smart_sampling/config.py`
-- Builds a patient index from `TRAIN.h5`, extracts embeddings, and selects diverse per-patient samples through `helpers/smart_sampling/*.py`
-- Preserves downstream HDF5 compatibility for `8_lr_finder.py` and `9_training_ensemble.py` by writing `images`, `masks`, `labels`, `patient_ids`, and `filenames`
-- Accepts legacy source files with `filename` or `filenames`, but always writes `filenames` in `TRAIN_FILTERED.h5`
-- Optionally writes `train_filtered_selection.csv`, `patient_filter_stats.csv`, and `filter_run_config.json` beside the filtered HDF5
+- Builds a patient index from `TRAIN_shards/manifest.parquet`, extracts embeddings, and selects diverse per-patient samples through `helpers/smart_sampling/*.py`
+- Writes one filtered shard per patient under `TRAIN_FILTERED_shards/` and preserves downstream HDF5 compatibility by keeping `images`, `masks`, `labels`, `patient_ids`, and `filenames`
+- Supports local staging and shared patient-shard caching for Google Drive + local SSD workflows
+- Uses output shard existence as the authoritative resume signal when overwrite is disabled
+- Rebuilds derived `manifest.parquet`, `sample_manifest.parquet`, and `summary.json` from published output shards
+- Optionally writes `train_filtered_selection.csv`, `patient_filter_stats.csv`, and `filter_run_config.json` beside the filtered shard directory
 
 ### Stage 8+: Training & Inference
 
 | Script | Purpose |
 |--------|---------|
 | `8_lr_finder.py` | Thin LR-finder orchestrator that loads `.env`, screens approved architecture/encoder pairs, and writes a LaTeX-generated PDF report plus CSV/JSON sidecars. |
-| `9_training_ensemble.py` | Thin training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages HDF5 data, and trains one model per execution through helper modules. |
-| `10_optimizer_ensemble.py` | Thin ensemble-optimizer orchestrator that loads `.env`, stages validation HDF5 data, optimizes a two-stream recipe, and writes the declarative JSON consumed by Stage 11. |
-| `11_inference_ensemble.py` | Thin inference orchestrator that loads the Stage 10 recipe, evaluates the two-stream ensemble on `TEST.h5`, and exports JSON/CSV/LaTeX reporting artifacts. |
+| `9_training_ensemble.py` | Thin training entrypoint. Loads `.env`, validates the approved architecture/encoder pair, stages shard-backed train/validation data, and trains one model per execution through helper modules. |
+| `10_optimizer_ensemble.py` | Thin ensemble-optimizer orchestrator that loads `.env`, stages shard-backed validation data, optimizes a two-stream recipe, and writes the declarative JSON consumed by Stage 11. |
+| `11_inference_ensemble.py` | Thin inference orchestrator that loads the Stage 10 recipe, evaluates the two-stream ensemble on `TEST_shards`, and exports JSON/CSV/LaTeX reporting artifacts. |
 
 Current training behavior:
 
-- `8_lr_finder.py` is now orchestration-focused; Stage 8 config loading, HDF5 staging, LR screening, curve analysis, and LaTeX reporting live in `helpers/lr_finder/*.py`
+- `8_lr_finder.py` is now orchestration-focused; Stage 8 config loading, shard-backed data setup, LR screening, curve analysis, and LaTeX reporting live in `helpers/lr_finder/*.py`
 - Stage 8 derives the screened architecture/encoder plan from `training_model_registry.json` instead of hardcoded lists
 - Stage 8 loads pretrained weights once per architecture/encoder pair, snapshots the initialized weights to CPU, and reuses that state across sampled loss configurations and repeats instead of reloading pretrained weights inside the nested screening loops
 - Stage 8 accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both environment variables before model creation
@@ -328,10 +353,12 @@ Current training behavior:
 - Expected LR-range-test divergence now stops the active sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure
 - Stage 8 console UX is notebook-friendly by design: one startup line, compact periodic progress snapshots, and one final summary with valid-record, completed-trial, failed-trial, and per-architecture counts
 - Stage 8 writes both `report.tex` and `report.pdf`, plus `SUMMARY_ALL.csv`, per-architecture CSV summaries, `LHS_SAMPLES.json`, and `lr_finder_run_config.json`
-- `9_training_ensemble.py` is now orchestration-focused; training runtime, data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
-- `10_optimizer_ensemble.py` is now orchestration-focused; Stage 10 config, metadata ranking, validation staging, model loading, patient holdout splitting, Optuna optimization, and JSON reporting live in `helpers/ensemble_optimizer/*.py`
+- Stage 8 consumes `TRAIN_FILTERED_shards` when smart sampling is enabled and present, otherwise `TRAIN_shards`; it always resolves `VALIDATION_shards` for matching provenance and run-config recording
+- `9_training_ensemble.py` is now orchestration-focused; training runtime, shard-backed data, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
+- Stage 9 consumes `TRAIN_FILTERED_shards` when smart sampling is enabled and present, otherwise `TRAIN_shards`; validation always uses `VALIDATION_shards`
+- `10_optimizer_ensemble.py` is now orchestration-focused; Stage 10 config, metadata ranking, shard-backed validation staging, model loading, patient holdout splitting, Optuna optimization, and JSON reporting live in `helpers/ensemble_optimizer/*.py`
 - Stage 10 preserves the `two_stream_spatial_gating` JSON contract used by `11_inference_ensemble.py`, including `roi_config`, `spatial_config`, `model_registry`, and `holdout_metrics`
-- `11_inference_ensemble.py` is now orchestration-focused; Stage 11 config, recipe parsing, test-data staging, recipe-model loading, two-stream inference, metrics, and reporting live in `helpers/ensemble_inference/*.py`
+- `11_inference_ensemble.py` is now orchestration-focused; Stage 11 config, recipe parsing, shard-backed test-data staging, recipe-model loading, two-stream inference, metrics, and reporting live in `helpers/ensemble_inference/*.py`
 - Architecture and encoder choices are validated against `training_model_registry.json`
 - Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
 - `TRAINING_MODEL_REGISTRY_PATH` can override the default registry when a controlled experiment needs a different file
@@ -517,8 +544,11 @@ uv run --python 3.12 python 5_crossfold.py
 # 6. Run HDF5-native sanity checks
 uv run --python 3.12 python 6_sanity_checks.py
 
-# 7-11. Optional smart sampling, then training & inference (typically on a GPU machine)
-uv run --python 3.12 python 7_smart_sampler.py
+# 6.5 / 7.1. Convert singleton Stage 5 splits to patient shards
+uv run --python 3.12 python 7_1_patient_shards.py
+
+# 7.2-11. Optional smart sampling, then training & inference (typically on a GPU machine)
+uv run --python 3.12 python 7_2_smart_sampler.py
 uv run --python 3.12 python 8_lr_finder.py
 uv run --python 3.12 python 9_training_ensemble.py
 uv run --python 3.12 python 10_optimizer_ensemble.py
@@ -583,9 +613,10 @@ The pipeline produces these standardized folders and artifacts:
 - `NOT_CANCER/` - Non-cancer patch images
 - `CANCER_MASK/` - Cancer segmentation masks
 - `NOT_CANCER_MASK/` - Non-cancer segmentation masks
-- Stage 5 source HDF5 - cleaned accepted patch pool packaged for Stage 6
-- `TRAIN.h5`, `VALIDATION.h5`, `TEST.h5` - Stage 6 HDF5 split artifacts
-- `TRAIN_FILTERED.h5` - optional Stage 7 smart-sampled training set
+- Stage 5 source HDF5 - cleaned accepted patch pool packaged for Stage 5
+- `TRAIN.h5`, `VALIDATION.h5`, `TEST.h5` - Stage 5 singleton split artifacts validated by Stage 6
+- `TRAIN_shards/`, `VALIDATION_shards/`, `TEST_shards/` - patient-isolated shard directories emitted by Stage 6.5 / 7.1
+- `TRAIN_FILTERED_shards/` - optional Stage 7.2 smart-sampled training shard directory
 
 ## Dependencies
 
