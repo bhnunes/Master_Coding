@@ -3,78 +3,165 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import h5py
 import numpy as np
+import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 
+from helpers.patient_shard_cache import PatientShardCache
+from helpers.provenance import hash_file_sha256
 from helpers.training.data import get_transforms
 from helpers.training.runtime import worker_init_fn
 
 
-def setup_validation_hdf5(
+@dataclass(frozen=True)
+class ValidationShardsLayout:
+    shard_dir: Path
+    manifest_path: Path
+    sample_manifest_path: Path
+    local_cache_dir: Path | None
+
+
+@dataclass(frozen=True)
+class ValidationSampleRecord:
+    patient_id: str
+    relative_hdf5_path: str
+    row_in_shard: int
+
+
+def _decode_patient_id(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def setup_validation_shards(
     hdf5_drive_dir: Path,
     local_data_dir: Path,
     *,
     stage_input_locally: bool,
-) -> Path:
-    source_path = hdf5_drive_dir / "VALIDATION.h5"
-    if not source_path.exists():
-        raise FileNotFoundError(f"Missing {source_path}")
-    if not stage_input_locally:
-        return source_path
+) -> ValidationShardsLayout:
+    shard_dir = hdf5_drive_dir / "VALIDATION_shards"
+    manifest_path = shard_dir / "manifest.parquet"
+    sample_manifest_path = shard_dir / "sample_manifest.parquet"
+    if not shard_dir.is_dir():
+        raise FileNotFoundError(f"Missing {shard_dir}")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {manifest_path}")
+    if not sample_manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {sample_manifest_path}")
 
-    if local_data_dir.exists():
-        shutil.rmtree(local_data_dir)
-    local_data_dir.mkdir(parents=True, exist_ok=True)
-    destination_path = local_data_dir / "VALIDATION.h5"
-    shutil.copy2(source_path, destination_path)
-    return destination_path
+    local_cache_dir: Path | None = None
+    if stage_input_locally:
+        if local_data_dir.exists():
+            shutil.rmtree(local_data_dir)
+        local_cache_dir = local_data_dir / "patient_shards"
+        local_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return ValidationShardsLayout(
+        shard_dir=shard_dir,
+        manifest_path=manifest_path,
+        sample_manifest_path=sample_manifest_path,
+        local_cache_dir=local_cache_dir,
+    )
+
+
+def collect_validation_shard_provenance(layout: ValidationShardsLayout) -> dict[str, Any]:
+    manifest_records = pq.read_table(layout.manifest_path).to_pylist()
+    lineage_keys = (
+        "source_hdf5_sha256",
+        "upstream_source_signature",
+        "stage4_cleaning_manifest_sha256",
+    )
+    lineage_attrs: dict[str, Any] | None = None
+    for record in manifest_records:
+        shard_path = layout.shard_dir.parent / str(record["relative_hdf5_path"])
+        with h5py.File(shard_path, "r") as handle:
+            observed = {key: handle.attrs.get(key) for key in lineage_keys}
+        if lineage_attrs is None:
+            lineage_attrs = observed
+            continue
+        if observed != lineage_attrs:
+            raise ValueError(
+                f"VALIDATION shard lineage mismatch in '{shard_path}'. Expected {lineage_attrs}, "
+                f"got {observed}."
+            )
+    return {
+        "path": str(layout.sample_manifest_path),
+        "manifest_path": str(layout.manifest_path),
+        "shard_dir": str(layout.shard_dir),
+        "manifest_sha256": hash_file_sha256(layout.manifest_path),
+        "sample_manifest_sha256": hash_file_sha256(layout.sample_manifest_path),
+        "attrs": lineage_attrs or {},
+    }
 
 
 class ValidationHDF5Dataset(Dataset[Any]):
-    def __init__(self, hdf5_path: Path, *, allowed_patients: set[str] | None = None) -> None:
-        self.hdf5_path = str(hdf5_path)
+    def __init__(
+        self,
+        layout: ValidationShardsLayout,
+        *,
+        allowed_patients: set[str] | None = None,
+    ) -> None:
+        self.layout = layout
         self.transform = get_transforms(mode="validation", img_size=224)
-        with h5py.File(self.hdf5_path, "r") as handle:
-            patient_ids_dataset = handle.get("patient_ids")
-            if patient_ids_dataset is None:
-                raise KeyError("Missing patient_ids dataset in validation HDF5.")
-            patient_ids = np.asarray(cast(Any, patient_ids_dataset)[:]).astype(str)
-            self.full_pids = patient_ids
-            if allowed_patients is None:
-                self.indices = np.arange(len(self.full_pids), dtype=np.int64)
-            else:
-                self.indices = np.asarray(
-                    [
-                        index
-                        for index, patient_id in enumerate(self.full_pids.tolist())
-                        if str(patient_id) in allowed_patients
-                    ],
-                    dtype=np.int64,
-                )
-            self.total_len = int(len(self.indices))
+        sample_records = pq.read_table(layout.sample_manifest_path).to_pylist()
+        self.records = [
+            ValidationSampleRecord(
+                patient_id=_decode_patient_id(record["patient_id"]),
+                relative_hdf5_path=str(record["relative_hdf5_path"]),
+                row_in_shard=int(record["row_in_shard"]),
+            )
+            for record in sample_records
+            if allowed_patients is None
+            or _decode_patient_id(record["patient_id"]) in allowed_patients
+        ]
+        self.total_len = len(self.records)
+        self.cache = (
+            PatientShardCache(layout.local_cache_dir, size_cap_bytes=0)
+            if layout.local_cache_dir is not None
+            else None
+        )
         self.h5_file: Any = None
         self.images_dset: Any = None
         self.masks_dset: Any = None
         self._opened_pid: int | None = None
+        self._opened_shard_path: str | None = None
         self._atexit_registered = False
 
-    def _open_file(self) -> None:
+    def _resolve_shard_path(self, relative_hdf5_path: str) -> Path:
+        source_path = self.layout.shard_dir.parent / relative_hdf5_path
+        if self.cache is None:
+            return source_path
+        return self.cache.fetch(source_path)
+
+    def _open_file(self, relative_hdf5_path: str) -> None:
         pid = os.getpid()
-        if self.h5_file is not None and self._opened_pid is not None and self._opened_pid != pid:
+        resolved_shard_path = self._resolve_shard_path(relative_hdf5_path)
+        shard_path_str = str(resolved_shard_path)
+        if (
+            self.h5_file is not None
+            and self._opened_pid is not None
+            and (self._opened_pid != pid or self._opened_shard_path != shard_path_str)
+        ):
             self.close()
         if self.h5_file is None:
             self.h5_file = h5py.File(
-                self.hdf5_path, "r", libver="latest", rdcc_nbytes=50 * 1024 * 1024
+                shard_path_str,
+                "r",
+                libver="latest",
+                rdcc_nbytes=50 * 1024 * 1024,
             )
             self.images_dset = self.h5_file["images"]
             self.masks_dset = self.h5_file["masks"]
             self._opened_pid = pid
+            self._opened_shard_path = shard_path_str
             if not self._atexit_registered:
                 atexit.register(self.close)
                 self._atexit_registered = True
@@ -85,14 +172,13 @@ class ValidationHDF5Dataset(Dataset[Any]):
     def __getitem__(
         self, idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, str] | tuple[None, None, None]:
-        if self.h5_file is None:
-            self._open_file()
+        record = self.records[idx]
+        resolved_shard_path = str(self._resolve_shard_path(record.relative_hdf5_path))
+        if self.h5_file is None or self._opened_shard_path != resolved_shard_path:
+            self._open_file(record.relative_hdf5_path)
 
-        source_index = int(self.indices[idx])
-
-        image = self.images_dset[source_index]
-        mask = self.masks_dset[source_index]
-        patient_id = str(self.full_pids[source_index])
+        image = self.images_dset[record.row_in_shard]
+        mask = self.masks_dset[record.row_in_shard]
         two_channel_mask = np.zeros((mask.shape[0], mask.shape[1], 2), dtype=np.float32)
         two_channel_mask[mask == 0, 0] = 1.0
         two_channel_mask[mask != 0, 1] = 1.0
@@ -102,7 +188,7 @@ class ValidationHDF5Dataset(Dataset[Any]):
             final_mask = augmented["mask"]
             if final_mask.shape[0] != 2:
                 final_mask = final_mask.permute(2, 0, 1)
-            return final_image, final_mask, patient_id
+            return final_image, final_mask, record.patient_id
         except Exception as error:
             print(f"Error on index {idx}: {error}")
             return None, None, None
@@ -118,6 +204,7 @@ class ValidationHDF5Dataset(Dataset[Any]):
             self.images_dset = None
             self.masks_dset = None
             self._opened_pid = None
+            self._opened_shard_path = None
 
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
@@ -125,6 +212,7 @@ class ValidationHDF5Dataset(Dataset[Any]):
         state["images_dset"] = None
         state["masks_dset"] = None
         state["_opened_pid"] = None
+        state["_opened_shard_path"] = None
         state["_atexit_registered"] = False
         return state
 
@@ -134,6 +222,7 @@ class ValidationHDF5Dataset(Dataset[Any]):
         self.images_dset = None
         self.masks_dset = None
         self._opened_pid = None
+        self._opened_shard_path = None
         self._atexit_registered = False
 
 
@@ -148,13 +237,13 @@ def collate_validation_batch(batch: list[Any]) -> Any:
 
 
 def create_validation_dataloader(
-    hdf5_path: Path,
+    layout: ValidationShardsLayout,
     *,
     batch_size: int,
     workers: int,
     allowed_patients: set[str] | None = None,
 ) -> DataLoader[Any]:
-    dataset = ValidationHDF5Dataset(hdf5_path, allowed_patients=allowed_patients)
+    dataset = ValidationHDF5Dataset(layout, allowed_patients=allowed_patients)
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -165,23 +254,17 @@ def create_validation_dataloader(
     )
 
 
-def summarize_validation_hdf5(hdf5_path: Path) -> tuple[list[str], set[str]]:
+def summarize_validation_shards(layout: ValidationShardsLayout) -> tuple[list[str], set[str]]:
     ordered_patients: list[str] = []
     positive_patients: set[str] = set()
     seen_patients: set[str] = set()
 
-    with h5py.File(hdf5_path, "r") as handle:
-        patient_ids_dataset = handle.get("patient_ids")
-        masks_dataset = handle.get("masks")
-        if patient_ids_dataset is None or masks_dataset is None:
-            raise KeyError("Missing patient_ids or masks dataset in validation HDF5.")
-        patient_ids = np.asarray(cast(Any, patient_ids_dataset)[:]).astype(str)
-        masks = cast(Any, masks_dataset)
-        for index, patient_id in enumerate(patient_ids.tolist()):
-            if patient_id not in seen_patients:
-                ordered_patients.append(patient_id)
-                seen_patients.add(patient_id)
-            if np.any(masks[index]):
-                positive_patients.add(patient_id)
+    for record in pq.read_table(layout.sample_manifest_path).to_pylist():
+        patient_id = _decode_patient_id(record["patient_id"])
+        if patient_id not in seen_patients:
+            ordered_patients.append(patient_id)
+            seen_patients.add(patient_id)
+        if int(record.get("label", 0)) != 0:
+            positive_patients.add(patient_id)
 
     return ordered_patients, positive_patients

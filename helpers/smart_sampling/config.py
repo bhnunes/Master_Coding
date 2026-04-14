@@ -29,6 +29,15 @@ def _parse_positive_int(value: str | None, variable_name: str, default: int) -> 
     return candidate
 
 
+def _parse_non_negative_int(value: str | None, variable_name: str, default: int) -> int:
+    candidate = default if value is None or value == "" else int(value)
+    if candidate < 0:
+        raise ValueError(
+            f"The '{variable_name}' environment variable must be greater than or equal to zero."
+        )
+    return candidate
+
+
 def _parse_positive_float(value: str | None, variable_name: str, default: float) -> float:
     candidate = default if value is None or value == "" else float(value)
     if candidate <= 0:
@@ -51,7 +60,7 @@ def _required_path(value: str | None, variable_name: str) -> Path:
 
 @dataclass(frozen=True)
 class SmartSamplerConfig:
-    source_h5_path: Path
+    source_h5_path: Path | None
     output_dir: Path
     output_filename: str
     local_work_dir: Path | None
@@ -80,6 +89,10 @@ class SmartSamplerConfig:
     m_max: int
     seed: int
     num_workers: int
+    patient_shard_cache_dir: Path | None = None
+    patient_shard_cache_bytes: int = 0
+    source_shard_dir: Path | None = None
+    source_manifest_path: Path | None = None
     use_gist: bool = False
     protect_positive_labels: bool = True
     protect_mask_positive: bool = True
@@ -99,12 +112,20 @@ def load_smart_sampler_config(
     use_gist_value = values.get("SMART_SAMPLER_USE_GIST")
     if use_gist_value is None:
         use_gist_value = values.get("USE_GIST_SCRIPT")
-    source_h5_path = _required_path(
-        values.get("SMART_SAMPLER_SOURCE_H5"), "SMART_SAMPLER_SOURCE_H5"
+    source_shard_dir = _required_path(
+        values.get("SMART_SAMPLER_SOURCE_SHARD_DIR"), "SMART_SAMPLER_SOURCE_SHARD_DIR"
+    )
+    source_manifest_path = resolve_env_path(
+        values.get("SMART_SAMPLER_SOURCE_MANIFEST_PATH"),
+        "SMART_SAMPLER_SOURCE_MANIFEST_PATH",
     )
     output_dir = _required_path(values.get("SMART_SAMPLER_OUTPUT_DIR"), "SMART_SAMPLER_OUTPUT_DIR")
     local_work_dir = resolve_env_path(
         values.get("SMART_SAMPLER_LOCAL_WORK_DIR"), "SMART_SAMPLER_LOCAL_WORK_DIR"
+    )
+    patient_shard_cache_dir = resolve_env_path(
+        values.get("SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR"),
+        "SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR",
     )
     device = (
         values.get("SMART_SAMPLER_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -120,10 +141,10 @@ def load_smart_sampler_config(
         )
 
     return SmartSamplerConfig(
-        source_h5_path=source_h5_path,
+        source_h5_path=None,
         output_dir=output_dir,
         output_filename=(
-            values.get("SMART_SAMPLER_OUTPUT_FILENAME") or "TRAIN_FILTERED.h5"
+            values.get("SMART_SAMPLER_OUTPUT_FILENAME") or "TRAIN_FILTERED_shards"
         ).strip(),
         local_work_dir=local_work_dir,
         stage_input_locally=_parse_bool(
@@ -216,6 +237,14 @@ def load_smart_sampler_config(
             0,
             int(values.get("SMART_SAMPLER_NUM_WORKERS") or 2),
         ),
+        patient_shard_cache_dir=patient_shard_cache_dir,
+        patient_shard_cache_bytes=_parse_non_negative_int(
+            values.get("SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES"),
+            "SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES",
+            0,
+        ),
+        source_shard_dir=source_shard_dir,
+        source_manifest_path=source_manifest_path or (source_shard_dir / "manifest.parquet"),
         use_gist=_parse_bool(
             use_gist_value,
             "SMART_SAMPLER_USE_GIST",

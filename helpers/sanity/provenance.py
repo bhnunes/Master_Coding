@@ -6,23 +6,31 @@ from typing import Any, cast
 
 import pandas as pd
 
+from helpers.stage_contracts import (
+    STAGE5_MANIFEST_FILE_NAME,
+    STAGE5_RUN_CONFIG_FILE_NAME,
+    STAGE5_SPLIT_STATS_FILE_NAME,
+)
+
 
 def load_manifest(base_dir: Path) -> pd.DataFrame:
-    manifest_path = base_dir / "manifest.csv"
+    manifest_path = base_dir / STAGE5_MANIFEST_FILE_NAME
     if not manifest_path.is_file():
-        raise FileNotFoundError(f"manifest.csv not found in base_dir: {manifest_path}")
+        raise FileNotFoundError(
+            f"{STAGE5_MANIFEST_FILE_NAME} not found in base_dir: {manifest_path}"
+        )
     return pd.read_csv(manifest_path)
 
 
 def load_run_config(base_dir: Path) -> dict[str, Any] | None:
-    run_config_path = base_dir / "run_config.json"
+    run_config_path = base_dir / STAGE5_RUN_CONFIG_FILE_NAME
     if not run_config_path.is_file():
         return None
     return cast(dict[str, Any], json.loads(run_config_path.read_text(encoding="utf-8")))
 
 
 def load_split_stats(base_dir: Path) -> pd.DataFrame | None:
-    split_stats_path = base_dir / "split_stats.csv"
+    split_stats_path = base_dir / STAGE5_SPLIT_STATS_FILE_NAME
     if not split_stats_path.is_file():
         return None
     try:

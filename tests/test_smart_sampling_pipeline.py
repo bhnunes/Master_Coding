@@ -8,16 +8,19 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import torch
 
 from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.pipeline import run_smart_sampling_pipeline
+from helpers.smart_sampling.selection import select_patient_samples as run_select_patient_samples
+from helpers.smart_sampling.writer import write_filtered_patient_shard
 from helpers.training import data as training_data
-from helpers.training.data import HybridProstateDataset
 
 
-def _write_training_hdf5(path: Path) -> None:
+def _write_training_shards(shard_dir: Path) -> None:
     images = np.arange(6 * 4 * 4 * 3, dtype=np.uint8).reshape(6, 4, 4, 3)
     masks = np.zeros((6, 4, 4), dtype=np.uint8)
     masks[1] = 1
@@ -36,19 +39,48 @@ def _write_training_hdf5(path: Path) -> None:
         dtype="S32",
     )
 
-    with h5py.File(path, "w") as handle:
-        handle.create_dataset("images", data=images)
-        handle.create_dataset("masks", data=masks)
-        handle.create_dataset("labels", data=labels)
-        handle.create_dataset("patient_ids", data=patient_ids)
-        handle.create_dataset("filenames", data=filenames)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_records: list[dict[str, object]] = []
+    for patient_id in (1, 2):
+        patient_mask = patient_ids == patient_id
+        shard_path = shard_dir / f"{patient_id}.h5"
+        patient_images = images[patient_mask]
+        patient_masks = masks[patient_mask]
+        patient_labels = labels[patient_mask]
+        patient_patient_ids = patient_ids[patient_mask]
+        patient_filenames = filenames[patient_mask]
+        with h5py.File(shard_path, "w") as handle:
+            handle.create_dataset("images", data=patient_images)
+            handle.create_dataset("masks", data=patient_masks)
+            handle.create_dataset("labels", data=patient_labels)
+            handle.create_dataset("patient_ids", data=patient_patient_ids)
+            handle.create_dataset("filenames", data=patient_filenames)
+            handle.attrs["patient_id"] = patient_id
+            handle.attrs["split_name"] = "TRAIN"
+            handle.attrs["source_split_hdf5_path"] = "/tmp/stage5/TRAIN.h5"
+            handle.attrs["source_split_row_indices_json"] = json.dumps(
+                np.where(patient_mask)[0].astype(int).tolist()
+            )
+        shard_records.append(
+            {
+                "split": "TRAIN",
+                "patient_id": patient_id,
+                "relative_hdf5_path": f"TRAIN_shards/{patient_id}.h5",
+                "rows": int(patient_mask.sum()),
+                "label_0_count": int((patient_labels == 0).sum()),
+                "label_1_count": int((patient_labels == 1).sum()),
+            }
+        )
+    pq.write_table(pa.Table.from_pylist(shard_records), shard_dir / "manifest.parquet")
 
 
 def _build_config(tmp_path: Path, **overrides: object) -> SmartSamplerConfig:
     values: dict[str, Any] = {
         "source_h5_path": tmp_path / "TRAIN.h5",
+        "source_shard_dir": tmp_path / "TRAIN_shards",
+        "source_manifest_path": tmp_path / "TRAIN_shards" / "manifest.parquet",
         "output_dir": tmp_path / "out",
-        "output_filename": "TRAIN_FILTERED.h5",
+        "output_filename": "TRAIN_FILTERED_shards",
         "local_work_dir": None,
         "stage_input_locally": False,
         "stage_outputs_locally": False,
@@ -110,18 +142,18 @@ class _IdentityTransform:
 def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    _write_training_hdf5(source_path)
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
 
     outputs = run_smart_sampling_pipeline(
-        _build_config(tmp_path, source_h5_path=source_path),
+        _build_config(tmp_path, source_h5_path=None, source_shard_dir=source_shard_dir),
         extractor_factory=_DummyEmbeddingExtractor,
     )
 
-    assert outputs.filtered_h5_path == tmp_path / "out" / "TRAIN_FILTERED.h5"
+    assert outputs.filtered_shard_dir == tmp_path / "out" / "TRAIN_FILTERED_shards"
     assert outputs.selection_csv_path is not None
     assert outputs.stats_csv_path is not None
     assert outputs.run_config_path is not None
@@ -133,12 +165,35 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     assert outputs.patient_count == 2
     assert outputs.patients_reduced_count == 2
 
-    with h5py.File(outputs.filtered_h5_path, "r") as handle:
+    manifest = pq.read_table(outputs.filtered_shard_dir / "manifest.parquet").to_pylist()
+    assert manifest == [
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 1,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/1.h5",
+            "rows": 2,
+            "label_0_count": 1,
+            "label_1_count": 1,
+        },
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 2,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/2.h5",
+            "rows": 2,
+            "label_0_count": 1,
+            "label_1_count": 1,
+        },
+    ]
+    with h5py.File(outputs.filtered_shard_dir / "1.h5", "r") as handle:
         assert set(handle.keys()) == {"filenames", "images", "labels", "masks", "patient_ids"}
-        assert handle["patient_ids"][:].tolist() == [1, 1, 2, 2]
+        assert handle["patient_ids"][:].tolist() == [1, 1]
         assert bool(handle.attrs["stage7_label_aware"])
         assert handle.attrs["stage7_holdout_mode"] == "within_patient_patch_holdout"
+    with h5py.File(outputs.filtered_shard_dir / "2.h5", "r") as handle:
+        assert handle["patient_ids"][:].tolist() == [2, 2]
 
+    assert outputs.summary_json_path is not None
+    assert outputs.summary_json_path is not None
     assert outputs.summary_json_path is not None
     summary = json.loads(outputs.summary_json_path.read_text(encoding="utf-8"))
     assert summary["total_input_samples"] == 6
@@ -157,15 +212,12 @@ def test_run_smart_sampling_pipeline_produces_training_compatible_outputs(
     assert summary["selected_negative_label_count"] == 2
     assert summary["model_name"] == "owkin/phikon-v2"
 
-    dataset = HybridProstateDataset(str(outputs.filtered_h5_path), mode="train")
-    assert len(dataset) == 4
-
 
 def test_run_smart_sampling_pipeline_stages_outputs_locally_and_publishes_on_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    _write_training_hdf5(source_path)
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
@@ -174,7 +226,8 @@ def test_run_smart_sampling_pipeline_stages_outputs_locally_and_publishes_on_suc
     local_work_dir = tmp_path / "content"
     config = _build_config(
         tmp_path,
-        source_h5_path=source_path,
+        source_h5_path=None,
+        source_shard_dir=source_shard_dir,
         output_dir=remote_output_dir,
         local_work_dir=local_work_dir,
         stage_input_locally=True,
@@ -183,21 +236,24 @@ def test_run_smart_sampling_pipeline_stages_outputs_locally_and_publishes_on_suc
 
     outputs = run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
 
-    assert outputs.filtered_h5_path == remote_output_dir / "TRAIN_FILTERED.h5"
+    assert outputs.filtered_shard_dir == remote_output_dir / "TRAIN_FILTERED_shards"
     assert outputs.selection_csv_path == remote_output_dir / "train_filtered_selection.csv"
     assert outputs.stats_csv_path == remote_output_dir / "patient_filter_stats.csv"
     assert outputs.run_config_path == remote_output_dir / "filter_run_config.json"
     assert outputs.summary_json_path == remote_output_dir / "filter_summary.json"
     assert not local_work_dir.exists()
-    assert outputs.filtered_h5_path.exists()
+    assert outputs.filtered_shard_dir.exists()
+    assert (outputs.filtered_shard_dir / "1.h5").exists()
+    assert (outputs.filtered_shard_dir / "2.h5").exists()
+    assert (outputs.filtered_shard_dir / "manifest.parquet").exists()
     assert outputs.summary_json_path.exists()
 
 
 def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    _write_training_hdf5(source_path)
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
@@ -206,7 +262,8 @@ def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
     local_work_dir = tmp_path / "content"
     config = _build_config(
         tmp_path,
-        source_h5_path=source_path,
+        source_h5_path=None,
+        source_shard_dir=source_shard_dir,
         output_dir=remote_output_dir,
         local_work_dir=local_work_dir,
         stage_input_locally=True,
@@ -221,16 +278,153 @@ def test_run_smart_sampling_pipeline_keeps_local_work_dir_on_publish_failure(
     with pytest.raises(OSError, match="drive unavailable"):
         run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
 
-    assert (local_work_dir / "input" / source_path.name).exists()
-    assert (local_work_dir / "output" / "TRAIN_FILTERED.h5").exists()
+    assert (remote_output_dir / "TRAIN_FILTERED_shards" / "1.h5").exists()
+    assert (remote_output_dir / "TRAIN_FILTERED_shards" / "2.h5").exists()
+    assert (remote_output_dir / "TRAIN_FILTERED_shards" / "manifest.parquet").exists()
+    assert not (local_work_dir / "input" / "1.h5").exists()
+    assert not (local_work_dir / "input" / "2.h5").exists()
+    assert not (local_work_dir / "output" / "TRAIN_FILTERED_shards" / "1.h5").exists()
+    assert not (local_work_dir / "output" / "TRAIN_FILTERED_shards" / "2.h5").exists()
     assert (local_work_dir / "output" / "filter_summary.json").exists()
+
+
+def test_run_smart_sampling_pipeline_keeps_current_patient_workspace_when_shard_publish_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    remote_output_dir = tmp_path / "drive"
+    local_work_dir = tmp_path / "content"
+    config = _build_config(
+        tmp_path,
+        source_h5_path=None,
+        source_shard_dir=source_shard_dir,
+        output_dir=remote_output_dir,
+        local_work_dir=local_work_dir,
+        stage_input_locally=True,
+        stage_outputs_locally=True,
+    )
+
+    def fail_patient_publish(*args: object, **kwargs: object) -> object:
+        raise OSError("patient publish failed")
+
+    monkeypatch.setattr(
+        "helpers.smart_sampling.pipeline.publish_patient_output", fail_patient_publish
+    )
+
+    with pytest.raises(OSError, match="patient publish failed"):
+        run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
+
+    assert (local_work_dir / "input" / "1.h5").exists()
+    assert (local_work_dir / "output" / "TRAIN_FILTERED_shards" / "1.h5").exists()
+    assert not (remote_output_dir / "TRAIN_FILTERED_shards" / "1.h5").exists()
+
+
+def test_run_smart_sampling_pipeline_skips_patients_with_existing_filtered_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
+    monkeypatch.setattr(
+        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
+    )
+
+    remote_output_dir = tmp_path / "drive"
+    remote_output_dir.mkdir()
+    config = _build_config(
+        tmp_path,
+        source_h5_path=None,
+        source_shard_dir=source_shard_dir,
+        output_dir=remote_output_dir,
+        overwrite_output=False,
+    )
+
+    preexisting_output_path = remote_output_dir / "TRAIN_FILTERED_shards" / "1.h5"
+    write_filtered_patient_shard(
+        config,
+        patient_id=1,
+        source_shard_path=source_shard_dir / "1.h5",
+        source_relative_path="TRAIN_shards/1.h5",
+        output_path=preexisting_output_path,
+        output_relative_path="TRAIN_FILTERED_shards/1.h5",
+        selected_row_indices=[0, 1],
+        signature_source_dir=source_shard_dir,
+        stage7_summary_attrs={
+            "protected_kept_samples": 1,
+            "protected_positive_label_kept_samples": 1,
+            "protected_mask_positive_kept_samples": 1,
+            "sampled_reducible_samples": 1,
+            "rejected_reducible_samples": 1,
+            "total_positive_label_count": 1,
+            "total_negative_label_count": 2,
+            "selected_positive_label_count": 1,
+            "selected_negative_label_count": 1,
+            "patients_reduced_count": 1,
+        },
+    )
+
+    seen_patient_ids: list[int] = []
+
+    def record_selection(
+        h5_path: str,
+        patient_id: int,
+        patient_indices: np.ndarray[tuple[int], np.dtype[np.int64]],
+        extractor: Any,
+        selection_config: SmartSamplerConfig,
+    ) -> object:
+        seen_patient_ids.append(patient_id)
+        return run_select_patient_samples(
+            h5_path,
+            patient_id,
+            patient_indices,
+            extractor,
+            selection_config,
+        )
+
+    monkeypatch.setattr("helpers.smart_sampling.pipeline.select_patient_samples", record_selection)
+
+    outputs = run_smart_sampling_pipeline(config, extractor_factory=_DummyEmbeddingExtractor)
+
+    assert seen_patient_ids == [2]
+    assert outputs.selected_sample_count == 4
+    assert outputs.rejected_sample_count == 2
+    assert outputs.patients_reduced_count == 2
+    manifest = pq.read_table(outputs.filtered_shard_dir / "manifest.parquet").to_pylist()
+    assert manifest == [
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 1,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/1.h5",
+            "rows": 2,
+            "label_0_count": 1,
+            "label_1_count": 1,
+        },
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 2,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/2.h5",
+            "rows": 2,
+            "label_0_count": 1,
+            "label_1_count": 1,
+        },
+    ]
+    assert outputs.summary_json_path is not None
+    summary = json.loads(outputs.summary_json_path.read_text(encoding="utf-8"))
+    assert summary["protected_kept_samples"] == 2
+    assert summary["sampled_reducible_samples"] == 2
+    assert summary["selected_positive_label_count"] == 2
+    assert summary["selected_negative_label_count"] == 2
 
 
 def test_run_smart_sampling_pipeline_reports_noop_summary_when_every_patch_is_kept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    _write_training_hdf5(source_path)
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
@@ -238,7 +432,8 @@ def test_run_smart_sampling_pipeline_reports_noop_summary_when_every_patch_is_ke
     outputs = run_smart_sampling_pipeline(
         _build_config(
             tmp_path,
-            source_h5_path=source_path,
+            source_h5_path=None,
+            source_shard_dir=source_shard_dir,
             adaptive_keep_enabled=False,
             keep_min=6,
             keep_improvement_threshold=0.5,
@@ -260,14 +455,16 @@ def test_run_smart_sampling_pipeline_reports_noop_summary_when_every_patch_is_ke
 def test_run_smart_sampling_pipeline_can_use_gist_selector(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    _write_training_hdf5(source_path)
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
 
     outputs = run_smart_sampling_pipeline(
-        _build_config(tmp_path, source_h5_path=source_path, use_gist=True),
+        _build_config(
+            tmp_path, source_h5_path=None, source_shard_dir=source_shard_dir, use_gist=True
+        ),
         extractor_factory=_DummyEmbeddingExtractor,
     )
 
@@ -283,14 +480,14 @@ def test_run_smart_sampling_pipeline_can_use_gist_selector(
 def test_run_smart_sampling_pipeline_records_protected_and_sampled_selection_buckets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_path = tmp_path / "TRAIN.h5"
-    _write_training_hdf5(source_path)
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    _write_training_shards(source_shard_dir)
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
 
     outputs = run_smart_sampling_pipeline(
-        _build_config(tmp_path, source_h5_path=source_path),
+        _build_config(tmp_path, source_h5_path=None, source_shard_dir=source_shard_dir),
         extractor_factory=_DummyEmbeddingExtractor,
     )
 

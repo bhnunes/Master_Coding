@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,7 +16,17 @@ from helpers.provenance import (
 )
 
 
-def _build_dataset_provenance(dataset: str) -> dict[str, Any]:
+def _build_dataset_provenance(
+    dataset: str | os.PathLike[str] | Mapping[str, Any],
+) -> dict[str, Any]:
+    if isinstance(dataset, Mapping):
+        payload = dict(dataset)
+        payload.setdefault("source_signature", None)
+        payload.setdefault("selection_signature", None)
+        payload.setdefault("smart_sampling_enabled", payload.get("selection_signature") is not None)
+        payload.setdefault("smart_sampling_metadata", {})
+        return payload
+
     dataset_path = Path(dataset)
     if not dataset_path.exists():
         raise FileNotFoundError(
@@ -64,8 +75,8 @@ def _build_artifact_loss_provenance(
 
 
 def _build_training_provenance(
-    dataset: str,
-    validation_dataset: str,
+    dataset: str | os.PathLike[str] | Mapping[str, Any],
+    validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
     artifact_index_path: str | os.PathLike[str] | None,
     resume_checkpoint: str | os.PathLike[str] | None,
     *,
@@ -153,8 +164,8 @@ def _build_training_provenance(
 
 def build_training_compatibility_signature(
     *,
-    dataset: str,
-    validation_dataset: str,
+    dataset: str | os.PathLike[str] | Mapping[str, Any],
+    validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
     artifact_index_path: str | os.PathLike[str] | None,
     run_ohem: bool,
     ohem_start_epoch: int,
@@ -428,8 +439,8 @@ def save_metadata(
     num_epochs: int,
     workers: int,
     seed: int,
-    dataset: str,
-    validation_dataset: str,
+    dataset: str | os.PathLike[str] | Mapping[str, Any],
+    validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
     patience: int,
     optimizer_name: str,
     alpha_bce: float,

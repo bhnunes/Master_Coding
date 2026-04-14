@@ -20,13 +20,13 @@ from helpers.training.checkpointing import (
 )
 from helpers.training.config import load_training_ensemble_config
 from helpers.training.data import (
-    HybridProstateDataset,
-    ProstateCancerDatasetHDF5,
+    HybridProstateShardDataset,
+    ProstateCancerShardDataset,
     SubsetView,
     collate_batch,
     create_stratified_subset_within_patients,
     load_artifact_coverage_lookup,
-    setup_local_hdf5,
+    prepare_training_shard_data,
     verify_patient_separation,
 )
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
@@ -106,12 +106,12 @@ optimizer_name = training_config.optimizer_name
 # =============================================================================
 # 7) Dataset & Normalization
 # =============================================================================
-# Path on Google Drive containing TRAIN.h5 and VALIDATION.h5
+# Path on Google Drive containing TRAIN_shards / TRAIN_FILTERED_shards and VALIDATION_shards
 hdf5_drive_dir = str(training_config.hdf5_drive_dir)
 metadata_dir = str(training_config.metadata_dir)
 identifier = training_config.identifier
 
-# Local temporary directory for staged HDF5 files
+# Local temporary directory for staged patient-shard caches
 local_data_dir = str(training_config.local_data_dir)
 
 
@@ -183,12 +183,12 @@ print("Aim/Ngrok setup complete.")
 # --- 13. Main Training Loop ---
 # ==============================================================================
 
-# 1. Transfer HDF5 files from Drive to Local
-chosen_file_name = setup_local_hdf5(hdf5_drive_dir, local_data_dir, smart_sampling)
-
-# Define paths to the local copies
-train_h5_path = os.path.join(local_data_dir, chosen_file_name)
-val_h5_path = os.path.join(local_data_dir, "VALIDATION.h5")
+# 1. Resolve shard-backed training and validation inputs
+prepared_shard_data = prepare_training_shard_data(hdf5_drive_dir, local_data_dir, smart_sampling)
+train_layout = prepared_shard_data.train_layout
+val_layout = prepared_shard_data.validation_layout
+train_dataset_provenance = prepared_shard_data.training_provenance
+validation_dataset_provenance = prepared_shard_data.validation_provenance
 
 print("\nCreating DataLoaders...")
 train_ds: Any = None
@@ -204,13 +204,13 @@ try:
         if effective_artifact_index_path is not None
         else None
     )
-    full_train_ds_h5 = HybridProstateDataset(
-        train_h5_path,
+    full_train_ds_h5 = HybridProstateShardDataset(
+        train_layout,
         mode="train",
         artifact_coverage_by_filename=artifact_coverage_by_filename,
     )
-    full_val_ds_h5 = ProstateCancerDatasetHDF5(
-        val_h5_path,
+    full_val_ds_h5 = ProstateCancerShardDataset(
+        val_layout,
         mode="val",
         artifact_coverage_by_filename=artifact_coverage_by_filename,
     )
@@ -387,8 +387,8 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         os.path.join(checkpoint_path, resume_checkpoint_path) if resume_checkpoint_path else None
     )
     expected_compatibility_signature = build_training_compatibility_signature(
-        dataset=train_h5_path,
-        validation_dataset=val_h5_path,
+        dataset=train_dataset_provenance,
+        validation_dataset=validation_dataset_provenance,
         artifact_index_path=effective_artifact_index_path,
         run_ohem=run_ohem,
         ohem_start_epoch=ohem_start_epoch,
@@ -499,8 +499,8 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
                 "num_epochs": num_epochs,
                 "workers": workers,
                 "seed": seed,
-                "dataset": train_h5_path,
-                "validation_dataset": val_h5_path,
+                "dataset": train_dataset_provenance,
+                "validation_dataset": validation_dataset_provenance,
                 "patience": patience,
                 "optimizer_name": optimizer_name,
                 "alpha_bce": alpha_bce,

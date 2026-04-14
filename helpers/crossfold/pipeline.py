@@ -19,6 +19,7 @@ from helpers.crossfold.provenance import (
 )
 from helpers.crossfold.splitting import create_train_val_test_split_best
 from helpers.provenance import collect_hdf5_provenance
+from helpers.stage_contracts import STAGE5_SINGLETON_SPLIT_FILES
 
 
 @dataclass(frozen=True)
@@ -85,17 +86,19 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         )
         save_normalizer_stats(normalizer, config.normalization_method, output_dir, template_paths)
 
-    for split_name, split_df in (
-        ("TRAIN", split_data["train_df"]),
-        ("VALIDATION", split_data["val_df"]),
-        ("TEST", split_data["test_df"]),
-    ):
+    split_frames = {
+        "TRAIN": split_data["train_df"],
+        "VALIDATION": split_data["val_df"],
+        "TEST": split_data["test_df"],
+    }
+    for split_name, output_file_name in STAGE5_SINGLETON_SPLIT_FILES.items():
+        split_df = split_frames[split_name]
         if split_df.empty:
             continue
         output_path = write_split_hdf5(
             split_df=split_df,
             source_hdf5_path=config.source_hdf5_path,
-            output_path=output_dir / f"{split_name}.h5",
+            output_path=output_dir / output_file_name,
             normalizer=normalizer,
             normalization_method=config.normalization_method,
             source_hdf5_provenance=source_hdf5_provenance,

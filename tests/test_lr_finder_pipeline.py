@@ -66,6 +66,9 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
             },
             completed_trials=2,
             failed_trials=0,
+            source_split_name="TRAIN_FILTERED_shards",
+            training_dataset_provenance={"manifest_path": "train_manifest.parquet"},
+            validation_dataset_provenance={"manifest_path": "validation_manifest.parquet"},
         )
 
     def fake_report_builder(
@@ -103,6 +106,11 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
     assert run_config["failed_trials"] == 0
     assert run_config["architecture_trial_stats"] == {
         "FPN": {"valid_records": 1, "completed_trials": 2, "failed_trials": 0}
+    }
+    assert run_config["source_split_name"] == "TRAIN_FILTERED_shards"
+    assert run_config["training_dataset_provenance"] == {"manifest_path": "train_manifest.parquet"}
+    assert run_config["validation_dataset_provenance"] == {
+        "manifest_path": "validation_manifest.parquet"
     }
     assert "runtime_environment" in run_config
     assert "git_commit" in run_config["runtime_environment"]

@@ -10,7 +10,11 @@ from typing import Any
 import torch
 
 from helpers.ensemble_inference.config import EnsembleInferenceConfig
-from helpers.ensemble_inference.data import create_test_dataloader, setup_test_hdf5
+from helpers.ensemble_inference.data import (
+    collect_test_shard_provenance,
+    create_test_dataloader,
+    setup_test_shards,
+)
 from helpers.ensemble_inference.inference import analyze_ensemble_metrics, export_visualizations
 from helpers.ensemble_inference.models import load_recipe_models
 from helpers.ensemble_inference.recipe import load_recipe_payload, parse_ensemble_recipe
@@ -22,7 +26,6 @@ from helpers.ensemble_inference.reporting import (
     write_ensemble_report_markdown,
 )
 from helpers.provenance import (
-    collect_hdf5_provenance,
     collect_runtime_environment,
     hash_file_sha256,
     hash_json_payload,
@@ -37,7 +40,7 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 def _validate_recipe_dataset_lineage(
     recipe_payload: dict[str, Any],
-    test_h5_provenance: dict[str, Any],
+    test_dataset_provenance: dict[str, Any],
 ) -> None:
     provenance = recipe_payload.get("provenance")
     if not isinstance(provenance, dict):
@@ -46,9 +49,9 @@ def _validate_recipe_dataset_lineage(
     if not isinstance(validation_lineage, dict):
         raise ValueError("Recipe provenance mismatch: missing validation_lineage payload.")
 
-    observed_attrs = test_h5_provenance.get("attrs")
+    observed_attrs = test_dataset_provenance.get("attrs")
     if not isinstance(observed_attrs, dict):
-        raise ValueError("Dataset lineage mismatch: test_h5_provenance is missing attrs.")
+        raise ValueError("Dataset lineage mismatch: test_dataset_provenance is missing attrs.")
 
     lineage_keys = (
         "source_hdf5_sha256",
@@ -65,7 +68,7 @@ def _validate_recipe_dataset_lineage(
             mismatches.append(f"{key}: recipe={expected} test={observed}")
     if mismatches:
         raise ValueError(
-            "Dataset lineage mismatch between recipe validation provenance and TEST.h5: "
+            "Dataset lineage mismatch between recipe validation provenance and TEST_shards: "
             + "; ".join(mismatches)
         )
 
@@ -127,7 +130,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
     else:
         recipe_copy_path.write_text(json.dumps(recipe_payload, indent=2), encoding="utf-8")
 
-    test_h5_path = setup_test_hdf5(
+    test_layout = setup_test_shards(
         config.hdf5_drive_dir,
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
@@ -146,10 +149,10 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
                 "The on-disk checkpoint content no longer matches the recipe."
             )
 
-    test_h5_provenance = collect_hdf5_provenance(test_h5_path)
-    _validate_recipe_dataset_lineage(recipe_payload, test_h5_provenance)
+    test_dataset_provenance = collect_test_shard_provenance(test_layout)
+    _validate_recipe_dataset_lineage(recipe_payload, test_dataset_provenance)
     test_loader = create_test_dataloader(
-        test_h5_path,
+        test_layout,
         batch_size=config.batch_size,
         workers=config.workers,
     )
@@ -238,8 +241,9 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         {
             "generated_at": timestamp,
             "runtime_environment": collect_runtime_environment(),
-            "test_h5_path": str(test_h5_path),
-            "test_h5_provenance": test_h5_provenance,
+            "test_shard_dir": str(test_layout.shard_dir),
+            "test_sample_manifest_path": str(test_layout.sample_manifest_path),
+            "test_dataset_provenance": test_dataset_provenance,
             "roi_threshold": recipe.roi_threshold,
             "decision_threshold": recipe.decision_threshold,
             "output_dir": str(output_dir),

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import shutil
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import albumentations as A
@@ -18,7 +21,8 @@ from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataloader import default_collate
 
-from helpers.provenance import hash_file_sha256
+from helpers.patient_shard_cache import PatientShardCache
+from helpers.provenance import hash_file_sha256, hash_json_payload
 
 NumericArray = npt.NDArray[np.generic]
 ArtifactCoverageLookup = dict[str, tuple[float, float, float, float, float]]
@@ -585,3 +589,363 @@ def create_stratified_subset_within_patients(
         f"NOT_CANCER: {not_cancer_count}"
     )
     return Subset(full_dataset, subset_indices)
+
+
+@dataclass(frozen=True)
+class ShardDatasetLayout:
+    shard_dir: Path
+    manifest_path: Path
+    sample_manifest_path: Path
+    local_cache_dir: Path | None
+
+
+@dataclass(frozen=True)
+class PreparedShardTrainingData:
+    train_layout: ShardDatasetLayout
+    validation_layout: ShardDatasetLayout
+    source_split_name: str
+    training_provenance: dict[str, Any]
+    validation_provenance: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ShardSampleRecord:
+    patient_id: str
+    label: int
+    relative_hdf5_path: str
+    row_in_shard: int
+    filename: str
+
+
+def _load_shard_layout(
+    drive_dir: Path,
+    split_dir_name: str,
+    *,
+    local_data_dir: Path,
+) -> ShardDatasetLayout:
+    shard_dir = drive_dir / split_dir_name
+    manifest_path = shard_dir / "manifest.parquet"
+    sample_manifest_path = shard_dir / "sample_manifest.parquet"
+    if not shard_dir.is_dir():
+        raise FileNotFoundError(f"Missing {shard_dir}")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {manifest_path}")
+    if not sample_manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {sample_manifest_path}")
+    local_cache_dir = local_data_dir / split_dir_name
+    local_cache_dir.mkdir(parents=True, exist_ok=True)
+    return ShardDatasetLayout(
+        shard_dir=shard_dir,
+        manifest_path=manifest_path,
+        sample_manifest_path=sample_manifest_path,
+        local_cache_dir=local_cache_dir,
+    )
+
+
+def _collect_common_shard_attrs(layout: ShardDatasetLayout) -> dict[str, Any]:
+    manifest_records = pq.read_table(layout.manifest_path).to_pylist()
+    common_attrs: dict[str, Any] | None = None
+    for record in manifest_records:
+        shard_path = layout.shard_dir.parent / str(record["relative_hdf5_path"])
+        with h5py.File(shard_path, "r") as handle:
+            observed = {
+                str(key): value
+                for key, value in handle.attrs.items()
+                if str(key).startswith("stage7_")
+                or str(key)
+                in {
+                    "source_signature",
+                    "upstream_source_signature",
+                    "source_hdf5_sha256",
+                    "source_split_hdf5_sha256",
+                    "stage4_cleaning_manifest_sha256",
+                }
+            }
+        if common_attrs is None:
+            common_attrs = observed
+            continue
+        comparable_keys = set(common_attrs).intersection(observed)
+        if any(common_attrs[key] != observed[key] for key in comparable_keys):
+            raise ValueError(f"Shard lineage mismatch detected under '{layout.shard_dir}'.")
+    return common_attrs or {}
+
+
+def collect_shard_dataset_provenance(layout: ShardDatasetLayout) -> dict[str, Any]:
+    summary_path = layout.shard_dir / "summary.json"
+    selection_signature = None
+    summary_sha256 = None
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        selection_signature = summary.get("selection_signature")
+        summary_sha256 = hash_file_sha256(summary_path)
+    attrs = _collect_common_shard_attrs(layout)
+    source_signature = attrs.get("source_signature") or attrs.get("upstream_source_signature")
+    smart_sampling_metadata = {
+        key: value for key, value in attrs.items() if str(key).startswith("stage7_")
+    }
+    manifest_sha256 = hash_file_sha256(layout.manifest_path)
+    sample_manifest_sha256 = hash_file_sha256(layout.sample_manifest_path)
+    combined_sha256 = hash_json_payload(
+        {
+            "manifest_sha256": manifest_sha256,
+            "sample_manifest_sha256": sample_manifest_sha256,
+            "summary_sha256": summary_sha256,
+        }
+    )
+    return {
+        "path": str(layout.sample_manifest_path),
+        "sha256": combined_sha256,
+        "source_signature": source_signature,
+        "selection_signature": selection_signature,
+        "smart_sampling_enabled": selection_signature is not None,
+        "smart_sampling_metadata": smart_sampling_metadata,
+        "manifest_path": str(layout.manifest_path),
+        "manifest_sha256": manifest_sha256,
+        "sample_manifest_sha256": sample_manifest_sha256,
+        "summary_path": str(summary_path) if summary_path.is_file() else None,
+        "summary_sha256": summary_sha256,
+        "attrs": attrs,
+    }
+
+
+def prepare_training_shard_data(
+    drive_dir: str | Path,
+    local_dir: str | Path,
+    smart_sampling: bool,
+) -> PreparedShardTrainingData:
+    drive_path = Path(drive_dir)
+    local_path = Path(local_dir)
+    print(f"\n{'=' * 25} Setting up Training Shards {'=' * 25}")
+    if local_path.exists():
+        shutil.rmtree(local_path)
+    local_path.mkdir(parents=True, exist_ok=True)
+    source_split_name = (
+        "TRAIN_FILTERED_shards"
+        if smart_sampling and (drive_path / "TRAIN_FILTERED_shards").is_dir()
+        else "TRAIN_shards"
+    )
+    train_layout = _load_shard_layout(drive_path, source_split_name, local_data_dir=local_path)
+    validation_layout = _load_shard_layout(
+        drive_path, "VALIDATION_shards", local_data_dir=local_path
+    )
+    print(f"Training source: {train_layout.shard_dir}")
+    print(f"Validation source: {validation_layout.shard_dir}")
+    return PreparedShardTrainingData(
+        train_layout=train_layout,
+        validation_layout=validation_layout,
+        source_split_name=source_split_name,
+        training_provenance=collect_shard_dataset_provenance(train_layout),
+        validation_provenance=collect_shard_dataset_provenance(validation_layout),
+    )
+
+
+class _BaseShardProstateDataset(Dataset[Any]):
+    def __init__(
+        self,
+        layout: ShardDatasetLayout,
+        *,
+        mode: str,
+        subset_indices: list[int] | None = None,
+        artifact_coverage_by_filename: ArtifactCoverageLookup | None = None,
+    ) -> None:
+        self.layout = layout
+        self.mode = mode
+        self.transform = get_transforms(mode=mode, img_size=224)
+        records = [
+            _ShardSampleRecord(
+                patient_id=_decode_filename(record["patient_id"]),
+                label=int(record["label"]),
+                relative_hdf5_path=str(record["relative_hdf5_path"]),
+                row_in_shard=int(record["row_in_shard"]),
+                filename=_decode_filename(record.get("filename", "")),
+            )
+            for record in pq.read_table(layout.sample_manifest_path).to_pylist()
+        ]
+        if subset_indices is not None:
+            self.records = [records[index] for index in subset_indices]
+        else:
+            self.records = records
+        self.labels = np.asarray([record.label for record in self.records], dtype=np.int64)
+        self.patient_ids = np.asarray([record.patient_id for record in self.records], dtype=str)
+        self.filenames = np.asarray([record.filename for record in self.records], dtype=str)
+        self.indices = np.arange(len(self.records), dtype=np.int64)
+        self.artifact_coverage_by_filename = artifact_coverage_by_filename
+        self.cache = (
+            PatientShardCache(layout.local_cache_dir, size_cap_bytes=0)
+            if layout.local_cache_dir is not None
+            else None
+        )
+        self.h5_file: Any = None
+        self.images_dset: Any = None
+        self.masks_dset: Any = None
+        self.filenames_dset: Any = None
+        self._opened_pid: int | None = None
+        self._opened_shard_path: str | None = None
+        self._atexit_registered = False
+
+    def _resolve_shard_path(self, relative_hdf5_path: str) -> Path:
+        source_path = self.layout.shard_dir.parent / relative_hdf5_path
+        if self.cache is None:
+            return source_path
+        return self.cache.fetch(source_path)
+
+    def _open_file(self, relative_hdf5_path: str) -> None:
+        pid = os.getpid()
+        shard_path = str(self._resolve_shard_path(relative_hdf5_path))
+        if (
+            self.h5_file is not None
+            and self._opened_pid is not None
+            and (self._opened_pid != pid or self._opened_shard_path != shard_path)
+        ):
+            self.close()
+        if self.h5_file is None:
+            self.h5_file = h5py.File(shard_path, "r", libver="latest", rdcc_nbytes=50 * 1024 * 1024)
+            self.images_dset = self.h5_file["images"]
+            self.masks_dset = self.h5_file["masks"]
+            self.filenames_dset = _get_filenames_dataset(self.h5_file)
+            self._opened_pid = pid
+            self._opened_shard_path = shard_path
+            if not self._atexit_registered:
+                atexit.register(self.close)
+                self._atexit_registered = True
+
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def _format_item(self, image: Any, mask: Any, filename: str) -> Any:
+        augmented = self.transform(image=image, mask=mask)
+        transformed_mask = augmented["mask"]
+        if transformed_mask.ndim == 3 and transformed_mask.shape[-1] == 1:
+            transformed_mask = transformed_mask.squeeze(-1)
+        if self.artifact_coverage_by_filename is None:
+            return augmented["image"], transformed_mask.long()
+        artifact_covariates = torch.tensor(
+            self.artifact_coverage_by_filename.get(filename, ZERO_ARTIFACT_COVERAGE),
+            dtype=torch.float32,
+        )
+        return augmented["image"], transformed_mask.long(), artifact_covariates
+
+    def __getitem__(self, idx: int) -> Any:
+        record = self.records[idx]
+        resolved_shard_path = str(self._resolve_shard_path(record.relative_hdf5_path))
+        if self.h5_file is None or self._opened_shard_path != resolved_shard_path:
+            self._open_file(record.relative_hdf5_path)
+        image = self.images_dset[record.row_in_shard]
+        mask = self.masks_dset[record.row_in_shard]
+        filename = _decode_filename(self.filenames_dset[record.row_in_shard])
+        try:
+            return self._format_item(image, mask, filename)
+        except Exception as error:
+            print(f"Error on index {idx}: {error}")
+            return None, None
+
+    def get_labels(self) -> NumericArray:
+        return np.asarray(self.labels)
+
+    def get_patient_ids(self) -> NumericArray:
+        return np.asarray(self.patient_ids)
+
+    def get_class_counts(self) -> dict[str, int]:
+        counts = np.bincount(np.asarray(self.labels))
+        return {
+            "CANCER": int(counts[1]) if len(counts) > 1 else 0,
+            "NOT_CANCER": int(counts[0]) if len(counts) > 0 else 0,
+        }
+
+    def close(self) -> None:
+        try:
+            if self.h5_file is not None:
+                self.h5_file.close()
+        except Exception:
+            pass
+        finally:
+            self.h5_file = None
+            self.images_dset = None
+            self.masks_dset = None
+            self.filenames_dset = None
+            self._opened_pid = None
+            self._opened_shard_path = None
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        state["h5_file"] = None
+        state["images_dset"] = None
+        state["masks_dset"] = None
+        state["filenames_dset"] = None
+        state["_opened_pid"] = None
+        state["_opened_shard_path"] = None
+        state["_atexit_registered"] = False
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self.h5_file = None
+        self.images_dset = None
+        self.masks_dset = None
+        self.filenames_dset = None
+        self._opened_pid = None
+        self._opened_shard_path = None
+        self._atexit_registered = False
+
+
+class ProstateCancerShardDataset(_BaseShardProstateDataset):
+    """Lazy shard-backed dataset used by validation and training paths."""
+
+
+class HybridProstateShardDataset(_BaseShardProstateDataset):
+    """Shard-backed training dataset that caches samples in RAM when feasible."""
+
+    def __init__(
+        self,
+        layout: ShardDatasetLayout,
+        *,
+        mode: str = "train",
+        subset_indices: list[int] | None = None,
+        artifact_coverage_by_filename: ArtifactCoverageLookup | None = None,
+    ) -> None:
+        super().__init__(
+            layout,
+            mode=mode,
+            subset_indices=subset_indices,
+            artifact_coverage_by_filename=artifact_coverage_by_filename,
+        )
+        self.images_cache: NumericArray | None = None
+        self.masks_cache: NumericArray | None = None
+        self.use_ram_cache = False
+        if self.records:
+            first_record = self.records[0]
+            first_shard_path = self.layout.shard_dir.parent / first_record.relative_hdf5_path
+            with h5py.File(first_shard_path, "r") as handle:
+                image_shape = tuple(cast(Any, handle["images"]).shape[1:])
+                mask_shape = tuple(cast(Any, handle["masks"]).shape[1:])
+            bytes_per_sample = int(np.prod(image_shape)) + int(np.prod(mask_shape))
+            total_bytes_needed = len(self.records) * bytes_per_sample
+            available_ram = psutil.virtual_memory().available
+            self.use_ram_cache = total_bytes_needed < (available_ram * 0.70)
+            if self.use_ram_cache:
+                self._load_to_ram()
+
+    def _load_to_ram(self) -> None:
+        images: list[Any] = []
+        masks: list[Any] = []
+        for record in self.records:
+            shard_path = self.layout.shard_dir.parent / record.relative_hdf5_path
+            with h5py.File(shard_path, "r") as handle:
+                images.append(np.asarray(cast(Any, handle["images"])[record.row_in_shard]))
+                masks.append(np.asarray(cast(Any, handle["masks"])[record.row_in_shard]))
+        self.images_cache = np.asarray(images)
+        self.masks_cache = np.asarray(masks)
+
+    def __getitem__(self, idx: int) -> Any:
+        if self.use_ram_cache:
+            assert self.images_cache is not None
+            assert self.masks_cache is not None
+            filename = str(self.filenames[idx])
+            try:
+                return self._format_item(self.images_cache[idx], self.masks_cache[idx], filename)
+            except Exception as error:
+                raise RuntimeError(f"Transform failed at idx={idx}") from error
+        return super().__getitem__(idx)

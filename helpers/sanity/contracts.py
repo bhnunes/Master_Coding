@@ -5,6 +5,7 @@ import re
 import pandas as pd
 
 from helpers.sanity.models import CheckResult
+from helpers.stage_contracts import STAGE5_SINGLETON_SPLIT_FILES
 
 PATIENT_FILENAME_PATTERN = re.compile(r"PATIENT_(\d+)_")
 LOGICAL_HDF5_REF_PATTERN = re.compile(
@@ -97,4 +98,31 @@ def check_source_reference_contract(manifest_df: pd.DataFrame) -> CheckResult:
     return CheckResult(
         "PASS",
         "Source references are valid, including logical HDF5 refs when present.",
+    )
+
+
+def check_stage5_singleton_layout_contract(manifest_df: pd.DataFrame) -> CheckResult:
+    """Validate that Stage 6 inputs still reference only canonical Stage 5 singleton outputs."""
+
+    invalid_examples: list[str] = []
+    expected_paths = STAGE5_SINGLETON_SPLIT_FILES
+    for row in manifest_df.itertuples(index=False):
+        split_name = str(getattr(row, "split", ""))
+        relative_hdf5_path = str(getattr(row, "relative_hdf5_path", ""))
+        expected_path = expected_paths.get(split_name)
+        if expected_path is None or relative_hdf5_path != expected_path:
+            invalid_examples.append(f"{split_name}:{relative_hdf5_path}")
+
+    if invalid_examples:
+        expected_layout = ", ".join(
+            f"{split_name} -> {path}" for split_name, path in expected_paths.items()
+        )
+        return CheckResult(
+            "FAIL",
+            "Stage 6 only supports Stage 5 singleton split outputs. "
+            f"Expected layout: {expected_layout}. Examples: {invalid_examples[:10]}",
+        )
+    return CheckResult(
+        "PASS",
+        "Manifest paths match the canonical Stage 5 singleton split layout.",
     )

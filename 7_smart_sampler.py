@@ -14,7 +14,7 @@ from helpers.training.runtime import seed_everything
 
 
 def main() -> None:
-    """Filter TRAIN.h5 into TRAIN_FILTERED.h5 using patient-wise label-aware smart sampling."""
+    """Filter TRAIN_shards into TRAIN_FILTERED_shards with patient-wise label-aware sampling."""
 
     load_dotenv(override=True)
 
@@ -52,8 +52,8 @@ def main() -> None:
     print(f"- Kept percentage: {outputs.kept_fraction * 100.0:.2f}%")
     print(f"- Patients processed: {outputs.patient_count}")
     print(f"- Patients reduced: {outputs.patients_reduced_count}")
-    logging.info("Filtered HDF5: %s", outputs.filtered_h5_path)
-    print(f"- Filtered HDF5: {outputs.filtered_h5_path}")
+    logging.info("Filtered shard dir: %s", outputs.filtered_shard_dir)
+    print(f"- Filtered shard dir: {outputs.filtered_shard_dir}")
     if outputs.selection_csv_path is not None:
         logging.info("Selection CSV: %s", outputs.selection_csv_path)
         print(f"- Selection CSV: {outputs.selection_csv_path}")

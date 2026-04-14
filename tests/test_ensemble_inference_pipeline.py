@@ -106,9 +106,24 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
     assert config.output_dir is not None
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
+    test_layout = type(
+        "_Layout",
+        (),
+        {
+            "shard_dir": tmp_path / "dataset" / "TEST_shards",
+            "sample_manifest_path": tmp_path
+            / "dataset"
+            / "TEST_shards"
+            / "sample_manifest.parquet",
+        },
+    )()
     monkeypatch.setattr(
-        "helpers.ensemble_inference.pipeline.setup_test_hdf5",
-        lambda *args, **kwargs: tmp_path / "dataset" / "TEST.h5",
+        "helpers.ensemble_inference.pipeline.setup_test_shards",
+        lambda *args, **kwargs: test_layout,
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.collect_test_shard_provenance",
+        lambda layout: {"attrs": {}},
     )
 
     with pytest.raises(ValueError, match="Checkpoint provenance mismatch"):
@@ -156,9 +171,9 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
         ),
         encoding="utf-8",
     )
-    test_h5_path = tmp_path / "dataset" / "TEST.h5"
-    test_h5_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(test_h5_path, "w") as handle:
+    test_shard_path = tmp_path / "dataset" / "TEST_shards" / "1.h5"
+    test_shard_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(test_shard_path, "w") as handle:
         handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
         handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
@@ -187,8 +202,28 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        "helpers.ensemble_inference.pipeline.setup_test_hdf5",
-        lambda *args, **kwargs: test_h5_path,
+        "helpers.ensemble_inference.pipeline.setup_test_shards",
+        lambda *args, **kwargs: type(
+            "_Layout",
+            (),
+            {
+                "shard_dir": tmp_path / "dataset" / "TEST_shards",
+                "sample_manifest_path": tmp_path
+                / "dataset"
+                / "TEST_shards"
+                / "sample_manifest.parquet",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.collect_test_shard_provenance",
+        lambda layout: {
+            "attrs": {
+                "source_hdf5_sha256": "other-stage5-sha",
+                "upstream_source_signature": "stage2-sig",
+                "stage4_cleaning_manifest_sha256": "clean-sha",
+            }
+        },
     )
     monkeypatch.setattr(
         "helpers.ensemble_inference.pipeline.hash_file_sha256",

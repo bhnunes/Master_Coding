@@ -43,6 +43,9 @@ class ScreeningOutputs:
     architecture_trial_stats: dict[str, dict[str, int]]
     completed_trials: int
     failed_trials: int
+    source_split_name: str | None = None
+    training_dataset_provenance: dict[str, Any] | None = None
+    validation_dataset_provenance: dict[str, Any] | None = None
 
 
 class _SnapshotProgressReporter:
@@ -523,7 +526,9 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
             }
     finally:
         progress.finish()
-        data_bundle.dataset.close()
+        close_dataset = getattr(data_bundle.dataset, "close", None)
+        if callable(close_dataset):
+            close_dataset()
 
     summary_all_path = config.output_dir / "SUMMARY_ALL.csv"
     pd.DataFrame([asdict(record) for record in records]).to_csv(summary_all_path, index=False)
@@ -535,4 +540,7 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
         architecture_trial_stats=architecture_trial_stats,
         completed_trials=completed_trials,
         failed_trials=failed_trials,
+        source_split_name=getattr(data_bundle, "source_split_name", None),
+        training_dataset_provenance=getattr(data_bundle, "training_provenance", None),
+        validation_dataset_provenance=getattr(data_bundle, "validation_provenance", None),
     )

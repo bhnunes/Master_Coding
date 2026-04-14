@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
+from helpers.ensemble_optimizer.data import ValidationShardsLayout
 from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
 from helpers.ensemble_optimizer.pipeline import (
     EnsembleOptimizerOutputs,
@@ -108,17 +109,20 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     ]
     observed: dict[str, object] = {}
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    validation_h5_path = tmp_path / "dataset" / "VALIDATION.h5"
-    validation_h5_path.parent.mkdir(parents=True, exist_ok=True)
-    validation_h5_path.write_bytes(b"validation-h5")
+    validation_layout = ValidationShardsLayout(
+        shard_dir=tmp_path / "dataset" / "VALIDATION_shards",
+        manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "manifest.parquet",
+        sample_manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "sample_manifest.parquet",
+        local_cache_dir=None,
+    )
 
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.setup_validation_hdf5",
-        lambda *args, **kwargs: validation_h5_path,
+        "helpers.ensemble_optimizer.pipeline.setup_validation_shards",
+        lambda *args, **kwargs: validation_layout,
     )
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline._build_validation_split",
-        lambda config, validation_h5_path: type(
+        lambda config, validation_layout: type(
             "Split",
             (),
             {
@@ -131,11 +135,11 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
 
     def fake_select_models(
         config: EnsembleOptimizerConfig,
-        validation_h5_path: Path,
+        validation_layout: ValidationShardsLayout,
         optimization_patients: set[str],
         device: Any,
     ) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str]]:
-        del config, validation_h5_path, device
+        del config, validation_layout, device
         observed["optimization_patients"] = optimization_patients
         return selected_models, {"a_meta.json": 0.9, "b_meta.json": 0.8}, {}
 
@@ -176,6 +180,10 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         "helpers.ensemble_optimizer.pipeline.write_recipe_metadata",
         lambda payload, output_dir, timestamp: output_dir / "recipe.json",
     )
+    monkeypatch.setattr(
+        "helpers.ensemble_optimizer.pipeline.collect_validation_shard_provenance",
+        lambda layout: {"attrs": {}, "path": str(layout.sample_manifest_path)},
+    )
 
     outputs = _execute_pipeline(config)
 
@@ -186,6 +194,7 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     assert run_config["holdout_patients"] == ["p3"]
     assert run_config["decision_threshold"] == 0.6
     assert run_config["calibration_metrics"] == {"Calibration_best_mcc": 0.55}
+    assert run_config["validation_shard_dir"].endswith("VALIDATION_shards")
     assert run_config["selected_models"][0]["optimization_subset_score"] == 0.9
     assert run_config["skipped_requested_architectures"] == {}
 
@@ -237,17 +246,20 @@ def test_execute_pipeline_logs_phase_summaries(
         ),
     ]
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    validation_h5_path = tmp_path / "dataset" / "VALIDATION.h5"
-    validation_h5_path.parent.mkdir(parents=True, exist_ok=True)
-    validation_h5_path.write_bytes(b"validation-h5")
+    validation_layout = ValidationShardsLayout(
+        shard_dir=tmp_path / "dataset" / "VALIDATION_shards",
+        manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "manifest.parquet",
+        sample_manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "sample_manifest.parquet",
+        local_cache_dir=None,
+    )
 
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.setup_validation_hdf5",
-        lambda *args, **kwargs: validation_h5_path,
+        "helpers.ensemble_optimizer.pipeline.setup_validation_shards",
+        lambda *args, **kwargs: validation_layout,
     )
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline._build_validation_split",
-        lambda config, validation_h5_path: type(
+        lambda config, validation_layout: type(
             "Split",
             (),
             {
@@ -297,6 +309,10 @@ def test_execute_pipeline_logs_phase_summaries(
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline.write_recipe_metadata",
         lambda payload, output_dir, timestamp: output_dir / "recipe.json",
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_optimizer.pipeline.collect_validation_shard_provenance",
+        lambda layout: {"attrs": {}, "path": str(layout.sample_manifest_path)},
     )
 
     caplog.set_level(logging.INFO)
@@ -376,17 +392,20 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         ),
     ]
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    validation_h5_path = tmp_path / "dataset" / "VALIDATION.h5"
-    validation_h5_path.parent.mkdir(parents=True, exist_ok=True)
-    validation_h5_path.write_bytes(b"validation-h5")
+    validation_layout = ValidationShardsLayout(
+        shard_dir=tmp_path / "dataset" / "VALIDATION_shards",
+        manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "manifest.parquet",
+        sample_manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "sample_manifest.parquet",
+        local_cache_dir=None,
+    )
 
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.setup_validation_hdf5",
-        lambda *args, **kwargs: validation_h5_path,
+        "helpers.ensemble_optimizer.pipeline.setup_validation_shards",
+        lambda *args, **kwargs: validation_layout,
     )
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline._build_validation_split",
-        lambda config, validation_h5_path: type(
+        lambda config, validation_layout: type(
             "Split",
             (),
             {
@@ -432,6 +451,10 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline.write_recipe_metadata",
         lambda payload, output_dir, timestamp: output_dir / "recipe.json",
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_optimizer.pipeline.collect_validation_shard_provenance",
+        lambda layout: {"attrs": {}, "path": str(layout.sample_manifest_path)},
     )
 
     outputs = _execute_pipeline(config)

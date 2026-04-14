@@ -505,3 +505,32 @@ def test_build_training_compatibility_signature_changes_with_ohem_settings(tmp_p
     )
 
     assert signature_a != signature_b
+
+
+def test_build_training_compatibility_signature_accepts_precomputed_provenance() -> None:
+    signature = build_training_compatibility_signature(
+        dataset={
+            "path": "TRAIN_FILTERED_shards/sample_manifest.parquet",
+            "sha256": "train-sha",
+            "source_signature": "train-sig",
+            "selection_signature": "sel-sig",
+            "smart_sampling_enabled": True,
+            "smart_sampling_metadata": {"stage7_label_aware": True},
+        },
+        validation_dataset={
+            "path": "VALIDATION_shards/sample_manifest.parquet",
+            "sha256": "val-sha",
+            "source_signature": "val-sig",
+            "selection_signature": None,
+            "smart_sampling_enabled": False,
+            "smart_sampling_metadata": {},
+        },
+        artifact_index_path=None,
+        run_ohem=False,
+        ohem_start_epoch=2,
+        ohem_ratio=0.25,
+        ohem_min_kept=1024,
+    )
+
+    assert isinstance(signature, str)
+    assert signature

@@ -3,10 +3,12 @@ from typing import Any, cast
 
 import h5py
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from helpers.smart_sampling.config import SmartSamplerConfig
-from helpers.smart_sampling.writer import write_filtered_hdf5
+from helpers.smart_sampling.writer import write_filtered_hdf5, write_filtered_shards
 
 
 def _write_source_hdf5(path: Path, *, filename_dataset_name: str = "filenames") -> None:
@@ -22,6 +24,32 @@ def _write_source_hdf5(path: Path, *, filename_dataset_name: str = "filenames") 
                 dtype="S32",
             ),
         )
+
+
+def _write_source_shard(path: Path, patient_id: int) -> None:
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset(
+            "images", data=np.zeros((3, 4, 4, 3), dtype=np.uint8) + np.uint8(patient_id)
+        )
+        handle.create_dataset("masks", data=np.zeros((3, 4, 4), dtype=np.uint8))
+        handle.create_dataset(
+            "patient_ids", data=np.array([patient_id, patient_id, patient_id], dtype=np.int32)
+        )
+        handle.create_dataset("labels", data=np.array([0, 1, 0], dtype=np.uint8))
+        handle.create_dataset(
+            "filenames",
+            data=np.array(
+                [
+                    f"PATIENT_{patient_id}_a.png".encode(),
+                    f"PATIENT_{patient_id}_b.png".encode(),
+                    f"PATIENT_{patient_id}_c.png".encode(),
+                ],
+                dtype="S32",
+            ),
+        )
+        handle.attrs["source_signature"] = f"source-{patient_id}"
+        handle.attrs["source_split_hdf5_path"] = "/tmp/stage5/TRAIN.h5"
+        handle.attrs["source_split_hdf5_sha256"] = f"sha-{patient_id}"
 
 
 def _build_config(source_path: Path, output_dir: Path, **overrides: object) -> SmartSamplerConfig:
@@ -197,3 +225,114 @@ def test_write_filtered_hdf5_keeps_selection_signature_stable_when_input_is_stag
         staged_signature = handle.attrs["selection_signature"]
 
     assert staged_signature == direct_signature
+
+
+def test_write_filtered_shards_writes_patient_isolated_outputs_and_manifests(
+    tmp_path: Path,
+) -> None:
+    source_shard_dir = tmp_path / "TRAIN_shards"
+    source_shard_dir.mkdir()
+    _write_source_shard(source_shard_dir / "1.h5", 1)
+    _write_source_shard(source_shard_dir / "2.h5", 2)
+    manifest_path = source_shard_dir / "manifest.parquet"
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "split": "TRAIN",
+                    "patient_id": 1,
+                    "relative_hdf5_path": "TRAIN_shards/1.h5",
+                    "rows": 3,
+                    "label_0_count": 2,
+                    "label_1_count": 1,
+                },
+                {
+                    "split": "TRAIN",
+                    "patient_id": 2,
+                    "relative_hdf5_path": "TRAIN_shards/2.h5",
+                    "rows": 3,
+                    "label_0_count": 2,
+                    "label_1_count": 1,
+                },
+            ]
+        ),
+        manifest_path,
+    )
+
+    config = _build_config(
+        tmp_path / "TRAIN.h5",
+        tmp_path / "output",
+        source_h5_path=None,
+        source_shard_dir=source_shard_dir,
+        source_manifest_path=manifest_path,
+        output_filename="TRAIN_FILTERED_shards",
+    )
+
+    filtered_dir = write_filtered_shards(
+        config,
+        [
+            {"patient_id": 1, "relative_hdf5_path": "TRAIN_shards/1.h5", "row_in_shard": 0},
+            {"patient_id": 1, "relative_hdf5_path": "TRAIN_shards/1.h5", "row_in_shard": 1},
+            {"patient_id": 2, "relative_hdf5_path": "TRAIN_shards/2.h5", "row_in_shard": 1},
+        ],
+        source_shard_dir=source_shard_dir,
+        source_manifest_path=manifest_path,
+        signature_source_dir=source_shard_dir,
+    )
+
+    assert filtered_dir == tmp_path / "output" / "TRAIN_FILTERED_shards"
+    with h5py.File(filtered_dir / "1.h5", "r") as handle:
+        assert handle["patient_ids"][:].tolist() == [1, 1]
+        assert handle["labels"][:].tolist() == [0, 1]
+        assert handle.attrs["source_patient_shard_row_indices_json"] == "[0, 1]"
+        assert handle.attrs["split_name"] == "TRAIN_FILTERED"
+    with h5py.File(filtered_dir / "2.h5", "r") as handle:
+        assert handle["patient_ids"][:].tolist() == [2]
+        assert handle["labels"][:].tolist() == [1]
+
+    manifest = pq.read_table(filtered_dir / "manifest.parquet").to_pylist()
+    assert manifest == [
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 1,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/1.h5",
+            "rows": 2,
+            "label_0_count": 1,
+            "label_1_count": 1,
+        },
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 2,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/2.h5",
+            "rows": 1,
+            "label_0_count": 0,
+            "label_1_count": 1,
+        },
+    ]
+    sample_manifest = pq.read_table(filtered_dir / "sample_manifest.parquet").to_pylist()
+    assert sample_manifest == [
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 1,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/1.h5",
+            "row_in_shard": 0,
+            "label": 0,
+            "filename": "PATIENT_1_a.png",
+        },
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 1,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/1.h5",
+            "row_in_shard": 1,
+            "label": 1,
+            "filename": "PATIENT_1_b.png",
+        },
+        {
+            "split": "TRAIN_FILTERED",
+            "patient_id": 2,
+            "relative_hdf5_path": "TRAIN_FILTERED_shards/2.h5",
+            "row_in_shard": 0,
+            "label": 1,
+            "filename": "PATIENT_2_b.png",
+        },
+    ]

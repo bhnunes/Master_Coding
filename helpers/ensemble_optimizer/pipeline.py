@@ -15,9 +15,11 @@ from tqdm import tqdm
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
 from helpers.ensemble_optimizer.data import (
+    ValidationShardsLayout,
+    collect_validation_shard_provenance,
     create_validation_dataloader,
-    setup_validation_hdf5,
-    summarize_validation_hdf5,
+    setup_validation_shards,
+    summarize_validation_shards,
 )
 from helpers.ensemble_optimizer.metadata import (
     SelectedModelMetadata,
@@ -31,7 +33,7 @@ from helpers.ensemble_optimizer.optimization import (
 )
 from helpers.ensemble_optimizer.reporting import build_recipe_metadata, write_recipe_metadata
 from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
-from helpers.provenance import build_split_fingerprint, collect_hdf5_provenance
+from helpers.provenance import build_split_fingerprint
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
@@ -128,13 +130,13 @@ def _compute_candidate_subset_score(
 
 def _select_models_from_optimization_subset(
     config: EnsembleOptimizerConfig,
-    validation_h5_path: Path,
+    validation_layout: ValidationShardsLayout,
     optimization_patients: set[str],
     device: torch.device,
 ) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str]]:
     candidates = load_model_candidates(config.metadata_dir, config.sort_metric)
     dataloader = create_validation_dataloader(
-        validation_h5_path,
+        validation_layout,
         batch_size=config.batch_size,
         workers=config.workers,
         allowed_patients=optimization_patients,
@@ -206,9 +208,9 @@ def _select_models_from_optimization_subset(
 
 
 def _build_validation_split(
-    config: EnsembleOptimizerConfig, validation_h5_path: Path
+    config: EnsembleOptimizerConfig, validation_layout: ValidationShardsLayout
 ) -> HoldoutSplit:
-    ordered_patients, positive_patients = summarize_validation_hdf5(validation_h5_path)
+    ordered_patients, positive_patients = summarize_validation_shards(validation_layout)
     return build_holdout_split(
         ordered_patients,
         positive_patients,
@@ -228,13 +230,13 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.output_dir,
     )
     LOGGER.info("Preparing validation data.")
-    validation_h5_path = setup_validation_hdf5(
+    validation_layout = setup_validation_shards(
         config.hdf5_drive_dir,
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
     )
-    LOGGER.info("Validation source ready: %s", validation_h5_path)
-    split = _build_validation_split(config, validation_h5_path)
+    LOGGER.info("Validation source ready: %s", validation_layout.sample_manifest_path)
+    split = _build_validation_split(config, validation_layout)
     LOGGER.info(
         "Split ready: optimization=%s calibration=%s holdout=%s patients.",
         len(split.optimization_patients),
@@ -248,7 +250,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     )
     selected_models, subset_scores, skipped_architectures = _select_models_from_optimization_subset(
         config,
-        validation_h5_path,
+        validation_layout,
         split.optimization_patients,
         device,
     )
@@ -260,7 +262,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.num_trials_spatial,
     )
     dataloader = create_validation_dataloader(
-        validation_h5_path,
+        validation_layout,
         batch_size=config.batch_size,
         workers=config.workers,
     )
@@ -284,7 +286,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     )
     timestamp = get_formatted_datetime_string()
     compatibility_signature = str(selected_models[0].raw_metadata["compatibility_signature"])
-    validation_provenance = collect_hdf5_provenance(validation_h5_path)
+    validation_provenance = collect_validation_shard_provenance(validation_layout)
     payload = build_recipe_metadata(
         selected_models=selected_models,
         semantic_indices=optimization_result.semantic_indices,
@@ -309,7 +311,9 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     run_payload = _serialize_config(config)
     run_payload.update(
         {
-            "validation_h5_path": str(validation_h5_path),
+            "validation_shard_dir": str(validation_layout.shard_dir),
+            "validation_manifest_path": str(validation_layout.manifest_path),
+            "validation_sample_manifest_path": str(validation_layout.sample_manifest_path),
             "optimization_patients": sorted(split.optimization_patients),
             "calibration_patients": sorted(split.calibration_patients),
             "holdout_patients": sorted(split.holdout_patients),

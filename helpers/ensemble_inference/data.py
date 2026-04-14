@@ -3,37 +3,98 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import h5py
 import numpy as np
+import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 
+from helpers.patient_shard_cache import PatientShardCache
+from helpers.provenance import hash_file_sha256
 from helpers.training.data import get_transforms
 from helpers.training.runtime import worker_init_fn
 
 
-def setup_test_hdf5(
+@dataclass(frozen=True)
+class TestShardsLayout:
+    shard_dir: Path
+    manifest_path: Path
+    sample_manifest_path: Path
+    local_cache_dir: Path | None
+
+
+@dataclass(frozen=True)
+class TestSampleRecord:
+    patient_id: str
+    relative_hdf5_path: str
+    row_in_shard: int
+    filename: str | None
+
+
+def setup_test_shards(
     hdf5_drive_dir: Path,
     local_data_dir: Path,
     *,
     stage_input_locally: bool,
-) -> Path:
-    source_path = hdf5_drive_dir / "TEST.h5"
-    if not source_path.exists():
-        raise FileNotFoundError(f"Missing {source_path}")
-    if not stage_input_locally:
-        return source_path
+) -> TestShardsLayout:
+    shard_dir = hdf5_drive_dir / "TEST_shards"
+    manifest_path = shard_dir / "manifest.parquet"
+    sample_manifest_path = shard_dir / "sample_manifest.parquet"
+    if not shard_dir.is_dir():
+        raise FileNotFoundError(f"Missing {shard_dir}")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {manifest_path}")
+    if not sample_manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {sample_manifest_path}")
 
-    if local_data_dir.exists():
-        shutil.rmtree(local_data_dir)
-    local_data_dir.mkdir(parents=True, exist_ok=True)
-    destination_path = local_data_dir / "TEST.h5"
-    shutil.copy2(source_path, destination_path)
-    return destination_path
+    local_cache_dir: Path | None = None
+    if stage_input_locally:
+        if local_data_dir.exists():
+            shutil.rmtree(local_data_dir)
+        local_cache_dir = local_data_dir / "patient_shards"
+        local_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return TestShardsLayout(
+        shard_dir=shard_dir,
+        manifest_path=manifest_path,
+        sample_manifest_path=sample_manifest_path,
+        local_cache_dir=local_cache_dir,
+    )
+
+
+def collect_test_shard_provenance(layout: TestShardsLayout) -> dict[str, Any]:
+    manifest_records = pq.read_table(layout.manifest_path).to_pylist()
+    lineage_keys = (
+        "source_hdf5_sha256",
+        "upstream_source_signature",
+        "stage4_cleaning_manifest_sha256",
+    )
+    lineage_attrs: dict[str, Any] | None = None
+    for record in manifest_records:
+        shard_path = layout.shard_dir.parent / str(record["relative_hdf5_path"])
+        with h5py.File(shard_path, "r") as handle:
+            observed = {key: handle.attrs.get(key) for key in lineage_keys}
+        if lineage_attrs is None:
+            lineage_attrs = observed
+            continue
+        if observed != lineage_attrs:
+            raise ValueError(
+                f"TEST shard lineage mismatch in '{shard_path}'. Expected {lineage_attrs}, "
+                f"got {observed}."
+            )
+    return {
+        "path": str(layout.sample_manifest_path),
+        "manifest_path": str(layout.manifest_path),
+        "shard_dir": str(layout.shard_dir),
+        "manifest_sha256": hash_file_sha256(layout.manifest_path),
+        "sample_manifest_sha256": hash_file_sha256(layout.sample_manifest_path),
+        "attrs": lineage_attrs or {},
+    }
 
 
 def _decode_patient_id(value: Any) -> str:
@@ -42,29 +103,60 @@ def _decode_patient_id(value: Any) -> str:
     return str(value)
 
 
+def _normalize_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    candidate = str(value)
+    return candidate if candidate else None
+
+
 class TestHDF5Dataset(Dataset[Any]):
-    def __init__(self, hdf5_path: Path) -> None:
-        self.hdf5_path = str(hdf5_path)
+    def __init__(self, layout: TestShardsLayout) -> None:
+        self.layout = layout
         self.transform = get_transforms(mode="validation", img_size=224)
-        with h5py.File(self.hdf5_path, "r") as handle:
-            self.full_pids = np.asarray(handle["patient_ids"][:])
-            self.full_filenames = (
-                np.asarray(handle["filenames"][:]) if "filenames" in handle else None
+        self.records = [
+            TestSampleRecord(
+                patient_id=_decode_patient_id(record["patient_id"]),
+                relative_hdf5_path=str(record["relative_hdf5_path"]),
+                row_in_shard=int(record["row_in_shard"]),
+                filename=_normalize_optional_string(record.get("filename")),
             )
-            self.total_len = len(self.full_pids)
+            for record in pq.read_table(layout.sample_manifest_path).to_pylist()
+        ]
+        self.total_len = len(self.records)
+        self.cache = (
+            PatientShardCache(layout.local_cache_dir, size_cap_bytes=0)
+            if layout.local_cache_dir is not None
+            else None
+        )
         self.h5_file: Any = None
         self.images_dset: Any = None
         self.masks_dset: Any = None
         self._opened_pid: int | None = None
+        self._opened_shard_path: str | None = None
         self._atexit_registered = False
 
-    def _open_file(self) -> None:
+    def _resolve_shard_path(self, relative_hdf5_path: str) -> Path:
+        source_path = self.layout.shard_dir.parent / relative_hdf5_path
+        if self.cache is None:
+            return source_path
+        return self.cache.fetch(source_path)
+
+    def _open_file(self, relative_hdf5_path: str) -> None:
         pid = os.getpid()
-        if self.h5_file is not None and self._opened_pid is not None and self._opened_pid != pid:
+        resolved_shard_path = self._resolve_shard_path(relative_hdf5_path)
+        shard_path_str = str(resolved_shard_path)
+        if (
+            self.h5_file is not None
+            and self._opened_pid is not None
+            and (self._opened_pid != pid or self._opened_shard_path != shard_path_str)
+        ):
             self.close()
         if self.h5_file is None:
             self.h5_file = h5py.File(
-                self.hdf5_path,
+                shard_path_str,
                 "r",
                 libver="latest",
                 rdcc_nbytes=50 * 1024 * 1024,
@@ -72,6 +164,7 @@ class TestHDF5Dataset(Dataset[Any]):
             self.images_dset = self.h5_file["images"]
             self.masks_dset = self.h5_file["masks"]
             self._opened_pid = pid
+            self._opened_shard_path = shard_path_str
             if not self._atexit_registered:
                 atexit.register(self.close)
                 self._atexit_registered = True
@@ -82,24 +175,21 @@ class TestHDF5Dataset(Dataset[Any]):
     def __getitem__(
         self, idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, str, str | None] | tuple[None, None, None, None]:
-        if self.h5_file is None:
-            self._open_file()
+        record = self.records[idx]
+        if self.h5_file is None or self._opened_shard_path is None:
+            self._open_file(record.relative_hdf5_path)
+        elif self._opened_shard_path != str(self._resolve_shard_path(record.relative_hdf5_path)):
+            self._open_file(record.relative_hdf5_path)
 
-        image = self.images_dset[idx]
-        mask = (self.masks_dset[idx] != 0).astype(np.uint8)
-        patient_id = _decode_patient_id(self.full_pids[idx])
-        filename = (
-            _decode_patient_id(self.full_filenames[idx])
-            if self.full_filenames is not None
-            else None
-        )
+        image = self.images_dset[record.row_in_shard]
+        mask = (self.masks_dset[record.row_in_shard] != 0).astype(np.uint8)
         try:
             augmented = self.transform(image=image, mask=mask)
             final_image = augmented["image"]
             final_mask = augmented["mask"]
             if not torch.is_tensor(final_mask):
                 final_mask = torch.from_numpy(final_mask)
-            return final_image, final_mask.to(torch.uint8), patient_id, filename
+            return final_image, final_mask.to(torch.uint8), record.patient_id, record.filename
         except Exception as error:
             print(f"Error on test index {idx}: {error}")
             return None, None, None, None
@@ -115,6 +205,7 @@ class TestHDF5Dataset(Dataset[Any]):
             self.images_dset = None
             self.masks_dset = None
             self._opened_pid = None
+            self._opened_shard_path = None
 
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
@@ -122,6 +213,7 @@ class TestHDF5Dataset(Dataset[Any]):
         state["images_dset"] = None
         state["masks_dset"] = None
         state["_opened_pid"] = None
+        state["_opened_shard_path"] = None
         state["_atexit_registered"] = False
         return state
 
@@ -131,6 +223,7 @@ class TestHDF5Dataset(Dataset[Any]):
         self.images_dset = None
         self.masks_dset = None
         self._opened_pid = None
+        self._opened_shard_path = None
         self._atexit_registered = False
 
 
@@ -146,12 +239,12 @@ def collate_test_batch(batch: list[Any]) -> Any:
 
 
 def create_test_dataloader(
-    hdf5_path: Path,
+    layout: TestShardsLayout,
     *,
     batch_size: int,
     workers: int,
 ) -> DataLoader[Any]:
-    dataset = TestHDF5Dataset(hdf5_path)
+    dataset = TestHDF5Dataset(layout)
     return DataLoader(
         dataset,
         batch_size=batch_size,
