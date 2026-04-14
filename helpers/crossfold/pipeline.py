@@ -49,19 +49,6 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
 
     source_hdf5_provenance = collect_hdf5_provenance(config.source_hdf5_path)
     dataset = load_patch_dataset(config.source_hdf5_path)
-    entropy_df: pd.DataFrame | None = None
-    should_compute_entropy = config.normalization_method != "NOT_NORMALIZED"
-    if should_compute_entropy:
-        entropy_df = compute_all_patch_entropies(
-            df=dataset,
-            num_workers=config.objective.num_workers,
-            chunksize=config.objective.chunksize,
-            entropy_thumbnail=config.objective.entropy_thumbnail,
-        )
-        if config.save_entropy_cache_csv:
-            entropy_df.to_csv(output_dir / "entropy_cache.csv", index=False)
-            logging.info("Saved entropy cache: %s", output_dir / "entropy_cache.csv")
-
     split_data = create_train_val_test_split_best(
         df=dataset,
         random_state=config.random_state,
@@ -80,7 +67,17 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
 
     normalizer = None
     template_paths: list[str] | None = None
+    entropy_df: pd.DataFrame | None = None
     if config.normalization_method != "NOT_NORMALIZED":
+        entropy_df = compute_all_patch_entropies(
+            df=split_data["train_df"],
+            num_workers=config.objective.num_workers,
+            chunksize=config.objective.chunksize,
+            entropy_thumbnail=config.objective.entropy_thumbnail,
+        )
+        if config.save_entropy_cache_csv:
+            entropy_df.to_csv(output_dir / "entropy_cache.csv", index=False)
+            logging.info("Saved entropy cache: %s", output_dir / "entropy_cache.csv")
         normalizer, template_paths = fit_normalizer_on_train_set(
             split_data["train_df"],
             config.normalization_method,
