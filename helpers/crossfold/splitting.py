@@ -111,25 +111,29 @@ def allocate_patients_greedily(
             "non_cancer_samples": 0,
         },
     }
-    patient_capacity = {
+    constrained_splits = {
         "TEST": test_patient_count,
         "VALIDATION": validation_patient_count,
-        "TRAIN": None,
     }
-    tie_break_order = ("TEST", "VALIDATION", "TRAIN")
+    tie_break_order = ("TEST", "VALIDATION")
 
     for patient in patient_df.itertuples(index=False):
         patient_id = int(patient.patient_id)
         patient_total_samples = int(patient.total_samples)
         patient_cancer_samples = int(patient.cancer_samples)
 
+        candidate_splits = [
+            split_name
+            for split_name in tie_break_order
+            if split_state[split_name]["patient_count"] < constrained_splits[split_name]
+        ]
+        if not candidate_splits:
+            candidate_splits = ["TRAIN"]
+
         best_split_name: str | None = None
         best_delta: float | None = None
-        for split_name in tie_break_order:
-            capacity = patient_capacity[split_name]
+        for split_name in candidate_splits:
             current_state = split_state[split_name]
-            if capacity is not None and current_state["patient_count"] >= capacity:
-                continue
             ratio = _ratio_after_assignment(
                 current_total_samples=current_state["total_samples"],
                 current_cancer_samples=current_state["cancer_samples"],
@@ -227,6 +231,28 @@ def validate_split_class_guardrails(split_stats: dict[str, dict[str, Any]]) -> N
         non_cancer_samples = int(split_details["non_cancer_samples"])
         if cancer_samples == 0 or non_cancer_samples == 0:
             raise ValueError(f"{split_name} split must contain both classes.")
+
+
+def validate_final_split_patient_counts(
+    split_stats: dict[str, dict[str, Any]],
+    *,
+    test_patient_count: int,
+    validation_patient_count: int,
+) -> None:
+    """Fail fast when final TEST or VALIDATION patient counts miss requested quotas."""
+
+    actual_test_count = int(split_stats["TEST"]["patient_count"])
+    actual_validation_count = int(split_stats["VALIDATION"]["patient_count"])
+    if actual_test_count != test_patient_count:
+        raise ValueError(
+            "TEST split patient count did not match the requested quota: "
+            f"{actual_test_count} != {test_patient_count}."
+        )
+    if actual_validation_count != validation_patient_count:
+        raise ValueError(
+            "VALIDATION split patient count did not match the requested quota: "
+            f"{actual_validation_count} != {validation_patient_count}."
+        )
 
 
 def compute_expected_class_counts(
@@ -343,6 +369,11 @@ def optimize_patient_split_with_optuna(
     final_allocation = allocate_patients_greedily(
         ordered_patients,
         global_cancer_ratio=global_cancer_ratio,
+        test_patient_count=test_patient_count,
+        validation_patient_count=validation_patient_count,
+    )
+    validate_final_split_patient_counts(
+        final_allocation["split_stats"],
         test_patient_count=test_patient_count,
         validation_patient_count=validation_patient_count,
     )

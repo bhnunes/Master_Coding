@@ -14,6 +14,7 @@ from helpers.crossfold.splitting import (
     create_train_val_test_split_best,
     optimize_patient_split_with_optuna,
     order_patients_by_trial_weights,
+    validate_final_split_patient_counts,
     validate_split_class_guardrails,
     validate_split_patient_counts,
 )
@@ -117,6 +118,29 @@ def test_allocate_patients_greedily_uses_test_then_validation_then_train_tie_bre
     assert allocation["test_patients"] == [11]
     assert allocation["val_patients"] == [12]
     assert allocation["train_patients"] == [13]
+
+
+def test_allocate_patients_greedily_fills_validation_quota_before_train() -> None:
+    patient_table = pd.DataFrame(
+        [
+            {"patient_id": 1, "total_samples": 10, "cancer_samples": 9},
+            {"patient_id": 2, "total_samples": 10, "cancer_samples": 9},
+            {"patient_id": 3, "total_samples": 10, "cancer_samples": 5},
+            {"patient_id": 4, "total_samples": 10, "cancer_samples": 5},
+        ]
+    ).assign(non_cancer_samples=lambda table: table["total_samples"] - table["cancer_samples"])
+
+    allocation = allocate_patients_greedily(
+        patient_table,
+        global_cancer_ratio=0.5,
+        test_patient_count=1,
+        validation_patient_count=2,
+    )
+
+    assert allocation["test_patients"] == [1]
+    assert allocation["val_patients"] == [2, 3]
+    assert allocation["train_patients"] == [4]
+    assert allocation["split_stats"]["VALIDATION"]["patient_count"] == 2
 
 
 def test_order_patients_by_trial_weights_uses_trial_suggestions_and_patient_id_tie_break() -> None:
@@ -259,6 +283,21 @@ def test_validate_split_class_guardrails_rejects_one_class_test_split() -> None:
 
     with pytest.raises(ValueError, match="TEST split must contain both classes"):
         validate_split_class_guardrails(split_stats)
+
+
+def test_validate_final_split_patient_counts_rejects_mismatched_quota() -> None:
+    split_stats = {
+        "TRAIN": {"patient_count": 10},
+        "VALIDATION": {"patient_count": 14},
+        "TEST": {"patient_count": 22},
+    }
+
+    with pytest.raises(ValueError, match="VALIDATION split patient count did not match"):
+        validate_final_split_patient_counts(
+            split_stats,
+            test_patient_count=22,
+            validation_patient_count=30,
+        )
 
 
 def test_validate_split_class_guardrails_rejects_one_class_validation_split() -> None:
