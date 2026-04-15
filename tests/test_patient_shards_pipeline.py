@@ -8,6 +8,12 @@ import pyarrow.parquet as pq
 import pytest
 
 from helpers.patient_shards.config import PatientShardsConfig
+from helpers.patient_shards.io import (
+    SourceSplitWriteContext,
+)
+from helpers.patient_shards.io import (
+    build_source_split_write_context as build_source_split_write_context_from_io,
+)
 from helpers.patient_shards.pipeline import (
     run_patient_shards_pipeline,
     validate_split_shard_integrity,
@@ -234,6 +240,61 @@ def test_run_patient_shards_pipeline_writes_one_shard_per_patient(tmp_path: Path
             "label": 0,
             "filename": "PATIENT_20_PATCH_003.png",
         },
+    ]
+
+
+def test_run_patient_shards_pipeline_builds_source_context_once_per_non_empty_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage5_dir = tmp_path / "stage5"
+    stage5_dir.mkdir()
+    _write_stage5_manifest(stage5_dir)
+    _write_stage5_split(
+        stage5_dir / "TRAIN.h5",
+        patient_ids=[10, 20, 20],
+        labels=[1, 0, 0],
+        pixel_values=[10, 20, 30],
+    )
+    _write_stage5_split(
+        stage5_dir / "VALIDATION.h5",
+        patient_ids=[30],
+        labels=[1],
+        pixel_values=[40],
+    )
+    _write_stage5_split(
+        stage5_dir / "TEST.h5",
+        patient_ids=[40],
+        labels=[0],
+        pixel_values=[50],
+    )
+
+    build_context_calls: list[Path] = []
+
+    def tracking_build_source_split_write_context(source_path: Path) -> SourceSplitWriteContext:
+        build_context_calls.append(source_path)
+        return build_source_split_write_context_from_io(source_path)
+
+    monkeypatch.setattr(
+        "helpers.patient_shards.pipeline.build_source_split_write_context",
+        tracking_build_source_split_write_context,
+    )
+
+    run_patient_shards_pipeline(
+        PatientShardsConfig(
+            stage5_base_dir=stage5_dir,
+            output_base_dir=tmp_path / "stage6_5",
+            overwrite_output=True,
+            hdf5_compression="NONE",
+            copy_batch_size=2,
+            log_folder=tmp_path / "logs",
+            log_file_name="patient_shards.log",
+        )
+    )
+
+    assert build_context_calls == [
+        stage5_dir / "TRAIN.h5",
+        stage5_dir / "VALIDATION.h5",
+        stage5_dir / "TEST.h5",
     ]
 
 

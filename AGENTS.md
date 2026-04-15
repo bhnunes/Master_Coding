@@ -150,6 +150,10 @@ Agent guide for coding agents working in this repository.
   - `CROSSFOLD_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `CROSSFOLD_COPY_BATCH_SIZE` with default `256`
 - Current best-known Stage 5 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
+- Stage 6.5 patient-shards-related env vars now include:
+  - `PATIENT_SHARDS_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
+  - `PATIENT_SHARDS_COPY_BATCH_SIZE` with default `1024`
+- Current best-known Stage 6.5 runtime choices on the sample `/mnt/host_c` inputs are `PATIENT_SHARDS_HDF5_COMPRESSION=none` and `PATIENT_SHARDS_COPY_BATCH_SIZE=1024`.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.

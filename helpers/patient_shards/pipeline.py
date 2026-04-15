@@ -14,6 +14,7 @@ from helpers.patient_shards.config import PatientShardsConfig
 from helpers.patient_shards.io import (
     build_sample_manifest_rows,
     build_shard_manifest_rows,
+    build_source_split_write_context,
     prepare_output_shard_dir,
     verify_patient_shard_integrity,
     write_patient_shard,
@@ -44,16 +45,13 @@ def _load_stage5_manifest(base_dir: Path) -> pd.DataFrame:
     return pd.read_csv(manifest_path)
 
 
-def _patient_row_indices(source_path: Path) -> dict[int, list[int]]:
-    with h5py.File(source_path, "r") as handle:
-        patient_ids = handle["patient_ids"][:]
-    indices_by_patient: dict[int, list[int]] = {}
-    for row_index, patient_id in enumerate(patient_ids.tolist()):
-        indices_by_patient.setdefault(int(patient_id), []).append(row_index)
-    return indices_by_patient
+@dataclass(frozen=True)
+class _PatientSplitData:
+    patient_rows: dict[int, list[int]]
+    patient_metadata: dict[int, dict[str, list[Any]]]
 
 
-def _patient_expected_metadata(source_path: Path) -> dict[int, dict[str, list[Any]]]:
+def _load_patient_split_data(source_path: Path) -> _PatientSplitData:
     with h5py.File(source_path, "r") as handle:
         patient_ids = handle["patient_ids"][:].tolist()
         labels = handle["labels"][:].tolist()
@@ -62,17 +60,19 @@ def _patient_expected_metadata(source_path: Path) -> dict[int, dict[str, list[An
             for value in handle["filenames"][:].tolist()
         ]
 
-    metadata_by_patient: dict[int, dict[str, list[Any]]] = {}
+    patient_rows: dict[int, list[int]] = {}
+    patient_metadata: dict[int, dict[str, list[Any]]] = {}
     for row_index, patient_id_value in enumerate(patient_ids):
         patient_id = int(patient_id_value)
-        patient_metadata = metadata_by_patient.setdefault(
+        patient_rows.setdefault(patient_id, []).append(row_index)
+        patient_metadata_entry = patient_metadata.setdefault(
             patient_id,
             {"labels": [], "filenames": [], "source_row_indices": []},
         )
-        patient_metadata["labels"].append(int(labels[row_index]))
-        patient_metadata["filenames"].append(filenames[row_index])
-        patient_metadata["source_row_indices"].append(row_index)
-    return metadata_by_patient
+        patient_metadata_entry["labels"].append(int(labels[row_index]))
+        patient_metadata_entry["filenames"].append(filenames[row_index])
+        patient_metadata_entry["source_row_indices"].append(row_index)
+    return _PatientSplitData(patient_rows=patient_rows, patient_metadata=patient_metadata)
 
 
 def _validate_stage5_split_presence(
@@ -240,8 +240,10 @@ def run_patient_shards_pipeline(config: PatientShardsConfig) -> PatientShardsRun
             split_shard_counts[split_name] = 0
             continue
 
-        patient_rows = _patient_row_indices(split_path)
-        patient_metadata = _patient_expected_metadata(split_path)
+        split_data = _load_patient_split_data(split_path)
+        patient_rows = split_data.patient_rows
+        patient_metadata = split_data.patient_metadata
+        source_split_context = build_source_split_write_context(split_path)
         logging.info(
             "Stage 6.5 split start: %s | patients=%s | source=%s",
             split_name,
@@ -259,6 +261,7 @@ def run_patient_shards_pipeline(config: PatientShardsConfig) -> PatientShardsRun
                 hdf5_compression=config.hdf5_compression,
                 copy_batch_size=config.copy_batch_size,
                 overwrite=config.overwrite_output,
+                source_split_context=source_split_context,
             )
             verify_patient_shard_integrity(
                 output_path,

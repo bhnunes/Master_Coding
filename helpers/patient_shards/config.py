@@ -100,7 +100,7 @@ def load_patient_shards_config(
         copy_batch_size=_parse_positive_int(
             values.get("PATIENT_SHARDS_COPY_BATCH_SIZE"),
             "PATIENT_SHARDS_COPY_BATCH_SIZE",
-            256,
+            1024,
         ),
         log_folder=resolve_log_folder(
             values,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -44,6 +45,12 @@ _SAMPLE_MANIFEST_SCHEMA = pa.schema(
         ("filename", pa.string()),
     ]
 )
+
+
+@dataclass(frozen=True)
+class SourceSplitWriteContext:
+    source_split_sha256: str
+    source_signature: str | None
 
 
 def _resolve_hdf5_compression(compression: str) -> str | None:
@@ -129,6 +136,17 @@ def _validate_source_split_contract(source_path: Path) -> None:
                 )
 
 
+def build_source_split_write_context(source_path: Path) -> SourceSplitWriteContext:
+    """Validate one Stage 5 split once and cache provenance reused by all shards."""
+
+    _validate_source_split_contract(source_path)
+    source_split_provenance = collect_hdf5_provenance(source_path)
+    return SourceSplitWriteContext(
+        source_split_sha256=cast(str, source_split_provenance["sha256"]),
+        source_signature=cast(str | None, source_split_provenance["source_signature"]),
+    )
+
+
 def write_patient_shard(
     *,
     source_path: Path,
@@ -139,14 +157,14 @@ def write_patient_shard(
     hdf5_compression: str = "NONE",
     copy_batch_size: int = 256,
     overwrite: bool,
+    source_split_context: SourceSplitWriteContext | None = None,
 ) -> Path:
     if not source_row_indices:
         raise ValueError(f"Cannot write patient shard '{output_path.name}' with no source rows.")
 
-    _validate_source_split_contract(source_path)
     ordered_row_indices = sorted(int(index) for index in source_row_indices)
     resolved_compression = _resolve_hdf5_compression(hdf5_compression)
-    source_split_provenance = collect_hdf5_provenance(source_path)
+    source_context = source_split_context or build_source_split_write_context(source_path)
 
     with h5py.File(source_path, "r") as source_handle:
         source_patient_ids = np.asarray(
@@ -160,109 +178,100 @@ def write_patient_shard(
             )
         filenames_raw = source_handle["filenames"][ordered_row_indices]
         filenames = [_normalize_hdf5_string(value) for value in filenames_raw.tolist()]
-        source_signature_attr = source_handle.attrs.get("source_signature")
-        source_signature = (
-            source_signature_attr.decode("utf-8")
-            if isinstance(source_signature_attr, bytes)
-            else cast(str | None, source_signature_attr)
-        )
         selection_signature = _build_selection_signature(
             source_path=source_path,
             split_name=split_name,
             patient_id=patient_id,
-            source_signature=source_signature,
+            source_signature=source_context.source_signature,
             row_indices=ordered_row_indices,
             filenames=filenames,
         )
 
-    if output_path.exists() and not overwrite:
-        return _validate_existing_patient_shard(output_path, selection_signature)
+        if output_path.exists() and not overwrite:
+            return _validate_existing_patient_shard(output_path, selection_signature)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    reporter = ProgressReporter(
-        "Stage 6.5 shard write",
-        len(ordered_row_indices),
-        "rows",
-        context=output_path.name,
-    )
-    reporter.log_start(
-        f"split={split_name} | patient_id={patient_id} | rows={len(ordered_row_indices)} "
-        f"| compression={resolved_compression or 'none'} | batch_size={copy_batch_size}"
-    )
-    with (
-        h5py.File(source_path, "r") as source_handle,
-        h5py.File(output_path, "w") as dest_handle,
-    ):
-        for attr_name in _LINEAGE_ATTRS:
-            attr_value = source_handle.attrs.get(attr_name)
-            if attr_value is not None:
-                dest_handle.attrs[attr_name] = attr_value
-        dest_handle.attrs["source_split_hdf5_path"] = str(source_path)
-        dest_handle.attrs["source_split_hdf5_sha256"] = source_split_provenance["sha256"]
-        dest_handle.attrs["source_split_row_indices_json"] = json.dumps(ordered_row_indices)
-        dest_handle.attrs["selection_signature"] = selection_signature
-        dest_handle.attrs["split_name"] = split_name
-        dest_handle.attrs["patient_id"] = patient_id
-        first_index = ordered_row_indices[0]
-        first_image = np.asarray(source_handle["images"][first_index], dtype=np.uint8)
-        first_mask = np.asarray(source_handle["masks"][first_index], dtype=np.uint8)
-        str_dtype = h5py.string_dtype(encoding="utf-8")
-        images = dest_handle.create_dataset(
-            "images",
-            shape=(len(ordered_row_indices),) + first_image.shape,
-            dtype="uint8",
-            compression=resolved_compression,
-            chunks=True,
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        reporter = ProgressReporter(
+            "Stage 6.5 shard write",
+            len(ordered_row_indices),
+            "rows",
+            context=output_path.name,
         )
-        masks = dest_handle.create_dataset(
-            "masks",
-            shape=(len(ordered_row_indices),) + first_mask.shape,
-            dtype="uint8",
-            compression=resolved_compression,
-            chunks=True,
+        reporter.log_start(
+            f"split={split_name} | patient_id={patient_id} | rows={len(ordered_row_indices)} "
+            f"| compression={resolved_compression or 'none'} | batch_size={copy_batch_size}"
         )
-        labels = dest_handle.create_dataset(
-            "labels", shape=(len(ordered_row_indices),), dtype="uint8"
-        )
-        patient_ids = dest_handle.create_dataset(
-            "patient_ids", shape=(len(ordered_row_indices),), dtype="int32"
-        )
-        filenames_dataset = dest_handle.create_dataset(
-            "filenames", shape=(len(ordered_row_indices),), dtype=str_dtype
-        )
+        with h5py.File(output_path, "w") as dest_handle:
+            for attr_name in _LINEAGE_ATTRS:
+                attr_value = source_handle.attrs.get(attr_name)
+                if attr_value is not None:
+                    dest_handle.attrs[attr_name] = attr_value
+            dest_handle.attrs["source_split_hdf5_path"] = str(source_path)
+            dest_handle.attrs["source_split_hdf5_sha256"] = source_context.source_split_sha256
+            dest_handle.attrs["source_split_row_indices_json"] = json.dumps(ordered_row_indices)
+            dest_handle.attrs["selection_signature"] = selection_signature
+            dest_handle.attrs["split_name"] = split_name
+            dest_handle.attrs["patient_id"] = patient_id
+            first_index = ordered_row_indices[0]
+            first_image = np.asarray(source_handle["images"][first_index], dtype=np.uint8)
+            first_mask = np.asarray(source_handle["masks"][first_index], dtype=np.uint8)
+            str_dtype = h5py.string_dtype(encoding="utf-8")
+            images = dest_handle.create_dataset(
+                "images",
+                shape=(len(ordered_row_indices),) + first_image.shape,
+                dtype="uint8",
+                compression=resolved_compression,
+                chunks=True,
+            )
+            masks = dest_handle.create_dataset(
+                "masks",
+                shape=(len(ordered_row_indices),) + first_mask.shape,
+                dtype="uint8",
+                compression=resolved_compression,
+                chunks=True,
+            )
+            labels = dest_handle.create_dataset(
+                "labels", shape=(len(ordered_row_indices),), dtype="uint8"
+            )
+            patient_ids = dest_handle.create_dataset(
+                "patient_ids", shape=(len(ordered_row_indices),), dtype="int32"
+            )
+            filenames_dataset = dest_handle.create_dataset(
+                "filenames", shape=(len(ordered_row_indices),), dtype=str_dtype
+            )
 
-        for batch_start in range(0, len(ordered_row_indices), copy_batch_size):
-            batch_stop = min(batch_start + copy_batch_size, len(ordered_row_indices))
-            batch_indices = ordered_row_indices[batch_start:batch_stop]
-            images_by_index = _load_rows_by_source_index(source_handle["images"], batch_indices)
-            masks_by_index = _load_rows_by_source_index(source_handle["masks"], batch_indices)
-            image_batch = np.empty((len(batch_indices),) + first_image.shape, dtype=np.uint8)
-            mask_batch = np.empty((len(batch_indices),) + first_mask.shape, dtype=np.uint8)
-            for output_offset, source_index in enumerate(batch_indices):
-                image_batch[output_offset] = images_by_index[source_index]
-                mask_batch[output_offset] = masks_by_index[source_index]
+            for batch_start in range(0, len(ordered_row_indices), copy_batch_size):
+                batch_stop = min(batch_start + copy_batch_size, len(ordered_row_indices))
+                batch_indices = ordered_row_indices[batch_start:batch_stop]
+                images_by_index = _load_rows_by_source_index(source_handle["images"], batch_indices)
+                masks_by_index = _load_rows_by_source_index(source_handle["masks"], batch_indices)
+                image_batch = np.empty((len(batch_indices),) + first_image.shape, dtype=np.uint8)
+                mask_batch = np.empty((len(batch_indices),) + first_mask.shape, dtype=np.uint8)
+                for output_offset, source_index in enumerate(batch_indices):
+                    image_batch[output_offset] = images_by_index[source_index]
+                    mask_batch[output_offset] = masks_by_index[source_index]
 
-            images[batch_start:batch_stop] = image_batch
-            masks[batch_start:batch_stop] = mask_batch
-            labels[batch_start:batch_stop] = np.asarray(
-                source_handle["labels"][batch_indices],
-                dtype=np.uint8,
-            )
-            patient_ids[batch_start:batch_stop] = np.asarray(
-                source_handle["patient_ids"][batch_indices],
-                dtype=np.int32,
-            )
-            filenames_dataset[batch_start:batch_stop] = np.asarray(
-                [
-                    _normalize_hdf5_string(value)
-                    for value in source_handle["filenames"][batch_indices]
-                ],
-                dtype=object,
-            )
-            reporter.log(
-                completed_units=batch_stop,
-                extra_parts=[f"remaining={len(ordered_row_indices) - batch_stop} rows"],
-            )
+                images[batch_start:batch_stop] = image_batch
+                masks[batch_start:batch_stop] = mask_batch
+                labels[batch_start:batch_stop] = np.asarray(
+                    source_handle["labels"][batch_indices],
+                    dtype=np.uint8,
+                )
+                patient_ids[batch_start:batch_stop] = np.asarray(
+                    source_handle["patient_ids"][batch_indices],
+                    dtype=np.int32,
+                )
+                filenames_dataset[batch_start:batch_stop] = np.asarray(
+                    [
+                        _normalize_hdf5_string(value)
+                        for value in source_handle["filenames"][batch_indices]
+                    ],
+                    dtype=object,
+                )
+                reporter.log(
+                    completed_units=batch_stop,
+                    extra_parts=[f"remaining={len(ordered_row_indices) - batch_stop} rows"],
+                )
     logging.info(
         "Stage 6.5 shard verify: %s | split=%s | patient_id=%s | rows=%s",
         output_path.name,

@@ -16,7 +16,7 @@ def test_load_patient_shards_config_reads_defaults(tmp_path: Path) -> None:
     assert config.output_base_dir == tmp_path / "stage5"
     assert config.overwrite_output is False
     assert config.hdf5_compression == "NONE"
-    assert config.copy_batch_size == 256
+    assert config.copy_batch_size == 1024
     assert config.log_path == Path("logs/patient_shards.log")
 
 
