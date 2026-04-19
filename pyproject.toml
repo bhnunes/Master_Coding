@@ -15,7 +15,7 @@ dependencies = [
     "opencv-contrib-python==4.9.0.80",
     "Pillow>=10.4.0",
     "openslide-python",
-    "tiatoolbox",
+    "torch-staintools",
     "shapely>=2.0.0",
     "albumentations",
     "segmentation-models-pytorch",
@@ -37,6 +37,7 @@ dependencies = [
     "orjson",
     "transformers==5.5.0",
     "xformers==0.0.32.post2",
+    "mmdc",
     "setuptools<82",
 ]
 
@@ -64,6 +65,8 @@ torch = { index = "pytorch-cu126" }
 torchvision = { index = "pytorch-cu126" }
 torchaudio = { index = "pytorch-cu126" }
 segmentation-models-pytorch = { git = "https://github.com/qubvel/segmentation_models.pytorch" }
+torch-staintools = { git = "https://github.com/CielAl/torch-staintools.git" }
+mmdc = { git = "https://github.com/MohammadRaziei/mmdc.git" }
 
 # --- Tool Configuration ---
 [tool.ruff]
