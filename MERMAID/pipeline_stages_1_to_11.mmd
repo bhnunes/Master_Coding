@@ -1,0 +1,75 @@
+flowchart TD
+    A1[Stage 1\n1_artifact_detection.py\nScan WSI zip -> detect artifacts -> write GeoJSON + SQLite progress]
+    A2[Stage 2\n2_database_manager.py\nIngest cases -> extract Stage 2 patient shards -> update master_manifest.sqlite]
+    A3[Stage 3\n3_pack_splits_to_hdf5.py\nObsolete\nFails closed with migration message]
+    A41[Stage 4.1\n4_1_optimization_sampling.py\nRead canonical source HDF5 -> export pilot/master review overlays]
+    A42[Stage 4.2\n4_2_tune_graph_method.py\nUse reviewed labels -> tune graph contamination parameters -> write JSON artifact]
+    A43[Stage 4.3\n4_3_cleaner_script.py\nApply graph cleaning -> update accepted/rejected row state in master_manifest.sqlite]
+    A5[Stage 5\n5_crossfold.py\nRead accepted rows -> assign TRAIN/VALIDATION/TEST -> fit TRAIN-only normalization -> write sidecars + SQLite split state]
+    A6[Stage 6\n6_sanity_checks.py\nValidate Stage 5 sidecars, split integrity, leakage, and scientific semantics]
+    A7[Stage 7\n7_smart_sampler.py\nRead TRAIN rows from master_manifest.sqlite -> select informative rows -> write sidecars + SQLite sampling state]
+    A8[Stage 8\n8_lr_finder.py\nResolve TRAIN/VALIDATION once at startup -> load Stage 2 shards -> screen LR/loss settings -> report]
+    A9[Stage 9\n9_training_ensemble.py\nResolve TRAIN/VALIDATION once at startup -> load Stage 2 shards -> train one model -> checkpoints + metadata]
+    A10[Stage 10\n10_optimizer_ensemble.py\nResolve VALIDATION once at startup -> rank models -> optimize two-stream ensemble -> recipe JSON]
+    A11[Stage 11\n11_inference_ensemble.py\nResolve TEST once at startup -> load Stage 2 shards -> run ensemble inference -> metrics + reports]
+
+    Z1[(WSI zip)] --> A1
+    A1 --> Z2[(Artifact GeoJSON)]
+    A1 --> Z3[(Stage 1 SQLite progress)]
+
+    Z4[(Raw slides + annotations)] --> A2
+    Z2 -. optional artifact lookup .-> A2
+    A2 --> Z5[(Stage 2 patient shards)]
+    A2 --> Z6[(master_manifest.sqlite)]
+
+    Z5 -. historical only .-> A3
+    Z6 -. current pipeline bypasses Stage 3 .-> A41
+
+    Z5 --> A41
+    A41 --> Z7[(Review overlays + candidate pool)]
+    Z7 --> A42
+    A42 --> Z8[(Graph cleaning params JSON)]
+    Z5 --> A43
+    Z8 --> A43
+    Z6 --> A43
+    A43 --> Z6
+
+    Z6 --> A5
+    A5 --> Z9[(Stage 5 sidecars\nmanifest.csv + split_stats.csv + run_config.json)]
+    A5 --> Z10[(Normalization artifacts)]
+    A5 --> Z6
+
+    Z9 --> A6
+    A6 --> Z11[(Sanity report)]
+
+    Z6 --> A7
+    A7 --> Z12[(Smart-sampling sidecars\nselection CSV + stats + summary)]
+    A7 --> Z6
+
+    Z6 --> A8
+    Z10 --> A8
+    Z5 --> A8
+    A8 --> Z13[(LR finder reports + run config)]
+
+    Z6 --> A9
+    Z10 --> A9
+    Z5 --> A9
+    A9 --> Z14[(Model checkpoints + metadata)]
+
+    Z6 --> A10
+    Z5 --> A10
+    Z14 --> A10
+    A10 --> Z15[(Ensemble recipe JSON)]
+
+    Z6 --> A11
+    Z5 --> A11
+    Z15 --> A11
+    A11 --> Z16[(Inference metrics + confusion matrix + Markdown/CSV/PDF reports)]
+
+    classDef active fill:#e8f5e9,stroke:#2e7d32,stroke-width:1.5px,color:#1b1b1b;
+    classDef data fill:#e3f2fd,stroke:#1565c0,stroke-width:1px,color:#1b1b1b;
+    classDef obsolete fill:#fff3e0,stroke:#ef6c00,stroke-width:1px,color:#1b1b1b;
+
+    class A1,A2,A41,A42,A43,A5,A6,A7,A8,A9,A10,A11 active;
+    class Z1,Z2,Z3,Z4,Z5,Z6,Z7,Z8,Z9,Z10,Z11,Z12,Z13,Z14,Z15,Z16 data;
+    class A3 obsolete;
