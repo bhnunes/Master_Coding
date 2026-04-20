@@ -45,20 +45,20 @@ Agent guide for coding agents working in this repository.
 - Type-check entire repo: `uv run mypy .`
 - Type-check touched scope: `uv run mypy path/to/file.py tests/test_file.py`
 
-## Stage Entrypoints
-- Stage 1: `1_artifact_detection.py`
-- Stage 2: `2_database_manager.py`
-- Stage 4.1: `4_1_optimization_sampling.py`
-- Stage 4.2: `4_2_tune_graph_method.py`
-- Stage 4.3: `4_3_cleaner_script.py`
-- Stage 5: `5_crossfold.py`
-- Stage 6: `6_sanity_checks.py`
-- Stage 7.2: `7_smart_sampler.py`
-- Stage 8: `8_lr_finder.py`
-- Stage 9: `9_training_ensemble.py`
-- Stage 10: `10_optimizer_ensemble.py`
-- Stage 11: `11_inference_ensemble.py`
-- Run a stage script with `uv`, for example: `uv run --python 3.12 python 5_crossfold.py`
+## Phase Entrypoints
+- Phase 1: `1_artifact_detection.py`
+- Phase 2: `2_database_manager.py`
+- Phase 3.1: `3_1_optimization_sampling.py`
+- Phase 3.2: `3_2_tune_graph_method.py`
+- Phase 3.3: `3_3_cleaner_script.py`
+- Phase 4: `4_crossfold.py`
+- Phase 5: `5_sanity_checks.py`
+- Phase 6: `6_smart_sampler.py`
+- Phase 7: `7_lr_finder.py`
+- Phase 8: `8_training_ensemble.py`
+- Phase 9: `9_optimizer_ensemble.py`
+- Phase 10: `10_inference_ensemble.py`
+- Run a phase script with `uv`, for example: `uv run --python 3.12 python 4_crossfold.py`
 
 ## Repository Shape
 - Keep root scripts orchestration-focused.
@@ -72,7 +72,7 @@ Agent guide for coding agents working in this repository.
 - Prefer the smallest correct change over broad rewrites.
 - Reuse existing helpers before creating new modules.
 - Preserve existing pipeline contracts unless the task explicitly changes them.
-- For Stage 2 `.svs/.xml` work, verify whether `TAG=HISEG` is active before changing color or XML parsing behavior.
+- For Phase 2 `.svs/.xml` work, verify whether `TAG=HISEG` is active before changing color or XML parsing behavior.
 - Every behavior change needs tests.
 - For bug fixes, add or update a regression test.
 - Run targeted tests for touched code before finishing.
@@ -130,26 +130,22 @@ Agent guide for coding agents working in this repository.
 - Update `.env_example` when adding or renaming environment variables.
 - Use `helpers.runtime_platform.resolve_env_path` and related helpers for path-like environment variables.
 - Preserve cross-platform behavior, especially Windows `OPENSLIDE_PATH` handling.
-- `TAG=HISEG` enables the HISEG-specific Stage 2 SVS/XML annotation path.
-- `TAG=Chile` enables the CHILE-specific Stage 2 SVS/XML annotation path.
+- `TAG=HISEG` enables the HISEG-specific Phase 2 SVS/XML annotation path.
+- `TAG=Chile` enables the CHILE-specific Phase 2 SVS/XML annotation path.
 - Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
-- Stage 8 LR-finder auth now accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both env vars before model creation.
-- Stage 8 LR-finder AMP now defaults to `fp32`; set `LR_FINDER_AMP_PRECISION` explicitly to override it.
-- Stage 2 performance-related env vars now include:
+- Phase 7 LR-finder auth now accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both env vars before model creation.
+- Phase 7 LR-finder AMP now defaults to `fp32`; set `LR_FINDER_AMP_PRECISION` explicitly to override it.
+- Phase 2 performance-related env vars now include:
   - `STAGE2_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `OPENSLIDE_CACHE_BYTES` with default `0`
   - `STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES` with default `0`
-- Current best-known Stage 2 runtime choice in `.env` is `STAGE2_HDF5_COMPRESSION=none`.
-- Stage 3 packaging-related env vars now include:
-  - `PACKAGING_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
-  - `PACKAGING_COPY_BATCH_SIZE` with default `256`
-- Current best-known Stage 3 runtime choices in `.env` are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`.
-- Stage 5 crossfold-related env vars now include:
+- Current best-known Phase 2 runtime choice in `.env` is `STAGE2_HDF5_COMPRESSION=none`.
+- Phase 4 crossfold-related env vars now include:
   - `CROSSFOLD_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `CROSSFOLD_COPY_BATCH_SIZE` with default `256`
-- Current best-known Stage 5 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
-- Stage 7.2 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes only sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
-- Stage 8-11 runtime stages now query `master_manifest.sqlite` once at startup and then load pixels only from canonical Stage 2 patient shards.
+- Current best-known Phase 4 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
+- Phase 6 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes only sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
+- Phases 7-10 now query `master_manifest.sqlite` once at startup and then load pixels only from canonical Phase 2 patient shards.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
@@ -160,21 +156,20 @@ Agent guide for coding agents working in this repository.
 - For HISEG XML annotations, preserve the hardcoded label policy: cancer colors map to positive, not-cancer colors map to negative, and rejected colors are skipped entirely.
 - In HDF5 workflows, keep canonical dataset names stable: `images`, `masks`, `labels`, `patient_ids`, `filenames`.
 
-## Stage Boundaries
-- Keep Stage 1 logic in `helpers/artifact/*`.
+## Phase Boundaries
+- Keep Phase 1 logic in `helpers/artifact/*`.
 - Keep extraction and image-reading details in `helpers/extraction/*`.
-- Keep Stage 2 dataset-specific XML parsing localized to `helpers/extraction/data_handlers.py` and the Stage 2 request flow.
-- Keep Stage 3 packaging logic in `helpers/packaging/*`.
-- Keep Stage 4.1 sampling logic in `helpers/optimization_sampling/*`.
-- Keep Stage 4.2 and 4.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
-- Keep Stage 5 split and normalization logic in `helpers/crossfold/*`.
-- Keep Stage 6 integrity checks in `helpers/sanity/*`.
+- Keep Phase 2 dataset-specific XML parsing localized to `helpers/extraction/data_handlers.py` and the Phase 2 request flow.
+- Keep Phase 3.1 sampling logic in `helpers/optimization_sampling/*`.
+- Keep Phase 3.2 and 3.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
+- Keep Phase 4 split and normalization logic in `helpers/crossfold/*`.
+- Keep Phase 5 integrity checks in `helpers/sanity/*`.
 - Keep patient-shard local cache behavior in `helpers/patient_shard_cache.py`.
-- Keep Stage 7.2 smart-sampling logic in `helpers/smart_sampling/*`.
-- Keep Stage 8 learning-rate finder logic in `helpers/lr_finder/*`.
-- Keep Stage 9 training logic in `helpers/training/*`.
-- Keep Stage 10 ensemble optimization logic in `helpers/ensemble_optimizer/*`.
-- Keep Stage 11 inference logic in `helpers/ensemble_inference/*`.
+- Keep Phase 6 smart-sampling logic in `helpers/smart_sampling/*`.
+- Keep Phase 7 learning-rate finder logic in `helpers/lr_finder/*`.
+- Keep Phase 8 training logic in `helpers/training/*`.
+- Keep Phase 9 ensemble optimization logic in `helpers/ensemble_optimizer/*`.
+- Keep Phase 10 inference logic in `helpers/ensemble_inference/*`.
 
 ## Filesystem and Safety
 - Respect `.gitignore`.
@@ -192,11 +187,11 @@ Agent guide for coding agents working in this repository.
 - No unrelated files were modified intentionally.
 - Pipeline contracts and scientific invariants remain intact.
 
-## Stage 2 Performance Notes
-- Use `stage2_performance_findings.md` as the canonical handoff document for Stage 2 benchmarking and optimization work.
+## Phase 2 Performance Notes
+- Use `stage2_performance_findings.md` as the canonical handoff document for Phase 2 benchmarking and optimization work.
 - Use `uv run python scripts/benchmark_stage2_cases.py --case-ids 8,4,6,7,2,5,1` for the agreed benchmark set.
 - Benchmark outputs live under `analysis/stage2_benchmarks*/`.
-- The biggest confirmed Stage 2 wins so far were:
+- The biggest confirmed Phase 2 wins so far were:
   - batched HDF5 shard writes in `helpers/extraction/hdf5_storage.py`
   - `STAGE2_HDF5_COMPRESSION=none`
   - replacing hot PIL-to-NumPy `np.array(...)` conversions with `np.asarray(...)` in `helpers/extraction/patch_engine.py`
@@ -211,54 +206,41 @@ Agent guide for coding agents working in this repository.
   - The rebuilt container now reports native OpenSlide `4.0.0`, and `openslide.OpenSlideCache(...)` instantiates successfully
   - Despite that, `OPENSLIDE_CACHE_BYTES=0` remains the best-known setting on the agreed benchmark slide set
 
-## Stage 3 Performance Notes
-- Use `analysis/stage3_packaging_performance_findings.md` as the canonical handoff document for Stage 3 benchmarking and optimization work.
-- The biggest confirmed Stage 3 wins so far were:
-  - batched HDF5 copy/write paths in `helpers/packaging/writer.py`
-  - replacing sorted fancy-index HDF5 reads with contiguous slice reads plus concatenate
-  - reusing shard-level `source_signature` provenance instead of recomputing per-row image and mask hashes during merge
-  - `PACKAGING_HDF5_COMPRESSION=none`
-- Current best-known Stage 3 runtime settings are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`.
-- Stage 3 now emits lightweight log-based progress for copy, filter, and merge paths, including processed counts, remaining work, throughput, and ETA.
-- Established negative results:
-  - `lzf` and `gzip` were slower than `none` on the measured Stage 3 workloads
-  - larger batch sizes such as `512` did not improve the full configured merge consistently over `256`
-
-## Stage 5 Performance Notes
-- Use `analysis/stage5_crossfold_performance_findings.md` as the canonical handoff document for Stage 5 performance analysis and optimization planning.
-- Current first-pass Stage 5 improvements are:
+## Phase 4 Performance Notes
+- Use `analysis/stage5_crossfold_performance_findings.md` as the canonical handoff document for Phase 4 performance analysis and optimization planning.
+- Current first-pass Phase 4 improvements are:
   - cached source-HDF5 provenance reuse across the pipeline, split writer, and run-config generation
   - batched HDF5-backed entropy reads in `helpers/crossfold/entropy.py`
-  - configurable Stage 5 split-output compression and batched copy writes in `helpers/crossfold/io.py`
+  - configurable Phase 4 split-output compression and batched copy writes in `helpers/crossfold/io.py`
   - bulk metadata verification in `helpers/crossfold/io.py`
   - lightweight log-based progress for entropy and split writing in `helpers/crossfold/entropy.py` and `helpers/crossfold/io.py`
-- First measured benchmark highlights on the real 10-patient Stage 5 dataset are:
+- First measured benchmark highlights on the real 10-patient Phase 4 dataset are:
   - entropy dropped from `629.8s` to `8.45s` on a `1024`-row before/after benchmark slice
   - full optimized entropy on all `7176` rows took `59.0s`
-  - full optimized Stage 5 runtime was `253.1s` with the objective enabled and `157.9s` with the objective disabled
+  - full optimized Phase 4 runtime was `253.1s` with the objective enabled and `157.9s` with the objective disabled
   - tuning the copy batch size to `1024` reduced full optimized runtime further to about `193.1s` with the objective enabled and `128.2s` with the objective disabled
   - the verification rewrite reduced one measured verify pass from `22.53s` to `0.045s`
   - `CROSSFOLD_HDF5_COMPRESSION=none` beat `gzip` strongly on the full write benchmark
   - the later progress-logging pass showed no evidence of meaningful slowdown on one measured objective-off rerun (`99.3s`)
-- When optimizing Stage 5, benchmark entropy, provenance hashing, split search, and split writing separately before changing scientific validation behavior.
+- When optimizing Phase 4, benchmark entropy, provenance hashing, split search, and split writing separately before changing scientific validation behavior.
 
-## Stage 4 Performance Notes
-- Use `analysis/stage4_2_graph_tuning_performance_findings.md` as the canonical handoff document for Stage 4.2 tuning-performance work.
-- Use `analysis/stage4_3_graph_cleaning_performance_findings.md` as the canonical handoff document for Stage 4.3 cleaning-performance work.
-- Stage 4.2 no longer depends on OpenCV contrib graph segmentation; it now uses `skimage.segmentation.felzenszwalb` in `helpers/graph/contamination.py`.
-- The biggest confirmed Stage 4.2 win so far was removing duplicate fold-by-fold rescoring in grouped CV by scoring each reviewed record once per parameter set and reusing those scores across folds.
-- Stage 4.3 now requires `GRAPH_CLEANING_PARAMS_PATH` and loads graph parameters and `tau` only from the Stage 4.2 JSON artifact; there is no raw env-var fallback.
-- The biggest confirmed Stage 4.3 wins so far were:
+## Phase 3 Performance Notes
+- Use `analysis/stage4_2_graph_tuning_performance_findings.md` as the canonical handoff document for Phase 3.2 tuning-performance work.
+- Use `analysis/stage4_3_graph_cleaning_performance_findings.md` as the canonical handoff document for Phase 3.3 cleaning-performance work.
+- Phase 3.2 no longer depends on OpenCV contrib graph segmentation; it now uses `skimage.segmentation.felzenszwalb` in `helpers/graph/contamination.py`.
+- The biggest confirmed Phase 3.2 win so far was removing duplicate fold-by-fold rescoring in grouped CV by scoring each reviewed record once per parameter set and reusing those scores across folds.
+- Phase 3.3 now requires `GRAPH_CLEANING_PARAMS_PATH` and loads graph parameters and `tau` only from the Phase 3.2 JSON artifact; there is no raw env-var fallback.
+- The biggest confirmed Phase 3.3 wins so far were:
   - reusing HDF5 `source_signature` instead of hashing the full source file during candidate discovery when the attribute is present
   - replacing row-at-a-time HDF5 image/mask reads with contiguous batched reads during cleaning
-- Current best-known Stage 4.3 behavior on the measured sample source HDF5 uses the default batched HDF5 fast path in `helpers/graph/cleaning_pipeline.py` with `_HDF5_SCORING_BATCH_SIZE = 512`.
-- Established Stage 4.3 finding: larger contiguous HDF5 batches produced better gains than a simple multiprocessing prototype on the measured 4-core sample machine, so the code currently favors larger batched reads over added parallel complexity.
+- Current best-known Phase 3.3 behavior on the measured sample source HDF5 uses the default batched HDF5 fast path in `helpers/graph/cleaning_pipeline.py` with `_HDF5_SCORING_BATCH_SIZE = 512`.
+- Established Phase 3.3 finding: larger contiguous HDF5 batches produced better gains than a simple multiprocessing prototype on the measured 4-core sample machine, so the code currently favors larger batched reads over added parallel complexity.
 
-## Stage 8 Operational Notes
-- Stage 8 loads pretrained weights once per architecture/encoder pair, snapshots the initialized state to CPU, and reuses that state across all sampled loss configurations and repeats instead of re-fetching pretrained weights inside the nested screening loops.
+## Phase 7 Operational Notes
+- Phase 7 loads pretrained weights once per architecture/encoder pair, snapshots the initialized state to CPU, and reuses that state across all sampled loss configurations and repeats instead of re-fetching pretrained weights inside the nested screening loops.
 - Expected LR-range-test divergence now stops the current sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure.
-- Console UX for Stage 8 is intentionally compact for notebook environments such as Google Colab: one startup line, periodic snapshot progress lines, and one final summary. Detailed per-run traces stay in `logs/lr_finder.log`.
-- The final Stage 8 summary now reports valid records, completed trials, failed trials, and a per-architecture breakdown.
+- Console UX for Phase 7 is intentionally compact for notebook environments such as Google Colab: one startup line, periodic snapshot progress lines, and one final summary. Detailed per-run traces stay in `logs/lr_finder.log`.
+- The final Phase 7 summary now reports valid records, completed trials, failed trials, and a per-architecture breakdown.
 
 ## Agent Heuristics
 - Prefer minimal local edits.
