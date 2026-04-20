@@ -54,7 +54,7 @@ def _write_source_shard(path: Path, patient_id: int) -> None:
 
 def _build_config(source_path: Path, output_dir: Path, **overrides: object) -> SmartSamplerConfig:
     values: dict[str, Any] = {
-        "source_h5_path": source_path,
+        "master_manifest_path": source_path,
         "output_dir": output_dir,
         "output_filename": "TRAIN_FILTERED.h5",
         "local_work_dir": None,
@@ -102,7 +102,11 @@ def test_write_filtered_hdf5_propagates_upstream_lineage_attrs(tmp_path: Path) -
 
     config = _build_config(source_path, output_dir)
 
-    result = write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    result = write_filtered_hdf5(
+        config,
+        np.array([1, 2], dtype=np.int64),
+        source_h5_path=source_path,
+    )
 
     with h5py.File(result, "r") as handle:
         assert handle.attrs["source_signature"] == "stage5-signature"
@@ -123,7 +127,11 @@ def test_write_filtered_hdf5_writes_plural_filenames_for_legacy_input(tmp_path: 
 
     config = _build_config(source_path, output_dir)
 
-    result = write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    result = write_filtered_hdf5(
+        config,
+        np.array([1, 2], dtype=np.int64),
+        source_h5_path=source_path,
+    )
 
     with h5py.File(result, "r") as handle:
         filenames = cast(h5py.Dataset, handle["filenames"])
@@ -141,10 +149,14 @@ def test_write_filtered_hdf5_reuses_existing_output_when_selection_matches(tmp_p
     _write_source_hdf5(source_path)
 
     config = _build_config(source_path, output_dir)
-    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64), source_h5_path=source_path)
     reuse_config = SmartSamplerConfig(**{**config.__dict__, "overwrite_output": False})
 
-    result = write_filtered_hdf5(reuse_config, np.array([1, 2], dtype=np.int64))
+    result = write_filtered_hdf5(
+        reuse_config,
+        np.array([1, 2], dtype=np.int64),
+        source_h5_path=source_path,
+    )
 
     assert result == output_dir / "TRAIN_FILTERED.h5"
 
@@ -158,11 +170,15 @@ def test_write_filtered_hdf5_rejects_existing_output_when_selection_mismatches(
     _write_source_hdf5(source_path)
 
     config = _build_config(source_path, output_dir)
-    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64), source_h5_path=source_path)
     reuse_config = SmartSamplerConfig(**{**config.__dict__, "overwrite_output": False})
 
     try:
-        write_filtered_hdf5(reuse_config, np.array([0, 2], dtype=np.int64))
+        write_filtered_hdf5(
+            reuse_config,
+            np.array([0, 2], dtype=np.int64),
+            source_h5_path=source_path,
+        )
     except ValueError as error:
         assert "does not match the current selection" in str(error)
     else:
@@ -178,7 +194,7 @@ def test_write_filtered_hdf5_rejects_reuse_when_source_contents_change_in_place(
     _write_source_hdf5(source_path)
 
     config = _build_config(source_path, output_dir)
-    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64), source_h5_path=source_path)
     reuse_config = SmartSamplerConfig(**{**config.__dict__, "overwrite_output": False})
 
     with h5py.File(source_path, "a") as handle:
@@ -186,7 +202,11 @@ def test_write_filtered_hdf5_rejects_reuse_when_source_contents_change_in_place(
         labels[0] = 1
 
     with pytest.raises(ValueError, match="does not match the current selection"):
-        write_filtered_hdf5(reuse_config, np.array([1, 2], dtype=np.int64))
+        write_filtered_hdf5(
+            reuse_config,
+            np.array([1, 2], dtype=np.int64),
+            source_h5_path=source_path,
+        )
 
 
 def test_write_filtered_hdf5_keeps_selection_signature_stable_when_input_is_staged(
@@ -209,7 +229,11 @@ def test_write_filtered_hdf5_keeps_selection_signature_stable_when_input_is_stag
         stage_outputs_locally=False,
     )
 
-    direct_output = write_filtered_hdf5(config, np.array([1, 2], dtype=np.int64))
+    direct_output = write_filtered_hdf5(
+        config,
+        np.array([1, 2], dtype=np.int64),
+        source_h5_path=source_path,
+    )
     direct_signature = None
     with h5py.File(direct_output, "r") as handle:
         direct_signature = handle.attrs["selection_signature"]
@@ -262,9 +286,6 @@ def test_write_filtered_shards_writes_patient_isolated_outputs_and_manifests(
     config = _build_config(
         tmp_path / "TRAIN.h5",
         tmp_path / "output",
-        source_h5_path=None,
-        source_shard_dir=source_shard_dir,
-        source_manifest_path=manifest_path,
         output_filename="TRAIN_FILTERED_shards",
     )
 

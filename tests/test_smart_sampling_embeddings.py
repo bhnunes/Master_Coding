@@ -17,7 +17,7 @@ from helpers.smart_sampling.embeddings import EmbeddingExtractor, H5PatchDataset
 
 def _build_config(tmp_path: Path) -> SmartSamplerConfig:
     return SmartSamplerConfig(
-        source_h5_path=tmp_path / "TRAIN.h5",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
         output_dir=tmp_path / "out",
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,

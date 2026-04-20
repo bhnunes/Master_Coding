@@ -21,6 +21,7 @@ from shapely.ops import clip_by_rect
 from shapely.prepared import prep
 from shapely.strtree import STRtree
 
+from helpers.cv2_compat import ensure_cv2_compat
 from helpers.extraction.data_handlers import BaseHandler
 from helpers.extraction.profiling import (
     PhaseStats,
@@ -32,11 +33,21 @@ from helpers.extraction.profiling import (
 )
 from helpers.runtime_platform import load_openslide_module
 
+cv2 = ensure_cv2_compat(cv2)
+
 load_dotenv(override=True)
 # --- Constants ---
 WINDOW_SIZE = int(os.getenv("WINDOW_SIZE", 224))  # Default 224
-KERNEL_OPEN = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))  # For noise removal
-KERNEL_CLOSE = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))  # For hole filling
+
+
+def _build_morph_kernel(size: tuple[int, int]) -> np.ndarray:
+    if hasattr(cv2, "getStructuringElement") and hasattr(cv2, "MORPH_ELLIPSE"):
+        return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, size)
+    return np.ones(size, dtype=np.uint8)
+
+
+KERNEL_OPEN = _build_morph_kernel((3, 3))  # For noise removal
+KERNEL_CLOSE = _build_morph_kernel((7, 7))  # For hole filling
 PATCH_AREA = WINDOW_SIZE * WINDOW_SIZE
 HALF_WINDOW = WINDOW_SIZE // 2
 ARTIFACT_CLASS_TO_COLUMN = {
@@ -117,6 +128,22 @@ def check_tissue_percentage_robust(patch_np, required_percentage):
     # This function is generic and correct. Unchanged.
     if patch_np is None or patch_np.size == 0:
         return False
+    if not all(
+        hasattr(cv2, attribute)
+        for attribute in (
+            "cvtColor",
+            "COLOR_RGB2HSV",
+            "threshold",
+            "THRESH_BINARY",
+            "THRESH_OTSU",
+            "morphologyEx",
+            "MORPH_OPEN",
+            "MORPH_CLOSE",
+        )
+    ):
+        color_spread = np.max(patch_np, axis=2) - np.min(patch_np, axis=2)
+        tissue_percentage = float(np.mean(color_spread > 10))
+        return tissue_percentage >= required_percentage
     patch_hsv = cv2.cvtColor(patch_np, cv2.COLOR_RGB2HSV)
     _, tissue_mask = cv2.threshold(patch_hsv[:, :, 1], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 

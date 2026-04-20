@@ -9,7 +9,7 @@ from helpers.smart_sampling.writer import write_filtered_hdf5
 
 def _build_config(source_path: Path, output_dir: Path) -> SmartSamplerConfig:
     return SmartSamplerConfig(
-        source_h5_path=source_path,
+        master_manifest_path=source_path,
         output_dir=output_dir,
         output_filename="TRAIN_FILTERED.h5",
         local_work_dir=None,
@@ -58,7 +58,7 @@ def test_write_filtered_hdf5_preserves_plural_filenames_dataset(tmp_path: Path) 
 
     config = _build_config(source_path, output_dir)
 
-    write_filtered_hdf5(config, np.array([1], dtype=np.int64))
+    write_filtered_hdf5(config, np.array([1], dtype=np.int64), source_h5_path=source_path)
 
     with h5py.File(output_dir / "TRAIN_FILTERED.h5", "r") as handle:
         assert "filenames" in handle

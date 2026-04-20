@@ -4,6 +4,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from helpers.cv2_compat import ensure_cv2_compat
+
+cv2 = ensure_cv2_compat(cv2)
+
 
 # MAKE OVERLAY: HEATMAP ON REDUCED AND CROPPED SLIDE CLON
 def make_overlay(slide, wsi_heatmap_im, p_s, patch_n_w_l0, patch_n_h_l0, overlay_factor):

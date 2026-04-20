@@ -14,6 +14,9 @@ import pandas as pd
 from tqdm import tqdm
 
 from helpers.crossfold.logging import ProgressReporter
+from helpers.cv2_compat import ensure_cv2_compat
+
+cv2 = ensure_cv2_compat(cv2)
 
 
 def calculate_image_entropy_from_path(image_path: str, thumb: int = 128) -> tuple[str, float]:

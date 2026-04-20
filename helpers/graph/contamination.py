@@ -12,6 +12,10 @@ import numpy as np
 import numpy.typing as npt
 from skimage.segmentation import felzenszwalb
 
+from helpers.cv2_compat import ensure_cv2_compat
+
+cv2 = ensure_cv2_compat(cv2)
+
 _HDF5_HANDLES: dict[Path, h5py.File] = {}
 _HDF5_CLEANUP_REGISTERED = False
 

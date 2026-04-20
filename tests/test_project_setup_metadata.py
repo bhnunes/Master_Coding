@@ -44,7 +44,7 @@ def test_pyproject_declares_repo_runtime_dependencies() -> None:
         "seaborn",
         "segmentation-models-pytorch",
         "shapely",
-        "tiatoolbox",
+        "torch-staintools",
         "torch",
         "torch-lr-finder",
         "torchaudio",

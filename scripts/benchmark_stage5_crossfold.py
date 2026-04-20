@@ -176,7 +176,7 @@ def _build_benchmark_config(
 ) -> CrossfoldConfig:
     return CrossfoldConfig(
         normalization_method="NOT_NORMALIZED",
-        source_hdf5_path=source_hdf5_path,
+        source_path=source_hdf5_path,
         overwrite_output_dir=True,
         random_state=random_state,
         constraints=SplitConstraints(

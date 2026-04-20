@@ -9,6 +9,10 @@ import numpy as np
 import torch
 from torch.amp.grad_scaler import GradScaler
 
+from helpers.cv2_compat import ensure_cv2_compat
+
+cv2 = ensure_cv2_compat(cv2)
+
 
 def seed_everything(seed: int = 42) -> None:
     """Seed Python, NumPy, and PyTorch RNGs for reproducibility."""

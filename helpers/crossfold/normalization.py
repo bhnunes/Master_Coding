@@ -16,7 +16,10 @@ from helpers.crossfold.entropy import (
     calculate_image_entropy_from_hdf5_row,
     calculate_image_entropy_from_path,
 )
+from helpers.cv2_compat import ensure_cv2_compat
 from helpers.runtime_platform import load_openslide_module
+
+cv2 = ensure_cv2_compat(cv2)
 
 
 class NumpyEncoder(json.JSONEncoder):

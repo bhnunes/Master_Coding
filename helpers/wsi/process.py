@@ -10,6 +10,10 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
+from helpers.cv2_compat import ensure_cv2_compat
+
+cv2 = ensure_cv2_compat(cv2)
+
 
 # Helper functions
 def to_tensor_x(x, **_kwargs):

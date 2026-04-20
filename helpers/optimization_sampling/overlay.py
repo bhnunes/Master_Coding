@@ -13,7 +13,10 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
+from helpers.cv2_compat import ensure_cv2_compat
 from helpers.optimization_sampling.sampling import OverlayTask
+
+cv2 = ensure_cv2_compat(cv2)
 
 _WORKER_HDF5_HANDLES: dict[Path, h5py.File] = {}
 _WORKER_HDF5_CLEANUP_REGISTERED = False
