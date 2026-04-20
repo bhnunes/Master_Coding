@@ -44,8 +44,8 @@ def _write_candidate(
                     },
                     "artifact_aware_loss": {
                         "enabled": False,
-                        "artifact_index_path": None,
-                        "artifact_index_sha256": None,
+                        "master_manifest_path": None,
+                        "master_manifest_sha256": None,
                     },
                     "validation_lineage": {
                         "dataset_sha256": "validation-sha",
@@ -206,8 +206,8 @@ def test_load_model_candidates_rejects_missing_validation_lineage(tmp_path: Path
             "smart_sampling_lineage": {"enabled": False, "selection_signature": None},
             "artifact_aware_loss": {
                 "enabled": False,
-                "artifact_index_path": None,
-                "artifact_index_sha256": None,
+                "master_manifest_path": None,
+                "master_manifest_sha256": None,
             },
         },
     }

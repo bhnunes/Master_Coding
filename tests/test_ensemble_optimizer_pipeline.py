@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
-from helpers.ensemble_optimizer.data import ValidationShardsLayout
+from helpers.ensemble_optimizer.data import ValidationDatasetLayout
 from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
 from helpers.ensemble_optimizer.pipeline import (
     EnsembleOptimizerOutputs,
@@ -19,7 +19,7 @@ from helpers.ensemble_optimizer.pipeline import (
 
 def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> None:
     config = EnsembleOptimizerConfig(
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
         metadata_dir=tmp_path / "metadata",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
@@ -65,7 +65,7 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = EnsembleOptimizerConfig(
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
         metadata_dir=tmp_path / "metadata",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
@@ -109,15 +109,14 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     ]
     observed: dict[str, object] = {}
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    validation_layout = ValidationShardsLayout(
-        shard_dir=tmp_path / "dataset" / "VALIDATION_shards",
-        manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "manifest.parquet",
-        sample_manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "sample_manifest.parquet",
+    validation_layout = ValidationDatasetLayout(
+        records=(),
         local_cache_dir=None,
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
     )
 
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.setup_validation_shards",
+        "helpers.ensemble_optimizer.pipeline.setup_validation_data",
         lambda *args, **kwargs: validation_layout,
     )
     monkeypatch.setattr(
@@ -135,7 +134,7 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
 
     def fake_select_models(
         config: EnsembleOptimizerConfig,
-        validation_layout: ValidationShardsLayout,
+        validation_layout: ValidationDatasetLayout,
         optimization_patients: set[str],
         device: Any,
     ) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str]]:
@@ -181,8 +180,8 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         lambda payload, output_dir, timestamp: output_dir / "recipe.json",
     )
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.collect_validation_shard_provenance",
-        lambda layout: {"attrs": {}, "path": str(layout.sample_manifest_path)},
+        "helpers.ensemble_optimizer.pipeline.collect_validation_provenance",
+        lambda layout: {"attrs": {}, "path": str(layout.master_manifest_path)},
     )
 
     outputs = _execute_pipeline(config)
@@ -194,7 +193,7 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     assert run_config["holdout_patients"] == ["p3"]
     assert run_config["decision_threshold"] == 0.6
     assert run_config["calibration_metrics"] == {"Calibration_best_mcc": 0.55}
-    assert run_config["validation_shard_dir"].endswith("VALIDATION_shards")
+    assert run_config["validation_master_manifest_path"].endswith("master_manifest.sqlite")
     assert run_config["selected_models"][0]["optimization_subset_score"] == 0.9
     assert run_config["skipped_requested_architectures"] == {}
 
@@ -203,7 +202,7 @@ def test_execute_pipeline_logs_phase_summaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     config = EnsembleOptimizerConfig(
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
         metadata_dir=tmp_path / "metadata",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
@@ -246,15 +245,14 @@ def test_execute_pipeline_logs_phase_summaries(
         ),
     ]
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    validation_layout = ValidationShardsLayout(
-        shard_dir=tmp_path / "dataset" / "VALIDATION_shards",
-        manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "manifest.parquet",
-        sample_manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "sample_manifest.parquet",
+    validation_layout = ValidationDatasetLayout(
+        records=(),
         local_cache_dir=None,
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
     )
 
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.setup_validation_shards",
+        "helpers.ensemble_optimizer.pipeline.setup_validation_data",
         lambda *args, **kwargs: validation_layout,
     )
     monkeypatch.setattr(
@@ -311,8 +309,8 @@ def test_execute_pipeline_logs_phase_summaries(
         lambda payload, output_dir, timestamp: output_dir / "recipe.json",
     )
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.collect_validation_shard_provenance",
-        lambda layout: {"attrs": {}, "path": str(layout.sample_manifest_path)},
+        "helpers.ensemble_optimizer.pipeline.collect_validation_provenance",
+        lambda layout: {"attrs": {}, "path": str(layout.master_manifest_path)},
     )
 
     caplog.set_level(logging.INFO)
@@ -329,7 +327,7 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = EnsembleOptimizerConfig(
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
         metadata_dir=tmp_path / "metadata",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
@@ -392,15 +390,14 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         ),
     ]
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    validation_layout = ValidationShardsLayout(
-        shard_dir=tmp_path / "dataset" / "VALIDATION_shards",
-        manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "manifest.parquet",
-        sample_manifest_path=tmp_path / "dataset" / "VALIDATION_shards" / "sample_manifest.parquet",
+    validation_layout = ValidationDatasetLayout(
+        records=(),
         local_cache_dir=None,
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
     )
 
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.setup_validation_shards",
+        "helpers.ensemble_optimizer.pipeline.setup_validation_data",
         lambda *args, **kwargs: validation_layout,
     )
     monkeypatch.setattr(
@@ -453,8 +450,8 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         lambda payload, output_dir, timestamp: output_dir / "recipe.json",
     )
     monkeypatch.setattr(
-        "helpers.ensemble_optimizer.pipeline.collect_validation_shard_provenance",
-        lambda layout: {"attrs": {}, "path": str(layout.sample_manifest_path)},
+        "helpers.ensemble_optimizer.pipeline.collect_validation_provenance",
+        lambda layout: {"attrs": {}, "path": str(layout.master_manifest_path)},
     )
 
     outputs = _execute_pipeline(config)

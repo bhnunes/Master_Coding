@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -71,7 +69,7 @@ class BCEDiceHybridLossPaper(nn.Module):
         intersection = (p * g).sum(dim=1)
         denominator = p.pow(2).sum(dim=1) + g.pow(2).sum(dim=1)
         dice = (2.0 * intersection + self.smooth) / (denominator + self.smooth)
-        return cast(torch.Tensor, 1.0 - dice)
+        return 1.0 - dice
 
     def _masked_dice_loss_per_sample(
         self,
@@ -88,7 +86,7 @@ class BCEDiceHybridLossPaper(nn.Module):
             dim=1
         )
         dice = (2.0 * intersection + self.smooth) / (denominator + self.smooth)
-        return cast(torch.Tensor, 1.0 - dice)
+        return 1.0 - dice
 
     def _build_hard_pixel_mask(self, ce_loss_map: torch.Tensor) -> torch.Tensor:
         """Keep the top-loss pixels per sample using ratio plus a safety floor."""
@@ -164,10 +162,7 @@ class BCEDiceHybridLossPaper(nn.Module):
                 probabilities[:, 1, :, :], target_one_hot[:, 1, :, :]
             )
 
-        loss_per_sample = cast(
-            torch.Tensor,
-            self.alpha * ce_loss + self.beta * dice_bg + self.gamma * dice_fg,
-        )
+        loss_per_sample = self.alpha * ce_loss + self.beta * dice_bg + self.gamma * dice_fg
 
         if artifact_covariates is not None and apply_artifact_discount:
             # Artifact awareness remains sample-level and independent from OHEM:

@@ -1,185 +1,121 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import cast
 
 import h5py
 import numpy as np
 import numpy.typing as npt
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 import torch
 
 from helpers.ensemble_optimizer import data as optimizer_data
 
 
-def _write_validation_shards(root: Path) -> optimizer_data.ValidationShardsLayout:
-    shard_dir = root / "VALIDATION_shards"
-    shard_dir.mkdir(parents=True)
-    images = np.arange(2 * 4 * 4 * 3, dtype=np.uint8).reshape(2, 4, 4, 3)
-    masks = np.array([np.zeros((4, 4), dtype=np.uint8), np.eye(4, dtype=np.uint8)])
-    for patient_id, row_index in (("p1", 0), ("p2", 1)):
-        with h5py.File(shard_dir / f"{patient_id}.h5", "w") as handle:
-            handle.create_dataset("images", data=images[row_index : row_index + 1])
-            handle.create_dataset("masks", data=masks[row_index : row_index + 1])
-            handle.create_dataset("labels", data=np.array([row_index], dtype=np.uint8))
-            handle.create_dataset("patient_ids", data=np.array([patient_id.encode()]))
-            handle.create_dataset("filenames", data=np.array([f"{patient_id}.png".encode()]))
-            handle.attrs["source_hdf5_sha256"] = "stage5-sha"
-            handle.attrs["upstream_source_signature"] = "stage2-sig"
-            handle.attrs["stage4_cleaning_manifest_sha256"] = "clean-sha"
-    pq.write_table(
-        pa.Table.from_pylist(
-            [
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p1",
-                    "relative_hdf5_path": "VALIDATION_shards/p1.h5",
-                    "rows": 1,
-                    "label_0_count": 1,
-                    "label_1_count": 0,
-                },
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p2",
-                    "relative_hdf5_path": "VALIDATION_shards/p2.h5",
-                    "rows": 1,
-                    "label_0_count": 0,
-                    "label_1_count": 1,
-                },
-            ]
-        ),
-        shard_dir / "manifest.parquet",
-    )
-    pq.write_table(
-        pa.Table.from_pylist(
-            [
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p1",
-                    "relative_hdf5_path": "VALIDATION_shards/p1.h5",
-                    "row_in_shard": 0,
-                    "label": 0,
-                    "filename": "p1.png",
-                },
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p2",
-                    "relative_hdf5_path": "VALIDATION_shards/p2.h5",
-                    "row_in_shard": 0,
-                    "label": 1,
-                    "filename": "p2.png",
-                },
-            ]
-        ),
-        shard_dir / "sample_manifest.parquet",
-    )
-    return optimizer_data.ValidationShardsLayout(
-        shard_dir=shard_dir,
-        manifest_path=shard_dir / "manifest.parquet",
-        sample_manifest_path=shard_dir / "sample_manifest.parquet",
-        local_cache_dir=None,
-    )
-
-
-def _write_multirow_validation_shards(root: Path) -> optimizer_data.ValidationShardsLayout:
-    shard_dir = root / "VALIDATION_shards"
-    shard_dir.mkdir(parents=True)
-    with h5py.File(shard_dir / "p1.h5", "w") as handle:
+def _write_stage2_shard(
+    shard_path: Path,
+    *,
+    patient_id: int,
+    pixel_values: list[int],
+    labels: list[int],
+    filenames: list[str],
+) -> None:
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(shard_path, "w") as handle:
         handle.create_dataset(
             "images",
             data=np.stack(
-                [
-                    np.full((4, 4, 3), 10, dtype=np.uint8),
-                    np.full((4, 4, 3), 20, dtype=np.uint8),
-                ]
+                [np.full((4, 4, 3), pixel_value, dtype=np.uint8) for pixel_value in pixel_values]
             ),
         )
         handle.create_dataset(
             "masks",
-            data=np.stack(
-                [
-                    np.zeros((4, 4), dtype=np.uint8),
-                    np.eye(4, dtype=np.uint8),
-                ]
-            ),
+            data=np.stack([np.full((4, 4), label, dtype=np.uint8) for label in labels]),
         )
-        handle.create_dataset("labels", data=np.array([0, 1], dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.array([b"p1", b"p1"], dtype="S16"))
-        handle.create_dataset("filenames", data=np.array([b"p1-a.png", b"p1-b.png"], dtype="S32"))
-        handle.attrs["source_hdf5_sha256"] = "stage5-sha"
-        handle.attrs["upstream_source_signature"] = "stage2-sig"
-        handle.attrs["stage4_cleaning_manifest_sha256"] = "clean-sha"
-    with h5py.File(shard_dir / "p2.h5", "w") as handle:
-        handle.create_dataset("images", data=np.full((1, 4, 4, 3), 30, dtype=np.uint8))
-        handle.create_dataset("masks", data=np.full((1, 4, 4), 2, dtype=np.uint8))
-        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.array([b"p2"], dtype="S16"))
-        handle.create_dataset("filenames", data=np.array([b"p2-a.png"], dtype="S32"))
-        handle.attrs["source_hdf5_sha256"] = "stage5-sha"
-        handle.attrs["upstream_source_signature"] = "stage2-sig"
-        handle.attrs["stage4_cleaning_manifest_sha256"] = "clean-sha"
-    pq.write_table(
-        pa.Table.from_pylist(
-            [
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p1",
-                    "relative_hdf5_path": "VALIDATION_shards/p1.h5",
-                    "rows": 2,
-                    "label_0_count": 1,
-                    "label_1_count": 1,
-                },
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p2",
-                    "relative_hdf5_path": "VALIDATION_shards/p2.h5",
-                    "rows": 1,
-                    "label_0_count": 0,
-                    "label_1_count": 1,
-                },
-            ]
-        ),
-        shard_dir / "manifest.parquet",
-    )
-    pq.write_table(
-        pa.Table.from_pylist(
-            [
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p1",
-                    "relative_hdf5_path": "VALIDATION_shards/p1.h5",
-                    "row_in_shard": 1,
-                    "label": 1,
-                    "filename": "p1-b.png",
-                },
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p1",
-                    "relative_hdf5_path": "VALIDATION_shards/p1.h5",
-                    "row_in_shard": 0,
-                    "label": 0,
-                    "filename": "p1-a.png",
-                },
-                {
-                    "split": "VALIDATION",
-                    "patient_id": "p2",
-                    "relative_hdf5_path": "VALIDATION_shards/p2.h5",
-                    "row_in_shard": 0,
-                    "label": 1,
-                    "filename": "p2-a.png",
-                },
-            ]
-        ),
-        shard_dir / "sample_manifest.parquet",
-    )
-    return optimizer_data.ValidationShardsLayout(
-        shard_dir=shard_dir,
-        manifest_path=shard_dir / "manifest.parquet",
-        sample_manifest_path=shard_dir / "sample_manifest.parquet",
-        local_cache_dir=None,
-    )
+        handle.create_dataset("labels", data=np.asarray(labels, dtype=np.uint8))
+        handle.create_dataset(
+            "patient_ids",
+            data=np.asarray([patient_id] * len(labels), dtype=np.int32),
+        )
+        handle.create_dataset(
+            "filenames",
+            data=np.asarray([filename.encode("utf-8") for filename in filenames]),
+        )
+
+
+def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) -> None:
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE patches (
+                patch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_hdf5_path TEXT NOT NULL,
+                source_row_index INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                patient_id INTEGER NOT NULL,
+                label INTEGER NOT NULL,
+                slide_id TEXT,
+                source_signature TEXT,
+                UNIQUE (source_hdf5_path, source_row_index)
+            );
+            CREATE TABLE patch_stage_state (
+                patch_id INTEGER PRIMARY KEY,
+                cleaning_decision TEXT,
+                contamination_rate REAL,
+                split TEXT,
+                normalization_method TEXT,
+                normalization_artifact_id INTEGER,
+                sampling_decision TEXT,
+                is_stage4_accepted INTEGER,
+                is_stage7_selected INTEGER,
+                last_updated_stage_name TEXT,
+                last_updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE normalization_artifacts (
+                normalization_artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                state_path TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                template_path TEXT,
+                template_sha256 TEXT,
+                fit_scope TEXT NOT NULL
+            );
+            """
+        )
+        for shard_path in shard_paths:
+            patient_id = int(shard_path.stem.replace("patient_", ""))
+            filenames = [f"p{patient_id}_{row_index}.png" for row_index in range(2)]
+            labels = [0, 1]
+            for row_index, (filename, label) in enumerate(zip(filenames, labels, strict=True)):
+                cursor = connection.execute(
+                    """
+                    INSERT INTO patches (
+                        source_hdf5_path, source_row_index, filename, patient_id, label, slide_id,
+                        source_signature
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(shard_path),
+                        row_index,
+                        filename,
+                        patient_id,
+                        label,
+                        f"slide_{patient_id}",
+                        f"sig_{patient_id}",
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO patch_stage_state (
+                        patch_id, split, normalization_method, normalization_artifact_id,
+                        is_stage4_accepted, is_stage7_selected, last_updated_stage_name
+                    ) VALUES (?, 'VALIDATION', 'NOT_NORMALIZED', NULL, 1, NULL, 'STAGE5')
+                    """,
+                    (cursor.lastrowid,),
+                )
+        connection.commit()
 
 
 class _ChannelFirstTransform:
@@ -208,188 +144,207 @@ class _ChannelLastTransform:
         }
 
 
-def test_setup_validation_shards_returns_layout_when_staging_disabled(tmp_path: Path) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
+@pytest.fixture
+def optimizer_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, list[Path]]:
+    monkeypatch.setattr(
+        "helpers.training.canonical_dataset.get_transforms",
+        lambda mode, img_size: _ChannelFirstTransform(),
+    )
+    shard_paths = [tmp_path / "PATCHES" / f"patient_{patient_id}.h5" for patient_id in (1, 2)]
+    _write_stage2_shard(
+        shard_paths[0],
+        patient_id=1,
+        pixel_values=[10, 20],
+        labels=[0, 1],
+        filenames=["p1_0.png", "p1_1.png"],
+    )
+    _write_stage2_shard(
+        shard_paths[1],
+        patient_id=2,
+        pixel_values=[30, 40],
+        labels=[1, 0],
+        filenames=["p2_0.png", "p2_1.png"],
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_master_manifest(master_manifest_path, shard_paths)
+    return master_manifest_path, shard_paths
 
-    result = optimizer_data.setup_validation_shards(
-        tmp_path / "source",
-        tmp_path / "local",
+
+def test_setup_validation_data_returns_layout_without_local_staging(
+    optimizer_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = optimizer_fixture
+
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
         stage_input_locally=False,
     )
 
-    assert result.shard_dir == layout.shard_dir
-    assert result.local_cache_dir is None
+    assert layout.master_manifest_path == master_manifest_path
+    assert layout.local_cache_dir is None
+    assert len(layout.records) == 4
 
 
-def test_setup_validation_shards_prepares_local_cache_when_staging_enabled(tmp_path: Path) -> None:
-    _write_validation_shards(tmp_path / "source")
-
-    result = optimizer_data.setup_validation_shards(
-        tmp_path / "source", tmp_path / "local", stage_input_locally=True
-    )
-
-    assert result.local_cache_dir == tmp_path / "local" / "patient_shards"
-    assert result.local_cache_dir.exists()
-
-
-def test_setup_validation_shards_raises_for_missing_shard_dir(tmp_path: Path) -> None:
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-
-    with pytest.raises(FileNotFoundError, match="Missing"):
-        optimizer_data.setup_validation_shards(
-            source_dir,
-            tmp_path / "local",
-            stage_input_locally=False,
-        )
-
-
-def test_collect_validation_shard_provenance_reads_shared_lineage(tmp_path: Path) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
-
-    provenance = optimizer_data.collect_validation_shard_provenance(layout)
-
-    assert provenance["attrs"]["source_hdf5_sha256"] == "stage5-sha"
-    assert provenance["attrs"]["upstream_source_signature"] == "stage2-sig"
-
-
-def test_decode_patient_id_handles_bytes_and_scalars() -> None:
-    assert optimizer_data._decode_patient_id(b"patient-1") == "patient-1"
-    assert optimizer_data._decode_patient_id(12) == "12"
-
-
-def test_validation_hdf5_dataset_builds_two_channel_mask(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_setup_validation_data_prepares_local_cache_when_enabled(
+    optimizer_fixture: tuple[Path, list[Path]],
 ) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
+    master_manifest_path, _shard_paths = optimizer_fixture
+
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=True,
     )
 
-    dataset = optimizer_data.ValidationHDF5Dataset(layout)
+    assert layout.local_cache_dir == master_manifest_path.parent / "local" / "patient_shards"
+    assert layout.local_cache_dir.exists()
+
+
+def test_collect_validation_provenance_reports_manifest_metadata(
+    optimizer_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
+    )
+
+    provenance = optimizer_data.collect_validation_provenance(layout)
+
+    assert provenance["master_manifest_path"] == str(master_manifest_path)
+    assert provenance["row_count"] == 4
+    assert provenance["shard_count"] == 2
+
+
+def test_validation_dataset_builds_two_channel_mask(
+    optimizer_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
+    )
+
+    dataset = optimizer_data.ValidationDataset(layout)
     image, mask, patient_id = cast(tuple[torch.Tensor, torch.Tensor, str], dataset[1])
 
     assert tuple(image.shape) == (3, 4, 4)
     assert tuple(mask.shape) == (2, 4, 4)
-    assert patient_id == "p2"
+    assert patient_id == "1"
     assert torch.equal(mask.sum(dim=0), torch.ones((4, 4), dtype=mask.dtype))
 
 
-def test_validation_hdf5_dataset_can_filter_to_allowed_patients(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_validation_dataset_can_filter_to_allowed_patients(
+    optimizer_fixture: tuple[Path, list[Path]],
 ) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
     )
 
-    dataset = optimizer_data.ValidationHDF5Dataset(layout, allowed_patients={"p2"})
+    dataset = optimizer_data.ValidationDataset(layout, allowed_patients={"2"})
 
-    assert len(dataset) == 1
+    assert len(dataset) == 2
     _image, _mask, patient_id = cast(tuple[torch.Tensor, torch.Tensor, str], dataset[0])
-    assert patient_id == "p2"
+    assert patient_id == "2"
 
 
-def test_validation_hdf5_dataset_uses_row_in_shard_for_multirow_patient_shards(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_validation_dataset_reads_canonical_rows_in_manifest_order(
+    optimizer_fixture: tuple[Path, list[Path]],
 ) -> None:
-    layout = _write_multirow_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
     )
 
-    dataset = optimizer_data.ValidationHDF5Dataset(layout)
-    first_image, first_mask, first_patient_id = cast(
+    dataset = optimizer_data.ValidationDataset(layout)
+    first_image, _first_mask, first_patient_id = cast(
         tuple[torch.Tensor, torch.Tensor, str], dataset[0]
     )
-    second_image, second_mask, second_patient_id = cast(
+    second_image, _second_mask, second_patient_id = cast(
         tuple[torch.Tensor, torch.Tensor, str], dataset[1]
     )
-    third_image, third_mask, third_patient_id = cast(
+    third_image, _third_mask, third_patient_id = cast(
         tuple[torch.Tensor, torch.Tensor, str], dataset[2]
     )
 
-    assert int(first_image[0, 0, 0]) == 20
-    assert int(second_image[0, 0, 0]) == 10
+    assert int(first_image[0, 0, 0]) == 10
+    assert int(second_image[0, 0, 0]) == 20
     assert int(third_image[0, 0, 0]) == 30
-    assert first_patient_id == "p1"
-    assert second_patient_id == "p1"
-    assert third_patient_id == "p2"
-    assert float(first_mask[1].sum()) == 4.0
-    assert float(second_mask[0].sum()) == 16.0
-    assert float(third_mask[1].sum()) == 16.0
+    assert first_patient_id == "1"
+    assert second_patient_id == "1"
+    assert third_patient_id == "2"
 
 
-def test_validation_hdf5_dataset_permute_branch_handles_hwc_mask_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_validation_dataset_permute_branch_handles_hwc_mask_output(
+    optimizer_fixture: tuple[Path, list[Path]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
+    master_manifest_path, _shard_paths = optimizer_fixture
     monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelLastTransform()
+        "helpers.training.canonical_dataset.get_transforms",
+        lambda mode, img_size: _ChannelLastTransform(),
+    )
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
     )
 
-    dataset = optimizer_data.ValidationHDF5Dataset(layout)
+    dataset = optimizer_data.ValidationDataset(layout)
     _image, mask, _patient_id = cast(tuple[torch.Tensor, torch.Tensor, str], dataset[0])
 
     assert tuple(mask.shape) == (2, 4, 4)
 
 
-def test_validation_hdf5_dataset_returns_none_triplet_when_transform_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_validation_dataset_returns_none_triplet_when_transform_fails(
+    optimizer_fixture: tuple[Path, list[Path]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FailingTransform:
         def __call__(
-            self,
-            *,
-            image: npt.NDArray[np.generic],
-            mask: npt.NDArray[np.generic],
+            self, *, image: npt.NDArray[np.generic], mask: npt.NDArray[np.generic]
         ) -> dict[str, torch.Tensor]:
             del image, mask
             raise RuntimeError("boom")
 
-    layout = _write_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(optimizer_data, "get_transforms", lambda mode, img_size: FailingTransform())
+    master_manifest_path, _shard_paths = optimizer_fixture
+    monkeypatch.setattr(
+        "helpers.training.canonical_dataset.get_transforms",
+        lambda mode, img_size: FailingTransform(),
+    )
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
+    )
 
-    dataset = optimizer_data.ValidationHDF5Dataset(layout)
+    dataset = optimizer_data.ValidationDataset(layout)
 
     assert dataset[0] == (None, None, None)
 
 
-def test_validation_hdf5_dataset_reopens_file_after_pid_change_or_shard_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_validation_dataset_state_reset_clears_open_handles(
+    optimizer_fixture: tuple[Path, list[Path]],
 ) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
-    )
-    registered: list[object] = []
-    monkeypatch.setattr(optimizer_data.atexit, "register", registered.append)  # type: ignore[attr-defined]
-    current_pid = {"value": 101}
-    monkeypatch.setattr(optimizer_data.os, "getpid", lambda: current_pid["value"])  # type: ignore[attr-defined]
-
-    dataset = optimizer_data.ValidationHDF5Dataset(layout)
-    _ = dataset[0]
-    first_handle = dataset.h5_file
-
-    current_pid["value"] = 102
-    dataset._open_file("VALIDATION_shards/p2.h5")
-
-    assert first_handle is not dataset.h5_file
-    assert dataset._opened_pid == 102
-    assert dataset._opened_shard_path is not None
-    assert dataset._opened_shard_path.endswith("p2.h5")
-    assert len(registered) == 1
-
-
-def test_validation_hdf5_dataset_state_reset_clears_open_handles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
     )
 
-    dataset = optimizer_data.ValidationHDF5Dataset(layout)
+    dataset = optimizer_data.ValidationDataset(layout)
     _ = dataset[0]
 
     state = dataset.__getstate__()
@@ -417,26 +372,32 @@ def test_collate_validation_batch_filters_invalid_items() -> None:
 
 
 def test_create_validation_dataloader_uses_expected_collate_and_worker_init(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    optimizer_fixture: tuple[Path, list[Path]],
 ) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
-    monkeypatch.setattr(
-        optimizer_data, "get_transforms", lambda mode, img_size: _ChannelFirstTransform()
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
     )
 
-    loader = optimizer_data.create_validation_dataloader(layout, batch_size=2, workers=0)
+    dataloader = optimizer_data.create_validation_dataloader(layout, batch_size=2, workers=0)
 
-    assert loader.batch_size == 2
-    assert loader.collate_fn is optimizer_data.collate_validation_batch
-    assert loader.worker_init_fn is optimizer_data.worker_init_fn  # type: ignore[attr-defined]
+    assert dataloader.collate_fn is optimizer_data.collate_validation_batch
+    assert dataloader.worker_init_fn is optimizer_data.worker_init_fn  # type: ignore[attr-defined]
 
 
-def test_summarize_validation_shards_returns_ordered_patients_and_positive_subset(
-    tmp_path: Path,
+def test_summarize_validation_data_preserves_patient_order_and_positive_labels(
+    optimizer_fixture: tuple[Path, list[Path]],
 ) -> None:
-    layout = _write_validation_shards(tmp_path / "source")
+    master_manifest_path, _shard_paths = optimizer_fixture
+    layout = optimizer_data.setup_validation_data(
+        master_manifest_path,
+        master_manifest_path.parent / "local",
+        stage_input_locally=False,
+    )
 
-    ordered_patients, positive_patients = optimizer_data.summarize_validation_shards(layout)
+    ordered_patients, positive_patients = optimizer_data.summarize_validation_data(layout)
 
-    assert ordered_patients == ["p1", "p2"]
-    assert positive_patients == {"p2"}
+    assert ordered_patients == ["1", "2"]
+    assert positive_patients == {"1", "2"}

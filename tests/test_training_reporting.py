@@ -29,7 +29,7 @@ def test_create_email_body_includes_checkpoint_and_encoder() -> None:
         beta_dice_bg=0.2,
         gamma_dice_fg=0.3,
         use_artifact_aware_loss=True,
-        artifact_index_path="/tmp/artifacts.parquet",
+        master_manifest_path="/tmp/master_manifest.sqlite",
         run_ohem=True,
         ohem_start_epoch=2,
         ohem_ratio=0.25,

@@ -31,6 +31,7 @@ def main() -> None:
         graph_params=config.graph_params,
         tau=config.tau,
         num_workers=config.num_workers,
+        master_manifest_path=config.master_manifest_path,
         logger=logger,
         progress_factory=lambda iterable: tqdm(
             iterable,

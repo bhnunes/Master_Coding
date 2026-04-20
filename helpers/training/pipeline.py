@@ -309,7 +309,7 @@ def finalize_training_artifacts(
         beta_dice_bg=float(save_metadata_kwargs.get("beta_dice_bg", 0.0)),
         gamma_dice_fg=float(save_metadata_kwargs.get("gamma_dice_fg", 0.0)),
         use_artifact_aware_loss=bool(save_metadata_kwargs.get("use_artifact_aware_loss", False)),
-        artifact_index_path=save_metadata_kwargs.get("artifact_index_path"),
+        master_manifest_path=save_metadata_kwargs.get("master_manifest_path"),
         run_ohem=bool(save_metadata_kwargs.get("run_ohem", False)),
         ohem_start_epoch=int(save_metadata_kwargs.get("ohem_start_epoch", 2)),
         ohem_ratio=float(save_metadata_kwargs.get("ohem_ratio", 0.25)),

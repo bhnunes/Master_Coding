@@ -11,9 +11,9 @@ import torch
 
 from helpers.ensemble_inference.config import EnsembleInferenceConfig
 from helpers.ensemble_inference.data import (
-    collect_test_shard_provenance,
+    collect_test_dataset_provenance,
     create_test_dataloader,
-    setup_test_shards,
+    setup_test_data,
 )
 from helpers.ensemble_inference.inference import analyze_ensemble_metrics, export_visualizations
 from helpers.ensemble_inference.models import load_recipe_models
@@ -54,21 +54,21 @@ def _validate_recipe_dataset_lineage(
         raise ValueError("Dataset lineage mismatch: test_dataset_provenance is missing attrs.")
 
     lineage_keys = (
-        "source_hdf5_sha256",
-        "upstream_source_signature",
-        "stage4_cleaning_manifest_sha256",
+        "master_manifest_sha256",
+        "normalization_method",
+        "normalization_artifact_id",
     )
     mismatches: list[str] = []
     for key in lineage_keys:
-        expected = validation_lineage.get(key)
-        if expected is None:
+        if key not in validation_lineage:
             raise ValueError(f"Recipe provenance mismatch: validation_lineage missing '{key}'.")
+        expected = validation_lineage.get(key)
         observed = observed_attrs.get(key)
         if observed != expected:
             mismatches.append(f"{key}: recipe={expected} test={observed}")
     if mismatches:
         raise ValueError(
-            "Dataset lineage mismatch between recipe validation provenance and TEST_shards: "
+            "Dataset lineage mismatch between recipe validation provenance and Stage 11 TEST rows: "
             + "; ".join(mismatches)
         )
 
@@ -101,7 +101,7 @@ def _prepare_output_dir(config: EnsembleInferenceConfig) -> Path:
 def _serialize_config(config: EnsembleInferenceConfig) -> dict[str, Any]:
     payload = asdict(config)
     payload["recipe_path"] = str(config.recipe_path)
-    payload["hdf5_drive_dir"] = str(config.hdf5_drive_dir)
+    payload["master_manifest_path"] = str(config.master_manifest_path)
     payload["output_dir"] = str(config.output_dir) if config.output_dir is not None else None
     payload["local_data_dir"] = str(config.local_data_dir)
     payload["log_folder"] = str(config.log_folder)
@@ -130,8 +130,8 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
     else:
         recipe_copy_path.write_text(json.dumps(recipe_payload, indent=2), encoding="utf-8")
 
-    test_layout = setup_test_shards(
-        config.hdf5_drive_dir,
+    test_layout = setup_test_data(
+        config.master_manifest_path,
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
     )
@@ -149,7 +149,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
                 "The on-disk checkpoint content no longer matches the recipe."
             )
 
-    test_dataset_provenance = collect_test_shard_provenance(test_layout)
+    test_dataset_provenance = collect_test_dataset_provenance(test_layout)
     _validate_recipe_dataset_lineage(recipe_payload, test_dataset_provenance)
     test_loader = create_test_dataloader(
         test_layout,
@@ -201,7 +201,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
             output_dir=output_dir,
             timestamp=timestamp,
             recipe_path=config.recipe_path,
-            dataset_dir=config.hdf5_drive_dir,
+            dataset_dir=config.master_manifest_path,
             seed=config.seed,
             batch_size=config.batch_size,
         )
@@ -241,8 +241,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         {
             "generated_at": timestamp,
             "runtime_environment": collect_runtime_environment(),
-            "test_shard_dir": str(test_layout.shard_dir),
-            "test_sample_manifest_path": str(test_layout.sample_manifest_path),
+            "test_master_manifest_path": str(test_layout.master_manifest_path),
             "test_dataset_provenance": test_dataset_provenance,
             "roi_threshold": recipe.roi_threshold,
             "decision_threshold": recipe.decision_threshold,

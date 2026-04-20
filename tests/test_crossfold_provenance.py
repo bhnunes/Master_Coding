@@ -45,7 +45,7 @@ def _split_data() -> dict[str, object]:
     }
 
 
-def test_build_hdf5_manifest_from_split_dfs_tracks_relative_hdf5_rows(tmp_path: Path) -> None:
+def test_build_hdf5_manifest_from_split_dfs_tracks_canonical_source_rows(tmp_path: Path) -> None:
     manifest_df = build_hdf5_manifest_from_split_dfs(
         output_dir=tmp_path,
         run_id="run-1",
@@ -54,16 +54,16 @@ def test_build_hdf5_manifest_from_split_dfs_tracks_relative_hdf5_rows(tmp_path: 
         split_data=_split_data(),
     )
 
-    assert manifest_df[["split", "relative_hdf5_path", "hdf5_row_index"]].to_dict("records") == [
+    assert manifest_df[["split", "source_row_index", "source_image_path"]].to_dict("records") == [
         {
             "split": "TRAIN",
-            "relative_hdf5_path": "TRAIN.h5",
-            "hdf5_row_index": 0,
+            "source_row_index": 0,
+            "source_image_path": "/src/p2.png",
         },
         {
             "split": "TRAIN",
-            "relative_hdf5_path": "TRAIN.h5",
-            "hdf5_row_index": 1,
+            "source_row_index": 1,
+            "source_image_path": "/src/p1.png",
         },
     ]
 

@@ -44,7 +44,7 @@ def _parse_optional_path(
 @dataclass(frozen=True)
 class EnsembleInferenceConfig:
     recipe_path: Path
-    hdf5_drive_dir: Path
+    master_manifest_path: Path
     output_dir: Path | None
     local_data_dir: Path
     stage_input_locally: bool
@@ -78,9 +78,9 @@ def load_ensemble_inference_config(
             "ENSEMBLE_INFER_RECIPE_PATH",
             system_name=system_name,
         ),
-        hdf5_drive_dir=_parse_required_path(
-            values.get("ENSEMBLE_INFER_HDF5_DRIVE_DIR"),
-            "ENSEMBLE_INFER_HDF5_DRIVE_DIR",
+        master_manifest_path=_parse_required_path(
+            values.get("ENSEMBLE_INFER_MASTER_MANIFEST_PATH"),
+            "ENSEMBLE_INFER_MASTER_MANIFEST_PATH",
             system_name=system_name,
         ),
         output_dir=_parse_optional_path(

@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import h5py
-import numpy as np
 import pytest
 
 from helpers.ensemble_inference.config import EnsembleInferenceConfig
@@ -18,7 +16,7 @@ from helpers.ensemble_inference.pipeline import (
 def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> None:
     config = EnsembleInferenceConfig(
         recipe_path=tmp_path / "recipe.json",
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
         stage_input_locally=False,
@@ -90,7 +88,7 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
     )
     config = EnsembleInferenceConfig(
         recipe_path=recipe_path,
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
         stage_input_locally=False,
@@ -110,20 +108,22 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
         "_Layout",
         (),
         {
-            "shard_dir": tmp_path / "dataset" / "TEST_shards",
-            "sample_manifest_path": tmp_path
-            / "dataset"
-            / "TEST_shards"
-            / "sample_manifest.parquet",
+            "master_manifest_path": tmp_path / "master_manifest.sqlite",
         },
     )()
     monkeypatch.setattr(
-        "helpers.ensemble_inference.pipeline.setup_test_shards",
+        "helpers.ensemble_inference.pipeline.setup_test_data",
         lambda *args, **kwargs: test_layout,
     )
     monkeypatch.setattr(
-        "helpers.ensemble_inference.pipeline.collect_test_shard_provenance",
-        lambda layout: {"attrs": {}},
+        "helpers.ensemble_inference.pipeline.collect_test_dataset_provenance",
+        lambda layout: {
+            "attrs": {
+                "master_manifest_sha256": "manifest-sha",
+                "normalization_method": "none",
+                "normalization_artifact_id": None,
+            }
+        },
     )
 
     with pytest.raises(ValueError, match="Checkpoint provenance mismatch"):
@@ -156,36 +156,24 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
                     "validation": {
                         "sha256": "validation-sha",
                         "attrs": {
-                            "source_hdf5_sha256": "stage5-sha",
-                            "upstream_source_signature": "stage2-sig",
-                            "stage4_cleaning_manifest_sha256": "clean-sha",
+                            "master_manifest_sha256": "manifest-sha",
+                            "normalization_method": "none",
+                            "normalization_artifact_id": None,
                         },
                     },
                     "validation_lineage": {
-                        "source_hdf5_sha256": "stage5-sha",
-                        "upstream_source_signature": "stage2-sig",
-                        "stage4_cleaning_manifest_sha256": "clean-sha",
+                        "master_manifest_sha256": "manifest-sha",
+                        "normalization_method": "none",
+                        "normalization_artifact_id": None,
                     },
                 },
             }
         ),
         encoding="utf-8",
     )
-    test_shard_path = tmp_path / "dataset" / "TEST_shards" / "1.h5"
-    test_shard_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(test_shard_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
-        handle.create_dataset("filenames", data=np.array([b"PATIENT_1.png"]))
-        handle.attrs["source_hdf5_sha256"] = "other-stage5-sha"
-        handle.attrs["upstream_source_signature"] = "stage2-sig"
-        handle.attrs["stage4_cleaning_manifest_sha256"] = "clean-sha"
-
     config = EnsembleInferenceConfig(
         recipe_path=recipe_path,
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "cache",
         stage_input_locally=False,
@@ -202,26 +190,22 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        "helpers.ensemble_inference.pipeline.setup_test_shards",
+        "helpers.ensemble_inference.pipeline.setup_test_data",
         lambda *args, **kwargs: type(
             "_Layout",
             (),
             {
-                "shard_dir": tmp_path / "dataset" / "TEST_shards",
-                "sample_manifest_path": tmp_path
-                / "dataset"
-                / "TEST_shards"
-                / "sample_manifest.parquet",
+                "master_manifest_path": tmp_path / "master_manifest.sqlite",
             },
         )(),
     )
     monkeypatch.setattr(
-        "helpers.ensemble_inference.pipeline.collect_test_shard_provenance",
+        "helpers.ensemble_inference.pipeline.collect_test_dataset_provenance",
         lambda layout: {
             "attrs": {
-                "source_hdf5_sha256": "other-stage5-sha",
-                "upstream_source_signature": "stage2-sig",
-                "stage4_cleaning_manifest_sha256": "clean-sha",
+                "master_manifest_sha256": "other-manifest-sha",
+                "normalization_method": "none",
+                "normalization_artifact_id": None,
             }
         },
     )
@@ -233,4 +217,93 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
     )
 
     with pytest.raises(ValueError, match="Dataset lineage mismatch"):
+        _execute_pipeline(config)
+
+
+def test_execute_pipeline_rejects_missing_validation_lineage_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_path = tmp_path / "model.pth"
+    checkpoint_path.write_bytes(b"model-v1")
+    recipe_path = tmp_path / "recipe.json"
+    recipe_path.write_text(
+        json.dumps(
+            {
+                "ensemble_strategy": "two_stream_spatial_gating",
+                "roi_config": {"threshold": 0.33, "scale": 4},
+                "decision_config": {"threshold": 0.57},
+                "model_registry": [
+                    {
+                        "architecture": "SWIN",
+                        "encoder": "enc-a",
+                        "checkpoint_path": str(checkpoint_path),
+                        "stream_role": "semantic",
+                        "weight": 1.0,
+                        "checkpoint_sha256": "ok-hash",
+                    }
+                ],
+                "provenance": {
+                    "validation": {
+                        "sha256": "validation-sha",
+                        "attrs": {
+                            "master_manifest_sha256": "manifest-sha",
+                            "normalization_method": "none",
+                            "normalization_artifact_id": None,
+                        },
+                    },
+                    "validation_lineage": {
+                        "master_manifest_sha256": "manifest-sha",
+                        "normalization_method": "none",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = EnsembleInferenceConfig(
+        recipe_path=recipe_path,
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
+        output_dir=tmp_path / "reports",
+        local_data_dir=tmp_path / "cache",
+        stage_input_locally=False,
+        overwrite_output=True,
+        batch_size=8,
+        workers=1,
+        seed=24,
+        visualization_samples=0,
+        export_csv=False,
+        export_latex=False,
+        export_visualizations=False,
+    )
+    assert config.output_dir is not None
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.setup_test_data",
+        lambda *args, **kwargs: type(
+            "_Layout",
+            (),
+            {
+                "master_manifest_path": tmp_path / "master_manifest.sqlite",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.collect_test_dataset_provenance",
+        lambda layout: {
+            "attrs": {
+                "master_manifest_sha256": "manifest-sha",
+                "normalization_method": "none",
+                "normalization_artifact_id": None,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.hash_file_sha256",
+        lambda path: (
+            "ok-hash" if Path(path) == checkpoint_path or Path(path) == recipe_path else "other"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="validation_lineage missing 'normalization_artifact_id'"):
         _execute_pipeline(config)

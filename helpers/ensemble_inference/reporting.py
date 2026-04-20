@@ -144,13 +144,13 @@ def export_results_to_csv(
     output_dir.mkdir(parents=True, exist_ok=True)
     filepath = output_dir / f"FINAL_EVALUATION_REPORT_{timestamp}.csv"
     config_data = {
-        "Parameter": [
-            "Experiment Datetime",
-            "Ensemble Recipe Path",
-            "Dataset ZIP Directory",
-            "Evaluation Set",
-            "Random Seed",
-            "Batch Size",
+            "Parameter": [
+                "Experiment Datetime",
+                "Ensemble Recipe Path",
+                "Master Manifest Path",
+                "Evaluation Set",
+                "Random Seed",
+                "Batch Size",
             "ROI Gate Threshold",
             "Decision Threshold",
         ],

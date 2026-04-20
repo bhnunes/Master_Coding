@@ -10,7 +10,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from helpers.extraction.artifact_index import ArtifactIndexWriter
 from helpers.extraction.artifact_lookup import (
     GeoJsonLookup,
     build_processing_signature,
@@ -23,6 +22,7 @@ from helpers.extraction.image_reader_service import (
     load_slide_runtime_settings,
     run_slide_processing,
 )
+from helpers.extraction.master_manifest import MasterManifest
 from helpers.extraction.repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
 from helpers.extraction.staging import stage_wsi_locally
 from helpers.logging_utils import configure_root_logger
@@ -204,6 +204,8 @@ def main_process() -> None:
     )
     logger.info("Stage 2 log file: %s", config.log_path)
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
+    master_manifest = MasterManifest(config.master_manifest_path)
+    master_manifest.initialize()
     folders, setup_needed = ensure_project_is_initialized(
         repository,
         config.source_folder,
@@ -274,78 +276,87 @@ def main_process() -> None:
         return
 
     print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.ROCKET} STARTING PROCESSING ---{Style.RESET}")
-    artifact_index_writer = ArtifactIndexWriter(
-        config.patch_base_path / "artifact_patch_index.parquet"
-    )
-
-    try:
-        with suppress_console_logging(logger):
-            with tqdm(
-                total=len(cases_to_process), desc=f"{Style.CYAN}Processing WSI slides{Style.RESET}"
-            ) as progress_bar:
-                for case in cases_to_process:
-                    progress_bar.set_description(
-                        f"Processing: {Style.CYAN}{case.image_path.name}{Style.RESET}"
-                    )
-                    if case.annotation_path is None:
-                        progress_bar.update(1)
-                        continue
-
-                    repository.mark_processing(case.record_id)
-                    started_at = time.perf_counter()
-                    artifacts_geojson_path = resolve_artifacts_geojson(
-                        case,
-                        config,
-                        geojson_lookup=geojson_lookup,
-                    )
-                    processing_signature = build_processing_signature_for_case(
-                        case,
-                        config,
-                        runtime_settings,
-                        artifacts_geojson_path=artifacts_geojson_path,
-                    )
-                    with stage_wsi_locally(
-                        source_path=case.image_path,
-                        cache_dir=(
-                            config.local_slide_cache_dir if config.copy_wsi_to_local_cache else None
-                        ),
-                        patient_id=case.patient,
-                    ) as staged_image_path:
-                        result = run_slide_processing(
-                            build_slide_request(
-                                case,
-                                config,
-                                runtime_settings,
-                                image_path=staged_image_path,
-                                artifacts_geojson_path=artifacts_geojson_path,
-                            )
-                        )
-                    artifact_index_writer.append_records(result.artifact_patch_records)
-                    elapsed_minutes = (time.perf_counter() - started_at) / 60
-                    repository.update_case(
-                        case.record_id,
-                        CaseUpdate(
-                            cancer_qtd=result.cancer_patches_created,
-                            non_cancer_qtd=result.not_cancer_patches_created,
-                            exec_time_minutes=elapsed_minutes,
-                            comments=result.comments[-240:],
-                            status=result.status,
-                            window_size=config.window_size,
-                            stride=config.stride,
-                            match_percentage=config.match_percentage,
-                            tissue_percentage=config.tissue_percentage,
-                            processing_signature=processing_signature,
-                        ),
-                    )
+    with suppress_console_logging(logger):
+        with tqdm(
+            total=len(cases_to_process), desc=f"{Style.CYAN}Processing WSI slides{Style.RESET}"
+        ) as progress_bar:
+            for case in cases_to_process:
+                progress_bar.set_description(
+                    f"Processing: {Style.CYAN}{case.image_path.name}{Style.RESET}"
+                )
+                if case.annotation_path is None:
                     progress_bar.update(1)
-                    progress_bar.set_postfix(
-                        cancer=result.cancer_patches_created,
-                        non_cancer=result.not_cancer_patches_created,
-                        artifact_rows=len(result.artifact_patch_records),
-                        status=result.status,
+                    continue
+
+                repository.mark_processing(case.record_id)
+                started_at = time.perf_counter()
+                artifacts_geojson_path = resolve_artifacts_geojson(
+                    case,
+                    config,
+                    geojson_lookup=geojson_lookup,
+                )
+                processing_signature = build_processing_signature_for_case(
+                    case,
+                    config,
+                    runtime_settings,
+                    artifacts_geojson_path=artifacts_geojson_path,
+                )
+                slide_request = build_slide_request(
+                    case,
+                    config,
+                    runtime_settings,
+                    artifacts_geojson_path=artifacts_geojson_path,
+                )
+                with stage_wsi_locally(
+                    source_path=case.image_path,
+                    cache_dir=(
+                        config.local_slide_cache_dir if config.copy_wsi_to_local_cache else None
+                    ),
+                    patient_id=case.patient,
+                ) as staged_image_path:
+                    result = run_slide_processing(
+                        build_slide_request(
+                            case,
+                            config,
+                            runtime_settings,
+                            image_path=staged_image_path,
+                            artifacts_geojson_path=artifacts_geojson_path,
+                        )
                     )
-    finally:
-        artifact_index_writer.close()
+                if slide_request.hdf5_output_path is not None:
+                    master_manifest.replace_stage2_slide_rows(
+                        source_hdf5_path=slide_request.hdf5_output_path,
+                        records=result.artifact_patch_records,
+                        source_slide_path=case.image_path,
+                        annotation_path=case.annotation_path,
+                        artifacts_geojson_path=artifacts_geojson_path,
+                        stage2_case_record_id=case.record_id,
+                        stage2_processing_signature=processing_signature,
+                        stage2_status=result.status,
+                    )
+                elapsed_minutes = (time.perf_counter() - started_at) / 60
+                repository.update_case(
+                    case.record_id,
+                    CaseUpdate(
+                        cancer_qtd=result.cancer_patches_created,
+                        non_cancer_qtd=result.not_cancer_patches_created,
+                        exec_time_minutes=elapsed_minutes,
+                        comments=result.comments[-240:],
+                        status=result.status,
+                        window_size=config.window_size,
+                        stride=config.stride,
+                        match_percentage=config.match_percentage,
+                        tissue_percentage=config.tissue_percentage,
+                        processing_signature=processing_signature,
+                    ),
+                )
+                progress_bar.update(1)
+                progress_bar.set_postfix(
+                    cancer=result.cancer_patches_created,
+                    non_cancer=result.not_cancer_patches_created,
+                    artifact_rows=len(result.artifact_patch_records),
+                    status=result.status,
+                )
 
 
 if __name__ == "__main__":

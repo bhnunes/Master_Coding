@@ -77,16 +77,16 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
         validation_provenance={
             "sha256": "val-sha",
             "attrs": {
-                "source_hdf5_sha256": "stage5-sha",
-                "upstream_source_signature": "stage2-sig",
-                "stage4_cleaning_manifest_sha256": "clean-sha",
+                "master_manifest_sha256": "manifest-sha",
+                "normalization_method": "none",
+                "normalization_artifact_id": None,
             },
         },
         split_fingerprint="split-sha",
     )
 
     assert payload["provenance"]["validation_lineage"] == {
-        "source_hdf5_sha256": "stage5-sha",
-        "upstream_source_signature": "stage2-sig",
-        "stage4_cleaning_manifest_sha256": "clean-sha",
+        "master_manifest_sha256": "manifest-sha",
+        "normalization_method": "none",
+        "normalization_artifact_id": None,
     }

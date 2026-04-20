@@ -8,7 +8,9 @@ from helpers.training.config import load_training_ensemble_config
 def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path) -> None:
     config = load_training_ensemble_config(
         {
-            "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "projects" / "camelyon16"),
+            "TRAINING_MASTER_MANIFEST_PATH": str(
+                tmp_path / "projects" / "camelyon16" / "master_manifest.sqlite"
+            ),
             "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
             "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
             "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
@@ -31,11 +33,12 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
             "TRAINING_OHEM_START_EPOCH": "3",
             "TRAINING_OHEM_RATIO": "0.4",
             "TRAINING_OHEM_MIN_KEPT": "2048",
-            "TRAINING_ARTIFACT_INDEX_PATH": str(tmp_path / "artifact_patch_index.parquet"),
         }
     )
 
-    assert config.hdf5_drive_dir == tmp_path / "projects" / "camelyon16"
+    assert config.master_manifest_path == (
+        tmp_path / "projects" / "camelyon16" / "master_manifest.sqlite"
+    )
     assert config.metadata_dir == tmp_path / "metadata"
     assert config.checkpoint_path == tmp_path / "checkpoints"
     assert config.aim_repo_path == tmp_path / "aim"
@@ -58,14 +61,13 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.ohem_ratio == 0.4
     assert config.ohem_min_kept == 2048
     assert config.use_artifact_aware_loss is True
-    assert config.artifact_index_path == tmp_path / "artifact_patch_index.parquet"
     assert config.log_path == Path("logs/training_ensemble.log")
 
 
 def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) -> None:
     config = load_training_ensemble_config(
         {
-            "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+            "TRAINING_MASTER_MANIFEST_PATH": str(tmp_path / "dataset" / "master_manifest.sqlite"),
             "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
             "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
             "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
@@ -84,7 +86,7 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.ohem_ratio == 0.25
     assert config.ohem_min_kept == 1024
     assert config.use_artifact_aware_loss is False
-    assert config.artifact_index_path is None
+    assert config.master_manifest_path == tmp_path / "dataset" / "master_manifest.sqlite"
     assert config.log_path == Path("logs/training_ensemble.log")
 
 
@@ -92,7 +94,9 @@ def test_load_training_ensemble_config_rejects_invalid_execution_mode(tmp_path: 
     with pytest.raises(ValueError, match="TRAINING_EXECUTION_MODE"):
         load_training_ensemble_config(
             {
-                "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+                "TRAINING_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
                 "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
                 "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
                 "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
@@ -102,7 +106,7 @@ def test_load_training_ensemble_config_rejects_invalid_execution_mode(tmp_path: 
 
 
 def test_load_training_ensemble_config_requires_dataset_path() -> None:
-    with pytest.raises(ValueError, match="TRAINING_HDF5_DRIVE_DIR"):
+    with pytest.raises(ValueError, match="TRAINING_MASTER_MANIFEST_PATH"):
         load_training_ensemble_config({})
 
 
@@ -110,7 +114,9 @@ def test_load_training_ensemble_config_rejects_unapproved_encoder(tmp_path: Path
     with pytest.raises(ValueError, match="TRAINING_ENCODER"):
         load_training_ensemble_config(
             {
-                "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+                "TRAINING_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
                 "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
                 "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
                 "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
@@ -123,7 +129,7 @@ def test_load_training_ensemble_config_rejects_unapproved_encoder(tmp_path: Path
 def test_load_training_ensemble_config_accepts_research_approved_pair(tmp_path: Path) -> None:
     config = load_training_ensemble_config(
         {
-            "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+            "TRAINING_MASTER_MANIFEST_PATH": str(tmp_path / "dataset" / "master_manifest.sqlite"),
             "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
             "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
             "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
@@ -140,7 +146,9 @@ def test_load_training_ensemble_config_rejects_invalid_ohem_ratio(tmp_path: Path
     with pytest.raises(ValueError, match="TRAINING_OHEM_RATIO"):
         load_training_ensemble_config(
             {
-                "TRAINING_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+                "TRAINING_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
                 "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
                 "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
                 "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),

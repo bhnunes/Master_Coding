@@ -12,7 +12,7 @@ from helpers.lr_finder.runner import ScreeningOutputs
 def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None:
     output_dir = tmp_path / "reports"
     config = LRFinderConfig(
-        hdf5_drive_dir=tmp_path / "h5",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
         output_dir=output_dir,
         local_data_dir=tmp_path / "local",
         stage_input_locally=False,

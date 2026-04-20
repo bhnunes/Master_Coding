@@ -8,9 +8,8 @@ from pathlib import Path
 import pandas as pd
 
 from helpers.crossfold.config import CrossfoldConfig
-from helpers.crossfold.discovery import load_patch_dataset
+from helpers.crossfold.discovery import collect_source_dataset_provenance, load_patch_dataset
 from helpers.crossfold.entropy import compute_all_patch_entropies
-from helpers.crossfold.io import verify_split_hdf5_integrity, write_split_hdf5
 from helpers.crossfold.logging import configure_crossfold_logging
 from helpers.crossfold.normalization import fit_normalizer_on_train_set, save_normalizer_stats
 from helpers.crossfold.provenance import (
@@ -18,8 +17,7 @@ from helpers.crossfold.provenance import (
     write_manifest_and_log_stats,
 )
 from helpers.crossfold.splitting import create_train_val_test_split_best
-from helpers.provenance import collect_hdf5_provenance
-from helpers.stage_contracts import STAGE5_SINGLETON_SPLIT_FILES
+from helpers.extraction.master_manifest import STAGE5_STAGE_NAME, MasterManifest
 
 
 @dataclass(frozen=True)
@@ -30,6 +28,12 @@ class CrossfoldRunSummary:
 
 def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     """Run the full Stage 5 split-generation and optional normalization workflow."""
+
+    if config.source_path.suffix.lower() != ".sqlite":
+        raise ValueError(
+            "Native Stage 5 now requires CROSSFOLD_SOURCE_HDF5_PATH to point to "
+            "master_manifest.sqlite."
+        )
 
     output_dir = config.output_run_dir
     if output_dir.exists():
@@ -48,8 +52,8 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     logging.info("Objective: %s", asdict(config.objective))
     logging.info("Output: %s", output_dir)
 
-    source_hdf5_provenance = collect_hdf5_provenance(config.source_hdf5_path)
-    dataset = load_patch_dataset(config.source_hdf5_path)
+    source_dataset_provenance = collect_source_dataset_provenance(config.source_path)
+    dataset = load_patch_dataset(config.source_path)
     split_data = create_train_val_test_split_best(
         df=dataset,
         random_state=config.random_state,
@@ -91,22 +95,6 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         "VALIDATION": split_data["val_df"],
         "TEST": split_data["test_df"],
     }
-    for split_name, output_file_name in STAGE5_SINGLETON_SPLIT_FILES.items():
-        split_df = split_frames[split_name]
-        if split_df.empty:
-            continue
-        output_path = write_split_hdf5(
-            split_df=split_df,
-            source_hdf5_path=config.source_hdf5_path,
-            output_path=output_dir / output_file_name,
-            normalizer=normalizer,
-            normalization_method=config.normalization_method,
-            source_hdf5_provenance=source_hdf5_provenance,
-            hdf5_compression=config.hdf5_compression,
-            copy_batch_size=config.copy_batch_size,
-            overwrite=True,
-        )
-        verify_split_hdf5_integrity(output_path, split_df)
 
     extra: dict[str, object] = {}
     extra["split_selection"] = {
@@ -124,15 +112,65 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         run_id=run_id,
         normalization_method=config.normalization_method,
         is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
-        source_hdf5_path=config.source_hdf5_path,
+        source_hdf5_path=config.source_path,
         split_data=split_data,
         manifest_df=manifest_df,
         calc_checksums=config.calc_checksums,
-        source_hdf5_provenance=source_hdf5_provenance,
+        source_hdf5_provenance=source_dataset_provenance,
         extra=extra,
+    )
+    _persist_stage5_split_state(
+        master_manifest_path=config.source_path,
+        split_frames=split_frames,
+        normalization_method=config.normalization_method,
+        output_dir=output_dir,
     )
     logging.info("=== DONE ===")
     return CrossfoldRunSummary(
         output_dir=output_dir,
         manifest_rows=len(manifest_df),
+    )
+
+
+def _persist_stage5_split_state(
+    *,
+    master_manifest_path: Path,
+    split_frames: dict[str, pd.DataFrame],
+    normalization_method: str,
+    output_dir: Path,
+) -> None:
+    master_manifest = MasterManifest(master_manifest_path)
+    run_id = master_manifest.create_run(
+        stage_name=STAGE5_STAGE_NAME,
+        config_path=output_dir / "run_config.json",
+    )
+    normalization_artifact_id: int | None = None
+    if normalization_method != "NOT_NORMALIZED":
+        normalization_artifact_id = master_manifest.create_normalization_artifact(
+            run_id=run_id,
+            method=normalization_method,
+            state_path=output_dir / "normalization_stats.json",
+            template_path=output_dir / "normalization_templates",
+            fit_scope="TRAIN",
+        )
+
+    assignments: list[dict[str, object]] = []
+    for split_name, split_df in split_frames.items():
+        if split_df.empty:
+            continue
+        for row in split_df.itertuples(index=False):
+            assignments.append(
+                {
+                    "split": split_name,
+                    "filename": row.filename,
+                    "patient_id": int(row.patient_id),
+                    "label": int(row.label),
+                    "source_hdf5_path": str(row.source_hdf5_path),
+                    "source_row_index": int(row.source_row_index),
+                }
+            )
+    master_manifest.update_stage5_split_assignments(
+        assignments=assignments,
+        normalization_method=normalization_method,
+        normalization_artifact_id=normalization_artifact_id,
     )

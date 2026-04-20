@@ -71,6 +71,10 @@ class DatabaseManagerConfig:
         return self.base_path / "PATCHES"
 
     @property
+    def master_manifest_path(self) -> Path:
+        return self.base_path / "master_manifest.sqlite"
+
+    @property
     def log_path(self) -> Path:
         return self.log_folder / self.log_file_name
 

@@ -30,7 +30,7 @@ def create_email_body(
     beta_dice_bg: float,
     gamma_dice_fg: float,
     use_artifact_aware_loss: bool,
-    artifact_index_path: str | PathLike[str] | None,
+    master_manifest_path: str | PathLike[str] | None,
     run_ohem: bool,
     ohem_start_epoch: int,
     ohem_ratio: float,
@@ -42,8 +42,8 @@ def create_email_body(
     whether a run used artifact-aware discounting, OHEM, or both.
     """
 
-    artifact_index_display = (
-        os.fspath(artifact_index_path) if artifact_index_path is not None else "n/a"
+    master_manifest_display = (
+        os.fspath(master_manifest_path) if master_manifest_path is not None else "n/a"
     )
     artifact_mode_display = "enabled" if use_artifact_aware_loss else "disabled"
     ohem_mode_display = "enabled" if run_ohem else "disabled"
@@ -64,7 +64,7 @@ def create_email_body(
         f"loss_beta_dice_bg: {beta_dice_bg}\n"
         f"loss_gamma_dice_fg: {gamma_dice_fg}\n"
         f"artifact_aware_loss: {artifact_mode_display}\n"
-        f"artifact_index_path: {artifact_index_display}\n"
+        f"master_manifest_path: {master_manifest_display}\n"
         f"run_ohem: {ohem_mode_display}\n"
         f"ohem_start_epoch: {ohem_start_epoch}\n"
         f"ohem_ratio: {ohem_ratio}\n"

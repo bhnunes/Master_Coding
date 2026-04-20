@@ -4,25 +4,34 @@ import atexit
 import json
 import os
 import shutil
+import sqlite3
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-import albumentations as A
-import cv2
 import h5py
 import numpy as np
 import numpy.typing as npt
 import psutil
 import pyarrow.parquet as pq
 import torch
-from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataloader import default_collate
 
 from helpers.patient_shard_cache import PatientShardCache
 from helpers.provenance import hash_file_sha256, hash_json_payload
+from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
+from helpers.training.master_manifest_queries import (
+    CanonicalRowRecord,
+    load_training_records,
+    load_validation_records,
+)
+from helpers.training.stain_normalization import (
+    build_split_stain_normalizer,
+    normalize_runtime_method_name,
+)
 
 NumericArray = npt.NDArray[np.generic]
 ArtifactCoverageLookup = dict[str, tuple[float, float, float, float, float]]
@@ -54,32 +63,38 @@ def _get_filenames_dataset(handle: h5py.File) -> Any:
     )
 
 
-def load_artifact_coverage_lookup(parquet_path: str) -> ArtifactCoverageLookup:
-    """Load filename-keyed artifact coverage vectors from Parquet."""
+def load_artifact_coverage_lookup(master_manifest_path: str) -> ArtifactCoverageLookup:
+    """Load filename-keyed artifact coverage vectors from `master_manifest.sqlite`."""
 
-    parquet_file = pq.ParquetFile(parquet_path)
-    available_columns = set(parquet_file.schema.names)
-    selected_columns = [
-        "filename",
-        *[c for c in ARTIFACT_COVERAGE_COLUMNS if c in available_columns],
-    ]
-    table = parquet_file.read(columns=selected_columns)
-    data = table.to_pydict()
-    filenames = data.pop("filename", [])
+    manifest_path = Path(master_manifest_path)
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Master manifest does not exist: {manifest_path}")
+
+    with sqlite3.connect(manifest_path) as connection:
+        rows = connection.execute(
+            "SELECT filename, cov_fold, cov_penmarking, cov_oof, "
+            "cov_darkspot_foreign, cov_edge_airbubble FROM patches"
+        ).fetchall()
+
     lookup: ArtifactCoverageLookup = {}
-    for index, filename in enumerate(filenames):
-        lookup[str(filename)] = cast(
-            tuple[float, float, float, float, float],
-            tuple(
-                float((data.get(column_name) or [0.0] * len(filenames))[index] or 0.0)
-                for column_name in ARTIFACT_COVERAGE_COLUMNS
-            ),
+    for row in rows:
+        filename, cov_fold, cov_penmarking, cov_oof, cov_darkspot_foreign, cov_edge_airbubble = row
+        lookup[str(filename)] = (
+            float(cov_fold or 0.0),
+            float(cov_penmarking or 0.0),
+            float(cov_oof or 0.0),
+            float(cov_darkspot_foreign or 0.0),
+            float(cov_edge_airbubble or 0.0),
         )
     return lookup
 
 
-def get_transforms(mode: str = "train", img_size: int = 224) -> A.Compose:
+def get_transforms(mode: str = "train", img_size: int = 224) -> Any:
     """Return the existing augmentation pipeline for train or validation."""
+
+    import albumentations as A
+    import cv2
+    from albumentations.pytorch import ToTensorV2
 
     if mode == "train":
         return A.Compose(
@@ -526,6 +541,53 @@ class SubsetView(Dataset[Any]):
         return list(patient_ids[self.indices].tolist())
 
 
+@dataclass(frozen=True)
+class PreparedTrainingData:
+    train_dataset: Dataset[Any]
+    validation_dataset: Dataset[Any]
+    sample_weights: torch.Tensor
+    source_split_name: str
+    training_provenance: dict[str, Any]
+    validation_provenance: dict[str, Any]
+
+
+class ArtifactAwareDatasetView(Dataset[Any]):
+    """Append filename-keyed artifact covariates to a base dataset item."""
+
+    def __init__(
+        self,
+        base_dataset: CanonicalRowHDF5Dataset,
+        artifact_coverage_by_filename: ArtifactCoverageLookup,
+    ) -> None:
+        self.base_dataset = base_dataset
+        self.artifact_coverage_by_filename = artifact_coverage_by_filename
+
+    def __len__(self) -> int:
+        return len(self.base_dataset)
+
+    def __getitem__(self, index: int) -> Any:
+        image, mask = self.base_dataset[index]
+        filename = str(self.base_dataset.filenames[index])
+        artifact_covariates = torch.tensor(
+            self.artifact_coverage_by_filename.get(filename, ZERO_ARTIFACT_COVERAGE),
+            dtype=torch.float32,
+        )
+        return image, mask, artifact_covariates
+
+    def get_labels(self) -> np.ndarray[Any, np.dtype[np.int64]]:
+        return self.base_dataset.get_labels()
+
+    def get_patient_ids(self) -> np.ndarray[Any, np.dtype[np.str_]]:
+        return self.base_dataset.get_patient_ids()
+
+    def close(self) -> None:
+        self.base_dataset.close()
+
+    @property
+    def records(self) -> list[CanonicalRowRecord]:
+        return self.base_dataset.records
+
+
 def verify_patient_separation(train_dataset: Any, val_dataset: Any) -> None:
     """Ensure train and validation splits do not share patients."""
 
@@ -541,6 +603,150 @@ def verify_patient_separation(train_dataset: Any, val_dataset: Any) -> None:
             f"CRITICAL DATA LEAKAGE: Patients {intersection} found in both Train and Val!"
         )
     print("Patient separation verified.")
+
+
+def collect_manifest_split_provenance(
+    master_manifest_path: Path,
+    *,
+    records: Sequence[CanonicalRowRecord],
+    split: str,
+    smart_sampling: bool,
+) -> dict[str, Any]:
+    normalization_methods = sorted(
+        {normalize_runtime_method_name(record.normalization_method) for record in records}
+    )
+    return {
+        "path": str(master_manifest_path),
+        "master_manifest_path": str(master_manifest_path),
+        "master_manifest_sha256": hash_file_sha256(master_manifest_path),
+        "split": split,
+        "row_count": len(records),
+        "shard_count": len({str(record.source_hdf5_path) for record in records}),
+        "smart_sampling": smart_sampling,
+        "selection_mode": "stage7_selected" if smart_sampling else "all_stage4_accepted",
+        "normalization_methods": normalization_methods,
+    }
+
+
+def prepare_training_data(
+    *,
+    master_manifest_path: Path,
+    local_data_dir: Path,
+    smart_sampling: bool,
+    use_subset: bool,
+    subset_ratio: float,
+    seed: int,
+    use_artifact_aware_loss: bool,
+) -> PreparedTrainingData:
+    if local_data_dir.exists():
+        shutil.rmtree(local_data_dir)
+    local_data_dir.mkdir(parents=True, exist_ok=True)
+
+    training_records = load_training_records(
+        master_manifest_path,
+        smart_sampling=smart_sampling,
+    )
+    validation_records = load_validation_records(master_manifest_path)
+    source_split_name = "TRAIN_SELECTED" if smart_sampling else "TRAIN"
+    artifact_coverage_by_filename = (
+        load_artifact_coverage_lookup(str(master_manifest_path))
+        if use_artifact_aware_loss
+        else None
+    )
+
+    train_records_for_dataset = tuple(training_records)
+    validation_records_for_dataset = tuple(validation_records)
+    if use_subset and subset_ratio < 1.0:
+        train_subset_source = CanonicalRowHDF5Dataset(
+            CanonicalDatasetLayout(records=train_records_for_dataset, local_cache_dir=None),
+            mode="train",
+            mask_mode="raw",
+        )
+        validation_subset_source = CanonicalRowHDF5Dataset(
+            CanonicalDatasetLayout(records=validation_records_for_dataset, local_cache_dir=None),
+            mode="val",
+            mask_mode="raw",
+        )
+        train_subset = create_stratified_subset_within_patients(
+            train_subset_source,
+            subset_ratio,
+            "train",
+            seed=seed,
+        )
+        validation_subset = create_stratified_subset_within_patients(
+            validation_subset_source,
+            subset_ratio,
+            "val",
+            seed=seed,
+        )
+        train_records_for_dataset = tuple(
+            training_records[int(index)] for index in list(train_subset.indices)
+        )
+        validation_records_for_dataset = tuple(
+            validation_records[int(index)] for index in list(validation_subset.indices)
+        )
+
+    train_dataset_base = CanonicalRowHDF5Dataset(
+        CanonicalDatasetLayout(
+            records=train_records_for_dataset,
+            local_cache_dir=local_data_dir / "TRAIN",
+        ),
+        mode="train",
+        mask_mode="raw",
+        image_normalizer=build_split_stain_normalizer(
+            master_manifest_path,
+            train_records_for_dataset,
+            device="cpu",
+        ),
+    )
+    validation_dataset_base = CanonicalRowHDF5Dataset(
+        CanonicalDatasetLayout(
+            records=validation_records_for_dataset,
+            local_cache_dir=local_data_dir / "VALIDATION",
+        ),
+        mode="val",
+        mask_mode="raw",
+        image_normalizer=build_split_stain_normalizer(
+            master_manifest_path,
+            validation_records_for_dataset,
+            device="cpu",
+        ),
+    )
+    train_dataset: Dataset[Any]
+    validation_dataset: Dataset[Any]
+    if artifact_coverage_by_filename is None:
+        train_dataset = train_dataset_base
+        validation_dataset = validation_dataset_base
+    else:
+        train_dataset = ArtifactAwareDatasetView(train_dataset_base, artifact_coverage_by_filename)
+        validation_dataset = ArtifactAwareDatasetView(
+            validation_dataset_base,
+            artifact_coverage_by_filename,
+        )
+
+    labels = np.asarray(cast(Any, train_dataset).get_labels())
+    class_counts = np.bincount(labels)
+    class_counts[class_counts == 0] = 1
+    class_weights = 1.0 / class_counts
+    sample_weights = torch.from_numpy(class_weights[labels]).float()
+    return PreparedTrainingData(
+        train_dataset=train_dataset,
+        validation_dataset=validation_dataset,
+        sample_weights=sample_weights,
+        source_split_name=source_split_name,
+        training_provenance=collect_manifest_split_provenance(
+            master_manifest_path,
+            records=train_records_for_dataset,
+            split="TRAIN",
+            smart_sampling=smart_sampling,
+        ),
+        validation_provenance=collect_manifest_split_provenance(
+            master_manifest_path,
+            records=validation_records_for_dataset,
+            split="VALIDATION",
+            smart_sampling=False,
+        ),
+    )
 
 
 def create_stratified_subset_within_patients(

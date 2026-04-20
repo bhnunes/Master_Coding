@@ -8,13 +8,13 @@ from helpers.ensemble_inference.config import load_ensemble_inference_config
 def test_load_ensemble_inference_config_uses_defaults(tmp_path: Path) -> None:
     env = {
         "ENSEMBLE_INFER_RECIPE_PATH": str(tmp_path / "recipe.json"),
-        "ENSEMBLE_INFER_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+        "ENSEMBLE_INFER_MASTER_MANIFEST_PATH": str(tmp_path / "master_manifest.sqlite"),
     }
 
     config = load_ensemble_inference_config(env)
 
     assert config.recipe_path == tmp_path / "recipe.json"
-    assert config.hdf5_drive_dir == tmp_path / "dataset"
+    assert config.master_manifest_path == tmp_path / "master_manifest.sqlite"
     assert config.output_dir is None
     assert config.stage_input_locally is True
     assert config.batch_size == 32

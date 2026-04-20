@@ -36,7 +36,7 @@ def build_hdf5_manifest_from_split_dfs(
     is_normalized: bool,
     split_data: dict[str, Any],
 ) -> pd.DataFrame:
-    """Build a deterministic manifest for HDF5-native split outputs."""
+    """Build a deterministic manifest for Stage 5 split assignments."""
 
     del output_dir
     rows: list[dict[str, Any]] = []
@@ -44,7 +44,6 @@ def build_hdf5_manifest_from_split_dfs(
     def add_rows(split_name: str, split_df: pd.DataFrame) -> None:
         if split_df.empty:
             return
-        relative_hdf5_path = f"{split_name}.h5"
         for row_index, row in enumerate(split_df.itertuples(index=False)):
             rows.append(
                 {
@@ -55,8 +54,7 @@ def build_hdf5_manifest_from_split_dfs(
                     "filename": row.filename,
                     "normalization_method": normalization_method,
                     "is_normalized": bool(is_normalized),
-                    "relative_hdf5_path": relative_hdf5_path,
-                    "hdf5_row_index": row_index,
+                    "source_hdf5_path": getattr(row, "source_hdf5_path", ""),
                     "source_row_index": int(getattr(row, "source_row_index", row_index)),
                     "source_image_path": getattr(row, "image_path", ""),
                     "source_mask_path": getattr(row, "mask_path", ""),

@@ -8,7 +8,9 @@ from helpers.ensemble_optimizer.config import load_ensemble_optimizer_config
 def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Path) -> None:
     config = load_ensemble_optimizer_config(
         {
-            "ENSEMBLE_OPT_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                tmp_path / "dataset" / "master_manifest.sqlite"
+            ),
             "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
             "ENSEMBLE_OPT_OUTPUT_DIR": str(tmp_path / "reports"),
             "ENSEMBLE_OPT_LOCAL_DATA_DIR": str(tmp_path / "cache"),
@@ -28,7 +30,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
         }
     )
 
-    assert config.hdf5_drive_dir == tmp_path / "dataset"
+    assert config.master_manifest_path == tmp_path / "dataset" / "master_manifest.sqlite"
     assert config.metadata_dir == tmp_path / "metadata"
     assert config.output_dir == tmp_path / "reports"
     assert config.local_data_dir == tmp_path / "cache"
@@ -51,7 +53,9 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
 def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -> None:
     config = load_ensemble_optimizer_config(
         {
-            "ENSEMBLE_OPT_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                tmp_path / "dataset" / "master_manifest.sqlite"
+            ),
             "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
         }
     )
@@ -71,7 +75,9 @@ def test_load_ensemble_optimizer_config_allows_explicit_positive_only_policy(
 ) -> None:
     config = load_ensemble_optimizer_config(
         {
-            "ENSEMBLE_OPT_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                tmp_path / "dataset" / "master_manifest.sqlite"
+            ),
             "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
             "ENSEMBLE_OPT_SPATIAL_PATIENT_POLICY": "positive_only",
         }
@@ -84,7 +90,9 @@ def test_load_ensemble_optimizer_config_rejects_unknown_group_architecture(tmp_p
     with pytest.raises(ValueError, match="Unknown ensemble optimizer architectures"):
         load_ensemble_optimizer_config(
             {
-                "ENSEMBLE_OPT_HDF5_DRIVE_DIR": str(tmp_path / "dataset"),
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
                 "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
                 "ENSEMBLE_OPT_SEMANTIC_ARCHITECTURES": "swin, madeupnet",
             }
@@ -92,5 +100,5 @@ def test_load_ensemble_optimizer_config_rejects_unknown_group_architecture(tmp_p
 
 
 def test_load_ensemble_optimizer_config_requires_dataset_path() -> None:
-    with pytest.raises(ValueError, match="ENSEMBLE_OPT_HDF5_DRIVE_DIR"):
+    with pytest.raises(ValueError, match="ENSEMBLE_OPT_MASTER_MANIFEST_PATH"):
         load_ensemble_optimizer_config({})

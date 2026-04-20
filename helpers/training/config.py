@@ -105,7 +105,7 @@ class TrainingEnsembleConfig:
     val_batch_size: int
     optimizer_name: str
     sensitivity_target: float
-    hdf5_drive_dir: Path
+    master_manifest_path: Path
     metadata_dir: Path
     identifier: str
     local_data_dir: Path
@@ -125,7 +125,6 @@ class TrainingEnsembleConfig:
     encoder: str
     resume_checkpoint: Path | None
     use_artifact_aware_loss: bool
-    artifact_index_path: Path | None
     log_folder: Path = Path("logs")
     log_file_name: str = "training_ensemble.log"
 
@@ -162,16 +161,11 @@ def load_training_ensemble_config(
         values.get("TRAINING_USE_ARTIFACT_AWARE_LOSS"),
         default=False,
     )
-    artifact_index_path = _parse_optional_path(
-        values.get("TRAINING_ARTIFACT_INDEX_PATH"),
-        "TRAINING_ARTIFACT_INDEX_PATH",
+    master_manifest_path = _parse_required_path(
+        values.get("TRAINING_MASTER_MANIFEST_PATH"),
+        "TRAINING_MASTER_MANIFEST_PATH",
         system_name=system_name,
     )
-    if use_artifact_aware_loss and artifact_index_path is None:
-        raise ValueError(
-            "The 'TRAINING_ARTIFACT_INDEX_PATH' environment variable is required when "
-            "TRAINING_USE_ARTIFACT_AWARE_LOSS is enabled."
-        )
 
     execution_mode = _parse_choice(
         values.get("TRAINING_EXECUTION_MODE"),
@@ -235,11 +229,7 @@ def load_training_ensemble_config(
             "TRAINING_SENSITIVITY_TARGET",
             0.95,
         ),
-        hdf5_drive_dir=_parse_required_path(
-            values.get("TRAINING_HDF5_DRIVE_DIR"),
-            "TRAINING_HDF5_DRIVE_DIR",
-            system_name=system_name,
-        ),
+        master_manifest_path=master_manifest_path,
         metadata_dir=_parse_required_path(
             values.get("TRAINING_METADATA_DIR"),
             "TRAINING_METADATA_DIR",
@@ -276,7 +266,6 @@ def load_training_ensemble_config(
         encoder=encoder,
         resume_checkpoint=resume_checkpoint,
         use_artifact_aware_loss=use_artifact_aware_loss,
-        artifact_index_path=artifact_index_path,
         log_folder=resolve_log_folder(
             values,
             system_name=system_name,

@@ -73,7 +73,7 @@ def _parse_architecture_group(value: str | None, *, default: tuple[str, ...]) ->
 
 @dataclass(frozen=True)
 class EnsembleOptimizerConfig:
-    hdf5_drive_dir: Path
+    master_manifest_path: Path
     metadata_dir: Path
     output_dir: Path
     local_data_dir: Path
@@ -115,9 +115,9 @@ def load_ensemble_optimizer_config(
     spatial_default = ("DEEPLABV3PLUS", "UNET++", "FPN", "MANET")
 
     return EnsembleOptimizerConfig(
-        hdf5_drive_dir=_parse_required_path(
-            values.get("ENSEMBLE_OPT_HDF5_DRIVE_DIR"),
-            "ENSEMBLE_OPT_HDF5_DRIVE_DIR",
+        master_manifest_path=_parse_required_path(
+            values.get("ENSEMBLE_OPT_MASTER_MANIFEST_PATH"),
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH",
             system_name=system_name,
         ),
         metadata_dir=_parse_required_path(

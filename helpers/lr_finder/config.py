@@ -24,7 +24,7 @@ class ModelPlan:
 
 @dataclass(frozen=True)
 class LRFinderConfig:
-    hdf5_drive_dir: Path
+    master_manifest_path: Path
     output_dir: Path
     local_data_dir: Path
     stage_input_locally: bool
@@ -142,9 +142,9 @@ def load_lr_finder_config(
         raise ValueError("LR_FINDER_PDF_NAME must end with '.pdf'.")
 
     return LRFinderConfig(
-        hdf5_drive_dir=_parse_required_path(
-            values.get("LR_FINDER_HDF5_DRIVE_DIR"),
-            "LR_FINDER_HDF5_DRIVE_DIR",
+        master_manifest_path=_parse_required_path(
+            values.get("LR_FINDER_MASTER_MANIFEST_PATH"),
+            "LR_FINDER_MASTER_MANIFEST_PATH",
             system_name=system_name,
         ),
         output_dir=_parse_required_path(

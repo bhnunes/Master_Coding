@@ -25,7 +25,7 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
         }
     )
 
-    assert config.source_hdf5_path == tmp_path / "SOURCE_DATASET.h5"
+    assert config.source_path == tmp_path / "SOURCE_DATASET.h5"
     assert config.normalization_method == "MACENKO"
     assert config.overwrite_output_dir is False
     assert config.random_state == 7
@@ -69,6 +69,16 @@ def test_load_crossfold_config_allows_explicit_destructive_mode(tmp_path: Path) 
 def test_load_crossfold_config_requires_source_hdf5_path() -> None:
     with pytest.raises(ValueError, match="CROSSFOLD_SOURCE_HDF5_PATH"):
         load_crossfold_config({})
+
+
+def test_load_crossfold_config_accepts_sqlite_source_path(tmp_path: Path) -> None:
+    config = load_crossfold_config(
+        {
+            "CROSSFOLD_SOURCE_HDF5_PATH": str(tmp_path / "master_manifest.sqlite"),
+        }
+    )
+
+    assert config.source_path == tmp_path / "master_manifest.sqlite"
 
 
 def test_load_crossfold_config_rejects_invalid_normalization_method(tmp_path: Path) -> None:

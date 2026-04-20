@@ -117,14 +117,14 @@ def build_recipe_metadata(
         "provenance": {
             "validation": validation_provenance,
             "validation_lineage": {
-                "source_hdf5_sha256": validation_provenance.get("attrs", {}).get(
-                    "source_hdf5_sha256"
+                "master_manifest_sha256": validation_provenance.get("attrs", {}).get(
+                    "master_manifest_sha256"
                 ),
-                "upstream_source_signature": validation_provenance.get("attrs", {}).get(
-                    "upstream_source_signature"
+                "normalization_method": validation_provenance.get("attrs", {}).get(
+                    "normalization_method"
                 ),
-                "stage4_cleaning_manifest_sha256": validation_provenance.get("attrs", {}).get(
-                    "stage4_cleaning_manifest_sha256"
+                "normalization_artifact_id": validation_provenance.get("attrs", {}).get(
+                    "normalization_artifact_id"
                 ),
             },
             "split_fingerprint": split_fingerprint,

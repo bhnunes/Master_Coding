@@ -28,7 +28,7 @@ from helpers.training.gpu import GPUDownscale, GPUNormalizer
 
 def _build_config(tmp_path: Path) -> LRFinderConfig:
     return LRFinderConfig(
-        hdf5_drive_dir=tmp_path / "h5",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "local",
         stage_input_locally=False,

@@ -120,6 +120,8 @@ Recommended file set:
 - stage-specific run-config and lineage JSON sidecars
 - optional immutable exports for audits or debugging only
 
+The concrete Milestone 1 contract for schema, ownership, row identity, and runtime boundaries lives in `MASTER_MANIFEST_CONTRACT.md`.
+
 ## Recommended End State by Stage
 
 ### Stage 2
@@ -462,7 +464,9 @@ Exit criteria:
 
 ## Master Manifest Schema
 
-Use one `master_manifest.sqlite` file with at least the following conceptual tables:
+Use one `master_manifest.sqlite` file with at least the following conceptual tables.
+
+`MASTER_MANIFEST_CONTRACT.md` is the authoritative contract for the required tables, minimum columns, ownership rules, and runtime constraints. The list below remains the architectural summary.
 
 1. `patches`
    - one immutable row per Stage 2 patch

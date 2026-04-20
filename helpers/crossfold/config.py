@@ -88,7 +88,7 @@ class ObjectiveConfig:
 @dataclass(frozen=True)
 class CrossfoldConfig:
     normalization_method: str
-    source_hdf5_path: Path
+    source_path: Path
     overwrite_output_dir: bool
     random_state: int
     constraints: SplitConstraints
@@ -102,7 +102,7 @@ class CrossfoldConfig:
 
     @property
     def output_base_dir(self) -> Path:
-        return self.source_hdf5_path.parent / self.normalization_method
+        return self.source_path.parent / self.normalization_method
 
     @property
     def output_run_dir(self) -> Path:
@@ -121,14 +121,15 @@ def load_crossfold_config(
     """Load and validate Stage 5 crossfold configuration from `.env`."""
 
     values = env if env is not None else os.environ
-    source_hdf5_path = _required_path(
+    source_path = _required_path(
         values,
         "CROSSFOLD_SOURCE_HDF5_PATH",
         system_name=system_name,
     )
-    if source_hdf5_path.suffix.lower() != ".h5":
+    if source_path.suffix.lower() not in {".h5", ".sqlite"}:
         raise ValueError(
-            "The 'CROSSFOLD_SOURCE_HDF5_PATH' environment variable must point to a .h5 file."
+            "The 'CROSSFOLD_SOURCE_HDF5_PATH' environment variable must point "
+            "to a .h5 or .sqlite file."
         )
     if _parse_bool(
         values.get("CROSSFOLD_ALLOW_DESTRUCTIVE_MOVE"),
@@ -187,7 +188,7 @@ def load_crossfold_config(
             default="NOT_NORMALIZED",
             allowed=VALID_NORMALIZATION_METHODS,
         ),
-        source_hdf5_path=source_hdf5_path,
+        source_path=source_path,
         overwrite_output_dir=_parse_bool(
             values.get("CROSSFOLD_OVERWRITE_OUTPUT_DIR"),
             "CROSSFOLD_OVERWRITE_OUTPUT_DIR",

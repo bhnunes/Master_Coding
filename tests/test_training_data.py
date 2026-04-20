@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -15,19 +16,23 @@ import torch
 from helpers.provenance import hash_file_sha256
 from helpers.training import data as training_data
 from helpers.training.data import (
+    ArtifactAwareDatasetView,
     HybridProstateDataset,
     HybridProstateShardDataset,
     PreparedShardTrainingData,
+    PreparedTrainingData,
     ProstateCancerDatasetHDF5,
     ProstateCancerShardDataset,
     ShardDatasetLayout,
     SubsetView,
     _decode_filename,
     collate_batch,
+    collect_manifest_split_provenance,
     collect_shard_dataset_provenance,
     create_stratified_subset_within_patients,
     get_training_hdf5_filename,
     load_artifact_coverage_lookup,
+    prepare_training_data,
     prepare_training_shard_data,
     setup_local_hdf5,
     verify_patient_separation,
@@ -243,21 +248,26 @@ def test_prostate_dataset_returns_artifact_covariates_when_lookup_is_provided(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     hdf5_path = tmp_path / "TRAIN.h5"
-    artifact_path = tmp_path / "artifact_patch_index.parquet"
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
     _write_hdf5(hdf5_path)
-    pq.write_table(
-        pa.table(
-            {
-                "filename": ["CANCER_PATIENT_2_0_0_0002.png"],
-                "cov_fold": [0.2],
-                "cov_penmarking": [0.1],
-                "cov_oof": [0.3],
-                "cov_darkspot_foreign": [0.0],
-                "cov_edge_airbubble": [0.4],
-            }
-        ),
-        artifact_path,
-    )
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE patches (
+                filename TEXT NOT NULL,
+                cov_fold REAL NOT NULL DEFAULT 0.0,
+                cov_penmarking REAL NOT NULL DEFAULT 0.0,
+                cov_oof REAL NOT NULL DEFAULT 0.0,
+                cov_darkspot_foreign REAL NOT NULL DEFAULT 0.0,
+                cov_edge_airbubble REAL NOT NULL DEFAULT 0.0
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO patches VALUES (?, ?, ?, ?, ?, ?)",
+            ("CANCER_PATIENT_2_0_0_0002.png", 0.2, 0.1, 0.3, 0.0, 0.4),
+        )
+        connection.commit()
     monkeypatch.setattr(
         training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
     )
@@ -266,7 +276,7 @@ def test_prostate_dataset_returns_artifact_covariates_when_lookup_is_provided(
         str(hdf5_path),
         mode="val",
         subset_indices=[1],
-        artifact_coverage_by_filename=load_artifact_coverage_lookup(str(artifact_path)),
+        artifact_coverage_by_filename=load_artifact_coverage_lookup(str(master_manifest_path)),
     )
     image, mask, artifact_covariates = dataset[0]
 
@@ -276,10 +286,27 @@ def test_prostate_dataset_returns_artifact_covariates_when_lookup_is_provided(
 
 
 def test_load_artifact_coverage_lookup_defaults_missing_values_to_zero(tmp_path: Path) -> None:
-    artifact_path = tmp_path / "artifact_patch_index.parquet"
-    pq.write_table(pa.table({"filename": ["patch.png"], "cov_fold": [0.5]}), artifact_path)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE patches (
+                filename TEXT NOT NULL,
+                cov_fold REAL,
+                cov_penmarking REAL,
+                cov_oof REAL,
+                cov_darkspot_foreign REAL,
+                cov_edge_airbubble REAL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO patches VALUES (?, ?, ?, ?, ?, ?)",
+            ("patch.png", 0.5, None, None, None, None),
+        )
+        connection.commit()
 
-    lookup = load_artifact_coverage_lookup(str(artifact_path))
+    lookup = load_artifact_coverage_lookup(str(master_manifest_path))
 
     assert lookup["patch.png"] == (0.5, 0.0, 0.0, 0.0, 0.0)
 
@@ -590,3 +617,388 @@ def test_hybrid_shard_dataset_supports_ram_cache_and_artifact_covariates(
     assert tuple(image.shape) == (3, 4, 4)
     assert tuple(mask.shape) == (4, 4)
     assert torch.allclose(artifact_covariates, torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5]))
+
+
+def _write_stage2_manifest_shard(
+    shard_path: Path,
+    *,
+    patient_id: int,
+    pixel_values: list[int],
+    labels: list[int],
+    filenames: list[str],
+) -> None:
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(shard_path, "w") as handle:
+        handle.create_dataset(
+            "images",
+            data=np.stack(
+                [np.full((4, 4, 3), pixel_value, dtype=np.uint8) for pixel_value in pixel_values]
+            ),
+        )
+        handle.create_dataset(
+            "masks",
+            data=np.stack([np.full((4, 4), label, dtype=np.uint8) for label in labels]),
+        )
+        handle.create_dataset("labels", data=np.asarray(labels, dtype=np.uint8))
+        handle.create_dataset(
+            "patient_ids",
+            data=np.asarray([patient_id] * len(labels), dtype=np.int32),
+        )
+        handle.create_dataset(
+            "filenames",
+            data=np.asarray([filename.encode("utf-8") for filename in filenames]),
+        )
+
+
+def _write_training_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) -> None:
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE patches (
+                patch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_hdf5_path TEXT NOT NULL,
+                source_row_index INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                patient_id INTEGER NOT NULL,
+                label INTEGER NOT NULL,
+                slide_id TEXT,
+                source_signature TEXT,
+                source_image_path TEXT NOT NULL,
+                source_mask_path TEXT NOT NULL,
+                source_slide_path TEXT NOT NULL,
+                annotation_path TEXT,
+                artifacts_geojson_path TEXT,
+                stage2_case_record_id INTEGER NOT NULL,
+                stage2_processing_signature TEXT,
+                stage2_status TEXT NOT NULL,
+                cov_fold REAL NOT NULL DEFAULT 0.0,
+                cov_penmarking REAL NOT NULL DEFAULT 0.0,
+                cov_oof REAL NOT NULL DEFAULT 0.0,
+                cov_darkspot_foreign REAL NOT NULL DEFAULT 0.0,
+                cov_edge_airbubble REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (source_hdf5_path, source_row_index)
+            );
+            CREATE TABLE patch_stage_state (
+                patch_id INTEGER PRIMARY KEY,
+                cleaning_decision TEXT,
+                contamination_rate REAL,
+                split TEXT,
+                normalization_method TEXT,
+                normalization_artifact_id INTEGER,
+                sampling_decision TEXT,
+                is_stage4_accepted INTEGER,
+                is_stage7_selected INTEGER,
+                last_updated_stage_name TEXT,
+                last_updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE normalization_artifacts (
+                normalization_artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                state_path TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                template_path TEXT,
+                template_sha256 TEXT,
+                fit_scope TEXT NOT NULL
+            );
+            """
+        )
+        selected_rows = {(str(shard_paths[0]), 0), (str(shard_paths[1]), 1)}
+        split_by_patient = {1: "TRAIN", 2: "TRAIN", 3: "VALIDATION", 4: "VALIDATION"}
+        for shard_path in shard_paths:
+            patient_id = int(shard_path.stem.replace("patient_", ""))
+            filenames = [f"p{patient_id}_{row_index}.png" for row_index in range(2)]
+            labels = [0, 1]
+            for row_index, (filename, label) in enumerate(zip(filenames, labels, strict=True)):
+                cursor = connection.execute(
+                    """
+                    INSERT INTO patches (
+                        source_hdf5_path,
+                        source_row_index,
+                        filename,
+                        patient_id,
+                        label,
+                        slide_id,
+                        source_signature,
+                        source_image_path,
+                        source_mask_path,
+                        source_slide_path,
+                        stage2_case_record_id,
+                        stage2_status,
+                        cov_fold,
+                        cov_penmarking,
+                        cov_oof,
+                        cov_darkspot_foreign,
+                        cov_edge_airbubble
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(shard_path),
+                        row_index,
+                        filename,
+                        patient_id,
+                        label,
+                        f"slide_{patient_id}",
+                        f"sig_{patient_id}",
+                        f"{shard_path}::images[{row_index}]",
+                        f"{shard_path}::masks[{row_index}]",
+                        f"/slides/{patient_id}.svs",
+                        patient_id,
+                        "COMPLETED",
+                        0.2 if filename == "p1_0.png" else 0.0,
+                        0.1 if filename == "p1_0.png" else 0.0,
+                        0.3 if filename == "p1_0.png" else 0.0,
+                        0.4 if filename == "p1_0.png" else 0.0,
+                        0.5 if filename == "p1_0.png" else 0.0,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO patch_stage_state (
+                        patch_id,
+                        split,
+                        normalization_method,
+                        normalization_artifact_id,
+                        sampling_decision,
+                        is_stage4_accepted,
+                        is_stage7_selected,
+                        last_updated_stage_name
+                    ) VALUES (?, ?, ?, ?, ?, 1, ?, 'STAGE7_2')
+                    """,
+                    (
+                        cursor.lastrowid,
+                        split_by_patient[patient_id],
+                        "NOT_NORMALIZED",
+                        None,
+                        (
+                            "sampled_kept"
+                            if (str(shard_path), row_index) in selected_rows
+                            else "rejected_reducible"
+                        ),
+                        1 if (str(shard_path), row_index) in selected_rows else 0,
+                    ),
+                )
+        connection.commit()
+
+
+@pytest.fixture
+def training_manifest_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, list[Path]]:
+    monkeypatch.setattr(
+        "helpers.training.canonical_dataset.get_transforms",
+        lambda mode, img_size: _IdentityTransform(),
+    )
+    shard_paths = [tmp_path / "PATCHES" / f"patient_{patient_id}.h5" for patient_id in (1, 2, 3, 4)]
+    _write_stage2_manifest_shard(
+        shard_paths[0],
+        patient_id=1,
+        pixel_values=[11, 22],
+        labels=[0, 1],
+        filenames=["p1_0.png", "p1_1.png"],
+    )
+    _write_stage2_manifest_shard(
+        shard_paths[1],
+        patient_id=2,
+        pixel_values=[33, 44],
+        labels=[0, 1],
+        filenames=["p2_0.png", "p2_1.png"],
+    )
+    _write_stage2_manifest_shard(
+        shard_paths[2],
+        patient_id=3,
+        pixel_values=[55, 66],
+        labels=[0, 1],
+        filenames=["p3_0.png", "p3_1.png"],
+    )
+    _write_stage2_manifest_shard(
+        shard_paths[3],
+        patient_id=4,
+        pixel_values=[77, 88],
+        labels=[0, 1],
+        filenames=["p4_0.png", "p4_1.png"],
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_training_master_manifest(master_manifest_path, shard_paths)
+    return master_manifest_path, shard_paths
+
+
+def test_prepare_training_data_uses_sqlite_rows_and_manifest_provenance(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=True,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=False,
+    )
+
+    assert isinstance(prepared, PreparedTrainingData)
+    assert prepared.source_split_name == "TRAIN_SELECTED"
+    train_dataset = cast(Any, prepared.train_dataset)
+    validation_dataset = cast(Any, prepared.validation_dataset)
+    assert train_dataset.get_labels().tolist() == [0, 1]
+    assert train_dataset.get_patient_ids().tolist() == ["1", "2"]
+    assert validation_dataset.get_patient_ids().tolist() == ["3", "3", "4", "4"]
+    assert prepared.training_provenance["split"] == "TRAIN"
+    assert prepared.training_provenance["smart_sampling"] is True
+    assert prepared.validation_provenance["split"] == "VALIDATION"
+
+
+def test_prepare_training_data_reads_canonical_stage2_rows(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=True,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=False,
+    )
+    first_image, first_mask = prepared.train_dataset[0]
+    second_image, second_mask = prepared.train_dataset[1]
+
+    assert int(first_image[0, 0, 0]) == 11
+    assert int(second_image[0, 0, 0]) == 44
+    assert int(first_mask[0, 0]) == 0
+    assert int(second_mask[0, 0]) == 1
+
+
+def test_prepare_training_data_preserves_patient_separation(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=False,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=False,
+    )
+
+    verify_patient_separation(prepared.train_dataset, prepared.validation_dataset)
+
+
+def test_prepare_training_data_uses_shared_stain_normalizer(
+    training_manifest_fixture: tuple[Path, list[Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+    normalizer = type(
+        "RecordingNormalizer",
+        (),
+        {
+            "__init__": lambda self: setattr(self, "calls", []),
+            "normalize_image": lambda self, image, cache_key=None: (
+                self.calls.append(str(cache_key)) or np.asarray(image + 5, dtype=np.uint8)
+            ),
+        },
+    )()
+    monkeypatch.setattr(
+        training_data, "build_split_stain_normalizer", lambda *args, **kwargs: normalizer
+    )
+
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=True,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=False,
+    )
+    image, _mask = prepared.train_dataset[0]
+
+    assert normalizer.calls[0] == "p1_0.png"
+    assert int(image[0, 0, 0]) == 16
+
+
+def test_prepare_training_data_wraps_artifact_aware_loss_features(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=True,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=True,
+    )
+    image, mask, artifact_covariates = cast(
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor], prepared.train_dataset[0]
+    )
+
+    assert isinstance(prepared.train_dataset, ArtifactAwareDatasetView)
+    assert tuple(image.shape) == (3, 4, 4)
+    assert tuple(mask.shape) == (4, 4)
+    assert torch.allclose(artifact_covariates, torch.tensor([0.2, 0.1, 0.3, 0.4, 0.5]))
+
+
+def test_prepare_training_data_builds_subset_and_weights(
+    training_manifest_fixture: tuple[Path, list[Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+
+    def fake_subset(dataset: object, ratio: float, split_name: str, seed: int) -> object:
+        del dataset, ratio, split_name, seed
+        return type("FakeSubset", (), {"indices": [1]})()
+
+    monkeypatch.setattr(training_data, "create_stratified_subset_within_patients", fake_subset)
+
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=False,
+        use_subset=True,
+        subset_ratio=0.5,
+        seed=24,
+        use_artifact_aware_loss=False,
+    )
+
+    train_dataset = cast(Any, prepared.train_dataset)
+    validation_dataset = cast(Any, prepared.validation_dataset)
+    assert train_dataset.get_labels().tolist() == [1]
+    assert validation_dataset.get_labels().tolist() == [1]
+    assert prepared.sample_weights.tolist() == [1.0]
+
+
+def test_collect_manifest_split_provenance_reports_manifest_metadata(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=True,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=False,
+    )
+    provenance = collect_manifest_split_provenance(
+        master_manifest_path,
+        records=cast(Any, prepared.train_dataset).records,
+        split="TRAIN",
+        smart_sampling=True,
+    )
+
+    assert provenance["master_manifest_path"] == str(master_manifest_path)
+    assert provenance["row_count"] == 2
+    assert provenance["selection_mode"] == "stage7_selected"

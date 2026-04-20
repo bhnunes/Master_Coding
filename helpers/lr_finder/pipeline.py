@@ -38,7 +38,7 @@ def _prepare_output_dir(config: LRFinderConfig) -> None:
 
 def _serialize_config(config: LRFinderConfig) -> dict[str, Any]:
     return {
-        "hdf5_drive_dir": str(config.hdf5_drive_dir),
+        "master_manifest_path": str(config.master_manifest_path),
         "output_dir": str(config.output_dir),
         "local_data_dir": str(config.local_data_dir),
         "stage_input_locally": config.stage_input_locally,

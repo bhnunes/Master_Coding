@@ -55,12 +55,9 @@ class GPUDownscale(nn.Module):
         small_height = int(height * scale)
         small_width = int(width * scale)
         x_small = functional.interpolate(x, size=(small_height, small_width), mode="nearest")
-        return cast(
-            torch.Tensor,
-            functional.interpolate(
-                x_small,
-                size=(height, width),
-                mode="bicubic",
-                align_corners=False,
-            ),
+        return functional.interpolate(
+            x_small,
+            size=(height, width),
+            mode="bicubic",
+            align_corners=False,
         )

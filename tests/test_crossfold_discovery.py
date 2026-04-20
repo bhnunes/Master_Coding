@@ -1,9 +1,10 @@
+import sqlite3
 from pathlib import Path
 
 import h5py
 import numpy as np
 
-from helpers.crossfold.discovery import load_patch_dataset
+from helpers.crossfold.discovery import collect_source_dataset_provenance, load_patch_dataset
 
 
 def test_load_patch_dataset_reads_hdf5_source_dataset(tmp_path: Path) -> None:
@@ -80,3 +81,90 @@ def test_load_patch_dataset_synthesizes_logical_source_refs_when_paths_are_absen
             "source_hdf5_path": str(source_path),
         }
     ]
+
+
+def test_load_patch_dataset_reads_sqlite_accepted_rows(tmp_path: Path) -> None:
+    source_hdf5_path = tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide_a.h5"
+    source_hdf5_path.parent.mkdir(parents=True, exist_ok=True)
+    source_hdf5_path.write_bytes(b"hdf5-placeholder")
+    sqlite_path = tmp_path / "master_manifest.sqlite"
+    with sqlite3.connect(sqlite_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE patches (
+                patch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_hdf5_path TEXT NOT NULL,
+                source_row_index INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                patient_id INTEGER NOT NULL,
+                label INTEGER NOT NULL,
+                source_image_path TEXT NOT NULL,
+                source_mask_path TEXT NOT NULL
+            );
+            CREATE TABLE patch_stage_state (
+                patch_id INTEGER PRIMARY KEY,
+                is_stage4_accepted INTEGER
+            );
+            """
+        )
+        cursor = connection.execute(
+            "INSERT INTO patches ("
+            "source_hdf5_path, source_row_index, filename, patient_id, label, "
+            "source_image_path, source_mask_path"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(source_hdf5_path),
+                4,
+                "accepted.png",
+                11,
+                1,
+                f"{source_hdf5_path}::images[4]",
+                f"{source_hdf5_path}::masks[4]",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO patch_stage_state (patch_id, is_stage4_accepted) VALUES (?, 1)",
+            ((cursor.lastrowid or 0),),
+        )
+        connection.commit()
+
+    dataset = load_patch_dataset(sqlite_path)
+
+    assert dataset.to_dict("records") == [
+        {
+            "patient_id": 11,
+            "image_path": f"{source_hdf5_path}::images[4]",
+            "mask_path": f"{source_hdf5_path}::masks[4]",
+            "label": 1,
+            "filename": "accepted.png",
+            "source_row_index": 4,
+            "source_hdf5_path": str(source_hdf5_path),
+        }
+    ]
+
+
+def test_collect_source_dataset_provenance_reads_sqlite_state(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "master_manifest.sqlite"
+    with sqlite3.connect(sqlite_path) as connection:
+        connection.execute(
+            "CREATE TABLE patch_stage_state ("
+            "patch_id INTEGER PRIMARY KEY, is_stage4_accepted INTEGER"
+            ")"
+        )
+        connection.execute(
+            "CREATE TABLE patches (patch_id INTEGER PRIMARY KEY, source_signature TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO patch_stage_state (patch_id, is_stage4_accepted) VALUES (1, 1)"
+        )
+        connection.execute("INSERT INTO patches (patch_id, source_signature) VALUES (1, 'sig-a')")
+        connection.commit()
+
+    provenance = collect_source_dataset_provenance(sqlite_path)
+
+    assert provenance["path"] == str(sqlite_path)
+    assert provenance["sha256"]
+    attrs = provenance["attrs"]
+    assert isinstance(attrs, dict)
+    assert attrs["stage4_cleaning_manifest_path"] == str(sqlite_path)
+    assert attrs["stage4_cleaning_selected_rows"] == 1

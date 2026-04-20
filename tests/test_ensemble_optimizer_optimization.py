@@ -74,7 +74,7 @@ class _ListLoader:
 @pytest.fixture
 def optimizer_config(tmp_path: Path) -> EnsembleOptimizerConfig:
     return EnsembleOptimizerConfig(
-        hdf5_drive_dir=tmp_path / "dataset",
+        master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",
         metadata_dir=tmp_path / "metadata",
         output_dir=tmp_path / "reports",
         local_data_dir=tmp_path / "local",

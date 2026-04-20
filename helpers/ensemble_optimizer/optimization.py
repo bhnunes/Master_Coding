@@ -146,10 +146,7 @@ def generate_roi_batch(
         align_corners=False,
     )
     mask_small = (small > threshold).float()
-    return cast(
-        torch.Tensor,
-        functional.interpolate(mask_small, size=(height, width), mode="nearest").squeeze(1),
-    )
+    return functional.interpolate(mask_small, size=(height, width), mode="nearest").squeeze(1)
 
 
 def compute_patient_auprc_in_roi(

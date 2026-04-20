@@ -1,0 +1,359 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+import pytest
+import torch
+
+from helpers.provenance import hash_file_sha256
+from helpers.training.master_manifest_queries import CanonicalRowRecord
+from helpers.training.stain_normalization import build_split_stain_normalizer
+
+
+class _FakeRuntimeNormalizer(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, Any]] = []
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        cache_keys: list[str] | None = None,
+    ) -> torch.Tensor:
+        self.calls.append({"shape": tuple(x.shape), "cache_keys": cache_keys})
+        return x + (1.0 / 255.0)
+
+
+class _FakeNormalizerBuilder:
+    last_method: str | None = None
+    last_kwargs: dict[str, Any] | None = None
+    last_module: _FakeRuntimeNormalizer | None = None
+
+    @staticmethod
+    def build(method: str, **kwargs: Any) -> _FakeRuntimeNormalizer:
+        _FakeNormalizerBuilder.last_method = method
+        _FakeNormalizerBuilder.last_kwargs = kwargs
+        module = _FakeRuntimeNormalizer()
+        _FakeNormalizerBuilder.last_module = module
+        return module
+
+
+def _write_normalization_manifest(
+    master_manifest_path: Path,
+    *,
+    method: str,
+    state_path: Path,
+    state_sha256: str,
+) -> None:
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE normalization_artifacts (
+                normalization_artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                state_path TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                template_path TEXT,
+                template_sha256 TEXT,
+                fit_scope TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO normalization_artifacts (
+                run_id,
+                method,
+                state_path,
+                state_sha256,
+                template_path,
+                template_sha256,
+                fit_scope
+            ) VALUES (1, ?, ?, ?, NULL, NULL, 'TRAIN')
+            """,
+            (method, str(state_path), state_sha256),
+        )
+        connection.commit()
+
+
+def _make_record(
+    *,
+    method: str | None,
+    normalization_artifact_id: int | None,
+) -> CanonicalRowRecord:
+    return CanonicalRowRecord(
+        source_hdf5_path=Path("/tmp/source.h5"),
+        source_row_index=0,
+        patient_id="1",
+        label=1,
+        filename="patch_001.png",
+        split="TRAIN",
+        normalization_method=method,
+        normalization_artifact_id=normalization_artifact_id,
+        sampling_decision=None,
+        is_stage7_selected=True,
+    )
+
+
+def test_build_split_stain_normalizer_returns_none_for_not_normalized(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    state_path = tmp_path / "unused.json"
+    state_path.write_text("{}", encoding="utf-8")
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="REINHARD",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record(method="NOT_NORMALIZED", normalization_artifact_id=None)],
+    )
+
+    assert normalizer is None
+
+
+def test_build_split_stain_normalizer_loads_reinhard_state_and_normalizes_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "normalization_stats.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "REINHARD",
+                "target_means": [0.1, 0.2, 0.3],
+                "target_stds": [0.4, 0.5, 0.6],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="REINHARD",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+    monkeypatch.setattr(
+        "helpers.training.stain_normalization._load_torch_staintools_builder",
+        lambda: _FakeNormalizerBuilder,
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record(method="REINHARD", normalization_artifact_id=1)],
+    )
+
+    assert normalizer is not None
+    image = np.full((4, 4, 3), 10, dtype=np.uint8)
+    output = normalizer.normalize_image(image, cache_key="patch_001.png")
+
+    assert _FakeNormalizerBuilder.last_method == "reinhard"
+    assert _FakeNormalizerBuilder.last_kwargs is not None
+    assert _FakeNormalizerBuilder.last_kwargs["use_cache"] is True
+    assert np.all(output == 11)
+    assert _FakeNormalizerBuilder.last_module is not None
+    assert _FakeNormalizerBuilder.last_module.calls == [
+        {"shape": (1, 3, 4, 4), "cache_keys": ["patch_001.png"]}
+    ]
+    target_means = cast(torch.Tensor, _FakeNormalizerBuilder.last_module.target_means)
+    target_stds = cast(torch.Tensor, _FakeNormalizerBuilder.last_module.target_stds)
+    assert torch.equal(
+        target_means,
+        torch.tensor([[[[0.1]], [[0.2]], [[0.3]]]], dtype=torch.float32),
+    )
+    assert torch.equal(
+        target_stds,
+        torch.tensor([[[[0.4]], [[0.5]], [[0.6]]]], dtype=torch.float32),
+    )
+
+
+def test_build_split_stain_normalizer_fails_closed_on_hash_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "normalization_stats.json"
+    state_path.write_text(
+        json.dumps({"target_means": [0.1], "target_stds": [0.2]}), encoding="utf-8"
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="REINHARD",
+        state_path=state_path,
+        state_sha256="deadbeef",
+    )
+    monkeypatch.setattr(
+        "helpers.training.stain_normalization._load_torch_staintools_builder",
+        lambda: _FakeNormalizerBuilder,
+    )
+
+    with pytest.raises(ValueError, match="hash mismatch"):
+        build_split_stain_normalizer(
+            master_manifest_path,
+            [_make_record(method="REINHARD", normalization_artifact_id=1)],
+        )
+
+
+def test_build_split_stain_normalizer_rejects_inconsistent_records(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    state_path = tmp_path / "unused.json"
+    state_path.write_text("{}", encoding="utf-8")
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="REINHARD",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+
+    with pytest.raises(ValueError, match="do not agree"):
+        build_split_stain_normalizer(
+            master_manifest_path,
+            [
+                _make_record(method="REINHARD", normalization_artifact_id=1),
+                _make_record(method="MACENKO", normalization_artifact_id=2),
+            ],
+        )
+
+
+def test_build_split_stain_normalizer_supports_ruifrok(tmp_path: Path) -> None:
+    state_path = tmp_path / "normalization_stats.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "RUIFROK",
+                "stain_matrix_target": [
+                    [0.65, 0.70, 0.29],
+                    [0.07, 0.99, 0.11],
+                ],
+                "maxC_target": [1.0, 0.8],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="RUIFROK",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record(method="RUIFROK", normalization_artifact_id=1)],
+    )
+
+    assert normalizer is not None
+    image = np.full((3, 3, 3), 180, dtype=np.uint8)
+    output = normalizer.normalize_image(image, cache_key="patch_001.png")
+    assert output.shape == image.shape
+    assert output.dtype == np.uint8
+
+
+@pytest.mark.parametrize("method", ["MACENKO", "VAHADANE"])
+def test_build_split_stain_normalizer_supports_torch_staintools_matrix_methods(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+) -> None:
+    state_path = tmp_path / f"{method.lower()}_stats.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": method,
+                "stain_matrix_target": [
+                    [0.65, 0.70, 0.29],
+                    [0.07, 0.99, 0.11],
+                ],
+                "maxC_target": [1.0, 0.8],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method=method,
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+    monkeypatch.setattr(
+        "helpers.training.stain_normalization._load_torch_staintools_builder",
+        lambda: _FakeNormalizerBuilder,
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record(method=method, normalization_artifact_id=1)],
+    )
+
+    assert normalizer is not None
+    image = np.full((4, 4, 3), 10, dtype=np.uint8)
+    output = normalizer.normalize_image(image, cache_key="patch_001.png")
+
+    assert _FakeNormalizerBuilder.last_method == method.lower()
+    assert np.all(output == 11)
+    assert _FakeNormalizerBuilder.last_module is not None
+    stain_matrix_target = cast(torch.Tensor, _FakeNormalizerBuilder.last_module.stain_matrix_target)
+    max_c_target = cast(torch.Tensor, _FakeNormalizerBuilder.last_module.maxC_target)
+    assert torch.equal(
+        stain_matrix_target,
+        torch.tensor(
+            [[[0.65, 0.70, 0.29], [0.07, 0.99, 0.11]]],
+            dtype=torch.float32,
+        ),
+    )
+    assert torch.equal(max_c_target, torch.tensor([[1.0, 0.8]], dtype=torch.float32))
+
+
+def test_build_split_stain_normalizer_uses_ruifrok_source_matrix_from_state(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "normalization_stats.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "RUIFROK",
+                "stain_matrix_source": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                "stain_matrix_target": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                "maxC_target": [1.0, 1.0],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="RUIFROK",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record(method="RUIFROK", normalization_artifact_id=1)],
+        device="cpu",
+    )
+
+    assert normalizer is not None
+    module = cast(torch.nn.Module, cast(Any, normalizer).module)
+    source_matrix = cast(torch.Tensor, module.stain_matrix_source)
+    assert source_matrix.device.type == "cpu"
+    assert torch.equal(
+        source_matrix,
+        torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], dtype=torch.float32),
+    )

@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 from typing import Any, cast
 
@@ -5,13 +6,13 @@ import pandas as pd
 from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold.config import CrossfoldConfig, ObjectiveConfig, SplitConstraints
-from helpers.crossfold.pipeline import run_crossfold_pipeline
+from helpers.crossfold.pipeline import _persist_stage5_split_state, run_crossfold_pipeline
 
 
 def test_run_crossfold_pipeline_executes_stage_flow(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path = tmp_path / "master_manifest.sqlite"
     dataset = pd.DataFrame(
         [
             {
@@ -63,7 +64,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     calls: list[str] = []
     split_kwargs: dict[str, object] = {}
     provenance_kwargs: dict[str, object] = {}
-    write_calls: list[dict[str, object]] = []
+    persist_kwargs: dict[str, object] = {}
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
     def record(name: str, return_value: object | None = None) -> object | None:
@@ -79,7 +80,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         lambda data_dir: record("load", dataset),
     )
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.collect_hdf5_provenance",
+        "helpers.crossfold.pipeline.collect_source_dataset_provenance",
         lambda path: cached_provenance,
     )
     monkeypatch.setattr(
@@ -90,30 +91,19 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
         lambda **kwargs: record("manifest", manifest_df),
     )
-
-    def fake_write_split_hdf5(**kwargs: object) -> object:
-        write_calls.append(kwargs)
-        output_path = kwargs["output_path"]
-        assert isinstance(output_path, Path)
-        return record(f"write:{output_path.name}", output_path)
-
-    monkeypatch.setattr(
-        "helpers.crossfold.pipeline.write_split_hdf5",
-        fake_write_split_hdf5,
-    )
-    monkeypatch.setattr(
-        "helpers.crossfold.pipeline.verify_split_hdf5_integrity",
-        lambda output_path, split_df: record(f"verify:{output_path.name}"),
-    )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
         lambda **kwargs: (provenance_kwargs.update(kwargs), record("provenance")),
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline._persist_stage5_split_state",
+        lambda **kwargs: (persist_kwargs.update(kwargs), record("persist")),
     )
 
     summary = run_crossfold_pipeline(
         CrossfoldConfig(
             normalization_method="NOT_NORMALIZED",
-            source_hdf5_path=source_path,
+            source_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
             constraints=SplitConstraints(
@@ -139,9 +129,9 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     assert split_selection["optuna_trials"] == 25
     assert split_selection["loss_metric"] == "sum_absolute_split_ratio_delta"
     assert split_selection["final_loss"] == 0.0
-    assert len(write_calls) == 1
-    assert write_calls[0]["source_hdf5_provenance"] is cached_provenance
     assert provenance_kwargs["source_hdf5_provenance"] is cached_provenance
+    assert persist_kwargs["master_manifest_path"] == source_path
+    assert persist_kwargs["normalization_method"] == "NOT_NORMALIZED"
     assert (
         cast(dict[str, Any], provenance_kwargs["extra"])["verification"]
         == split_data["verification"]
@@ -151,16 +141,15 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         "load",
         "split",
         "manifest",
-        "write:TRAIN.h5",
-        "verify:TRAIN.h5",
         "provenance",
+        "persist",
     ]
 
 
 def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path = tmp_path / "master_manifest.sqlite"
     dataset = pd.DataFrame(
         [
             {
@@ -224,9 +213,9 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
         },
     }
     manifest_df = pd.DataFrame([{"relative_hdf5_path": "TRAIN.h5", "hdf5_row_index": 0}])
-    write_calls: list[dict[str, object]] = []
     entropy_inputs: list[pd.DataFrame] = []
     fit_calls: list[dict[str, object]] = []
+    persist_kwargs: dict[str, object] = {}
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
     monkeypatch.setattr(
@@ -234,7 +223,7 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
     )
     monkeypatch.setattr("helpers.crossfold.pipeline.load_patch_dataset", lambda data_dir: dataset)
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.collect_hdf5_provenance",
+        "helpers.crossfold.pipeline.collect_source_dataset_provenance",
         lambda path: cached_provenance,
     )
     monkeypatch.setattr(
@@ -283,25 +272,19 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
         "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
         lambda **kwargs: manifest_df,
     )
-
-    def fake_write_split_hdf5(**kwargs: object) -> object:
-        write_calls.append(kwargs)
-        return cast(Path, kwargs["output_path"])
-
-    monkeypatch.setattr("helpers.crossfold.pipeline.write_split_hdf5", fake_write_split_hdf5)
-    monkeypatch.setattr(
-        "helpers.crossfold.pipeline.verify_split_hdf5_integrity",
-        lambda output_path, split_df: None,
-    )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
         lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline._persist_stage5_split_state",
+        lambda **kwargs: persist_kwargs.update(kwargs),
     )
 
     run_crossfold_pipeline(
         CrossfoldConfig(
             normalization_method="REINHARD",
-            source_hdf5_path=source_path,
+            source_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
             constraints=SplitConstraints(
@@ -327,9 +310,326 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
     assert cast(pd.DataFrame, fit_calls[0]["entropy_df"])["image_path"].tolist() == [
         "/src/train_1.png"
     ]
-    assert [cast(Path, call["output_path"]).name for call in write_calls] == [
-        "TRAIN.h5",
-        "VALIDATION.h5",
-        "TEST.h5",
+    split_frames = cast(dict[str, pd.DataFrame], persist_kwargs["split_frames"])
+    assert split_frames["TRAIN"]["image_path"].tolist() == ["/src/train_1.png"]
+    assert split_frames["VALIDATION"]["image_path"].tolist() == ["/src/val_1.png"]
+    assert split_frames["TEST"]["image_path"].tolist() == ["/src/test_1.png"]
+    assert persist_kwargs["normalization_method"] == "REINHARD"
+
+
+def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    output_dir = tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
+    output_dir.mkdir(parents=True)
+    (output_dir / "run_config.json").write_text("{}", encoding="utf-8")
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE patches (
+                patch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_hdf5_path TEXT NOT NULL,
+                source_row_index INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                patient_id INTEGER NOT NULL,
+                label INTEGER NOT NULL,
+                slide_id TEXT,
+                source_signature TEXT,
+                source_image_path TEXT NOT NULL,
+                source_mask_path TEXT NOT NULL,
+                source_slide_path TEXT NOT NULL,
+                annotation_path TEXT,
+                artifacts_geojson_path TEXT,
+                stage2_case_record_id INTEGER NOT NULL,
+                stage2_processing_signature TEXT,
+                stage2_status TEXT NOT NULL,
+                cov_fold REAL NOT NULL DEFAULT 0.0,
+                cov_penmarking REAL NOT NULL DEFAULT 0.0,
+                cov_oof REAL NOT NULL DEFAULT 0.0,
+                cov_darkspot_foreign REAL NOT NULL DEFAULT 0.0,
+                cov_edge_airbubble REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (source_hdf5_path, source_row_index)
+            );
+            CREATE TABLE patch_stage_state (
+                patch_id INTEGER PRIMARY KEY,
+                cleaning_decision TEXT,
+                contamination_rate REAL,
+                split TEXT,
+                normalization_method TEXT,
+                normalization_artifact_id INTEGER,
+                sampling_decision TEXT,
+                is_stage4_accepted INTEGER,
+                is_stage7_selected INTEGER,
+                last_updated_stage_name TEXT,
+                last_updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE runs (
+                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stage_name TEXT NOT NULL,
+                config_path TEXT,
+                config_sha256 TEXT,
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                code_version TEXT,
+                input_summary_json_path TEXT,
+                input_summary_sha256 TEXT
+            );
+            CREATE TABLE normalization_artifacts (
+                normalization_artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                state_path TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                template_path TEXT,
+                template_sha256 TEXT,
+                fit_scope TEXT NOT NULL
+            );
+            """
+        )
+        for row_index, filename in enumerate(("a.png", "b.png")):
+            cursor = connection.execute(
+                """
+                INSERT INTO patches (
+                    source_hdf5_path, source_row_index, filename, patient_id, label, slide_id,
+                    source_signature, source_image_path, source_mask_path, source_slide_path,
+                    stage2_case_record_id, stage2_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "/patches/patient_1.h5",
+                    row_index,
+                    filename,
+                    1,
+                    row_index,
+                    "slide_0",
+                    "sig",
+                    f"/patches/patient_1.h5::images[{row_index}]",
+                    f"/patches/patient_1.h5::masks[{row_index}]",
+                    "/slides/slide_0.svs",
+                    1,
+                    "COMPLETED",
+                ),
+            )
+            connection.execute(
+                "INSERT INTO patch_stage_state ("
+                "patch_id, is_stage4_accepted, last_updated_stage_name"
+                ") VALUES (?, 1, ?)",
+                ((cursor.lastrowid or 0), "STAGE4_3"),
+            )
+        connection.commit()
+
+    split_frames = {
+        "TRAIN": pd.DataFrame(
+            [
+                {
+                    "patient_id": 1,
+                    "label": 0,
+                    "filename": "a.png",
+                    "source_hdf5_path": "/patches/patient_1.h5",
+                    "source_row_index": 0,
+                }
+            ]
+        ),
+        "VALIDATION": pd.DataFrame(
+            [
+                {
+                    "patient_id": 1,
+                    "label": 1,
+                    "filename": "b.png",
+                    "source_hdf5_path": "/patches/patient_1.h5",
+                    "source_row_index": 1,
+                }
+            ]
+        ),
+        "TEST": pd.DataFrame(
+            columns=[
+                "patient_id",
+                "label",
+                "filename",
+                "source_hdf5_path",
+                "source_row_index",
+            ]
+        ),
+    }
+
+    _persist_stage5_split_state(
+        master_manifest_path=master_manifest_path,
+        split_frames=split_frames,
+        normalization_method="NOT_NORMALIZED",
+        output_dir=output_dir,
+    )
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        updated_rows = connection.execute(
+            "SELECT split, normalization_method, normalization_artifact_id, "
+            "last_updated_stage_name FROM patch_stage_state ORDER BY patch_id ASC"
+        ).fetchall()
+        run_rows = connection.execute("SELECT stage_name, config_path FROM runs").fetchall()
+
+    assert updated_rows == [
+        ("TRAIN", "NOT_NORMALIZED", None, "STAGE5"),
+        ("VALIDATION", "NOT_NORMALIZED", None, "STAGE5"),
     ]
-    assert all(call["normalizer"] is write_calls[0]["normalizer"] for call in write_calls)
+    assert run_rows == [("STAGE5", str(output_dir / "run_config.json"))]
+
+
+def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    output_dir = tmp_path / "REINHARD" / "REINHARD_seed_42"
+    templates_dir = output_dir / "normalization_templates"
+    output_dir.mkdir(parents=True)
+    templates_dir.mkdir()
+    (output_dir / "run_config.json").write_text("{}", encoding="utf-8")
+    (output_dir / "normalization_stats.json").write_text('{"method": "REINHARD"}', encoding="utf-8")
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE patches (
+                patch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_hdf5_path TEXT NOT NULL,
+                source_row_index INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                patient_id INTEGER NOT NULL,
+                label INTEGER NOT NULL,
+                slide_id TEXT,
+                source_signature TEXT,
+                source_image_path TEXT NOT NULL,
+                source_mask_path TEXT NOT NULL,
+                source_slide_path TEXT NOT NULL,
+                annotation_path TEXT,
+                artifacts_geojson_path TEXT,
+                stage2_case_record_id INTEGER NOT NULL,
+                stage2_processing_signature TEXT,
+                stage2_status TEXT NOT NULL,
+                cov_fold REAL NOT NULL DEFAULT 0.0,
+                cov_penmarking REAL NOT NULL DEFAULT 0.0,
+                cov_oof REAL NOT NULL DEFAULT 0.0,
+                cov_darkspot_foreign REAL NOT NULL DEFAULT 0.0,
+                cov_edge_airbubble REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (source_hdf5_path, source_row_index)
+            );
+            CREATE TABLE patch_stage_state (
+                patch_id INTEGER PRIMARY KEY,
+                cleaning_decision TEXT,
+                contamination_rate REAL,
+                split TEXT,
+                normalization_method TEXT,
+                normalization_artifact_id INTEGER,
+                sampling_decision TEXT,
+                is_stage4_accepted INTEGER,
+                is_stage7_selected INTEGER,
+                last_updated_stage_name TEXT,
+                last_updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE runs (
+                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stage_name TEXT NOT NULL,
+                config_path TEXT,
+                config_sha256 TEXT,
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                code_version TEXT,
+                input_summary_json_path TEXT,
+                input_summary_sha256 TEXT
+            );
+            CREATE TABLE normalization_artifacts (
+                normalization_artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                state_path TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                template_path TEXT,
+                template_sha256 TEXT,
+                fit_scope TEXT NOT NULL
+            );
+            """
+        )
+        cursor = connection.execute(
+            """
+            INSERT INTO patches (
+                source_hdf5_path, source_row_index, filename, patient_id, label, slide_id,
+                source_signature, source_image_path, source_mask_path, source_slide_path,
+                stage2_case_record_id, stage2_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "/patches/patient_1.h5",
+                0,
+                "a.png",
+                1,
+                1,
+                "slide_0",
+                "sig",
+                "/patches/patient_1.h5::images[0]",
+                "/patches/patient_1.h5::masks[0]",
+                "/slides/slide_0.svs",
+                1,
+                "COMPLETED",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO patch_stage_state ("
+            "patch_id, is_stage4_accepted, last_updated_stage_name"
+            ") VALUES (?, 1, ?)",
+            ((cursor.lastrowid or 0), "STAGE4_3"),
+        )
+        connection.commit()
+
+    _persist_stage5_split_state(
+        master_manifest_path=master_manifest_path,
+        split_frames={
+            "TRAIN": pd.DataFrame(
+                [
+                    {
+                        "patient_id": 1,
+                        "label": 1,
+                        "filename": "a.png",
+                        "source_hdf5_path": "/patches/patient_1.h5",
+                        "source_row_index": 0,
+                    }
+                ]
+            ),
+            "VALIDATION": pd.DataFrame(
+                columns=[
+                    "patient_id",
+                    "label",
+                    "filename",
+                    "source_hdf5_path",
+                    "source_row_index",
+                ]
+            ),
+            "TEST": pd.DataFrame(
+                columns=[
+                    "patient_id",
+                    "label",
+                    "filename",
+                    "source_hdf5_path",
+                    "source_row_index",
+                ]
+            ),
+        },
+        normalization_method="REINHARD",
+        output_dir=output_dir,
+    )
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        stage_state_rows = connection.execute(
+            "SELECT split, normalization_method, normalization_artifact_id "
+            "FROM patch_stage_state"
+        ).fetchall()
+        artifact_rows = connection.execute(
+            "SELECT method, state_path, template_path, fit_scope FROM normalization_artifacts"
+        ).fetchall()
+
+    assert stage_state_rows == [("TRAIN", "REINHARD", 1)]
+    assert artifact_rows == [
+        (
+            "REINHARD",
+            str(output_dir / "normalization_stats.json"),
+            str(templates_dir),
+            "TRAIN",
+        )
+    ]

@@ -28,9 +28,19 @@ def _build_hdf5_split_signature(
     payload = {
         "source_hdf5": source_hdf5_provenance,
         "normalization_method": normalization_method,
-        "rows": split_df[["filename", "patient_id", "label", "source_row_index"]].to_dict(
-            "records"
-        ),
+        "rows": split_df[
+            [
+                column
+                for column in (
+                    "filename",
+                    "patient_id",
+                    "label",
+                    "source_hdf5_path",
+                    "source_row_index",
+                )
+                if column in split_df.columns
+            ]
+        ].to_dict("records"),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode(
         "utf-8"
@@ -94,6 +104,12 @@ def _load_rows_by_source_index(
     return rows_by_index
 
 
+def _resolve_source_paths(batch_df: pd.DataFrame, fallback_source_hdf5_path: Path) -> pd.Series:
+    if "source_hdf5_path" in batch_df.columns:
+        return batch_df["source_hdf5_path"].astype(str)
+    return pd.Series([str(fallback_source_hdf5_path)] * len(batch_df), index=batch_df.index)
+
+
 def write_split_hdf5(
     *,
     split_df: pd.DataFrame,
@@ -135,10 +151,7 @@ def write_split_hdf5(
         f"| batch_size={copy_batch_size}"
     )
 
-    with (
-        h5py.File(source_hdf5_path, "r") as source_handle,
-        h5py.File(output_path, "w") as dest_handle,
-    ):
+    with h5py.File(output_path, "w") as dest_handle:
         dest_handle.attrs["source_signature"] = source_signature
         dest_handle.attrs["source_hdf5_sha256"] = resolved_source_hdf5_provenance["sha256"]
         for attr_name in (
@@ -147,13 +160,17 @@ def write_split_hdf5(
             "stage4_cleaning_manifest_sha256",
             "stage4_cleaning_selected_rows",
         ):
-            attr_value = source_handle.attrs.get(attr_name)
+            attr_value = resolved_source_hdf5_provenance.get("attrs", {}).get(attr_name)
             if attr_value is not None:
                 dest_handle.attrs[attr_name] = attr_value
 
+        first_source_path = Path(
+            str(ordered_split_df.iloc[0].get("source_hdf5_path", source_hdf5_path))
+        )
         first_index = int(ordered_split_df.iloc[0]["source_row_index"])
-        first_image = np.asarray(source_handle["images"][first_index])
-        first_mask = np.asarray(source_handle["masks"][first_index])
+        with h5py.File(first_source_path, "r") as first_source_handle:
+            first_image = np.asarray(first_source_handle["images"][first_index])
+            first_mask = np.asarray(first_source_handle["masks"][first_index])
         images = dest_handle.create_dataset(
             "images",
             shape=(len(ordered_split_df),) + first_image.shape,
@@ -179,19 +196,30 @@ def write_split_hdf5(
         for batch_start in range(0, len(ordered_split_df), copy_batch_size):
             batch_stop = min(batch_start + copy_batch_size, len(ordered_split_df))
             batch_df = ordered_split_df.iloc[batch_start:batch_stop].reset_index(drop=True)
-            source_indices = sorted(batch_df["source_row_index"].astype(int).tolist())
-            images_by_index = _load_rows_by_source_index(source_handle["images"], source_indices)
-            masks_by_index = _load_rows_by_source_index(source_handle["masks"], source_indices)
-
             image_batch = np.empty((len(batch_df),) + first_image.shape, dtype=np.uint8)
             mask_batch = np.empty((len(batch_df),) + first_mask.shape, dtype=np.uint8)
-            for output_offset, row in enumerate(batch_df.itertuples(index=False)):
-                source_index = int(row.source_row_index)
-                image_batch[output_offset] = _normalize_image_array(
-                    images_by_index[source_index],
-                    normalizer,
-                )
-                mask_batch[output_offset] = masks_by_index[source_index]
+            grouped_source_paths = _resolve_source_paths(batch_df, source_hdf5_path)
+            for source_group_path, group_df in batch_df.groupby(grouped_source_paths, sort=False):
+                group_positions = group_df.index.tolist()
+                source_indices = sorted(group_df["source_row_index"].astype(int).tolist())
+                with h5py.File(Path(str(source_group_path)), "r") as source_handle:
+                    images_by_index = _load_rows_by_source_index(
+                        source_handle["images"],
+                        source_indices,
+                    )
+                    masks_by_index = _load_rows_by_source_index(
+                        source_handle["masks"],
+                        source_indices,
+                    )
+
+                for output_offset in group_positions:
+                    row = batch_df.iloc[output_offset]
+                    source_index = int(row["source_row_index"])
+                    image_batch[output_offset] = _normalize_image_array(
+                        images_by_index[source_index],
+                        normalizer,
+                    )
+                    mask_batch[output_offset] = masks_by_index[source_index]
 
             images[batch_start:batch_stop] = image_batch
             masks[batch_start:batch_stop] = mask_batch

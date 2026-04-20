@@ -4,7 +4,7 @@ import contextlib
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -143,7 +143,7 @@ def compute_two_stream_probabilities(
     )
     roi_small = (sem_small > roi_threshold).float()
     roi_mask = functional.interpolate(roi_small, size=(height, width), mode="nearest").squeeze(1)
-    final_probs = cast(torch.Tensor, spa_accum * roi_mask)
+    final_probs = spa_accum * roi_mask
     final_probs.clamp_(0.0, 1.0)
     return final_probs
 

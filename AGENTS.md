@@ -54,8 +54,7 @@ Agent guide for coding agents working in this repository.
 - Stage 4.3: `4_3_cleaner_script.py`
 - Stage 5: `5_crossfold.py`
 - Stage 6: `6_sanity_checks.py`
-- Stage 6.5 / 7.1: `7_1_patient_shards.py`
-- Stage 7.2: `7_2_smart_sampler.py`
+- Stage 7.2: `7_smart_sampler.py`
 - Stage 8: `8_lr_finder.py`
 - Stage 9: `9_training_ensemble.py`
 - Stage 10: `10_optimizer_ensemble.py`
@@ -150,10 +149,8 @@ Agent guide for coding agents working in this repository.
   - `CROSSFOLD_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `CROSSFOLD_COPY_BATCH_SIZE` with default `256`
 - Current best-known Stage 5 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
-- Stage 6.5 patient-shards-related env vars now include:
-  - `PATIENT_SHARDS_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
-  - `PATIENT_SHARDS_COPY_BATCH_SIZE` with default `1024`
-- Current best-known Stage 6.5 runtime choices on the sample `/mnt/host_c` inputs are `PATIENT_SHARDS_HDF5_COMPRESSION=none` and `PATIENT_SHARDS_COPY_BATCH_SIZE=1024`.
+- Stage 7.2 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes only sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
+- Stage 8-11 runtime stages now query `master_manifest.sqlite` once at startup and then load pixels only from canonical Stage 2 patient shards.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
@@ -173,7 +170,6 @@ Agent guide for coding agents working in this repository.
 - Keep Stage 4.2 and 4.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
 - Keep Stage 5 split and normalization logic in `helpers/crossfold/*`.
 - Keep Stage 6 integrity checks in `helpers/sanity/*`.
-- Keep Stage 6.5 patient-sharding logic in `helpers/patient_shards/*`.
 - Keep patient-shard local cache behavior in `helpers/patient_shard_cache.py`.
 - Keep Stage 7.2 smart-sampling logic in `helpers/smart_sampling/*`.
 - Keep Stage 8 learning-rate finder logic in `helpers/lr_finder/*`.

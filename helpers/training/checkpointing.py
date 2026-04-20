@@ -55,29 +55,31 @@ def _metadata_path_for_checkpoint(checkpoint_path: str | os.PathLike[str]) -> Pa
 
 
 def _build_artifact_loss_provenance(
-    artifact_index_path: str | os.PathLike[str] | None,
+    master_manifest_path: str | os.PathLike[str] | None,
 ) -> dict[str, Any]:
-    artifact_path_str = os.fspath(artifact_index_path) if artifact_index_path is not None else None
-    artifact_sha256 = None
-    if artifact_path_str is not None:
-        artifact_path = Path(artifact_path_str)
-        if not artifact_path.exists():
+    manifest_path_str = (
+        os.fspath(master_manifest_path) if master_manifest_path is not None else None
+    )
+    manifest_sha256 = None
+    if manifest_path_str is not None:
+        manifest_path = Path(manifest_path_str)
+        if not manifest_path.exists():
             raise FileNotFoundError(
-                "Artifact-aware loss index "
-                f"'{artifact_path}' does not exist; cannot write provenance."
+                "Artifact-aware loss master manifest "
+                f"'{manifest_path}' does not exist; cannot write provenance."
             )
-        artifact_sha256 = hash_file_sha256(artifact_path)
+        manifest_sha256 = hash_file_sha256(manifest_path)
     return {
-        "enabled": artifact_path_str is not None,
-        "artifact_index_path": artifact_path_str,
-        "artifact_index_sha256": artifact_sha256,
+        "enabled": manifest_path_str is not None,
+        "master_manifest_path": manifest_path_str,
+        "master_manifest_sha256": manifest_sha256,
     }
 
 
 def _build_training_provenance(
     dataset: str | os.PathLike[str] | Mapping[str, Any],
     validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
-    artifact_index_path: str | os.PathLike[str] | None,
+    master_manifest_path: str | os.PathLike[str] | None,
     resume_checkpoint: str | os.PathLike[str] | None,
     *,
     run_ohem: bool,
@@ -87,7 +89,7 @@ def _build_training_provenance(
 ) -> tuple[dict[str, Any], str]:
     dataset_provenance = _build_dataset_provenance(dataset)
     validation_dataset_provenance = _build_dataset_provenance(validation_dataset)
-    artifact_loss_provenance = _build_artifact_loss_provenance(artifact_index_path)
+    artifact_loss_provenance = _build_artifact_loss_provenance(master_manifest_path)
     resume_path_str = os.fspath(resume_checkpoint) if resume_checkpoint is not None else None
     resume_sha256 = None
     if resume_path_str is not None and Path(resume_path_str).exists():
@@ -166,7 +168,7 @@ def build_training_compatibility_signature(
     *,
     dataset: str | os.PathLike[str] | Mapping[str, Any],
     validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
-    artifact_index_path: str | os.PathLike[str] | None,
+    master_manifest_path: str | os.PathLike[str] | None,
     run_ohem: bool,
     ohem_start_epoch: int,
     ohem_ratio: float,
@@ -177,7 +179,7 @@ def build_training_compatibility_signature(
     _provenance, compatibility_signature = _build_training_provenance(
         dataset,
         validation_dataset,
-        artifact_index_path,
+        master_manifest_path,
         resume_checkpoint=None,
         run_ohem=run_ohem,
         ohem_start_epoch=ohem_start_epoch,
@@ -448,7 +450,7 @@ def save_metadata(
     gamma_dice_fg: float,
     execution_mode: str | None = None,
     use_artifact_aware_loss: bool = False,
-    artifact_index_path: str | os.PathLike[str] | None = None,
+    master_manifest_path: str | os.PathLike[str] | None = None,
     resume_checkpoint: str | os.PathLike[str] | None = None,
     run_ohem: bool = False,
     ohem_start_epoch: int = 2,
@@ -462,7 +464,7 @@ def save_metadata(
     provenance, compatibility_signature = _build_training_provenance(
         dataset,
         validation_dataset,
-        artifact_index_path,
+        master_manifest_path,
         resume_checkpoint,
         run_ohem=run_ohem,
         ohem_start_epoch=ohem_start_epoch,
@@ -485,8 +487,8 @@ def save_metadata(
         "run_ohem": run_ohem,
         "compatibility_signature": compatibility_signature,
         "provenance": provenance,
-        "artifact_index_path": (
-            os.fspath(artifact_index_path) if artifact_index_path is not None else None
+        "master_manifest_path": (
+            os.fspath(master_manifest_path) if master_manifest_path is not None else None
         ),
         "resume_checkpoint": os.fspath(resume_checkpoint)
         if resume_checkpoint is not None

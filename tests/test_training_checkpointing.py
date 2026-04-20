@@ -296,8 +296,8 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
     validation_path = tmp_path / "VALIDATION.h5"
     dataset_path.write_bytes(b"dataset-v1")
     validation_path.write_bytes(b"validation-v1")
-    artifact_index_path = tmp_path / "artifact.parquet"
-    artifact_index_path.write_bytes(b"artifact-v1")
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"manifest-v1")
 
     save_metadata(
         best_val_score=0.9,
@@ -325,7 +325,7 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
         gamma_dice_fg=0.8,
         execution_mode="PAPER",
         use_artifact_aware_loss=True,
-        artifact_index_path=artifact_index_path,
+        master_manifest_path=master_manifest_path,
         resume_checkpoint="resume.pth",
         run_ohem=True,
         ohem_start_epoch=2,
@@ -337,7 +337,7 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
     assert payload["execution_mode"] == "PAPER"
     assert payload["use_artifact_aware_loss"] is True
     assert payload["run_ohem"] is True
-    assert payload["artifact_index_path"] == str(artifact_index_path)
+    assert payload["master_manifest_path"] == str(master_manifest_path)
     assert payload["resume_checkpoint"] == "resume.pth"
     assert "git_commit" in payload["runtime_environment"]
 
@@ -347,8 +347,8 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
     dataset_path.write_bytes(b"dataset-v1")
     validation_path = tmp_path / "VALIDATION.h5"
     validation_path.write_bytes(b"validation-v1")
-    artifact_index_path = tmp_path / "artifact.parquet"
-    artifact_index_path.write_bytes(b"artifact-v1")
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"manifest-v1")
 
     save_metadata(
         best_val_score=0.9,
@@ -375,7 +375,7 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
         beta_dice_bg=0.2,
         gamma_dice_fg=0.8,
         execution_mode="PAPER",
-        artifact_index_path=artifact_index_path,
+        master_manifest_path=master_manifest_path,
         resume_checkpoint="resume.pth",
         run_ohem=True,
         ohem_start_epoch=2,
@@ -390,7 +390,7 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
     assert provenance["validation_dataset"]["sha256"]
     assert provenance["validation_lineage"]["dataset_sha256"]
     assert provenance["artifact_aware_loss"]["enabled"] is True
-    assert provenance["artifact_aware_loss"]["artifact_index_sha256"]
+    assert provenance["artifact_aware_loss"]["master_manifest_sha256"]
     assert provenance["ohem"]["enabled"] is True
 
 
@@ -460,7 +460,7 @@ def test_build_training_compatibility_signature_changes_with_validation_dataset(
     signature_a = build_training_compatibility_signature(
         dataset=str(train_path),
         validation_dataset=str(validation_a_path),
-        artifact_index_path=None,
+        master_manifest_path=None,
         run_ohem=False,
         ohem_start_epoch=2,
         ohem_ratio=0.25,
@@ -469,7 +469,7 @@ def test_build_training_compatibility_signature_changes_with_validation_dataset(
     signature_b = build_training_compatibility_signature(
         dataset=str(train_path),
         validation_dataset=str(validation_b_path),
-        artifact_index_path=None,
+        master_manifest_path=None,
         run_ohem=False,
         ohem_start_epoch=2,
         ohem_ratio=0.25,
@@ -488,7 +488,7 @@ def test_build_training_compatibility_signature_changes_with_ohem_settings(tmp_p
     signature_a = build_training_compatibility_signature(
         dataset=str(train_path),
         validation_dataset=str(validation_path),
-        artifact_index_path=None,
+        master_manifest_path=None,
         run_ohem=False,
         ohem_start_epoch=2,
         ohem_ratio=0.25,
@@ -497,7 +497,7 @@ def test_build_training_compatibility_signature_changes_with_ohem_settings(tmp_p
     signature_b = build_training_compatibility_signature(
         dataset=str(train_path),
         validation_dataset=str(validation_path),
-        artifact_index_path=None,
+        master_manifest_path=None,
         run_ohem=True,
         ohem_start_epoch=2,
         ohem_ratio=0.25,
@@ -525,7 +525,7 @@ def test_build_training_compatibility_signature_accepts_precomputed_provenance()
             "smart_sampling_enabled": False,
             "smart_sampling_metadata": {},
         },
-        artifact_index_path=None,
+        master_manifest_path=None,
         run_ohem=False,
         ohem_start_epoch=2,
         ohem_ratio=0.25,

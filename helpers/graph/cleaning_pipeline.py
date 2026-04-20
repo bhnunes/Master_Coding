@@ -13,6 +13,7 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 
+from helpers.extraction.master_manifest import MasterManifest
 from helpers.graph.contamination import (
     GraphContaminationParameters,
     calculate_roi_contamination,
@@ -75,6 +76,7 @@ def run_graph_cleaning_pipeline(
     tau: float,
     num_workers: int,
     logger: logging.Logger,
+    master_manifest_path: Path | None = None,
     scorer: Scorer = calculate_roi_contamination,
     progress_factory: ProgressFactory | None = None,
 ) -> GraphCleaningSummary:
@@ -110,6 +112,10 @@ def run_graph_cleaning_pipeline(
         scorer=scorer,
         progress_factory=progress_factory,
     )
+    if master_manifest_path is not None:
+        MasterManifest(master_manifest_path).update_stage4_cleaning_decisions(
+            decisions=[record.__dict__ for record in decisions]
+        )
     _write_decision_manifest(accepted_manifest_path, decisions, ACCEPTED)
     _write_decision_manifest(rejected_manifest_path, decisions, REJECTED)
     result_counts = Counter(record.decision for record in decisions)

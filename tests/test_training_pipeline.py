@@ -161,7 +161,7 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
             "alpha_bce": 0.6,
             "beta_dice_bg": 0.2,
             "gamma_dice_fg": 0.8,
-            "artifact_index_path": "artifact.parquet",
+            "master_manifest_path": "master_manifest.sqlite",
             "use_artifact_aware_loss": True,
             "run_ohem": True,
             "ohem_start_epoch": 2,

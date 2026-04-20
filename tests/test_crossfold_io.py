@@ -268,3 +268,59 @@ def test_write_split_hdf5_emits_progress_logs(
 
     assert any("Stage 5 split write" in message for message in caplog.messages)
     assert any("Stage 5 split verify" in message for message in caplog.messages)
+
+
+def test_write_split_hdf5_reads_rows_from_multiple_stage2_sources(tmp_path: Path) -> None:
+    source_a = tmp_path / "PATCHES" / "HDF5_SHARDS" / "a.h5"
+    source_b = tmp_path / "PATCHES" / "HDF5_SHARDS" / "b.h5"
+    source_a.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(source_a, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([0], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([10], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"A.png"]))
+    with h5py.File(source_b, "w") as handle:
+        handle.create_dataset("images", data=np.ones((1, 4, 4, 3), dtype=np.uint8) * 7)
+        handle.create_dataset("masks", data=np.ones((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([20], dtype=np.int32))
+        handle.create_dataset("filenames", data=np.array([b"B.png"]))
+
+    split_df = pd.DataFrame(
+        [
+            {
+                "label": 0,
+                "patient_id": 10,
+                "filename": "A.png",
+                "source_hdf5_path": str(source_a),
+                "source_row_index": 0,
+            },
+            {
+                "label": 1,
+                "patient_id": 20,
+                "filename": "B.png",
+                "source_hdf5_path": str(source_b),
+                "source_row_index": 0,
+            },
+        ]
+    )
+
+    output_path = write_split_hdf5(
+        split_df=split_df,
+        source_hdf5_path=tmp_path / "master_manifest.sqlite",
+        output_path=tmp_path / "TRAIN.h5",
+        normalizer=None,
+        normalization_method="NOT_NORMALIZED",
+        source_hdf5_provenance={
+            "path": str(tmp_path / "master_manifest.sqlite"),
+            "sha256": "sqlite-sha",
+            "attrs": {"stage4_cleaning_manifest_path": str(tmp_path / "master_manifest.sqlite")},
+        },
+        overwrite=True,
+    )
+
+    with h5py.File(output_path, "r") as handle:
+        assert handle["labels"][:].tolist() == [0, 1]
+        assert int(handle["images"][1, 0, 0, 0]) == 7
+        assert handle.attrs["source_hdf5_sha256"] == "sqlite-sha"

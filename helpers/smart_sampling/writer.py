@@ -233,9 +233,9 @@ def write_filtered_hdf5(
     output_dir: Path | None = None,
     signature_source_path: Path | None = None,
 ) -> Path:
-    source_path = source_h5_path or config.source_h5_path
+    source_path = source_h5_path
     if source_path is None:
-        raise ValueError("write_filtered_hdf5 requires a source_h5_path for singleton input.")
+        raise ValueError("write_filtered_hdf5 requires an explicit source_h5_path.")
     output_path = (output_dir or config.output_dir) / config.output_filename
     selected_indices = np.asarray(selected_indices, dtype=np.int64)
     selection_signature = _build_sampling_signature(
@@ -442,7 +442,7 @@ def write_filtered_shards(
         normalized_rows,
         source_shard_dir=source_shard_dir,
         source_manifest_path=source_manifest_path,
-        signature_source_manifest_path=config.source_manifest_path,
+        signature_source_manifest_path=source_manifest_path,
         signature_source_dir=signature_source_dir,
     )
     if filtered_shard_dir.exists() and not config.overwrite_output:

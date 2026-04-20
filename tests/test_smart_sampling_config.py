@@ -6,21 +6,17 @@ from helpers.smart_sampling.config import load_smart_sampler_config
 
 
 def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
-    shard_dir = tmp_path / "TRAIN_shards"
-    shard_dir.mkdir()
-    manifest_path = shard_dir / "manifest.parquet"
-    manifest_path.write_bytes(b"parquet")
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     config = load_smart_sampler_config(
         {
-            "SMART_SAMPLER_SOURCE_SHARD_DIR": str(shard_dir),
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
         }
     )
 
-    assert config.source_h5_path is None
-    assert config.source_shard_dir == shard_dir
-    assert config.source_manifest_path == shard_dir / "manifest.parquet"
+    assert config.master_manifest_path == master_manifest_path
     assert config.output_dir == tmp_path / "out"
     assert config.output_filename == "TRAIN_FILTERED_shards"
     assert config.stage_input_locally is False
@@ -46,13 +42,13 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
 
 
 def test_load_smart_sampler_config_rejects_invalid_growth_factor(tmp_path: Path) -> None:
-    shard_dir = tmp_path / "TRAIN_shards"
-    shard_dir.mkdir()
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     with pytest.raises(ValueError, match="SMART_SAMPLER_GROWTH_FACTOR"):
         load_smart_sampler_config(
             {
-                "SMART_SAMPLER_SOURCE_SHARD_DIR": str(shard_dir),
+                "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
                 "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
                 "SMART_SAMPLER_GROWTH_FACTOR": "1.0",
             }
@@ -60,19 +56,19 @@ def test_load_smart_sampler_config_rejects_invalid_growth_factor(tmp_path: Path)
 
 
 def test_load_smart_sampler_config_reads_gist_flag_and_legacy_alias(tmp_path: Path) -> None:
-    shard_dir = tmp_path / "TRAIN_shards"
-    shard_dir.mkdir()
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     config = load_smart_sampler_config(
         {
-            "SMART_SAMPLER_SOURCE_SHARD_DIR": str(shard_dir),
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
             "SMART_SAMPLER_USE_GIST": "true",
         }
     )
     alias_config = load_smart_sampler_config(
         {
-            "SMART_SAMPLER_SOURCE_SHARD_DIR": str(shard_dir),
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out2"),
             "USE_GIST_SCRIPT": "true",
         }
@@ -83,12 +79,12 @@ def test_load_smart_sampler_config_reads_gist_flag_and_legacy_alias(tmp_path: Pa
 
 
 def test_load_smart_sampler_config_reads_protection_settings(tmp_path: Path) -> None:
-    shard_dir = tmp_path / "TRAIN_shards"
-    shard_dir.mkdir()
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     config = load_smart_sampler_config(
         {
-            "SMART_SAMPLER_SOURCE_SHARD_DIR": str(shard_dir),
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
             "SMART_SAMPLER_MODEL_NAME": "custom/phikon",
             "SMART_SAMPLER_PROTECT_POSITIVE_LABELS": "false",
@@ -104,12 +100,12 @@ def test_load_smart_sampler_config_reads_protection_settings(tmp_path: Path) -> 
 
 
 def test_load_smart_sampler_config_reads_local_cache_settings(tmp_path: Path) -> None:
-    shard_dir = tmp_path / "TRAIN_shards"
-    shard_dir.mkdir()
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     config = load_smart_sampler_config(
         {
-            "SMART_SAMPLER_SOURCE_SHARD_DIR": str(shard_dir),
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
             "SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR": str(tmp_path / "cache"),
             "SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES": "4096",

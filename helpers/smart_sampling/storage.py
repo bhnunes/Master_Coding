@@ -11,8 +11,6 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 
 @dataclass(frozen=True)
 class PreparedSmartSamplerStorage:
-    source_shard_dir: Path
-    source_manifest_path: Path
     final_output_dir: Path
     sidecar_output_dir: Path
     patient_shard_cache: PatientShardCache | None
@@ -23,8 +21,6 @@ def prepare_storage(config: SmartSamplerConfig) -> PreparedSmartSamplerStorage:
     needs_local_work_dir = config.stage_input_locally or config.stage_outputs_locally
     local_work_dir = _require_local_work_dir(config) if needs_local_work_dir else None
 
-    source_shard_dir = _require_source_shard_dir(config)
-    source_manifest_path = _require_source_manifest_path(config)
     final_output_dir = config.output_dir
     sidecar_output_dir = config.output_dir
     patient_shard_cache: PatientShardCache | None = None
@@ -46,8 +42,6 @@ def prepare_storage(config: SmartSamplerConfig) -> PreparedSmartSamplerStorage:
         logging.info("Writing Stage 7 sidecars locally first in %s", sidecar_output_dir)
 
     return PreparedSmartSamplerStorage(
-        source_shard_dir=source_shard_dir,
-        source_manifest_path=source_manifest_path,
         final_output_dir=final_output_dir,
         sidecar_output_dir=sidecar_output_dir,
         patient_shard_cache=patient_shard_cache,
@@ -131,37 +125,10 @@ def cleanup_local_work_dir(config: SmartSamplerConfig) -> None:
         shutil.rmtree(config.local_work_dir)
 
 
-def prepare_source_h5(config: SmartSamplerConfig) -> Path:
-    if config.source_h5_path is None:
-        raise ValueError(
-            "SMART_SAMPLER_SOURCE_H5 is no longer supported for Stage 7 pipeline input."
-        )
-    if not config.stage_input_locally:
-        return config.source_h5_path
-    local_work_dir = _require_local_work_dir(config)
-    staged_input_dir = _input_stage_dir(local_work_dir)
-    staged_input_dir.mkdir(parents=True, exist_ok=True)
-    staged_path = staged_input_dir / config.source_h5_path.name
-    shutil.copy2(config.source_h5_path, staged_path)
-    return staged_path
-
-
 def _require_local_work_dir(config: SmartSamplerConfig) -> Path:
     if config.local_work_dir is None:
         raise ValueError("SMART_SAMPLER_LOCAL_WORK_DIR is required when local staging is enabled.")
     return config.local_work_dir
-
-
-def _require_source_shard_dir(config: SmartSamplerConfig) -> Path:
-    if config.source_shard_dir is None:
-        raise ValueError("SMART_SAMPLER_SOURCE_SHARD_DIR is required for Stage 7 shard input.")
-    return config.source_shard_dir
-
-
-def _require_source_manifest_path(config: SmartSamplerConfig) -> Path:
-    if config.source_manifest_path is None:
-        raise ValueError("SMART_SAMPLER_SOURCE_MANIFEST_PATH is required for Stage 7 shard input.")
-    return config.source_manifest_path
 
 
 def _input_stage_dir(local_work_dir: Path) -> Path:

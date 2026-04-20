@@ -52,8 +52,8 @@ def main() -> None:
     print(f"- Kept percentage: {outputs.kept_fraction * 100.0:.2f}%")
     print(f"- Patients processed: {outputs.patient_count}")
     print(f"- Patients reduced: {outputs.patients_reduced_count}")
-    logging.info("Filtered shard dir: %s", outputs.filtered_shard_dir)
-    print(f"- Filtered shard dir: {outputs.filtered_shard_dir}")
+    logging.info("Output dir: %s", outputs.output_dir)
+    print(f"- Output dir: {outputs.output_dir}")
     if outputs.selection_csv_path is not None:
         logging.info("Selection CSV: %s", outputs.selection_csv_path)
         print(f"- Selection CSV: {outputs.selection_csv_path}")

@@ -20,13 +20,8 @@ from helpers.training.checkpointing import (
 )
 from helpers.training.config import load_training_ensemble_config
 from helpers.training.data import (
-    HybridProstateShardDataset,
-    ProstateCancerShardDataset,
-    SubsetView,
     collate_batch,
-    create_stratified_subset_within_patients,
-    load_artifact_coverage_lookup,
-    prepare_training_shard_data,
+    prepare_training_data,
     verify_patient_separation,
 )
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
@@ -106,14 +101,9 @@ optimizer_name = training_config.optimizer_name
 # =============================================================================
 # 7) Dataset & Normalization
 # =============================================================================
-# Path on Google Drive containing TRAIN_shards / TRAIN_FILTERED_shards and VALIDATION_shards
-hdf5_drive_dir = str(training_config.hdf5_drive_dir)
+master_manifest_path = training_config.master_manifest_path
 metadata_dir = str(training_config.metadata_dir)
 identifier = training_config.identifier
-
-# Local temporary directory for staged patient-shard caches
-local_data_dir = str(training_config.local_data_dir)
-
 
 # =============================================================================
 # 9) Checkpoints, Tracking & Notifications
@@ -137,8 +127,7 @@ run_ohem = training_config.run_ohem
 ohem_start_epoch = training_config.ohem_start_epoch
 ohem_ratio = training_config.ohem_ratio
 ohem_min_kept = training_config.ohem_min_kept
-artifact_index_path = training_config.artifact_index_path
-effective_artifact_index_path = artifact_index_path if use_artifact_aware_loss else None
+effective_master_manifest_path = master_manifest_path if use_artifact_aware_loss else None
 
 subset_ratio = 1.0
 use_subset = False
@@ -183,12 +172,18 @@ print("Aim/Ngrok setup complete.")
 # --- 13. Main Training Loop ---
 # ==============================================================================
 
-# 1. Resolve shard-backed training and validation inputs
-prepared_shard_data = prepare_training_shard_data(hdf5_drive_dir, local_data_dir, smart_sampling)
-train_layout = prepared_shard_data.train_layout
-val_layout = prepared_shard_data.validation_layout
-train_dataset_provenance = prepared_shard_data.training_provenance
-validation_dataset_provenance = prepared_shard_data.validation_provenance
+# 1. Resolve manifest-backed training and validation inputs
+prepared_training_data = prepare_training_data(
+    master_manifest_path=master_manifest_path,
+    local_data_dir=training_config.local_data_dir,
+    smart_sampling=smart_sampling,
+    use_subset=use_subset,
+    subset_ratio=subset_ratio,
+    seed=seed,
+    use_artifact_aware_loss=use_artifact_aware_loss,
+)
+train_dataset_provenance = prepared_training_data.training_provenance
+validation_dataset_provenance = prepared_training_data.validation_provenance
 
 print("\nCreating DataLoaders...")
 train_ds: Any = None
@@ -199,41 +194,15 @@ try:
     # A) Full HDF5 Wrappers
     # Note: Ensure your preprocessing script included "patient_ids" in the HDF5
     # for the leakage check below to function.
-    artifact_coverage_by_filename = (
-        load_artifact_coverage_lookup(str(effective_artifact_index_path))
-        if effective_artifact_index_path is not None
-        else None
-    )
-    full_train_ds_h5 = HybridProstateShardDataset(
-        train_layout,
-        mode="train",
-        artifact_coverage_by_filename=artifact_coverage_by_filename,
-    )
-    full_val_ds_h5 = ProstateCancerShardDataset(
-        val_layout,
-        mode="val",
-        artifact_coverage_by_filename=artifact_coverage_by_filename,
-    )
+    full_train_ds_h5 = prepared_training_data.train_dataset
+    full_val_ds_h5 = prepared_training_data.validation_dataset
 
     # B) Patient Leakage Check (Critical for scientific validity)
     print("Verifying data integrity...")
     verify_patient_separation(full_train_ds_h5, full_val_ds_h5)
 
-    # C) Subsetting (Patient-Stratified)
-    if use_subset and subset_ratio < 1.0:
-        print(f"Subsampling enabled: {subset_ratio:.0%}")
-        train_sub = create_stratified_subset_within_patients(
-            full_train_ds_h5, subset_ratio, "train", seed=seed
-        )
-        val_sub = create_stratified_subset_within_patients(
-            full_val_ds_h5, subset_ratio, "val", seed=seed
-        )
-
-        train_ds = SubsetView(full_train_ds_h5, list(train_sub.indices))
-        val_ds = SubsetView(full_val_ds_h5, list(val_sub.indices))
-    else:
-        train_ds = full_train_ds_h5
-        val_ds = full_val_ds_h5
+    train_ds = full_train_ds_h5
+    val_ds = full_val_ds_h5
 
     # ---------------------------------------------------------
     # 3) IMPLEMENT WEIGHTED RANDOM SAMPLER (Unchanged)
@@ -248,7 +217,7 @@ try:
     class_counts[class_counts == 0] = 1
 
     weight_per_class = 1.0 / class_counts
-    samples_weights = weight_per_class[current_labels]
+    samples_weights = prepared_training_data.sample_weights.numpy()
 
     sampler_generator = torch.Generator()
     sampler_generator.manual_seed(seed)
@@ -289,7 +258,7 @@ try:
         worker_init_fn=worker_init_fn,
     )
 
-    print("DataLoaders created successfully (Train: HDF5, Val: HDF5).")
+    print("DataLoaders created successfully (Train: canonical rows, Val: canonical rows).")
 
 except Exception as e:
     print(f"DataLoader Err: {e}")
@@ -389,7 +358,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
     expected_compatibility_signature = build_training_compatibility_signature(
         dataset=train_dataset_provenance,
         validation_dataset=validation_dataset_provenance,
-        artifact_index_path=effective_artifact_index_path,
+        master_manifest_path=effective_master_manifest_path,
         run_ohem=run_ohem,
         ohem_start_epoch=ohem_start_epoch,
         ohem_ratio=ohem_ratio,
@@ -507,7 +476,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
                 "beta_dice_bg": beta_dice_bg,
                 "gamma_dice_fg": gamma_dice_fg,
                 "execution_mode": execution_mode,
-                "artifact_index_path": effective_artifact_index_path,
+                "master_manifest_path": effective_master_manifest_path,
                 "use_artifact_aware_loss": use_artifact_aware_loss,
                 "run_ohem": run_ohem,
                 "ohem_start_epoch": ohem_start_epoch,
