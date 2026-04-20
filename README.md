@@ -20,7 +20,6 @@ A Python research pipeline for pathology whole-slide-image (WSI) processing. It 
 Master_Coding/
 ├── 1_artifact_detection.py          # Generate artifact GeoJSON from WSIs
 ├── 2_database_manager.py            # Database orchestration & case processing
-├── 3_pack_splits_to_hdf5.py         # Package source HDF5 datasets
 ├── 4_1_optimization_sampling.py     # Select samples for human-in-the-loop cleaning
 ├── 4_2_tune_graph_method.py         # Tune graph segmentation parameters
 ├── 4_3_cleaner_script.py            # Apply cleaning to remove incorrect annotations
@@ -173,7 +172,6 @@ Helper modules are organized by domain under `helpers/<domain>/`. New domain-spe
 |-------|-----------|-------------|
 | 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using a `.env`-driven Stage 1 pipeline. Output: GeoJSON files with artifact annotations and SQLite processing status |
 | 2 | `2_database_manager.py` | Extract canonical HDF5 patch shards from WSIs, populate `master_manifest.sqlite`, and optionally emit PNG exports when explicitly enabled |
-| 3 | `3_pack_splits_to_hdf5.py` | Obsolete entrypoint retained only to fail closed with a migration message |
 | 4.1-4.3 | `4_1_optimization_sampling.py` → `4_2_tune_graph_method.py` → `4_3_cleaner_script.py` | HDF5-backed human-in-the-loop review plus graph-based cleaning, with PNG retained only for review/export workflows |
 | 5 | `5_crossfold.py` | Create Stage 5 split assignments in `master_manifest.sqlite`, emit split/normalization sidecars, and fit stain normalization on `TRAIN` only |
 | 6 | `6_sanity_checks.py` | Validate Stage 5 singleton split integrity, provenance, leakage, and mask/label semantics |
@@ -226,17 +224,6 @@ Current Stage 2 multi-dataset XML behavior:
   - cancer: `#8B0000`, `#FF00FF`, `#800080`
   - not_cancer: `#8A2BE2`, `#0000FF`, `#4682B4`, `#00FF00`, `#008000`, `#FFFF00`
   - rejected: `#4B0082` (skipped entirely)
-
-### Stage 3: HDF5 Packaging
-
-| Script | Purpose |
-|--------|---------|
-| `3_pack_splits_to_hdf5.py` | Obsolete entrypoint that exits with a migration message. |
-
-Current Stage 3 behavior:
-
-- Stage 3 is no longer part of the active metadata-first pipeline
-- Accepted-row state now lives in `master_manifest.sqlite` instead of rewrite-only packaged HDF5 outputs
 
 ### Stage 4: Annotation Cleaning
 
@@ -378,10 +365,6 @@ HF_TOKEN=
 # HUGGINGFACE_HUB_TOKEN=  # equivalent alias; Stage 8 mirrors either token to both names
 LR_FINDER_AMP_PRECISION=fp32
 
-# Stage 3 - Packaging
-PACKAGING_HDF5_COMPRESSION=none
-PACKAGING_COPY_BATCH_SIZE=256
-
 # Stage 5 - Crossfold
 CROSSFOLD_HDF5_COMPRESSION=none
 CROSSFOLD_COPY_BATCH_SIZE=1024
@@ -411,15 +394,13 @@ OPENSLIDE_PATH=
 
 For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Stage 2 resolves the supported label colors internally and does not require manual SQLite color setup.
 
-See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, obsolete Stage 3 packaging notes, Stage 4 cleaning, Stage 5/6 manifest-driven preparation, Stage 7.2 smart-sampling sidecars, Stage 8 LR-finder reporting, the Stage 9 training matrix, and Stage 10 ensemble-optimizer settings.
+See `.env_example` for the current commented template, including Stage 1, Stage 2 local WSI staging, Stage 4 cleaning, Stage 5/6 manifest-driven preparation, Stage 7.2 smart-sampling sidecars, Stage 8 LR-finder reporting, the Stage 9 training matrix, and Stage 10 ensemble-optimizer settings.
 
 Stage 8 runtime notes:
 
 - Stage 8 accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` and applies the detected token to both environment variables before model creation.
 - The default `LR_FINDER_AMP_PRECISION` is `fp32`.
 - Console output is intentionally compact for Colab and other notebook environments: one startup line, periodic snapshot progress lines, and one final summary. Detailed trace logging stays in `logs/lr_finder.log`.
-
-For Stage 3 packaging, the current best-known performance settings are `PACKAGING_HDF5_COMPRESSION=none` and `PACKAGING_COPY_BATCH_SIZE=256`. The benchmark write-up lives in `analysis/stage3_packaging_performance_findings.md`.
 
 For Stage 4 graph cleaning, the current tuning and cleaning benchmark notes live in `analysis/stage4_2_graph_tuning_performance_findings.md` and `analysis/stage4_3_graph_cleaning_performance_findings.md`.
 
@@ -508,23 +489,20 @@ uv run --python 3.12 python 2_database_manager.py
 # place matching `.xml` files in ANNOTATIONS_HISEG, then run:
 uv run --python 3.12 python 2_database_manager.py
 
-# 3. Package Stage 2 shards into one source HDF5
-uv run --python 3.12 python 3_pack_splits_to_hdf5.py
-
-# 4. Annotation Cleaning (optional, for cancer patches)
+# 3. Annotation Cleaning (optional, for cancer patches)
 uv run --python 3.12 python 4_1_optimization_sampling.py
 # After human review, place approved/rejected in folders
 uv run --python 3.12 python 4_2_tune_graph_method.py
 # Stage 4.3 consumes the JSON artifact emitted by Stage 4.2 and fails fast without it
 uv run --python 3.12 python 4_3_cleaner_script.py
 
-# 5. Create HDF5 TRAIN/VALIDATION/TEST splits
+# 4. Create HDF5 TRAIN/VALIDATION/TEST splits
 uv run --python 3.12 python 5_crossfold.py
 
-# 6. Run HDF5-native sanity checks
+# 5. Run HDF5-native sanity checks
 uv run --python 3.12 python 6_sanity_checks.py
 
-# 7.2-11. Optional smart sampling, then training & inference (typically on a GPU machine)
+# 6. Optional smart sampling, then training & inference (typically on a GPU machine)
 uv run --python 3.12 python 7_smart_sampler.py
 uv run --python 3.12 python 8_lr_finder.py
 uv run --python 3.12 python 9_training_ensemble.py
@@ -559,11 +537,11 @@ uv run pytest
 uv run pytest --cov=helpers --cov-report=term-missing
 
 # Run linting and typing on the actively maintained surfaces
-uv run ruff check 1_artifact_detection.py 2_database_manager.py 3_pack_splits_to_hdf5.py 9_training_ensemble.py helpers tests
+uv run ruff check 1_artifact_detection.py 2_database_manager.py 9_training_ensemble.py helpers tests
 uv run ruff format .
 
 # Run type checking on the same touched scope
-uv run mypy 1_artifact_detection.py 2_database_manager.py 3_pack_splits_to_hdf5.py 9_training_ensemble.py helpers tests
+uv run mypy 1_artifact_detection.py 2_database_manager.py 9_training_ensemble.py helpers tests
 ```
 
 Recent targeted validation highlights:

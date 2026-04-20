@@ -11,7 +11,6 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `4_1_optimization_sampling.py`
 - `4_2_tune_graph_method.py`
 - `4_3_cleaner_script.py`
-- `3_pack_splits_to_hdf5.py`
 - `5_crossfold.py`
 - `6_sanity_checks.py`
 - `7_smart_sampler.py`
@@ -58,11 +57,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/graph/cleaning_pipeline.py`
 - `.env_example`
 
-## Stage 3 packaging
+## Stage 3 packaging helpers
 
-- `3_pack_splits_to_hdf5.py`
 - `helpers/packaging/config.py`
-- `helpers/packaging/discovery.py`
 - `helpers/packaging/pipeline.py`
 - `helpers/packaging/writer.py`
 - `.env_example`

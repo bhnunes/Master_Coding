@@ -48,7 +48,6 @@ Agent guide for coding agents working in this repository.
 ## Stage Entrypoints
 - Stage 1: `1_artifact_detection.py`
 - Stage 2: `2_database_manager.py`
-- Stage 3: `3_pack_splits_to_hdf5.py`
 - Stage 4.1: `4_1_optimization_sampling.py`
 - Stage 4.2: `4_2_tune_graph_method.py`
 - Stage 4.3: `4_3_cleaner_script.py`
