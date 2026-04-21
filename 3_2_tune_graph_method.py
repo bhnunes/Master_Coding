@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 from helpers.graph.parameter_store import save_graph_cleaning_parameter_artifact
 from helpers.graph.tuning_config import load_graph_tuning_config
 from helpers.graph.tuning_pipeline import (
+    GraphTuningPipelineConfig,
     build_graph_cleaning_parameter_artifact,
     build_recommendation_message,
     run_graph_tuning_pipeline,
 )
-from helpers.logging_utils import configure_stage_logger
+from helpers.logging_utils import LoggerSettings, configure_stage_logger
 
 
 def main() -> None:
@@ -22,25 +23,29 @@ def main() -> None:
     logger = configure_stage_logger(
         "graph_tuning",
         config.log_path,
-        logger_level=20,
-        file_level=10,
-        console_level=20,
-        file_mode="w",
-        file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+        settings=LoggerSettings(
+            logger_level=20,
+            file_level=10,
+            console_level=20,
+            file_mode="w",
+            file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+        ),
     )
     summary = run_graph_tuning_pipeline(
-        source_hdf5_path=config.source_hdf5_path,
-        review_base_dir=config.review_base_dir,
-        test_set_size=config.test_set_size,
-        n_splits_inner_cv=config.n_splits_inner_cv,
-        n_bayesian_calls=config.n_bayesian_calls,
-        n_initial_points=config.n_initial_points,
-        random_state=config.random_state,
-        bg_intensity_range=config.bg_intensity_range,
-        k_range=config.k_range,
-        min_size_range=config.min_size_range,
-        erosion_range=config.erosion_range,
-        logger=logger,
+        GraphTuningPipelineConfig(
+            source_hdf5_path=config.source_hdf5_path,
+            review_base_dir=config.review_base_dir,
+            test_set_size=config.test_set_size,
+            n_splits_inner_cv=config.n_splits_inner_cv,
+            n_bayesian_calls=config.n_bayesian_calls,
+            n_initial_points=config.n_initial_points,
+            random_state=config.random_state,
+            bg_intensity_range=config.bg_intensity_range,
+            k_range=config.k_range,
+            min_size_range=config.min_size_range,
+            erosion_range=config.erosion_range,
+            logger=logger,
+        )
     )
     artifact = build_graph_cleaning_parameter_artifact(summary, random_state=config.random_state)
     save_graph_cleaning_parameter_artifact(config.output_params_path, artifact)

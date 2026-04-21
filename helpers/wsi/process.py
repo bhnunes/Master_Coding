@@ -2,6 +2,7 @@
 
 # MAIN LOOP TO PROCESS WSI
 import json
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -13,6 +14,26 @@ from tqdm import tqdm
 from helpers.cv2_compat import ensure_cv2_compat
 
 cv2 = ensure_cv2_compat(cv2)
+
+TISSUE_TILE_MIN_ZERO_PIXELS = 50
+MIN_GEOJSON_CONTOUR_POINTS = 4
+
+
+@dataclass(frozen=True)
+class SlideProcessConfig:
+    patch_count_w: int
+    patch_count_h: int
+    patch_size: int
+    model_patch_size: int
+    colors: list[list[int]]
+    encoder_model: str
+    encoder_weights: str
+    device: str
+    back_class: int
+    mpp_model: float
+    slide_mpp: float
+    width_l0: int
+    height_l0: int
 
 
 # Helper functions
@@ -66,75 +87,77 @@ def slide_process_single(
     model,
     tis_det_map_mpp,
     slide,
-    patch_n_w_l0,
-    patch_n_h_l0,
-    p_s,
-    m_p_s,
-    colors,
-    ENCODER_MODEL_1,
-    ENCODER_WEIGHTS,
-    DEVICE,
-    BACK_CLASS,
-    MPP_MODEL_1,
-    mpp,
-    w_l0,
-    h_l0,
+    config: SlideProcessConfig,
 ):
     """
     Tissue detection map is generated under MPP = 4, therefore model patch size of
     (512, 512) corresponds to a tis_det_map patch size of (128, 128).
     """
 
-    model_size = (m_p_s, m_p_s)
-    preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER_MODEL_1, ENCODER_WEIGHTS)
+    model_size = (config.model_patch_size, config.model_patch_size)
+    preprocessing_fn = smp.encoders.get_preprocessing_fn(
+        config.encoder_model,
+        config.encoder_weights,
+    )
 
     mask_rows = []
-    for he in tqdm(range(patch_n_h_l0), total=patch_n_h_l0):
-        h = he * p_s + 1
+    for he in tqdm(range(config.patch_count_h), total=config.patch_count_h):
+        h = he * config.patch_size + 1
         if he == 0:
             h = 0
         row_tiles = []
-        for wi in range(patch_n_w_l0):
-            w = wi * p_s + 1
+        for wi in range(config.patch_count_w):
+            w = wi * config.patch_size + 1
             if wi == 0:
                 w = 0
-            td_patch = tis_det_map_mpp[he * m_p_s : (he + 1) * m_p_s, wi * m_p_s : (wi + 1) * m_p_s]
-            if td_patch.shape != (m_p_s, m_p_s):
+            td_patch = tis_det_map_mpp[
+                he * config.model_patch_size : (he + 1) * config.model_patch_size,
+                wi * config.model_patch_size : (wi + 1) * config.model_patch_size,
+            ]
+            if td_patch.shape != (config.model_patch_size, config.model_patch_size):
                 original_shape = td_patch.shape
-                desired_shape = (m_p_s, m_p_s)
+                desired_shape = (config.model_patch_size, config.model_patch_size)
                 padding = [(0, desired_shape[i] - original_shape[i]) for i in range(2)]
                 td_patch_ = np.pad(td_patch, padding, mode="constant")
             else:
                 td_patch_ = td_patch
 
-            if np.count_nonzero(td_patch == 0) > 50:  # here change to check of segmentation map
+            if np.count_nonzero(td_patch == 0) > TISSUE_TILE_MIN_ZERO_PIXELS:
                 # Generate patch
-                work_patch = slide.read_region((w, h), 0, (p_s, p_s))
+                work_patch = slide.read_region((w, h), 0, (config.patch_size, config.patch_size))
                 work_patch = work_patch.convert("RGB")
 
                 # Resize to model patch size
-                work_patch = work_patch.resize((m_p_s, m_p_s), Image.Resampling.LANCZOS)
+                work_patch = work_patch.resize(model_size, Image.Resampling.LANCZOS)
 
                 image_pre = get_preprocessing(work_patch, preprocessing_fn, model_size)
-                x_tensor = torch.from_numpy(image_pre).to(DEVICE).unsqueeze(0)
+                x_tensor = torch.from_numpy(image_pre).to(config.device).unsqueeze(0)
                 predictions = model.predict(x_tensor)
                 predictions = predictions.squeeze().cpu().numpy()
 
                 mask_raw = np.argmax(predictions, axis=0).astype("int8")
-                mask = np.where(td_patch_ == 1, BACK_CLASS, mask_raw)
+                mask = np.where(td_patch_ == 1, config.back_class, mask_raw)
 
             else:
-                mask = np.full((m_p_s, m_p_s), BACK_CLASS)
+                mask = np.full(model_size, config.back_class)
 
             row_tiles.append(mask)
 
-        mask_rows.append(_combine_mask_tiles(row_tiles, m_p_s, 0))
+        mask_rows.append(_combine_mask_tiles(row_tiles, config.model_patch_size, 0))
 
-    end_image = _combine_mask_rows(mask_rows, m_p_s, 0)
+    end_image = _combine_mask_rows(mask_rows, config.model_patch_size, 0)
 
     # now get size of padded region (buffer) at Model MPP
-    buffer_right_l = int((w_l0 - (patch_n_w_l0 * p_s)) * mpp / MPP_MODEL_1)
-    buffer_bottom_l = int((h_l0 - (patch_n_h_l0 * p_s)) * mpp / MPP_MODEL_1)
+    buffer_right_l = int(
+        (config.width_l0 - (config.patch_count_w * config.patch_size))
+        * config.slide_mpp
+        / config.mpp_model
+    )
+    buffer_bottom_l = int(
+        (config.height_l0 - (config.patch_count_h * config.patch_size))
+        * config.slide_mpp
+        / config.mpp_model
+    )
     # firstly bottom
     buffer_bottom = np.full((buffer_bottom_l, end_image.shape[1]), 0)
     temp_image = np.concatenate((end_image, buffer_bottom), axis=0)
@@ -143,10 +166,10 @@ def slide_process_single(
     buffer_right = np.full((temp_image_he, buffer_right_l), 0)
     end_image = np.concatenate((temp_image, buffer_right), axis=1).astype(np.uint8)
 
-    end_image_1class = make_1class_map_thr(end_image, colors)
+    end_image_1class = make_1class_map_thr(end_image, config.colors)
     end_image_1class = Image.fromarray(end_image_1class)
     end_image_1class = end_image_1class.resize(
-        (patch_n_w_l0 * 50, patch_n_h_l0 * 50), Image.Resampling.LANCZOS
+        (config.patch_count_w * 50, config.patch_count_h * 50), Image.Resampling.LANCZOS
     )
 
     return end_image_1class, end_image
@@ -203,7 +226,7 @@ def mask_to_geojson(mask_path, output_path, scale_factor=1.0):
             scaled_points = contour_points * scale_factor
 
             # Skip contours with less than 4 points
-            if len(scaled_points) < 4:
+            if len(scaled_points) < MIN_GEOJSON_CONTOUR_POINTS:
                 continue
 
             # Ensure polygon is closed by adding first point at the end if needed

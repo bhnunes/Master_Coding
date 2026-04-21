@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import torch
 
-from helpers.training.loop import train_epoch, validate_epoch
+from helpers.training.loop import (
+    TrainEpochConfig,
+    TrainEpochRuntime,
+    ValidationEpochConfig,
+    ValidationEpochRuntime,
+    train_epoch,
+    validate_epoch,
+)
 from helpers.training.metrics import TrainingHealthTracker
 
 
@@ -48,15 +55,19 @@ def test_train_epoch_enables_ohem_and_sets_current_epoch() -> None:
         model=model,
         optimizer=optimizer,
         dataloader=dataloader,
-        device=torch.device("cpu"),
-        current_epoch=3,
-        loss_fn=loss_fn,
-        health=TrainingHealthTracker(name="train"),
-        architecture="FPN",
-        accumulation_steps=1,
-        amp_precision="fp32",
-        gpu_normalizer=torch.nn.Identity(),
-        gpu_downscale=torch.nn.Identity(),
+        runtime=TrainEpochRuntime(
+            loss_fn=loss_fn,
+            health=TrainingHealthTracker(name="train"),
+            gpu_normalizer=torch.nn.Identity(),
+            gpu_downscale=torch.nn.Identity(),
+        ),
+        config=TrainEpochConfig(
+            device=torch.device("cpu"),
+            current_epoch=3,
+            architecture="FPN",
+            accumulation_steps=1,
+            amp_precision="fp32",
+        ),
     )
 
     assert loss_fn.calls[:2] == [("epoch", 3), ("enabled", True)]
@@ -77,12 +88,16 @@ def test_validate_epoch_disables_ohem_and_clears_epoch() -> None:
         model=model,
         optimizer=optimizer,
         dataloader=dataloader,
-        device=torch.device("cpu"),
-        loss_fn=loss_fn,
-        health=TrainingHealthTracker(name="val"),
-        architecture="FPN",
-        amp_precision="fp32",
-        gpu_normalizer=torch.nn.Identity(),
+        runtime=ValidationEpochRuntime(
+            loss_fn=loss_fn,
+            health=TrainingHealthTracker(name="val"),
+            gpu_normalizer=torch.nn.Identity(),
+        ),
+        config=ValidationEpochConfig(
+            device=torch.device("cpu"),
+            architecture="FPN",
+            amp_precision="fp32",
+        ),
     )
 
     assert loss_fn.calls[:2] == [("enabled", False), ("epoch", None)]

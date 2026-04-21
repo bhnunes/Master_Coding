@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from helpers.training.reporting import (
+    TrainingEmailContext,
     close_aim_run,
     create_aim_run,
     create_email_body,
@@ -15,25 +16,27 @@ from helpers.training.reporting import (
 
 def test_create_email_body_includes_checkpoint_and_encoder() -> None:
     body = create_email_body(
-        checkpoint_path="/tmp/best.pth",
-        encoder="resnet34",
-        architecture="UNET++",
-        val_loss=0.2,
-        val_auprc=0.8,
-        val_auroc=0.7,
-        val_mcc=0.6,
-        optimizer_name="AdamW",
-        base_learning_rate=1e-3,
-        weight_decay=1e-4,
-        alpha_bce=0.1,
-        beta_dice_bg=0.2,
-        gamma_dice_fg=0.3,
-        use_artifact_aware_loss=True,
-        master_manifest_path="/tmp/master_manifest.sqlite",
-        run_ohem=True,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        TrainingEmailContext(
+            checkpoint_path="/tmp/best.pth",
+            encoder="resnet34",
+            architecture="UNET++",
+            val_loss=0.2,
+            val_auprc=0.8,
+            val_auroc=0.7,
+            val_mcc=0.6,
+            optimizer_name="AdamW",
+            base_learning_rate=1e-3,
+            weight_decay=1e-4,
+            alpha_bce=0.1,
+            beta_dice_bg=0.2,
+            gamma_dice_fg=0.3,
+            use_artifact_aware_loss=True,
+            master_manifest_path="/tmp/master_manifest.sqlite",
+            run_ohem=True,
+            ohem_start_epoch=2,
+            ohem_ratio=0.25,
+            ohem_min_kept=1024,
+        )
     )
 
     assert "UNET++" in body

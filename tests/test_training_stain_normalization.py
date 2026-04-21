@@ -13,6 +13,8 @@ from helpers.provenance import hash_file_sha256
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 from helpers.training.stain_normalization import build_split_stain_normalizer
 
+NORMALIZED_PIXEL_VALUE = 11
+
 
 class _FakeRuntimeNormalizer(torch.nn.Module):
     def __init__(self) -> None:
@@ -158,7 +160,7 @@ def test_build_split_stain_normalizer_loads_reinhard_state_and_normalizes_image(
     assert _FakeNormalizerBuilder.last_method == "reinhard"
     assert _FakeNormalizerBuilder.last_kwargs is not None
     assert _FakeNormalizerBuilder.last_kwargs["use_cache"] is True
-    assert np.all(output == 11)
+    assert np.all(output == NORMALIZED_PIXEL_VALUE)
     assert _FakeNormalizerBuilder.last_module is not None
     assert _FakeNormalizerBuilder.last_module.calls == [
         {"shape": (1, 3, 4, 4), "cache_keys": ["patch_001.png"]}
@@ -300,7 +302,7 @@ def test_build_split_stain_normalizer_supports_torch_staintools_matrix_methods(
     output = normalizer.normalize_image(image, cache_key="patch_001.png")
 
     assert _FakeNormalizerBuilder.last_method == method.lower()
-    assert np.all(output == 11)
+    assert np.all(output == NORMALIZED_PIXEL_VALUE)
     assert _FakeNormalizerBuilder.last_module is not None
     stain_matrix_target = cast(torch.Tensor, _FakeNormalizerBuilder.last_module.stain_matrix_target)
     max_c_target = cast(torch.Tensor, _FakeNormalizerBuilder.last_module.maxC_target)

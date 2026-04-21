@@ -15,10 +15,22 @@ from helpers.ensemble_inference.data import (
     create_test_dataloader,
     setup_test_data,
 )
-from helpers.ensemble_inference.inference import analyze_ensemble_metrics, export_visualizations
+from helpers.ensemble_inference.inference import (
+    EnsembleAnalysisConfig,
+    VisualizationExportConfig,
+    analyze_ensemble_metrics,
+    export_visualizations,
+)
 from helpers.ensemble_inference.models import load_recipe_models
-from helpers.ensemble_inference.recipe import load_recipe_payload, parse_ensemble_recipe
+from helpers.ensemble_inference.recipe import (
+    EnsembleRecipe,
+    load_recipe_payload,
+    parse_ensemble_recipe,
+)
 from helpers.ensemble_inference.reporting import (
+    CsvReportConfig,
+    LatexReportConfig,
+    MarkdownReportConfig,
     export_results_to_csv,
     render_scientific_analysis_report,
     save_confusion_matrix_png,
@@ -86,6 +98,26 @@ class EnsembleInferenceOutputs:
     pdf_report_path: Path | None
 
 
+@dataclass(frozen=True)
+class PipelinePreparation:
+    recipe: EnsembleRecipe
+    recipe_payload: dict[str, Any]
+    recipe_copy_path: Path
+    test_layout: Any
+    test_dataset_provenance: dict[str, Any]
+    observed_checkpoint_hashes: dict[str, str]
+
+
+@dataclass(frozen=True)
+class PipelineResults:
+    metrics_json_path: Path
+    confusion_matrix_path: Path
+    markdown_report_path: Path
+    csv_report_path: Path | None
+    latex_report_path: Path | None
+    pdf_report_path: Path | None
+
+
 def _resolve_output_dir(config: EnsembleInferenceConfig) -> Path:
     return config.output_dir or config.recipe_path.parent
 
@@ -108,13 +140,9 @@ def _serialize_config(config: EnsembleInferenceConfig) -> dict[str, Any]:
     return payload
 
 
-def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutputs:
-    output_dir = _resolve_output_dir(config)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = get_formatted_datetime_string()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed_everything(config.seed)
-
+def _copy_recipe_payload(
+    config: EnsembleInferenceConfig, *, output_dir: Path
+) -> tuple[dict[str, Any], Path]:
     recipe_payload = load_recipe_payload(config.recipe_path)
     expected_recipe_signature = recipe_payload.get("recipe_signature")
     if isinstance(expected_recipe_signature, str) and expected_recipe_signature.strip():
@@ -123,18 +151,16 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         )
         if observed_recipe_signature != expected_recipe_signature:
             raise ValueError("Recipe provenance mismatch: recipe_signature does not match payload.")
-    recipe = parse_ensemble_recipe(recipe_payload)
+
     recipe_copy_path = output_dir / config.recipe_path.name
     if config.recipe_path.resolve() != recipe_copy_path.resolve():
         shutil.copy2(config.recipe_path, recipe_copy_path)
     else:
         recipe_copy_path.write_text(json.dumps(recipe_payload, indent=2), encoding="utf-8")
+    return recipe_payload, recipe_copy_path
 
-    test_layout = setup_test_data(
-        config.master_manifest_path,
-        config.local_data_dir,
-        stage_input_locally=config.stage_input_locally,
-    )
+
+def _validate_checkpoint_hashes(recipe_payload: dict[str, Any]) -> dict[str, str]:
     observed_checkpoint_hashes: dict[str, str] = {}
     for entry in recipe_payload.get("model_registry", []):
         checkpoint_path = Path(str(entry.get("checkpoint_path", "")).strip())
@@ -148,28 +174,149 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
                 f"Checkpoint provenance mismatch for '{checkpoint_path}'. "
                 "The on-disk checkpoint content no longer matches the recipe."
             )
+    return observed_checkpoint_hashes
 
+
+def _prepare_pipeline(config: EnsembleInferenceConfig, *, output_dir: Path) -> PipelinePreparation:
+    recipe_payload, recipe_copy_path = _copy_recipe_payload(config, output_dir=output_dir)
+    recipe = parse_ensemble_recipe(recipe_payload)
+    test_layout = setup_test_data(
+        config.master_manifest_path,
+        config.local_data_dir,
+        stage_input_locally=config.stage_input_locally,
+    )
+    observed_checkpoint_hashes = _validate_checkpoint_hashes(recipe_payload)
     test_dataset_provenance = collect_test_dataset_provenance(test_layout)
     _validate_recipe_dataset_lineage(recipe_payload, test_dataset_provenance)
+    return PipelinePreparation(
+        recipe=recipe,
+        recipe_payload=recipe_payload,
+        recipe_copy_path=recipe_copy_path,
+        test_layout=test_layout,
+        test_dataset_provenance=test_dataset_provenance,
+        observed_checkpoint_hashes=observed_checkpoint_hashes,
+    )
+
+
+def _run_reports(
+    *,
+    config: EnsembleInferenceConfig,
+    output_dir: Path,
+    timestamp: str,
+    recipe_payload: dict[str, Any],
+    metrics: dict[str, Any],
+    confusion_matrix_path: Path,
+) -> tuple[Path, Path | None, Path | None, Path | None]:
+    markdown_report_path = write_ensemble_report_markdown(
+        recipe_payload,
+        metrics,
+        train_mean=IMAGENET_MEAN,
+        train_std=IMAGENET_STD,
+        config=MarkdownReportConfig(output_dir=output_dir, timestamp=timestamp),
+    )
+
+    csv_report_path: Path | None = None
+    if config.export_csv:
+        csv_report_path = export_results_to_csv(
+            recipe_payload,
+            metrics,
+            config=CsvReportConfig(
+                output_dir=output_dir,
+                timestamp=timestamp,
+                recipe_path=config.recipe_path,
+                dataset_dir=config.master_manifest_path,
+                seed=config.seed,
+                batch_size=config.batch_size,
+            ),
+        )
+
+    latex_report_path: Path | None = None
+    pdf_report_path: Path | None = None
+    if config.export_latex:
+        latex_report_path, pdf_report_path = write_ensemble_report_latex(
+            recipe_payload,
+            metrics,
+            train_mean=IMAGENET_MEAN,
+            train_std=IMAGENET_STD,
+            config=LatexReportConfig(
+                cm_png_path=confusion_matrix_path,
+                output_dir=output_dir,
+                timestamp=timestamp,
+            ),
+        )
+
+    return markdown_report_path, csv_report_path, latex_report_path, pdf_report_path
+
+
+def _write_run_config(
+    *,
+    config: EnsembleInferenceConfig,
+    output_dir: Path,
+    timestamp: str,
+    preparation: PipelinePreparation,
+    results: PipelineResults,
+) -> Path:
+    run_config_path = output_dir / "ensemble_inference_run_config.json"
+    run_payload = _serialize_config(config)
+    run_payload.update(
+        {
+            "generated_at": timestamp,
+            "runtime_environment": collect_runtime_environment(),
+            "test_master_manifest_path": str(preparation.test_layout.master_manifest_path),
+            "test_dataset_provenance": preparation.test_dataset_provenance,
+            "roi_threshold": preparation.recipe.roi_threshold,
+            "decision_threshold": preparation.recipe.decision_threshold,
+            "output_dir": str(output_dir),
+            "recipe_copy_path": str(preparation.recipe_copy_path),
+            "recipe_sha256": hash_file_sha256(preparation.recipe_copy_path),
+            "observed_checkpoint_hashes": preparation.observed_checkpoint_hashes,
+            "metrics_json_path": str(results.metrics_json_path),
+            "confusion_matrix_path": str(results.confusion_matrix_path),
+            "markdown_report_path": str(results.markdown_report_path),
+            "csv_report_path": (
+                str(results.csv_report_path) if results.csv_report_path is not None else None
+            ),
+            "latex_report_path": (
+                str(results.latex_report_path) if results.latex_report_path is not None else None
+            ),
+            "pdf_report_path": (
+                str(results.pdf_report_path) if results.pdf_report_path is not None else None
+            ),
+        }
+    )
+    run_config_path.write_text(json.dumps(run_payload, indent=2), encoding="utf-8")
+    return run_config_path
+
+
+def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutputs:
+    output_dir = _resolve_output_dir(config)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = get_formatted_datetime_string()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    seed_everything(config.seed)
+
+    preparation = _prepare_pipeline(config, output_dir=output_dir)
     test_loader = create_test_dataloader(
-        test_layout,
+        preparation.test_layout,
         batch_size=config.batch_size,
         workers=config.workers,
     )
-    models, constituent_info = load_recipe_models(recipe, device)
+    models, constituent_info = load_recipe_models(preparation.recipe, device)
     gpu_normalizer = GPUNormalizer(IMAGENET_MEAN, IMAGENET_STD, device)
     metrics = analyze_ensemble_metrics(
         models,
         constituent_info,
         test_loader,
-        device=device,
-        roi_threshold=recipe.roi_threshold,
-        decision_threshold=recipe.decision_threshold,
-        roi_scale=recipe.roi_scale,
-        train_mean=IMAGENET_MEAN,
-        train_std=IMAGENET_STD,
-        gpu_normalizer=gpu_normalizer,
-        seed=config.seed,
+        EnsembleAnalysisConfig(
+            device=device,
+            roi_threshold=preparation.recipe.roi_threshold,
+            decision_threshold=preparation.recipe.decision_threshold,
+            roi_scale=preparation.recipe.roi_scale,
+            train_mean=IMAGENET_MEAN,
+            train_std=IMAGENET_STD,
+            gpu_normalizer=gpu_normalizer,
+            seed=config.seed,
+        ),
     )
 
     print(render_scientific_analysis_report(metrics))
@@ -184,84 +331,52 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
         int(confusion.get("tn", 0)),
         output_dir / "confusion_matrix.png",
     )
-    markdown_report_path = write_ensemble_report_markdown(
-        ensemble_recipe=recipe_payload,
-        ensemble_metrics=metrics,
-        train_mean=IMAGENET_MEAN,
-        train_std=IMAGENET_STD,
+    markdown_report_path, csv_report_path, latex_report_path, pdf_report_path = _run_reports(
+        config=config,
         output_dir=output_dir,
         timestamp=timestamp,
+        recipe_payload=preparation.recipe_payload,
+        metrics=metrics,
+        confusion_matrix_path=confusion_matrix_path,
     )
-
-    csv_report_path: Path | None = None
-    if config.export_csv:
-        csv_report_path = export_results_to_csv(
-            ensemble_recipe=recipe_payload,
-            metrics_results=metrics,
-            output_dir=output_dir,
-            timestamp=timestamp,
-            recipe_path=config.recipe_path,
-            dataset_dir=config.master_manifest_path,
-            seed=config.seed,
-            batch_size=config.batch_size,
-        )
-
-    latex_report_path: Path | None = None
-    pdf_report_path: Path | None = None
-    if config.export_latex:
-        latex_report_path, pdf_report_path = write_ensemble_report_latex(
-            ensemble_recipe=recipe_payload,
-            ensemble_metrics=metrics,
-            train_mean=IMAGENET_MEAN,
-            train_std=IMAGENET_STD,
-            cm_png_path=confusion_matrix_path,
-            output_dir=output_dir,
-            timestamp=timestamp,
-        )
 
     if config.export_visualizations and config.visualization_samples > 0:
         export_visualizations(
             models,
             test_loader,
-            device=device,
-            roi_threshold=recipe.roi_threshold,
-            decision_threshold=recipe.decision_threshold,
-            roi_scale=recipe.roi_scale,
-            train_mean=IMAGENET_MEAN,
-            train_std=IMAGENET_STD,
-            constituent_models_info=constituent_info,
-            gpu_normalizer=gpu_normalizer,
-            output_dir=output_dir / "visualizations",
-            num_samples=config.visualization_samples,
+            VisualizationExportConfig(
+                device=device,
+                roi_threshold=preparation.recipe.roi_threshold,
+                decision_threshold=preparation.recipe.decision_threshold,
+                roi_scale=preparation.recipe.roi_scale,
+                train_mean=IMAGENET_MEAN,
+                train_std=IMAGENET_STD,
+                constituent_models_info=constituent_info,
+                gpu_normalizer=gpu_normalizer,
+                output_dir=output_dir / "visualizations",
+                num_samples=config.visualization_samples,
+            ),
         )
 
-    run_config_path = output_dir / "ensemble_inference_run_config.json"
-    run_payload = _serialize_config(config)
-    run_payload.update(
-        {
-            "generated_at": timestamp,
-            "runtime_environment": collect_runtime_environment(),
-            "test_master_manifest_path": str(test_layout.master_manifest_path),
-            "test_dataset_provenance": test_dataset_provenance,
-            "roi_threshold": recipe.roi_threshold,
-            "decision_threshold": recipe.decision_threshold,
-            "output_dir": str(output_dir),
-            "recipe_copy_path": str(recipe_copy_path),
-            "recipe_sha256": hash_file_sha256(recipe_copy_path),
-            "observed_checkpoint_hashes": observed_checkpoint_hashes,
-            "metrics_json_path": str(metrics_json_path),
-            "confusion_matrix_path": str(confusion_matrix_path),
-            "markdown_report_path": str(markdown_report_path),
-            "csv_report_path": str(csv_report_path) if csv_report_path is not None else None,
-            "latex_report_path": str(latex_report_path) if latex_report_path is not None else None,
-            "pdf_report_path": str(pdf_report_path) if pdf_report_path is not None else None,
-        }
+    results = PipelineResults(
+        metrics_json_path=metrics_json_path,
+        confusion_matrix_path=confusion_matrix_path,
+        markdown_report_path=markdown_report_path,
+        csv_report_path=csv_report_path,
+        latex_report_path=latex_report_path,
+        pdf_report_path=pdf_report_path,
     )
-    run_config_path.write_text(json.dumps(run_payload, indent=2), encoding="utf-8")
+    run_config_path = _write_run_config(
+        config=config,
+        output_dir=output_dir,
+        timestamp=timestamp,
+        preparation=preparation,
+        results=results,
+    )
     return EnsembleInferenceOutputs(
         output_dir=output_dir,
         run_config_path=run_config_path,
-        recipe_copy_path=recipe_copy_path,
+        recipe_copy_path=preparation.recipe_copy_path,
         metrics_json_path=metrics_json_path,
         confusion_matrix_path=confusion_matrix_path,
         markdown_report_path=markdown_report_path,

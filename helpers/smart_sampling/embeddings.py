@@ -14,6 +14,9 @@ from transformers import AutoImageProcessor, AutoModel
 
 from helpers.smart_sampling.config import SmartSamplerConfig
 
+IMAGE_TENSOR_NDIM = 3
+CHANNEL_FIRST_IMAGE_MAX = 4
+
 
 class H5PatchDataset(Dataset[Any]):
     def __init__(
@@ -54,9 +57,9 @@ class H5PatchDataset(Dataset[Any]):
             self._open_file()
         global_idx = int(self.indices[idx])
         image_data = np.asarray(cast(Any, self.images_dset)[global_idx])
-        if image_data.ndim != 3:
+        if image_data.ndim != IMAGE_TENSOR_NDIM:
             raise ValueError(f"Expected 3D image tensor for Stage 7, got shape {image_data.shape}.")
-        if image_data.shape[0] <= 4:
+        if image_data.shape[0] <= CHANNEL_FIRST_IMAGE_MAX:
             image_data = np.transpose(image_data, (1, 2, 0))
         return np.asarray(image_data, dtype=np.uint8)
 

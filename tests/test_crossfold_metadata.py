@@ -5,9 +5,12 @@ import h5py
 import pandas as pd
 
 from helpers.crossfold.provenance import (
+    ManifestWriteConfig,
     build_hdf5_manifest_from_split_dfs,
     write_manifest_and_log_stats,
 )
+
+OBJECTIVE_SCORE = 0.125
 
 
 def _split_data() -> dict[str, object]:
@@ -130,20 +133,22 @@ def test_run_config_records_new_stage5_split_metadata(tmp_path: Path) -> None:
     }
 
     write_manifest_and_log_stats(
-        output_dir=tmp_path,
-        run_id="run-1",
-        normalization_method="NOT_NORMALIZED",
-        is_normalized=False,
-        source_hdf5_path=source_path,
-        split_data=split_data,
-        manifest_df=manifest_df,
-        calc_checksums=False,
-        extra=extra,
+        ManifestWriteConfig(
+            output_dir=tmp_path,
+            run_id="run-1",
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
+            source_hdf5_path=source_path,
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=False,
+            extra=extra,
+        )
     )
 
     payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
     assert "optimize_training_set" not in payload
-    assert payload["objective_score"] == 0.125
+    assert payload["objective_score"] == OBJECTIVE_SCORE
     assert "objective_score_split" not in payload
     assert payload["extra"]["split_selection"] == extra["split_selection"]
     assert payload["extra"]["verification"] == verification

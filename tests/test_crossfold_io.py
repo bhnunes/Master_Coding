@@ -7,7 +7,10 @@ import numpy.typing as npt
 import pandas as pd
 import pytest
 
-from helpers.crossfold.io import verify_split_hdf5_integrity, write_split_hdf5
+from helpers.crossfold.io import SplitHDF5WriteConfig, verify_split_hdf5_integrity, write_split_hdf5
+
+NORMALIZED_PIXEL_VALUE = 10
+MULTI_SOURCE_PIXEL_VALUE = 7
 
 
 def test_write_split_hdf5_writes_split_contract_from_source_rows(tmp_path: Path) -> None:
@@ -42,12 +45,14 @@ def test_write_split_hdf5_writes_split_contract_from_source_rows(tmp_path: Path)
     )
 
     output_path = write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=source_path,
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=None,
-        normalization_method="NOT_NORMALIZED",
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            overwrite=True,
+        )
     )
 
     with h5py.File(output_path, "r") as handle:
@@ -83,16 +88,18 @@ def test_write_split_hdf5_applies_normalizer_when_provided(tmp_path: Path) -> No
             return (image_rgb + 10).astype(np.uint8)
 
     output_path = write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=source_path,
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=FakeNormalizer(),
-        normalization_method="MACENKO",
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=FakeNormalizer(),
+            normalization_method="MACENKO",
+            overwrite=True,
+        )
     )
 
     with h5py.File(output_path, "r") as handle:
-        assert int(handle["images"][0, 0, 0, 0]) == 10
+        assert int(handle["images"][0, 0, 0, 0]) == NORMALIZED_PIXEL_VALUE
 
 
 def test_write_split_hdf5_carries_stage4_cleaning_lineage_attrs(tmp_path: Path) -> None:
@@ -118,12 +125,14 @@ def test_write_split_hdf5_carries_stage4_cleaning_lineage_attrs(tmp_path: Path) 
     )
 
     output_path = write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=source_path,
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=None,
-        normalization_method="NOT_NORMALIZED",
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            overwrite=True,
+        )
     )
 
     with h5py.File(output_path, "r") as handle:
@@ -171,15 +180,17 @@ def test_write_split_hdf5_respects_none_compression_and_cached_provenance(
     monkeypatch.setattr("helpers.crossfold.io.collect_hdf5_provenance", fail_collect)
 
     output_path = write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=source_path,
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=None,
-        normalization_method="NOT_NORMALIZED",
-        source_hdf5_provenance={"path": str(source_path), "sha256": "cached-hash", "attrs": {}},
-        hdf5_compression="NONE",
-        copy_batch_size=2,
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            source_hdf5_provenance={"path": str(source_path), "sha256": "cached-hash", "attrs": {}},
+            hdf5_compression="NONE",
+            copy_batch_size=2,
+            overwrite=True,
+        )
     )
 
     with h5py.File(output_path, "r") as handle:
@@ -208,12 +219,14 @@ def test_verify_split_hdf5_integrity_rejects_metadata_mismatch(tmp_path: Path) -
     )
 
     output_path = write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=source_path,
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=None,
-        normalization_method="NOT_NORMALIZED",
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            overwrite=True,
+        )
     )
 
     with h5py.File(output_path, "a") as handle:
@@ -256,14 +269,16 @@ def test_write_split_hdf5_emits_progress_logs(
 
     caplog.set_level("INFO")
     write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=source_path,
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=None,
-        normalization_method="NOT_NORMALIZED",
-        hdf5_compression="NONE",
-        copy_batch_size=1,
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            hdf5_compression="NONE",
+            copy_batch_size=1,
+            overwrite=True,
+        )
     )
 
     assert any("Stage 5 split write" in message for message in caplog.messages)
@@ -307,20 +322,24 @@ def test_write_split_hdf5_reads_rows_from_multiple_stage2_sources(tmp_path: Path
     )
 
     output_path = write_split_hdf5(
-        split_df=split_df,
-        source_hdf5_path=tmp_path / "master_manifest.sqlite",
-        output_path=tmp_path / "TRAIN.h5",
-        normalizer=None,
-        normalization_method="NOT_NORMALIZED",
-        source_hdf5_provenance={
-            "path": str(tmp_path / "master_manifest.sqlite"),
-            "sha256": "sqlite-sha",
-            "attrs": {"stage4_cleaning_manifest_path": str(tmp_path / "master_manifest.sqlite")},
-        },
-        overwrite=True,
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=tmp_path / "master_manifest.sqlite",
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            source_hdf5_provenance={
+                "path": str(tmp_path / "master_manifest.sqlite"),
+                "sha256": "sqlite-sha",
+                "attrs": {
+                    "stage4_cleaning_manifest_path": str(tmp_path / "master_manifest.sqlite")
+                },
+            },
+            overwrite=True,
+        )
     )
 
     with h5py.File(output_path, "r") as handle:
         assert handle["labels"][:].tolist() == [0, 1]
-        assert int(handle["images"][1, 0, 0, 0]) == 7
+        assert int(handle["images"][1, 0, 0, 0]) == MULTI_SOURCE_PIXEL_VALUE
         assert handle.attrs["source_hdf5_sha256"] == "sqlite-sha"

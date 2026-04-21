@@ -7,7 +7,7 @@ import os
 import torch
 from dotenv import load_dotenv
 
-from helpers.logging_utils import configure_root_logger
+from helpers.logging_utils import LoggerSettings, configure_root_logger
 from helpers.lr_finder.config import load_lr_finder_config
 from helpers.lr_finder.pipeline import LRFinderOutputs, run_lr_finder_pipeline
 from helpers.training.runtime import seed_everything
@@ -52,12 +52,14 @@ def main() -> None:
         config = load_lr_finder_config(os.environ)
         configure_root_logger(
             config.log_path,
-            logger_level=logging.INFO,
-            file_level=logging.INFO,
-            console_level=logging.ERROR,
-            file_mode="a",
-            file_pattern="%(asctime)s - %(levelname)s - %(message)s",
-            console_pattern="%(message)s",
+            settings=LoggerSettings(
+                logger_level=logging.INFO,
+                file_level=logging.INFO,
+                console_level=logging.ERROR,
+                file_mode="a",
+                file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+                console_pattern="%(message)s",
+            ),
         )
         _apply_huggingface_token(config.hf_token)
         total_trials = len(config.model_plans) * config.num_lhs_samples * config.num_repeats

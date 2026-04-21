@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 
 from helpers.extraction.hdf5_storage import write_slide_patch_dataset_hdf5
-from helpers.extraction.master_manifest import MasterManifest
+from helpers.extraction.master_manifest import MasterManifest, Stage2SlideRows
 
 
 def _write_stage2_shard(tmp_path: Path, *, name: str, records: list[dict[str, object]]) -> Path:
@@ -50,14 +50,16 @@ def test_master_manifest_replaces_stage2_slide_rows_with_canonical_source_identi
     manifest = MasterManifest(tmp_path / "master_manifest.sqlite")
 
     manifest.replace_stage2_slide_rows(
-        source_hdf5_path=shard_path,
-        records=records,
-        source_slide_path=tmp_path / "source" / "IMAGES" / "slide_a.svs",
-        annotation_path=tmp_path / "source" / "ANNOTATIONS" / "slide_a.xml",
-        artifacts_geojson_path=tmp_path / "source" / "GEOJSON" / "slide_a.geojson",
-        stage2_case_record_id=17,
-        stage2_processing_signature="proc-sig",
-        stage2_status="COMPLETED",
+        Stage2SlideRows(
+            source_hdf5_path=shard_path,
+            records=records,
+            source_slide_path=tmp_path / "source" / "IMAGES" / "slide_a.svs",
+            annotation_path=tmp_path / "source" / "ANNOTATIONS" / "slide_a.xml",
+            artifacts_geojson_path=tmp_path / "source" / "GEOJSON" / "slide_a.geojson",
+            stage2_case_record_id=17,
+            stage2_processing_signature="proc-sig",
+            stage2_status="COMPLETED",
+        )
     )
 
     with sqlite3.connect(tmp_path / "master_manifest.sqlite") as connection:
@@ -169,26 +171,30 @@ def test_master_manifest_removes_stale_rows_for_rewritten_stage2_shard(tmp_path:
     manifest = MasterManifest(tmp_path / "master_manifest.sqlite")
 
     manifest.replace_stage2_slide_rows(
-        source_hdf5_path=shard_path,
-        records=first_records,
-        source_slide_path=tmp_path / "slide_b.svs",
-        annotation_path=tmp_path / "slide_b.xml",
-        artifacts_geojson_path=None,
-        stage2_case_record_id=19,
-        stage2_processing_signature="first",
-        stage2_status="COMPLETED",
+        Stage2SlideRows(
+            source_hdf5_path=shard_path,
+            records=first_records,
+            source_slide_path=tmp_path / "slide_b.svs",
+            annotation_path=tmp_path / "slide_b.xml",
+            artifacts_geojson_path=None,
+            stage2_case_record_id=19,
+            stage2_processing_signature="first",
+            stage2_status="COMPLETED",
+        )
     )
 
     shard_path = _write_stage2_shard(tmp_path, name="slide_b", records=second_records)
     manifest.replace_stage2_slide_rows(
-        source_hdf5_path=shard_path,
-        records=second_records,
-        source_slide_path=tmp_path / "slide_b.svs",
-        annotation_path=tmp_path / "slide_b.xml",
-        artifacts_geojson_path=None,
-        stage2_case_record_id=19,
-        stage2_processing_signature="second",
-        stage2_status="COMPLETED",
+        Stage2SlideRows(
+            source_hdf5_path=shard_path,
+            records=second_records,
+            source_slide_path=tmp_path / "slide_b.svs",
+            annotation_path=tmp_path / "slide_b.xml",
+            artifacts_geojson_path=None,
+            stage2_case_record_id=19,
+            stage2_processing_signature="second",
+            stage2_status="COMPLETED",
+        )
     )
 
     with sqlite3.connect(tmp_path / "master_manifest.sqlite") as connection:

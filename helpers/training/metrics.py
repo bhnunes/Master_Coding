@@ -8,6 +8,14 @@ from typing import Any, cast
 import torch
 from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 
+LOGIT_TENSOR_NDIM = 4
+MASK_TENSOR_NDIM = 3
+BINARY_CLASS_COUNT = 2
+SINGLE_CHANNEL_COUNT = 1
+FOREGROUND_CHANNEL_INDEX = 1
+SINGLE_CHANNEL_INDEX = 0
+DEFAULT_PROBABILITY_THRESHOLD = 0.5
+
 
 class TrainingHealthTracker:
     """Track train/validation instability counters and collapse state."""
@@ -174,14 +182,14 @@ class AdvancedMetricTracker:
 
     @staticmethod
     def _extract_probs_fg(pred_logits: torch.Tensor) -> torch.Tensor:
-        if pred_logits.ndim != 4:
+        if pred_logits.ndim != LOGIT_TENSOR_NDIM:
             raise ValueError(f"Expected pred_logits [B,C,H,W], got {tuple(pred_logits.shape)}")
 
         _, channels, _, _ = pred_logits.shape
-        if channels == 1:
-            probs = torch.sigmoid(pred_logits[:, 0, ...])
-        elif channels == 2:
-            probs = torch.softmax(pred_logits, dim=1)[:, 1, ...]
+        if channels == SINGLE_CHANNEL_COUNT:
+            probs = torch.sigmoid(pred_logits[:, SINGLE_CHANNEL_INDEX, ...])
+        elif channels == BINARY_CLASS_COUNT:
+            probs = torch.softmax(pred_logits, dim=1)[:, FOREGROUND_CHANNEL_INDEX, ...]
         else:
             raise ValueError(f"Expected C=1 or C=2 for binary segmentation, got C={channels}")
 
@@ -189,26 +197,118 @@ class AdvancedMetricTracker:
 
     @staticmethod
     def _extract_target_fg(target: torch.Tensor) -> torch.Tensor:
-        if target.ndim == 3:
+        if target.ndim == MASK_TENSOR_NDIM:
             foreground = target
-        elif target.ndim == 4 and target.shape[1] == 2:
-            foreground = target[:, 1, ...]
-        elif target.ndim == 4 and target.shape[1] == 1:
-            foreground = target[:, 0, ...]
+        elif target.ndim == LOGIT_TENSOR_NDIM and target.shape[1] == BINARY_CLASS_COUNT:
+            foreground = target[:, FOREGROUND_CHANNEL_INDEX, ...]
+        elif target.ndim == LOGIT_TENSOR_NDIM and target.shape[1] == SINGLE_CHANNEL_COUNT:
+            foreground = target[:, SINGLE_CHANNEL_INDEX, ...]
         else:
             raise ValueError(f"Unsupported target shape: {tuple(target.shape)}")
 
         if foreground.dtype != torch.bool:
-            foreground = foreground > 0.5
+            foreground = foreground > DEFAULT_PROBABILITY_THRESHOLD
         return foreground
 
     @staticmethod
     def _extract_probs_from_probs_fg(probs_fg: torch.Tensor) -> torch.Tensor:
-        if probs_fg.ndim == 4 and probs_fg.shape[1] == 1:
-            probs_fg = probs_fg[:, 0, ...]
-        if probs_fg.ndim != 3:
+        if probs_fg.ndim == LOGIT_TENSOR_NDIM and probs_fg.shape[1] == SINGLE_CHANNEL_COUNT:
+            probs_fg = probs_fg[:, SINGLE_CHANNEL_INDEX, ...]
+        if probs_fg.ndim != MASK_TENSOR_NDIM:
             raise ValueError(f"Expected probs_fg [B,H,W], got {tuple(probs_fg.shape)}")
         return probs_fg.to(dtype=torch.float32).clamp(0.0, 1.0)
+
+    def _reset_after_failure(
+        self,
+        message: str,
+        health: TrainingHealthTracker | None,
+        *,
+        invalid_metrics: bool = False,
+    ) -> None:
+        print(message)
+        if health is not None:
+            if invalid_metrics:
+                health.mark_val_invalid_metrics()
+            else:
+                health.mark_val_collapsed()
+        self.reset()
+
+    def _check_fg_prevalence(
+        self,
+        fg_prevalence: float,
+        health: TrainingHealthTracker | None,
+    ) -> bool:
+        if fg_prevalence < self.collapse_low:
+            self._reset_after_failure(
+                "[VAL GUARDRAIL] COLLAPSE DETECTED - "
+                f"FG prevalence @0.5 too LOW: {fg_prevalence:.6f} "
+                f"(threshold {self.collapse_low:.6f})",
+                health,
+            )
+            return False
+        if fg_prevalence > self.collapse_high:
+            self._reset_after_failure(
+                "[VAL GUARDRAIL] COLLAPSE DETECTED - "
+                f"FG prevalence @0.5 too HIGH: {fg_prevalence:.6f} "
+                f"(threshold {self.collapse_high:.6f})",
+                health,
+            )
+            return False
+        return True
+
+    def _validate_metric_tensor(
+        self,
+        metric_tensor: torch.Tensor,
+        metric_name: str,
+        health: TrainingHealthTracker | None,
+    ) -> bool:
+        if (metric_tensor.numel() == 0) or (not torch.isfinite(metric_tensor).all()):
+            self._reset_after_failure(
+                f"[VAL GUARDRAIL] INVALID METRIC - {metric_name} is NaN/Inf: {metric_tensor}",
+                health,
+                invalid_metrics=True,
+            )
+            return False
+        return True
+
+    def _build_final_metrics(
+        self,
+        auprc_tensor: torch.Tensor,
+        auroc_tensor: torch.Tensor,
+        fg_prevalence: float,
+        health: TrainingHealthTracker | None,
+    ) -> dict[str, float] | None:
+        val_auprc = float(auprc_tensor.item())
+        val_auroc = float(auroc_tensor.item())
+        mcc_values = self._mcc_from_counts(
+            self._tp.cpu(),
+            self._fp.cpu(),
+            self._tn.cpu(),
+            self._fn.cpu(),
+        )
+        if not self._validate_metric_tensor(mcc_values, "MCC*", health):
+            return None
+
+        val_mcc_star = float(torch.max(mcc_values).item())
+        if not (
+            math.isfinite(val_auprc) and math.isfinite(val_auroc) and math.isfinite(val_mcc_star)
+        ):
+            self._reset_after_failure(
+                f"[VAL GUARDRAIL] INVALID METRIC - AUPRC={val_auprc}, AUROC={val_auroc}, "
+                f"MCC*={val_mcc_star}",
+                health,
+                invalid_metrics=True,
+            )
+            return None
+
+        metrics = {
+            "val_auprc": val_auprc,
+            "val_auroc": val_auroc,
+            "val_mcc_star": val_mcc_star,
+            "fg_prevalence_at_05": float(fg_prevalence),
+        }
+        self.reset()
+        return metrics
 
     @staticmethod
     def _mcc_from_counts(
@@ -230,7 +330,7 @@ class AdvancedMetricTracker:
         self.auprc.update(probabilities, targets)
         self.auroc.update(probabilities, targets)
 
-        self._pred_pos_at_05 += int((probabilities >= 0.5).sum().item())
+        self._pred_pos_at_05 += int((probabilities >= DEFAULT_PROBABILITY_THRESHOLD).sum().item())
         self._total_pixels += int(probabilities.numel())
 
         preds_k = probabilities.unsqueeze(0) >= self.mcc_thresholds.unsqueeze(1)
@@ -261,76 +361,14 @@ class AdvancedMetricTracker:
             return None
 
         fg_prevalence = self._pred_pos_at_05 / float(self._total_pixels)
-        if fg_prevalence < self.collapse_low:
-            print(
-                "[VAL GUARDRAIL] COLLAPSE DETECTED - "
-                f"FG prevalence @0.5 too LOW: {fg_prevalence:.6f} "
-                f"(threshold {self.collapse_low:.6f})"
-            )
-            if health is not None:
-                health.mark_val_collapsed()
-            self.reset()
-            return None
-
-        if fg_prevalence > self.collapse_high:
-            print(
-                "[VAL GUARDRAIL] COLLAPSE DETECTED - "
-                f"FG prevalence @0.5 too HIGH: {fg_prevalence:.6f} "
-                f"(threshold {self.collapse_high:.6f})"
-            )
-            if health is not None:
-                health.mark_val_collapsed()
-            self.reset()
+        if not self._check_fg_prevalence(fg_prevalence, health):
             return None
 
         auprc_tensor = self.auprc.compute().detach().cpu()
         auroc_tensor = self.auroc.compute().detach().cpu()
-
-        if (auprc_tensor.numel() == 0) or (not torch.isfinite(auprc_tensor).all()):
-            print(f"[VAL GUARDRAIL] INVALID METRIC - AUPRC is NaN/Inf: {auprc_tensor}")
-            if health is not None:
-                health.mark_val_invalid_metrics()
-            self.reset()
+        if not self._validate_metric_tensor(auprc_tensor, "AUPRC", health):
+            return None
+        if not self._validate_metric_tensor(auroc_tensor, "AUROC", health):
             return None
 
-        if (auroc_tensor.numel() == 0) or (not torch.isfinite(auroc_tensor).all()):
-            print(f"[VAL GUARDRAIL] INVALID METRIC - AUROC is NaN/Inf: {auroc_tensor}")
-            if health is not None:
-                health.mark_val_invalid_metrics()
-            self.reset()
-            return None
-
-        val_auprc = float(auprc_tensor.item())
-        val_auroc = float(auroc_tensor.item())
-        mcc_values = self._mcc_from_counts(
-            self._tp.cpu(), self._fp.cpu(), self._tn.cpu(), self._fn.cpu()
-        )
-
-        if (mcc_values.numel() == 0) or (not torch.isfinite(mcc_values).all()):
-            print(f"[VAL GUARDRAIL] INVALID METRIC - MCC* contains NaN/Inf: {mcc_values}")
-            if health is not None:
-                health.mark_val_invalid_metrics()
-            self.reset()
-            return None
-
-        val_mcc_star = float(torch.max(mcc_values).item())
-        if not (
-            math.isfinite(val_auprc) and math.isfinite(val_auroc) and math.isfinite(val_mcc_star)
-        ):
-            print(
-                f"[VAL GUARDRAIL] INVALID METRIC - AUPRC={val_auprc}, AUROC={val_auroc}, "
-                f"MCC*={val_mcc_star}"
-            )
-            if health is not None:
-                health.mark_val_invalid_metrics()
-            self.reset()
-            return None
-
-        metrics = {
-            "val_auprc": val_auprc,
-            "val_auroc": val_auroc,
-            "val_mcc_star": val_mcc_star,
-            "fg_prevalence_at_05": float(fg_prevalence),
-        }
-        self.reset()
-        return metrics
+        return self._build_final_metrics(auprc_tensor, auroc_tensor, fg_prevalence, health)

@@ -7,6 +7,9 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
+CONTROL_CHARACTER_MAX_ORDINAL = 31
+WINDOWS_DRIVE_PREFIX_LENGTH = 3
+
 
 def get_runtime_os(system_name: str | None = None) -> str:
     """Return the normalized runtime operating system name."""
@@ -35,7 +38,7 @@ def resolve_env_path(
             raise ValueError(f"The '{variable_name}' environment variable is required.")
         return None
 
-    if any(ord(character) < 32 for character in stripped):
+    if any(ord(character) <= CONTROL_CHARACTER_MAX_ORDINAL for character in stripped):
         raise ValueError(
             f"The '{variable_name}' environment variable contains control characters. "
             "This often happens when a Windows path in .env uses backslashes that are "
@@ -126,5 +129,8 @@ def load_openslide_module(
 
 def _is_windows_style_path(value: str) -> bool:
     return (
-        len(value) >= 3 and value[1] == ":" and value[0].isalpha() and value[2] in {"\\", "/"}
+        len(value) >= WINDOWS_DRIVE_PREFIX_LENGTH
+        and value[1] == ":"
+        and value[0].isalpha()
+        and value[2] in {"\\", "/"}
     ) or value.startswith("\\\\")

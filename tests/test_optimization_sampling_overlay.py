@@ -21,6 +21,8 @@ from helpers.optimization_sampling.overlay import (
 )
 from helpers.optimization_sampling.sampling import OverlayTask
 
+NUM_PROCESSES = 3
+
 
 def test_to_grayscale_mask_uses_alpha_channel_for_rgba() -> None:
     mask = np.zeros((2, 2, 4), dtype=np.uint8)
@@ -187,10 +189,10 @@ def test_generate_overlay_images_uses_live_progress_friendly_settings(
     monkeypatch.setattr("helpers.optimization_sampling.overlay._progress_file", lambda: "stream")
     monkeypatch.setattr("helpers.optimization_sampling.overlay._progress_disabled", lambda: False)
 
-    result = generate_overlay_images([task], num_processes=3)
+    result = generate_overlay_images([task], num_processes=NUM_PROCESSES)
 
     assert result == [True]
-    assert seen["processes"] == 3
+    assert seen["processes"] == NUM_PROCESSES
     assert seen["chunksize"] == 1
     assert seen["tasks"] == [task]
     assert seen["tqdm_kwargs"] == {

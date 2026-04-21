@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from helpers.ensemble_inference.reporting import (
+    CsvReportConfig,
+    LatexReportConfig,
+    MarkdownReportConfig,
     export_results_to_csv,
     write_ensemble_report_latex,
     write_ensemble_report_markdown,
@@ -48,14 +51,16 @@ def _sample_metrics() -> dict[str, object]:
 
 def test_export_results_to_csv_writes_report(tmp_path: Path) -> None:
     csv_path = export_results_to_csv(
-        ensemble_recipe=_sample_recipe(),
-        metrics_results=_sample_metrics(),
-        output_dir=tmp_path,
-        timestamp="2026-03-20_12_00_00",
-        recipe_path=tmp_path / "recipe.json",
-        dataset_dir=tmp_path / "dataset",
-        seed=24,
-        batch_size=8,
+        _sample_recipe(),
+        _sample_metrics(),
+        CsvReportConfig(
+            output_dir=tmp_path,
+            timestamp="2026-03-20_12_00_00",
+            recipe_path=tmp_path / "recipe.json",
+            dataset_dir=tmp_path / "dataset",
+            seed=24,
+            batch_size=8,
+        ),
     )
 
     assert csv_path.name == "FINAL_EVALUATION_REPORT_2026-03-20_12_00_00.csv"
@@ -72,14 +77,16 @@ def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:
         (cwd / "FINAL_ENSEMBLE_REPORT_2026-03-20_12_00_00.pdf").write_bytes(b"pdf")
 
     tex_path, pdf_path = write_ensemble_report_latex(
-        ensemble_recipe=_sample_recipe(),
-        ensemble_metrics=_sample_metrics(),
+        _sample_recipe(),
+        _sample_metrics(),
         train_mean=[0.1, 0.2, 0.3],
         train_std=[0.4, 0.5, 0.6],
-        cm_png_path=cm_path,
-        output_dir=tmp_path,
-        timestamp="2026-03-20_12_00_00",
-        latex_runner=fake_runner,
+        config=LatexReportConfig(
+            cm_png_path=cm_path,
+            output_dir=tmp_path,
+            timestamp="2026-03-20_12_00_00",
+            latex_runner=fake_runner,
+        ),
     )
 
     assert tex_path.exists()
@@ -104,12 +111,11 @@ def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
     monkeypatch.chdir(tmp_path)
 
     markdown_path = write_ensemble_report_markdown(
-        ensemble_recipe=_sample_recipe(),
-        ensemble_metrics=_sample_metrics(),
+        _sample_recipe(),
+        _sample_metrics(),
         train_mean=[0.1, 0.2, 0.3],
         train_std=[0.4, 0.5, 0.6],
-        output_dir=tmp_path,
-        timestamp="2026-03-20_12_00_00",
+        config=MarkdownReportConfig(output_dir=tmp_path, timestamp="2026-03-20_12_00_00"),
     )
 
     contents = markdown_path.read_text(encoding="utf-8")

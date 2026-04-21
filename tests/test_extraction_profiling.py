@@ -12,6 +12,12 @@ from helpers.extraction.profiling import (
     write_profile_summary,
 )
 
+ACCEPTED_PATCH_COUNT = 4
+SKIPPED_TISSUE_COUNT = 6
+SKIPPED_OVERLAP_COUNT = 10
+READ_REGION_SHARE = 0.3
+PARALLEL_SHARE = 0.8
+
 
 def test_merge_phase_stats_accumulates_totals_and_calls() -> None:
     target = create_phase_stats(["read_region", "image_save"])
@@ -43,12 +49,12 @@ def test_build_profile_summary_reports_percentages_and_counts() -> None:
     )
 
     assert summary["slide_name"] == "sample.svs"
-    assert summary["accepted_patches"] == 4
-    assert summary["skipped_tissue"] == 6
-    assert summary["skipped_overlap"] == 10
+    assert summary["accepted_patches"] == ACCEPTED_PATCH_COUNT
+    assert summary["skipped_tissue"] == SKIPPED_TISSUE_COUNT
+    assert summary["skipped_overlap"] == SKIPPED_OVERLAP_COUNT
     assert summary["phases"][0]["name"] == "read_region"
-    assert summary["phases"][0]["share_of_runtime"] == 0.3
-    assert summary["slide_phases"]["parallel"]["share_of_runtime"] == 0.8
+    assert summary["phases"][0]["share_of_runtime"] == READ_REGION_SHARE
+    assert summary["slide_phases"]["parallel"]["share_of_runtime"] == PARALLEL_SHARE
 
 
 def test_write_profile_summary_persists_json(tmp_path: Path) -> None:

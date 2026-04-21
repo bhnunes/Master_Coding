@@ -14,6 +14,9 @@ from helpers.ensemble_inference.metrics import (
     summarize_patient_metrics,
 )
 
+FALSE_POSITIVE_RATE = 0.3
+CONFIDENCE_INTERVAL_BOUNDS = 2
+
 
 def test_calculate_metrics_treats_empty_gt_and_empty_prediction_as_perfect() -> None:
     metrics = calculate_metrics(tp=0, fp=0, fn=0, tn=10)
@@ -28,7 +31,7 @@ def test_calculate_metrics_treats_empty_gt_and_false_alarm_as_failure() -> None:
 
     assert metrics["dice"] == 0.0
     assert metrics["iou"] == 0.0
-    assert metrics["fpr"] == 0.3
+    assert metrics["fpr"] == FALSE_POSITIVE_RATE
 
 
 def test_mask_to_binary_indices_accepts_two_channel_masks() -> None:
@@ -147,8 +150,8 @@ def test_summarize_patient_metrics_with_bootstrap_populates_confidence_intervals
         "n_bootstrap_samples": 8,
         "seed": 7,
     }
-    assert len(summary["micro_averaged_metrics"]["ci"]["dice"]) == 2
-    assert len(summary["macro_averaged_metrics"]["ci"]["dice"]) == 2
+    assert len(summary["micro_averaged_metrics"]["ci"]["dice"]) == CONFIDENCE_INTERVAL_BOUNDS
+    assert len(summary["macro_averaged_metrics"]["ci"]["dice"]) == CONFIDENCE_INTERVAL_BOUNDS
     assert not math.isnan(summary["macro_dice_rule6_split"]["dice_pos_only"]["ci"][0])
     assert not math.isnan(summary["macro_dice_rule6_split"]["neg_clean_rate"]["ci"][0])
 

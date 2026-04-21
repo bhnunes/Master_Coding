@@ -5,9 +5,32 @@ import pytest
 
 from helpers.extraction.artifact_lookup import (
     GeoJsonLookup,
+    ProcessingSignatureConfig,
     build_processing_signature,
     resolve_geojson_for_slide,
 )
+
+
+def _signature_config(
+    image_path: Path,
+    annotation_path: Path,
+    *,
+    artifacts_geojson_path: Path | None,
+    use_advanced_artifact_filtering: bool,
+    hiseg_xml_coord_level: int,
+) -> ProcessingSignatureConfig:
+    return ProcessingSignatureConfig(
+        image_path=image_path,
+        annotation_path=annotation_path,
+        artifacts_geojson_path=artifacts_geojson_path,
+        window_size=224,
+        stride=112,
+        match_percentage=1.0,
+        tissue_percentage=0.3,
+        target_level=0,
+        use_advanced_artifact_filtering=use_advanced_artifact_filtering,
+        hiseg_xml_coord_level=hiseg_xml_coord_level,
+    )
 
 
 def test_resolve_geojson_for_slide_accepts_single_collision_safe_match(tmp_path: Path) -> None:
@@ -56,30 +79,24 @@ def test_build_processing_signature_changes_when_geojson_metadata_changes(tmp_pa
     geojson_path.write_text('{"version": 1}')
 
     signature_before = build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=geojson_path,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=True,
-        hiseg_xml_coord_level=6,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=geojson_path,
+            use_advanced_artifact_filtering=True,
+            hiseg_xml_coord_level=6,
+        )
     )
 
     geojson_path.write_text('{"version": 200}')
     signature_after = build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=geojson_path,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=True,
-        hiseg_xml_coord_level=6,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=geojson_path,
+            use_advanced_artifact_filtering=True,
+            hiseg_xml_coord_level=6,
+        )
     )
 
     assert signature_before != signature_after
@@ -92,28 +109,22 @@ def test_build_processing_signature_changes_when_hiseg_coord_level_changes(tmp_p
     annotation_path.write_text("annotation")
 
     signature_before = build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=None,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=False,
-        hiseg_xml_coord_level=5,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=None,
+            use_advanced_artifact_filtering=False,
+            hiseg_xml_coord_level=5,
+        )
     )
     signature_after = build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=None,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=False,
-        hiseg_xml_coord_level=6,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=None,
+            use_advanced_artifact_filtering=False,
+            hiseg_xml_coord_level=6,
+        )
     )
 
     assert signature_before != signature_after
@@ -140,16 +151,13 @@ def test_build_processing_signature_avoids_opening_raw_input_files(
     monkeypatch.setattr(Path, "open", fail_if_raw_input_opened)
 
     build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=geojson_path,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=True,
-        hiseg_xml_coord_level=6,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=geojson_path,
+            use_advanced_artifact_filtering=True,
+            hiseg_xml_coord_level=6,
+        )
     )
 
 
@@ -160,30 +168,24 @@ def test_build_processing_signature_changes_when_image_metadata_changes(tmp_path
     annotation_path.write_text("annotation")
 
     signature_before = build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=None,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=False,
-        hiseg_xml_coord_level=6,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=None,
+            use_advanced_artifact_filtering=False,
+            hiseg_xml_coord_level=6,
+        )
     )
 
     image_path.write_text("slide-expanded")
     signature_after = build_processing_signature(
-        image_path=image_path,
-        annotation_path=annotation_path,
-        artifacts_geojson_path=None,
-        window_size=224,
-        stride=112,
-        match_percentage=1.0,
-        tissue_percentage=0.3,
-        target_level=0,
-        use_advanced_artifact_filtering=False,
-        hiseg_xml_coord_level=6,
+        _signature_config(
+            image_path,
+            annotation_path,
+            artifacts_geojson_path=None,
+            use_advanced_artifact_filtering=False,
+            hiseg_xml_coord_level=6,
+        )
     )
 
     assert signature_before != signature_after

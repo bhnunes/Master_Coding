@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,20 @@ class SafeJSONEncoder(json.JSONEncoder):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         return super().default(obj)
+
+
+@dataclass(frozen=True)
+class ManifestWriteConfig:
+    output_dir: Path
+    run_id: str
+    normalization_method: str
+    is_normalized: bool
+    source_hdf5_path: Path
+    split_data: dict[str, Any]
+    manifest_df: pd.DataFrame
+    calc_checksums: bool = True
+    source_hdf5_provenance: dict[str, Any] | None = None
+    extra: dict[str, Any] | None = None
 
 
 def build_hdf5_manifest_from_split_dfs(
@@ -149,58 +164,47 @@ def recompute_split_stats_from_manifest(manifest_df: pd.DataFrame) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
-def write_manifest_and_log_stats(
-    output_dir: Path,
-    run_id: str,
-    normalization_method: str,
-    is_normalized: bool,
-    source_hdf5_path: Path,
-    split_data: dict[str, Any],
-    manifest_df: pd.DataFrame,
-    calc_checksums: bool = True,
-    source_hdf5_provenance: dict[str, Any] | None = None,
-    extra: dict[str, Any] | None = None,
-) -> None:
+def write_manifest_and_log_stats(config: ManifestWriteConfig) -> None:
     """Persist Stage 5 manifest, split statistics, and run metadata artifacts."""
 
     logging.info("Writing manifest.csv, split_stats.csv, run_config.json ...")
-    if calc_checksums:
+    if config.calc_checksums:
         raise ValueError(
             "HDF5-native Stage 5 does not support per-row file checksums. "
             "Set 'CROSSFOLD_CALC_CHECKSUMS=False'."
         )
-    manifest_output = manifest_df.copy()
-    manifest_path = output_dir / "manifest.csv"
+    manifest_output = config.manifest_df.copy()
+    manifest_path = config.output_dir / "manifest.csv"
     manifest_output.to_csv(manifest_path, index=False)
     logging.info("Manifest written: %s (rows=%s)", manifest_path, len(manifest_output))
 
-    split_stats_df = build_split_stats_dataframe(split_data, run_id)
-    split_stats_path = output_dir / "split_stats.csv"
+    split_stats_df = build_split_stats_dataframe(config.split_data, config.run_id)
+    split_stats_path = config.output_dir / "split_stats.csv"
     split_stats_df.to_csv(split_stats_path, index=False)
     logging.info("Split stats written: %s", split_stats_path)
 
     run_config = {
-        "run_id": run_id,
+        "run_id": config.run_id,
         "created_utc": datetime.now(UTC).isoformat(),
-        "source_hdf5_path": str(source_hdf5_path),
-        "output_dir": str(output_dir),
-        "normalization_method": normalization_method,
-        "is_normalized": bool(is_normalized),
-        "constraints": split_data.get("constraints", {}),
-        "split_seed": split_data.get("split_seed"),
-        "split_attempt": split_data.get("split_attempt"),
-        "objective_score": split_data.get("objective_score"),
+        "source_hdf5_path": str(config.source_hdf5_path),
+        "output_dir": str(config.output_dir),
+        "normalization_method": config.normalization_method,
+        "is_normalized": bool(config.is_normalized),
+        "constraints": config.split_data.get("constraints", {}),
+        "split_seed": config.split_data.get("split_seed"),
+        "split_attempt": config.split_data.get("split_attempt"),
+        "objective_score": config.split_data.get("objective_score"),
         "patients": {
-            "train": [int(value) for value in split_data.get("train_patients", [])],
-            "validation": [int(value) for value in split_data.get("val_patients", [])],
-            "test": [int(value) for value in split_data.get("test_patients", [])],
+            "train": [int(value) for value in config.split_data.get("train_patients", [])],
+            "validation": [int(value) for value in config.split_data.get("val_patients", [])],
+            "test": [int(value) for value in config.split_data.get("test_patients", [])],
         },
-        "source_hdf5_provenance": source_hdf5_provenance
-        or collect_hdf5_provenance(source_hdf5_path),
+        "source_hdf5_provenance": config.source_hdf5_provenance
+        or collect_hdf5_provenance(config.source_hdf5_path),
         "library_versions": collect_runtime_environment(),
         "git_commit": get_git_commit_hash(),
-        "extra": extra or {},
+        "extra": config.extra or {},
     }
-    config_path = output_dir / "run_config.json"
+    config_path = config.output_dir / "run_config.json"
     config_path.write_text(json.dumps(run_config, indent=2, cls=SafeJSONEncoder), encoding="utf-8")
     logging.info("Run config written: %s", config_path)

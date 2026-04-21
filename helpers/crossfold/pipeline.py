@@ -13,6 +13,7 @@ from helpers.crossfold.entropy import compute_all_patch_entropies
 from helpers.crossfold.logging import configure_crossfold_logging
 from helpers.crossfold.normalization import fit_normalizer_on_train_set, save_normalizer_stats
 from helpers.crossfold.provenance import (
+    ManifestWriteConfig,
     build_hdf5_manifest_from_split_dfs,
     write_manifest_and_log_stats,
 )
@@ -108,16 +109,18 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     if "verification" in split_data:
         extra["verification"] = split_data["verification"]
     write_manifest_and_log_stats(
-        output_dir=output_dir,
-        run_id=run_id,
-        normalization_method=config.normalization_method,
-        is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
-        source_hdf5_path=config.source_path,
-        split_data=split_data,
-        manifest_df=manifest_df,
-        calc_checksums=config.calc_checksums,
-        source_hdf5_provenance=source_dataset_provenance,
-        extra=extra,
+        config=ManifestWriteConfig(
+            output_dir=output_dir,
+            run_id=run_id,
+            normalization_method=config.normalization_method,
+            is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
+            source_hdf5_path=config.source_path,
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=config.calc_checksums,
+            source_hdf5_provenance=source_dataset_provenance,
+            extra=extra,
+        )
     )
     _persist_stage5_split_state(
         master_manifest_path=config.source_path,

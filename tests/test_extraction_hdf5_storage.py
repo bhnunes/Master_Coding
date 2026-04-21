@@ -6,6 +6,8 @@ import pytest
 
 from helpers.extraction.hdf5_storage import write_slide_patch_dataset_hdf5
 
+IMAGE_PIXEL_VALUE = 77
+
 
 def test_write_slide_patch_dataset_hdf5_writes_canonical_stage2_shard(tmp_path: Path) -> None:
     output_path = tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide_a.h5"
@@ -91,7 +93,7 @@ def test_write_slide_patch_dataset_hdf5_supports_in_memory_patch_records(tmp_pat
 
     with h5py.File(output_path, "r") as handle:
         assert handle["patient_ids"][:].tolist() == [2002]
-        assert int(handle["images"][0, 0, 0, 0]) == 77
+        assert int(handle["images"][0, 0, 0, 0]) == IMAGE_PIXEL_VALUE
         assert set(np.unique(handle["masks"][0]).tolist()) == {1}
 
 

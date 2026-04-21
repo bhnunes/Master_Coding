@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import timeit
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +12,99 @@ from helpers.artifact.model_loader import ArtifactModelLoader
 from helpers.runtime_platform import load_openslide_module
 
 Image.MAX_IMAGE_PIXELS = 1_000_000_000
+
+
+@dataclass(frozen=True)
+class TileGrid:
+    tiles_x: int
+    tiles_y: int
+    patch_size: int
+    width: int
+    height: int
+    overhang_x: int
+    overhang_y: int
+
+
+@dataclass(frozen=True)
+class TissueOutputPaths:
+    thumbnail_path: Path
+    tissue_mask_path: Path
+    tissue_mask_colored_path: Path
+    tissue_overlay_path: Path
+
+
+@dataclass(frozen=True)
+class HorizontalTileAppend:
+    temp_image: Any
+    temp_image_class_map: Any
+    mask: Any
+    class_mask: Any
+    tile_x: int
+    tiles_x: int
+    patch_size: int
+    overhang_x: int
+
+
+@dataclass(frozen=True)
+class VerticalTileAppend:
+    end_image: Any
+    end_image_class_map: Any
+    temp_image: Any
+    temp_image_class_map: Any
+    tile_y: int
+    tiles_y: int
+    patch_size: int
+    overhang_y: int
+
+
+def _build_tissue_directories(output_dir: Path) -> dict[str, Path]:
+    tissue_dirs = {
+        "tissue_mask_dir": output_dir / "tis_det_mask",
+        "tissue_overlay_dir": output_dir / "tis_det_overlay",
+        "tissue_thumb_dir": output_dir / "tis_det_thumbnail",
+        "tissue_mask_col_dir": output_dir / "tis_det_mask_col",
+    }
+    for directory in tissue_dirs.values():
+        directory.mkdir(parents=True, exist_ok=True)
+    return tissue_dirs
+
+
+def _build_tile_grid(thumbnail_image: Image.Image, patch_size: int) -> TileGrid:
+    width, height = thumbnail_image.size
+    tiles_x = width // patch_size
+    tiles_y = height // patch_size
+    overhang_x = width - tiles_x * patch_size
+    overhang_y = height - tiles_y * patch_size
+    return TileGrid(
+        tiles_x=tiles_x,
+        tiles_y=tiles_y,
+        patch_size=patch_size,
+        width=width,
+        height=height,
+        overhang_x=overhang_x,
+        overhang_y=overhang_y,
+    )
+
+
+def _resolve_tissue_output_paths(
+    slide_path: Path,
+    *,
+    tissue_thumb_dir: Path,
+    tissue_mask_dir: Path,
+    tissue_mask_col_dir: Path,
+    tissue_overlay_dir: Path,
+) -> TissueOutputPaths:
+    slide_stem = slide_path.stem
+    return TissueOutputPaths(
+        thumbnail_path=tissue_thumb_dir / f"{slide_stem}.jpg",
+        tissue_mask_path=tissue_mask_dir / f"{slide_stem}_MASK.png",
+        tissue_mask_colored_path=tissue_mask_col_dir / f"{slide_stem}_MASK_COL.png",
+        tissue_overlay_path=tissue_overlay_dir / f"{slide_stem}_OVERLAY.jpg",
+    )
+
+
+def _tile_range(tile_count: int, overhang: int) -> range:
+    return range(tile_count + (1 if overhang > 0 else 0))
 
 
 class ArtifactProcessor:
@@ -40,17 +134,7 @@ class ArtifactProcessor:
 
         models = self.model_loader.load()
         openslide_module = load_openslide_module()
-        tissue_mask_dir = output_dir / "tis_det_mask"
-        tissue_overlay_dir = output_dir / "tis_det_overlay"
-        tissue_thumb_dir = output_dir / "tis_det_thumbnail"
-        tissue_mask_col_dir = output_dir / "tis_det_mask_col"
-        for directory in [
-            tissue_mask_dir,
-            tissue_overlay_dir,
-            tissue_thumb_dir,
-            tissue_mask_col_dir,
-        ]:
-            directory.mkdir(parents=True, exist_ok=True)
+        tissue_dirs = _build_tissue_directories(output_dir)
 
         slide = openslide_module.OpenSlide(str(slide_path))
         width_l0, height_l0 = slide.level_dimensions[0]
@@ -59,43 +143,27 @@ class ArtifactProcessor:
         thumb_width = max(1, int(round(width_l0 / reduction_factor)))
         thumb_height = max(1, int(round(height_l0 / reduction_factor)))
         image_original = slide.get_thumbnail((thumb_width, thumb_height))
-
-        slide_stem = slide_path.stem
-        thumbnail_path = tissue_thumb_dir / f"{slide_stem}.jpg"
-        tissue_mask_path = tissue_mask_dir / f"{slide_stem}_MASK.png"
-        tissue_mask_colored_path = tissue_mask_col_dir / f"{slide_stem}_MASK_COL.png"
-        tissue_overlay_path = tissue_overlay_dir / f"{slide_stem}_OVERLAY.jpg"
-        image_original.save(thumbnail_path, quality=80)
+        output_paths = _resolve_tissue_output_paths(
+            slide_path,
+            tissue_thumb_dir=tissue_dirs["tissue_thumb_dir"],
+            tissue_mask_dir=tissue_dirs["tissue_mask_dir"],
+            tissue_mask_col_dir=tissue_dirs["tissue_mask_col_dir"],
+            tissue_overlay_dir=tissue_dirs["tissue_overlay_dir"],
+        )
+        image_original.save(output_paths.thumbnail_path, quality=80)
 
         thumbnail_image = image_original.convert("RGB")
-
-        width, height = thumbnail_image.size
-        patch_size = self.config.model_patch_size
-        tiles_x = width // patch_size
-        tiles_y = height // patch_size
-        overhang_x = width - tiles_x * patch_size
-        overhang_y = height - tiles_y * patch_size
-        tile_cols = tiles_x + (1 if overhang_x > 0 else 0)
-        tile_rows = tiles_y + (1 if overhang_y > 0 else 0)
+        grid = _build_tile_grid(thumbnail_image, self.config.model_patch_size)
         colors = [[50, 50, 250], [128, 128, 128]]
 
         row_masks: list[Any] = []
         row_class_masks: list[Any] = []
         with torch.inference_mode():
-            for tile_y in range(tile_rows):
+            for tile_y in _tile_range(grid.tiles_y, grid.overhang_y):
                 current_row_masks: list[Any] = []
                 current_row_class_masks: list[Any] = []
-                for tile_x in range(tile_cols):
-                    image_work = _crop_tile(
-                        thumbnail_image,
-                        tile_x,
-                        tile_y,
-                        tiles_x,
-                        tiles_y,
-                        patch_size,
-                        width,
-                        height,
-                    )
+                for tile_x in _tile_range(grid.tiles_x, grid.overhang_x):
+                    image_work = _crop_tile(thumbnail_image, tile_x, tile_y, grid)
                     image_pre = get_preprocessing(  # type: ignore[no-untyped-call]
                         image_work, models.preprocessing_fn
                     )
@@ -109,8 +177,8 @@ class ArtifactProcessor:
                 stitched_row_mask, stitched_row_class_mask = _combine_horizontal_tiles(
                     current_row_masks,
                     current_row_class_masks,
-                    patch_size=patch_size,
-                    overhang_x=overhang_x,
+                    patch_size=grid.patch_size,
+                    overhang_x=grid.overhang_x,
                 )
                 row_masks.append(stitched_row_mask)
                 row_class_masks.append(stitched_row_class_mask)
@@ -121,15 +189,15 @@ class ArtifactProcessor:
             end_image, end_image_class_map = _combine_vertical_tiles(
                 row_masks,
                 row_class_masks,
-                patch_size=patch_size,
-                overhang_y=overhang_y,
+                patch_size=grid.patch_size,
+                overhang_y=grid.overhang_y,
             )
 
         if end_image is None or end_image_class_map is None:
             raise RuntimeError(f"No tissue detection output was created for '{slide_path.name}'.")
 
-        Image.fromarray(end_image).save(tissue_mask_path)
-        Image.fromarray(end_image_class_map).save(tissue_mask_colored_path)
+        Image.fromarray(end_image).save(output_paths.tissue_mask_path)
+        Image.fromarray(end_image_class_map).save(output_paths.tissue_mask_colored_path)
         overlay = cv2.addWeighted(
             np.array(thumbnail_image),
             self.config.over_image,
@@ -137,13 +205,13 @@ class ArtifactProcessor:
             self.config.over_mask,
             0,
         )
-        Image.fromarray(overlay).save(tissue_overlay_path)
+        Image.fromarray(overlay).save(output_paths.tissue_overlay_path)
 
         return {
-            "tissue_mask_path": tissue_mask_path,
-            "tissue_mask_colored_path": tissue_mask_colored_path,
-            "tissue_overlay_path": tissue_overlay_path,
-            "thumbnail_path": thumbnail_path,
+            "tissue_mask_path": output_paths.tissue_mask_path,
+            "tissue_mask_colored_path": output_paths.tissue_mask_colored_path,
+            "tissue_overlay_path": output_paths.tissue_overlay_path,
+            "thumbnail_path": output_paths.thumbnail_path,
         }
 
     def _run_qc_processing(
@@ -157,7 +225,7 @@ class ArtifactProcessor:
 
         from helpers.wsi.colors import colors_QC7
         from helpers.wsi.maps import make_overlay
-        from helpers.wsi.process import mask_to_geojson, slide_process_single
+        from helpers.wsi.process import SlideProcessConfig, mask_to_geojson, slide_process_single
         from helpers.wsi.slide_info import slide_info
 
         start = timeit.default_timer()
@@ -179,23 +247,25 @@ class ArtifactProcessor:
         )
         tissue_detection_map_mpp = np.array(tissue_detection_map.convert("L"))
         colors = colors_QC7
-        map_image, full_mask = slide_process_single(  # type: ignore[no-untyped-call]
+        map_image, full_mask = slide_process_single(
             models.qc_model,
             tissue_detection_map_mpp,
             slide,
-            patch_count_w,
-            patch_count_h,
-            patch_size,
-            self.config.model_patch_size,
-            colors,
-            self.config.encoder_model,
-            self.config.encoder_weights,
-            self.config.device,
-            self.config.back_class,
-            self.config.mpp_model,
-            mpp,
-            width_l0,
-            height_l0,
+            SlideProcessConfig(
+                patch_count_w=patch_count_w,
+                patch_count_h=patch_count_h,
+                patch_size=patch_size,
+                model_patch_size=self.config.model_patch_size,
+                colors=colors,
+                encoder_model=self.config.encoder_model,
+                encoder_weights=self.config.encoder_weights,
+                device=self.config.device,
+                back_class=self.config.back_class,
+                mpp_model=self.config.mpp_model,
+                slide_mpp=mpp,
+                width_l0=width_l0,
+                height_l0=height_l0,
+            ),
         )
 
         maps_dir = slide_path.parent / "artifact_output" / "maps_qc"
@@ -228,30 +298,43 @@ def _crop_tile(
     image: Image.Image,
     tile_x: int,
     tile_y: int,
-    tiles_x: int,
-    tiles_y: int,
-    patch_size: int,
-    width: int,
-    height: int,
+    grid: TileGrid,
 ) -> Image.Image:
-    if tile_x != tiles_x and tile_y != tiles_y:
+    if tile_x != grid.tiles_x and tile_y != grid.tiles_y:
         return image.crop(
             (
-                tile_x * patch_size,
-                tile_y * patch_size,
-                (tile_x + 1) * patch_size,
-                (tile_y + 1) * patch_size,
+                tile_x * grid.patch_size,
+                tile_y * grid.patch_size,
+                (tile_x + 1) * grid.patch_size,
+                (tile_y + 1) * grid.patch_size,
             )
         )
-    if tile_x == tiles_x and tile_y != tiles_y:
+    if tile_x == grid.tiles_x and tile_y != grid.tiles_y:
         return image.crop(
-            (width - patch_size, tile_y * patch_size, width, (tile_y + 1) * patch_size)
+            (
+                grid.width - grid.patch_size,
+                tile_y * grid.patch_size,
+                grid.width,
+                (tile_y + 1) * grid.patch_size,
+            )
         )
-    if tile_x != tiles_x and tile_y == tiles_y:
+    if tile_x != grid.tiles_x and tile_y == grid.tiles_y:
         return image.crop(
-            (tile_x * patch_size, height - patch_size, (tile_x + 1) * patch_size, height)
+            (
+                tile_x * grid.patch_size,
+                grid.height - grid.patch_size,
+                (tile_x + 1) * grid.patch_size,
+                grid.height,
+            )
         )
-    return image.crop((width - patch_size, height - patch_size, width, height))
+    return image.crop(
+        (
+            grid.width - grid.patch_size,
+            grid.height - grid.patch_size,
+            grid.width,
+            grid.height,
+        )
+    )
 
 
 def _combine_horizontal_tiles(
@@ -294,73 +377,61 @@ def _combine_vertical_tiles(
     return np.concatenate(tiles, axis=0), np.concatenate(class_tiles, axis=0)
 
 
-def _append_horizontal_tile(
-    temp_image: Any,
-    temp_image_class_map: Any,
-    mask: Any,
-    class_mask: Any,
-    tile_x: int,
-    tiles_x: int,
-    patch_size: int,
-    overhang_x: int,
-) -> tuple[Any, Any]:
+def _append_horizontal_tile(config: HorizontalTileAppend) -> tuple[Any, Any]:
     import numpy as np
 
-    if tile_x == 0:
-        return mask, class_mask
-    if temp_image is None or temp_image_class_map is None:
+    if config.tile_x == 0:
+        return config.mask, config.class_mask
+    if config.temp_image is None or config.temp_image_class_map is None:
         raise RuntimeError("Horizontal stitching state was not initialized.")
-    if tile_x == tiles_x:
-        mask_clip = mask[:, patch_size - overhang_x : patch_size] if overhang_x > 0 else mask[:, :0]
+    if config.tile_x == config.tiles_x:
+        mask_clip = (
+            config.mask[:, config.patch_size - config.overhang_x : config.patch_size]
+            if config.overhang_x > 0
+            else config.mask[:, :0]
+        )
         class_mask_clip = (
-            class_mask[:, patch_size - overhang_x : patch_size, :]
-            if overhang_x > 0
-            else class_mask[:, :0, :]
+            config.class_mask[:, config.patch_size - config.overhang_x : config.patch_size, :]
+            if config.overhang_x > 0
+            else config.class_mask[:, :0, :]
         )
         return (
-            np.concatenate((temp_image, mask_clip), axis=1),
-            np.concatenate((temp_image_class_map, class_mask_clip), axis=1),
+            np.concatenate((config.temp_image, mask_clip), axis=1),
+            np.concatenate((config.temp_image_class_map, class_mask_clip), axis=1),
         )
     return (
-        np.concatenate((temp_image, mask), axis=1),
-        np.concatenate((temp_image_class_map, class_mask), axis=1),
+        np.concatenate((config.temp_image, config.mask), axis=1),
+        np.concatenate((config.temp_image_class_map, config.class_mask), axis=1),
     )
 
 
-def _append_vertical_tile(
-    end_image: Any,
-    end_image_class_map: Any,
-    temp_image: Any,
-    temp_image_class_map: Any,
-    tile_y: int,
-    tiles_y: int,
-    patch_size: int,
-    overhang_y: int,
-) -> tuple[Any, Any]:
+def _append_vertical_tile(config: VerticalTileAppend) -> tuple[Any, Any]:
     import numpy as np
 
-    if tile_y == 0:
-        return temp_image, temp_image_class_map
-    if end_image is None or end_image_class_map is None:
+    if config.tile_y == 0:
+        return config.temp_image, config.temp_image_class_map
+    if config.end_image is None or config.end_image_class_map is None:
         raise RuntimeError("Vertical stitching state was not initialized.")
-    temp_image_array = cast(Any, temp_image)
-    temp_image_class_map_array = cast(Any, temp_image_class_map)
-    if tile_y == tiles_y:
+    temp_image_array = cast(Any, config.temp_image)
+    temp_image_class_map_array = cast(Any, config.temp_image_class_map)
+    if config.tile_y == config.tiles_y:
         temp_clip = (
-            temp_image_array[patch_size - overhang_y : patch_size, :]
-            if overhang_y > 0
+            temp_image_array[config.patch_size - config.overhang_y : config.patch_size, :]
+            if config.overhang_y > 0
             else temp_image_array[:0, :]
         )
         temp_class_clip = (
-            temp_image_class_map_array[patch_size - overhang_y : patch_size, :, :]
-            if overhang_y > 0
+            temp_image_class_map_array[
+                config.patch_size - config.overhang_y : config.patch_size, :, :
+            ]
+            if config.overhang_y > 0
             else temp_image_class_map_array[:0, :, :]
         )
         return (
-            np.concatenate((end_image, temp_clip), axis=0),
-            np.concatenate((end_image_class_map, temp_class_clip), axis=0),
+            np.concatenate((config.end_image, temp_clip), axis=0),
+            np.concatenate((config.end_image_class_map, temp_class_clip), axis=0),
         )
     return (
-        np.concatenate((end_image, temp_image_array), axis=0),
-        np.concatenate((end_image_class_map, temp_image_class_map_array), axis=0),
+        np.concatenate((config.end_image, temp_image_array), axis=0),
+        np.concatenate((config.end_image_class_map, temp_image_class_map_array), axis=0),
     )

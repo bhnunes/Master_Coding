@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -14,6 +15,78 @@ from helpers.provenance import (
     hash_file_sha256,
     hash_json_payload,
 )
+
+
+@dataclass(frozen=True)
+class OHEMCheckpointSettings:
+    run_ohem: bool
+    ohem_start_epoch: int
+    ohem_ratio: float
+    ohem_min_kept: int
+
+
+@dataclass(frozen=True)
+class TrainingProvenanceRequest:
+    dataset: str | os.PathLike[str] | Mapping[str, Any]
+    validation_dataset: str | os.PathLike[str] | Mapping[str, Any]
+    master_manifest_path: str | os.PathLike[str] | None
+    resume_checkpoint: str | os.PathLike[str] | None
+    ohem: OHEMCheckpointSettings
+
+
+@dataclass(frozen=True)
+class EarlyStoppingCheckpoint:
+    score: float
+    model: torch.nn.Module
+    optimizer: torch.optim.Optimizer
+    epoch: int
+    val_loss: float
+    val_auprc: float
+    val_mcc_star: float
+    val_auroc: float
+    previous_best_score_for_log: float | None = None
+
+
+@dataclass(frozen=True)
+class ResumeCheckpointRequest:
+    model: torch.nn.Module
+    optimizer: torch.optim.Optimizer
+    early_stopping: EarlyStopping
+    checkpoint_path: str | None
+    device: torch.device
+    expected_compatibility_signature: str | None = None
+
+
+@dataclass(frozen=True)
+class TrainingMetadataRequest:
+    best_val_score: float | None
+    checkpoint: dict[str, Any]
+    encoder: str
+    architecture: str
+    metadata_best_path: str
+    val_loss: float | None
+    val_mcc: float | None
+    val_auroc: float | None
+    metadata_dir: str
+    amp_log: Any
+    base_learning_rate: float
+    weight_decay: float
+    batch_size: int
+    num_epochs: int
+    workers: int
+    seed: int
+    dataset: str | os.PathLike[str] | Mapping[str, Any]
+    validation_dataset: str | os.PathLike[str] | Mapping[str, Any]
+    patience: int
+    optimizer_name: str
+    alpha_bce: float
+    beta_dice_bg: float
+    gamma_dice_fg: float
+    execution_mode: str | None = None
+    use_artifact_aware_loss: bool = False
+    master_manifest_path: str | os.PathLike[str] | None = None
+    resume_checkpoint: str | os.PathLike[str] | None = None
+    ohem: OHEMCheckpointSettings = OHEMCheckpointSettings(False, 2, 0.25, 1024)
 
 
 def _build_dataset_provenance(
@@ -76,21 +149,13 @@ def _build_artifact_loss_provenance(
     }
 
 
-def _build_training_provenance(
-    dataset: str | os.PathLike[str] | Mapping[str, Any],
-    validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
-    master_manifest_path: str | os.PathLike[str] | None,
-    resume_checkpoint: str | os.PathLike[str] | None,
-    *,
-    run_ohem: bool,
-    ohem_start_epoch: int,
-    ohem_ratio: float,
-    ohem_min_kept: int,
-) -> tuple[dict[str, Any], str]:
-    dataset_provenance = _build_dataset_provenance(dataset)
-    validation_dataset_provenance = _build_dataset_provenance(validation_dataset)
-    artifact_loss_provenance = _build_artifact_loss_provenance(master_manifest_path)
-    resume_path_str = os.fspath(resume_checkpoint) if resume_checkpoint is not None else None
+def _build_training_provenance(request: TrainingProvenanceRequest) -> tuple[dict[str, Any], str]:
+    dataset_provenance = _build_dataset_provenance(request.dataset)
+    validation_dataset_provenance = _build_dataset_provenance(request.validation_dataset)
+    artifact_loss_provenance = _build_artifact_loss_provenance(request.master_manifest_path)
+    resume_path_str = (
+        os.fspath(request.resume_checkpoint) if request.resume_checkpoint is not None else None
+    )
     resume_sha256 = None
     if resume_path_str is not None and Path(resume_path_str).exists():
         resume_sha256 = hash_file_sha256(resume_path_str)
@@ -138,10 +203,10 @@ def _build_training_provenance(
         },
         "artifact_aware_loss": artifact_loss_provenance,
         "ohem": {
-            "enabled": run_ohem,
-            "start_epoch": ohem_start_epoch,
-            "ratio": ohem_ratio,
-            "min_kept": ohem_min_kept,
+            "enabled": request.ohem.run_ohem,
+            "start_epoch": request.ohem.ohem_start_epoch,
+            "ratio": request.ohem.ohem_ratio,
+            "min_kept": request.ohem.ohem_min_kept,
         },
         "resume_checkpoint": {
             "path": resume_path_str,
@@ -165,27 +230,11 @@ def _build_training_provenance(
 
 
 def build_training_compatibility_signature(
-    *,
-    dataset: str | os.PathLike[str] | Mapping[str, Any],
-    validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
-    master_manifest_path: str | os.PathLike[str] | None,
-    run_ohem: bool,
-    ohem_start_epoch: int,
-    ohem_ratio: float,
-    ohem_min_kept: int,
+    request: TrainingProvenanceRequest,
 ) -> str:
     """Build the fail-closed compatibility signature for a training run."""
 
-    _provenance, compatibility_signature = _build_training_provenance(
-        dataset,
-        validation_dataset,
-        master_manifest_path,
-        resume_checkpoint=None,
-        run_ohem=run_ohem,
-        ohem_start_epoch=ohem_start_epoch,
-        ohem_ratio=ohem_ratio,
-        ohem_min_kept=ohem_min_kept,
-    )
+    _provenance, compatibility_signature = _build_training_provenance(request)
     return compatibility_signature
 
 
@@ -224,43 +273,29 @@ class EarlyStopping:
 
     def __call__(
         self,
-        score: float,
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        epoch: int,
-        val_loss: float,
-        val_auprc: float,
-        val_mcc_star: float,
-        val_auroc: float,
+        checkpoint: EarlyStoppingCheckpoint,
     ) -> bool:
         if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(
-                val_loss,
-                model,
-                optimizer,
-                epoch,
-                val_auprc,
-                val_mcc_star,
-                score,
-                val_auroc,
-            )
+            self.best_score = checkpoint.score
+            self.save_checkpoint(checkpoint)
             return True
 
-        improvement_detected = score > self.best_score + self.delta
+        improvement_detected = checkpoint.score > self.best_score + self.delta
         if improvement_detected:
             previous_best_score_for_log = self.best_score
-            self.best_score = score
+            self.best_score = checkpoint.score
             self.save_checkpoint(
-                val_loss,
-                model,
-                optimizer,
-                epoch,
-                val_auprc,
-                val_mcc_star,
-                score,
-                val_auroc,
-                previous_best_score_for_log,
+                EarlyStoppingCheckpoint(
+                    score=checkpoint.score,
+                    model=checkpoint.model,
+                    optimizer=checkpoint.optimizer,
+                    epoch=checkpoint.epoch,
+                    val_loss=checkpoint.val_loss,
+                    val_auprc=checkpoint.val_auprc,
+                    val_mcc_star=checkpoint.val_mcc_star,
+                    val_auroc=checkpoint.val_auroc,
+                    previous_best_score_for_log=previous_best_score_for_log,
+                )
             )
             self.counter = 0
         else:
@@ -276,33 +311,22 @@ class EarlyStopping:
 
         return improvement_detected
 
-    def save_checkpoint(
-        self,
-        val_loss: float,
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        epoch: int,
-        val_auprc: float,
-        val_mcc_star: float,
-        score: float,
-        val_auroc: float,
-        previous_best_score_for_log: float | None = None,
-    ) -> None:
-        if self.verbose and previous_best_score_for_log is None:
-            print(f"Initial best score: {score:.6f}. Saving model...")
+    def save_checkpoint(self, checkpoint: EarlyStoppingCheckpoint) -> None:
+        if self.verbose and checkpoint.previous_best_score_for_log is None:
+            print(f"Initial best score: {checkpoint.score:.6f}. Saving model...")
 
-        original_model = getattr(model, "_orig_mod", model)
+        original_model = getattr(checkpoint.model, "_orig_mod", checkpoint.model)
         model_to_save = cast(torch.nn.Module, original_model)
         save_dict = {
-            "epoch": epoch,
+            "epoch": checkpoint.epoch,
             "model_state_dict": model_to_save.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "val_loss": val_loss,
-            "best_val_score": score,
-            "val_auprc": val_auprc,
-            "val_auroc": val_auroc,
-            "val_mcc_star": val_mcc_star,
-            "is_compiled": hasattr(model, "_orig_mod"),
+            "optimizer_state_dict": checkpoint.optimizer.state_dict(),
+            "val_loss": checkpoint.val_loss,
+            "best_val_score": checkpoint.score,
+            "val_auprc": checkpoint.val_auprc,
+            "val_auroc": checkpoint.val_auroc,
+            "val_mcc_star": checkpoint.val_mcc_star,
+            "is_compiled": hasattr(checkpoint.model, "_orig_mod"),
         }
 
         try:
@@ -314,75 +338,82 @@ class EarlyStopping:
             print(f"Error saving best model checkpoint to {self.output_best_model_path}: {error}")
 
 
-def load_checkpoint_for_resume(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    early_stopping: EarlyStopping,
-    checkpoint_path: str | None,
-    device: torch.device,
-    expected_compatibility_signature: str | None = None,
-) -> int:
-    """Restore model, optimizer, and early-stopping state from a checkpoint."""
-
-    start_epoch = 0
-    if not checkpoint_path:
+def _resolve_resume_checkpoint_path(request: ResumeCheckpointRequest) -> str | None:
+    if not request.checkpoint_path:
         print("No resume checkpoint provided: training from scratch.")
-        early_stopping.set_initial_best_checkpoint_path(None)
-        return start_epoch
+        request.early_stopping.set_initial_best_checkpoint_path(None)
+        return None
 
-    checkpoint_path = checkpoint_path.strip()
+    checkpoint_path = request.checkpoint_path.strip()
     if checkpoint_path == "":
         print("Empty resume checkpoint string: training from scratch.")
-        early_stopping.set_initial_best_checkpoint_path(None)
-        return start_epoch
+        request.early_stopping.set_initial_best_checkpoint_path(None)
+        return None
 
     if not os.path.exists(checkpoint_path):
         print(f"Resume checkpoint not found at {checkpoint_path}. Training from scratch.")
-        early_stopping.set_initial_best_checkpoint_path(None)
-        return start_epoch
+        request.early_stopping.set_initial_best_checkpoint_path(None)
+        return None
+    return checkpoint_path
 
-    if expected_compatibility_signature is not None:
-        metadata_path = _metadata_path_for_checkpoint(checkpoint_path)
-        if not metadata_path.exists():
-            raise ValueError(
-                "Resume checkpoint has no metadata sidecar; cannot verify compatible provenance. "
-                f"Expected metadata at '{metadata_path}'."
-            )
-        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-        observed_signature = str(payload.get("compatibility_signature", "")).strip()
-        if observed_signature != expected_compatibility_signature:
-            raise ValueError(
-                "Resume checkpoint has incompatible provenance for the current training inputs."
-            )
+
+def _verify_resume_compatibility(
+    checkpoint_path: str,
+    expected_compatibility_signature: str | None,
+) -> None:
+    if expected_compatibility_signature is None:
+        return
+    metadata_path = _metadata_path_for_checkpoint(checkpoint_path)
+    if not metadata_path.exists():
+        raise ValueError(
+            "Resume checkpoint has no metadata sidecar; cannot verify compatible provenance. "
+            f"Expected metadata at '{metadata_path}'."
+        )
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    observed_signature = str(payload.get("compatibility_signature", "")).strip()
+    if observed_signature != expected_compatibility_signature:
+        raise ValueError(
+            "Resume checkpoint has incompatible provenance for the current training inputs."
+        )
+
+
+def load_checkpoint_for_resume(request: ResumeCheckpointRequest) -> int:
+    """Restore model, optimizer, and early-stopping state from a checkpoint."""
+
+    start_epoch = 0
+    checkpoint_path = _resolve_resume_checkpoint_path(request)
+    if checkpoint_path is None:
+        return start_epoch
+    _verify_resume_compatibility(checkpoint_path, request.expected_compatibility_signature)
 
     print(f"\n*** Resuming from checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=request.device)
     state_dict = checkpoint.get("model_state_dict")
     if state_dict is None:
         print("Checkpoint missing 'model_state_dict'. Training from scratch.")
-        early_stopping.set_initial_best_checkpoint_path(None)
+        request.early_stopping.set_initial_best_checkpoint_path(None)
         return start_epoch
 
-    if hasattr(model, "_orig_mod"):
-        compiled_model = cast(torch.nn.Module, model._orig_mod)
+    if hasattr(request.model, "_orig_mod"):
+        compiled_model = cast(torch.nn.Module, request.model._orig_mod)
         compiled_model.load_state_dict(state_dict)
     else:
-        model.load_state_dict(state_dict)
+        request.model.load_state_dict(state_dict)
 
     if "optimizer_state_dict" in checkpoint:
         try:
-            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            request.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             print("Optimizer state loaded from checkpoint.")
         except Exception as error:
             print(f"Warning: could not load optimizer state: {error}")
 
     best_score = checkpoint.get("best_val_score")
     if best_score is not None:
-        early_stopping.best_score = float(best_score)
-        early_stopping.counter = 0
+        request.early_stopping.best_score = float(best_score)
+        request.early_stopping.counter = 0
         print(f"Loaded EarlyStopping best_val_score = {best_score:.6f}")
 
-    early_stopping.set_initial_best_checkpoint_path(checkpoint_path)
+    request.early_stopping.set_initial_best_checkpoint_path(checkpoint_path)
     last_epoch = int(checkpoint.get("epoch", 0))
     start_epoch = last_epoch
     print(
@@ -424,97 +455,66 @@ def get_previous_metrics(
     )
 
 
-def save_metadata(
-    best_val_score: float | None,
-    checkpoint: dict[str, Any],
-    encoder: str,
-    architecture: str,
-    metadata_best_path: str,
-    val_loss: float | None,
-    val_mcc: float | None,
-    val_auroc: float | None,
-    metadata_dir: str,
-    amp_log: Any,
-    base_learning_rate: float,
-    weight_decay: float,
-    batch_size: int,
-    num_epochs: int,
-    workers: int,
-    seed: int,
-    dataset: str | os.PathLike[str] | Mapping[str, Any],
-    validation_dataset: str | os.PathLike[str] | Mapping[str, Any],
-    patience: int,
-    optimizer_name: str,
-    alpha_bce: float,
-    beta_dice_bg: float,
-    gamma_dice_fg: float,
-    execution_mode: str | None = None,
-    use_artifact_aware_loss: bool = False,
-    master_manifest_path: str | os.PathLike[str] | None = None,
-    resume_checkpoint: str | os.PathLike[str] | None = None,
-    run_ohem: bool = False,
-    ohem_start_epoch: int = 2,
-    ohem_ratio: float = 0.25,
-    ohem_min_kept: int = 1024,
-) -> None:
+def save_metadata(request: TrainingMetadataRequest) -> None:
     """Persist model metadata next to the best checkpoint."""
 
-    meta_filename = os.path.join(metadata_dir, os.path.basename(metadata_best_path))
+    meta_filename = os.path.join(request.metadata_dir, os.path.basename(request.metadata_best_path))
     meta_filename = meta_filename.replace(".pth", "_meta.json")
     provenance, compatibility_signature = _build_training_provenance(
-        dataset,
-        validation_dataset,
-        master_manifest_path,
-        resume_checkpoint,
-        run_ohem=run_ohem,
-        ohem_start_epoch=ohem_start_epoch,
-        ohem_ratio=ohem_ratio,
-        ohem_min_kept=ohem_min_kept,
+        TrainingProvenanceRequest(
+            dataset=request.dataset,
+            validation_dataset=request.validation_dataset,
+            master_manifest_path=request.master_manifest_path,
+            resume_checkpoint=request.resume_checkpoint,
+            ohem=request.ohem,
+        )
     )
 
     metadata = {
-        "best_val_auprc_pixel_score": best_val_score,
-        "pixel_val_loss": val_loss,
-        "pixel_val_mcc": val_mcc,
-        "pixel_val_auroc": val_auroc,
-        "best_model_epoch": checkpoint.get("epoch", "?"),
-        "checkpoint_path": metadata_best_path,
-        "encoder": encoder,
-        "architecture": architecture,
+        "best_val_auprc_pixel_score": request.best_val_score,
+        "pixel_val_loss": request.val_loss,
+        "pixel_val_mcc": request.val_mcc,
+        "pixel_val_auroc": request.val_auroc,
+        "best_model_epoch": request.checkpoint.get("epoch", "?"),
+        "checkpoint_path": request.metadata_best_path,
+        "encoder": request.encoder,
+        "architecture": request.architecture,
         "runtime_environment": collect_runtime_environment(),
-        "execution_mode": execution_mode,
-        "use_artifact_aware_loss": use_artifact_aware_loss,
-        "run_ohem": run_ohem,
+        "execution_mode": request.execution_mode,
+        "use_artifact_aware_loss": request.use_artifact_aware_loss,
+        "run_ohem": request.ohem.run_ohem,
         "compatibility_signature": compatibility_signature,
         "provenance": provenance,
         "master_manifest_path": (
-            os.fspath(master_manifest_path) if master_manifest_path is not None else None
+            os.fspath(request.master_manifest_path)
+            if request.master_manifest_path is not None
+            else None
         ),
-        "resume_checkpoint": os.fspath(resume_checkpoint)
-        if resume_checkpoint is not None
+        "resume_checkpoint": os.fspath(request.resume_checkpoint)
+        if request.resume_checkpoint is not None
         else None,
         "hyperparameters": {
-            "amp_precision": amp_log,
-            "Learning_rate": base_learning_rate,
-            "Weight_Decay": weight_decay,
-            "Batch_Size": batch_size,
-            "Num_Epochs": num_epochs,
-            "Workers": workers,
-            "Seed": seed,
-            "Dataset": dataset,
-            "Patience": patience,
-            "Optimizer": optimizer_name,
+            "amp_precision": request.amp_log,
+            "Learning_rate": request.base_learning_rate,
+            "Weight_Decay": request.weight_decay,
+            "Batch_Size": request.batch_size,
+            "Num_Epochs": request.num_epochs,
+            "Workers": request.workers,
+            "Seed": request.seed,
+            "Dataset": request.dataset,
+            "Patience": request.patience,
+            "Optimizer": request.optimizer_name,
             "Loss_Function": "BCEDiceHybrid",
-            "Run_OHEM": run_ohem,
+            "Run_OHEM": request.ohem.run_ohem,
             "OHEM": {
-                "start_epoch": ohem_start_epoch,
-                "ratio": ohem_ratio,
-                "min_kept": ohem_min_kept,
+                "start_epoch": request.ohem.ohem_start_epoch,
+                "ratio": request.ohem.ohem_ratio,
+                "min_kept": request.ohem.ohem_min_kept,
             },
             "Loss_Weights": {
-                "alpha_bce": alpha_bce,
-                "beta_dice_bg": beta_dice_bg,
-                "gamma_dice_fg": gamma_dice_fg,
+                "alpha_bce": request.alpha_bce,
+                "beta_dice_bg": request.beta_dice_bg,
+                "gamma_dice_fg": request.gamma_dice_fg,
             },
         },
     }

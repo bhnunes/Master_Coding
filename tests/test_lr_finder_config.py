@@ -7,6 +7,9 @@ import pytest
 
 from helpers.lr_finder.config import load_lr_finder_config
 
+LHS_SAMPLE_COUNT = 4
+NUM_REPEATS = 2
+
 
 def test_load_lr_finder_config_builds_model_plan_from_registry(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -59,8 +62,8 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     assert config.master_manifest_path == master_manifest_path
     assert config.output_dir == output_dir
     assert config.local_data_dir == local_dir
-    assert config.num_lhs_samples == 4
-    assert config.num_repeats == 2
+    assert config.num_lhs_samples == LHS_SAMPLE_COUNT
+    assert config.num_repeats == NUM_REPEATS
     assert config.log_path == Path("logs/lr_finder.log")
     assert config.execution_mode == "PAPER"
     assert config.amp_precision == "fp32"

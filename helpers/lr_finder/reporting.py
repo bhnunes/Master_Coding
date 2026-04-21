@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+DECIMAL_FORMAT_LOWER_BOUND = 1e-2
+DECIMAL_FORMAT_UPPER_BOUND = 1e3
+
 
 @dataclass(frozen=True)
 class RunRecord:
@@ -23,7 +26,7 @@ class RunRecord:
 def format_metric(value: float) -> str:
     if value != value or value in {float("inf"), float("-inf")}:  # noqa: PLR0124
         return "NA"
-    if 1e-2 <= value < 1e3:
+    if DECIMAL_FORMAT_LOWER_BOUND <= value < DECIMAL_FORMAT_UPPER_BOUND:
         return f"{value:.4f}"
     return f"{value:.2e}"
 

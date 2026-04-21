@@ -18,6 +18,8 @@ from helpers.cv2_compat import ensure_cv2_compat
 
 cv2 = ensure_cv2_compat(cv2)
 
+COLOR_IMAGE_NDIM = 3
+
 
 def calculate_image_entropy_from_path(image_path: str, thumb: int = 128) -> tuple[str, float]:
     """Compute fast grayscale Shannon entropy from a PNG path."""
@@ -41,7 +43,7 @@ def calculate_image_entropy_from_path(image_path: str, thumb: int = 128) -> tupl
 
 
 def _calculate_entropy_from_array(image: npt.NDArray[np.uint8], thumb: int = 128) -> float:
-    if image.ndim == 3:
+    if image.ndim == COLOR_IMAGE_NDIM:
         image = np.asarray(cv2.cvtColor(image, cv2.COLOR_RGB2GRAY), dtype=np.uint8)
     if thumb is not None:
         image = np.asarray(

@@ -15,6 +15,9 @@ from helpers.ensemble_optimizer.models import (
     load_single_model,
 )
 
+MODEL_LEARNING_RATE = 1e-3
+MIN_LOADED_MODEL_COUNT = 2
+
 
 class FakeModel:
     def __init__(self, keys: list[str]) -> None:
@@ -51,7 +54,7 @@ def _selected_model() -> SelectedModelMetadata:
             "best_val_auprc_pixel_score": 0.88,
             "validation_monitoring_threshold_pixel_level": 0.42,
             "hyperparameters": {
-                "Learning_rate": 1e-3,
+                "Learning_rate": MODEL_LEARNING_RATE,
                 "Batch_Size": 8,
                 "Weight_Decay": 1e-4,
                 "Optimizer": "AdamW",
@@ -123,7 +126,7 @@ def test_build_loaded_model_info_returns_expected_metadata_fields() -> None:
     assert info["architecture"] == "UNET"
     assert info["encoder"] == "resnet34"
     assert info["checkpoint_path"] == "/tmp/model.ckpt"
-    assert info["Learning_rate"] == 1e-3
+    assert info["Learning_rate"] == MODEL_LEARNING_RATE
     assert info["Loss_Function"] == "Dice"
 
 
@@ -184,7 +187,7 @@ def test_load_ensemble_models_skips_failures_but_requires_two_models(
         [selected_a, selected_b, selected_c], device=cast(Any, "cpu")
     )
 
-    assert len(models) == 2
+    assert len(models) == MIN_LOADED_MODEL_COUNT
     assert [entry["checkpoint_path"] for entry in info] == ["/tmp/model.ckpt", "/tmp/c.ckpt"]
     assert "Failed to load model /tmp/b.ckpt: broken" in caplog.text
     assert "Loaded 2/3 selected models (1 failed)." in caplog.text

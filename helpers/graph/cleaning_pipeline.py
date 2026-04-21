@@ -68,30 +68,34 @@ class CleaningDecisionRecord:
     source_row_index: int | None = None
 
 
-def run_graph_cleaning_pipeline(
-    *,
-    source_hdf5_path: Path,
-    output_base_dir: Path,
-    graph_params: GraphContaminationParameters,
-    tau: float,
-    num_workers: int,
-    logger: logging.Logger,
-    master_manifest_path: Path | None = None,
-    scorer: Scorer = calculate_roi_contamination,
-    progress_factory: ProgressFactory | None = None,
-) -> GraphCleaningSummary:
+@dataclass(frozen=True)
+class GraphCleaningPipelineConfig:
+    source_hdf5_path: Path
+    output_base_dir: Path
+    graph_params: GraphContaminationParameters
+    tau: float
+    num_workers: int
+    logger: logging.Logger
+    master_manifest_path: Path | None = None
+    scorer: Scorer = calculate_roi_contamination
+    progress_factory: ProgressFactory | None = None
+
+
+def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCleaningSummary:
     """Run Stage 4.3 filtering and write accepted/rejected manifests."""
 
     started_at = time.time()
-    logger.info("--- Starting Stage 4.3 HDF5-backed filtering process ---")
-    logger.info("Using optimal parameters: %s | tau=%.2f", graph_params, tau)
-    logger.info("Distributing work across %s CPU cores.", num_workers)
+    config.logger.info("--- Starting Stage 4.3 HDF5-backed filtering process ---")
+    config.logger.info("Using optimal parameters: %s | tau=%.2f", config.graph_params, config.tau)
+    config.logger.info("Distributing work across %s CPU cores.", config.num_workers)
 
-    accepted_manifest_path = output_base_dir / "accepted_manifest.csv"
-    rejected_manifest_path = output_base_dir / "rejected_manifest.csv"
-    logger.info("Accepted/rejected manifests will be written under: %s", output_base_dir)
+    accepted_manifest_path = config.output_base_dir / "accepted_manifest.csv"
+    rejected_manifest_path = config.output_base_dir / "rejected_manifest.csv"
+    config.logger.info(
+        "Accepted/rejected manifests will be written under: %s", config.output_base_dir
+    )
 
-    candidates = _list_hdf5_candidates(source_hdf5_path, logger)
+    candidates = _list_hdf5_candidates(config.source_hdf5_path, config.logger)
 
     if not candidates:
         return GraphCleaningSummary(
@@ -99,21 +103,21 @@ def run_graph_cleaning_pipeline(
             accepted=0,
             rejected=0,
             skipped=0,
-            output_base_dir=output_base_dir,
+            output_base_dir=config.output_base_dir,
             accepted_manifest_path=accepted_manifest_path,
             rejected_manifest_path=rejected_manifest_path,
         )
 
-    logger.info("Found %s source rows to process.", len(candidates))
+    config.logger.info("Found %s source rows to process.", len(candidates))
     decisions = _process_hdf5_candidates(
         candidates=candidates,
-        graph_params=graph_params,
-        tau=tau,
-        scorer=scorer,
-        progress_factory=progress_factory,
+        graph_params=config.graph_params,
+        tau=config.tau,
+        scorer=config.scorer,
+        progress_factory=config.progress_factory,
     )
-    if master_manifest_path is not None:
-        MasterManifest(master_manifest_path).update_stage4_cleaning_decisions(
+    if config.master_manifest_path is not None:
+        MasterManifest(config.master_manifest_path).update_stage4_cleaning_decisions(
             decisions=[record.__dict__ for record in decisions]
         )
     _write_decision_manifest(accepted_manifest_path, decisions, ACCEPTED)
@@ -121,19 +125,21 @@ def run_graph_cleaning_pipeline(
     result_counts = Counter(record.decision for record in decisions)
     skipped_total = 0
 
-    logger.info("\n--- Filtering Complete ---")
-    logger.info("Total source rows analyzed: %s", len(candidates))
-    logger.info("Accepted rows: %s", result_counts[ACCEPTED])
-    logger.info("Rejected rows: %s", result_counts[REJECTED])
-    logger.info("Skipped rows: %s", skipped_total)
-    logger.info("Total execution time: %.2f minutes.", (time.time() - started_at) / 60)
-    logger.info("A detailed log has been saved to: %s", _resolve_log_destination(logger))
+    config.logger.info("\n--- Filtering Complete ---")
+    config.logger.info("Total source rows analyzed: %s", len(candidates))
+    config.logger.info("Accepted rows: %s", result_counts[ACCEPTED])
+    config.logger.info("Rejected rows: %s", result_counts[REJECTED])
+    config.logger.info("Skipped rows: %s", skipped_total)
+    config.logger.info("Total execution time: %.2f minutes.", (time.time() - started_at) / 60)
+    config.logger.info(
+        "A detailed log has been saved to: %s", _resolve_log_destination(config.logger)
+    )
     return GraphCleaningSummary(
         total_images=len(candidates),
         accepted=result_counts[ACCEPTED],
         rejected=result_counts[REJECTED],
         skipped=skipped_total,
-        output_base_dir=output_base_dir,
+        output_base_dir=config.output_base_dir,
         accepted_manifest_path=accepted_manifest_path,
         rejected_manifest_path=rejected_manifest_path,
     )

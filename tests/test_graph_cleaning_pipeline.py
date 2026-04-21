@@ -4,7 +4,7 @@ import csv
 import logging
 import sqlite3
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -12,8 +12,35 @@ import numpy.typing as npt
 import pytest
 
 from helpers.graph import cleaning_pipeline
-from helpers.graph.cleaning_pipeline import SourceCandidateRecord, run_graph_cleaning_pipeline
+from helpers.graph.cleaning_pipeline import (
+    GraphCleaningPipelineConfig,
+    SourceCandidateRecord,
+    run_graph_cleaning_pipeline,
+)
 from helpers.graph.contamination import GraphContaminationParameters, calculate_roi_contamination
+
+HDF5_BATCH_COUNT = 2
+
+
+def _pipeline_config(
+    *,
+    source_hdf5_path: Path,
+    output_base_dir: Path,
+    graph_params: GraphContaminationParameters,
+    logger_name: str,
+    master_manifest_path: Path | None = None,
+    scorer: Any = calculate_roi_contamination,
+) -> GraphCleaningPipelineConfig:
+    return GraphCleaningPipelineConfig(
+        source_hdf5_path=source_hdf5_path,
+        output_base_dir=output_base_dir,
+        graph_params=graph_params,
+        tau=0.24,
+        num_workers=1,
+        logger=logging.getLogger(logger_name),
+        master_manifest_path=master_manifest_path,
+        scorer=scorer,
+    )
 
 
 def test_run_graph_cleaning_pipeline_reports_empty_source_dataset(tmp_path: Path) -> None:
@@ -27,17 +54,17 @@ def test_run_graph_cleaning_pipeline_reports_empty_source_dataset(tmp_path: Path
         handle.create_dataset("filenames", data=np.array([], dtype="S32"))
 
     summary = run_graph_cleaning_pipeline(
-        source_hdf5_path=source_path,
-        output_base_dir=output_dir,
-        graph_params=GraphContaminationParameters(
-            bg_intensity_thresh=198,
-            k=386.0,
-            min_size=200,
-            erosion_px=0,
-        ),
-        tau=0.24,
-        num_workers=1,
-        logger=logging.getLogger("test_graph_cleaning_empty"),
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            output_base_dir=output_dir,
+            graph_params=GraphContaminationParameters(
+                bg_intensity_thresh=198,
+                k=386.0,
+                min_size=200,
+                erosion_px=0,
+            ),
+            logger_name="test_graph_cleaning_empty",
+        )
     )
 
     assert summary.total_images == 0
@@ -71,18 +98,18 @@ def test_run_graph_cleaning_pipeline_writes_hdf5_manifests(tmp_path: Path) -> No
         return scores[row_index]
 
     summary = run_graph_cleaning_pipeline(
-        source_hdf5_path=source_path,
-        output_base_dir=output_dir,
-        graph_params=GraphContaminationParameters(
-            bg_intensity_thresh=198,
-            k=386.0,
-            min_size=200,
-            erosion_px=0,
-        ),
-        tau=0.24,
-        num_workers=1,
-        logger=logging.getLogger("test_graph_cleaning_hdf5"),
-        scorer=fake_scorer,
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            output_base_dir=output_dir,
+            graph_params=GraphContaminationParameters(
+                bg_intensity_thresh=198,
+                k=386.0,
+                min_size=200,
+                erosion_px=0,
+            ),
+            logger_name="test_graph_cleaning_hdf5",
+            scorer=fake_scorer,
+        )
     )
 
     assert summary.accepted == 1
@@ -188,7 +215,7 @@ def test_process_hdf5_candidates_batches_contiguous_hdf5_reads(
         progress_factory=None,
     )
 
-    assert len(batch_starts) == 2
+    assert len(batch_starts) == HDF5_BATCH_COUNT
     assert batch_starts == [("fake.h5", 0, 64), ("fake.h5", 64, 70)]
     assert decisions[0].decision == "accepted"
     assert decisions[-1].decision == "rejected"
@@ -289,14 +316,14 @@ def test_run_graph_cleaning_pipeline_updates_master_manifest_state(tmp_path: Pat
         return 0.1 if str(image_path).endswith("[0]") else 0.5
 
     summary = run_graph_cleaning_pipeline(
-        source_hdf5_path=source_path,
-        output_base_dir=output_dir,
-        graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
-        tau=0.24,
-        num_workers=1,
-        master_manifest_path=master_manifest_path,
-        logger=logging.getLogger("test_graph_cleaning_sqlite"),
-        scorer=fake_sqlite_scorer,
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            output_base_dir=output_dir,
+            graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
+            logger_name="test_graph_cleaning_sqlite",
+            master_manifest_path=master_manifest_path,
+            scorer=fake_sqlite_scorer,
+        )
     )
 
     assert summary.accepted == 1
@@ -410,14 +437,14 @@ def test_run_graph_cleaning_pipeline_rejects_stale_master_manifest_provenance(
 
     with pytest.raises(ValueError, match="source_signature does not match"):
         run_graph_cleaning_pipeline(
-            source_hdf5_path=source_path,
-            output_base_dir=output_dir,
-            graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
-            tau=0.24,
-            num_workers=1,
-            master_manifest_path=master_manifest_path,
-            logger=logging.getLogger("test_graph_cleaning_sqlite_stale_provenance"),
-            scorer=fake_sqlite_scorer,
+            _pipeline_config(
+                source_hdf5_path=source_path,
+                output_base_dir=output_dir,
+                graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
+                logger_name="test_graph_cleaning_sqlite_stale_provenance",
+                master_manifest_path=master_manifest_path,
+                scorer=fake_sqlite_scorer,
+            )
         )
 
 
@@ -536,14 +563,14 @@ def test_run_graph_cleaning_pipeline_rejects_mismatched_filename_join(tmp_path: 
     try:
         with pytest.raises(ValueError, match="filename does not match"):
             run_graph_cleaning_pipeline(
-                source_hdf5_path=source_path,
-                output_base_dir=output_dir,
-                graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
-                tau=0.24,
-                num_workers=1,
-                master_manifest_path=master_manifest_path,
-                logger=logging.getLogger("test_graph_cleaning_sqlite_filename_mismatch"),
-                scorer=fake_sqlite_scorer,
+                _pipeline_config(
+                    source_hdf5_path=source_path,
+                    output_base_dir=output_dir,
+                    graph_params=GraphContaminationParameters(198, 386.0, 200, 0),
+                    logger_name="test_graph_cleaning_sqlite_filename_mismatch",
+                    master_manifest_path=master_manifest_path,
+                    scorer=fake_sqlite_scorer,
+                )
             )
     finally:
         monkeypatch.undo()

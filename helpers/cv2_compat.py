@@ -11,75 +11,92 @@ from skimage.filters import threshold_otsu
 from skimage.measure import find_contours
 from skimage.morphology import binary_closing, binary_erosion, binary_opening
 
+COLOR_IMAGE_NDIM = 3
+RGB_CHANNEL_COUNT = 3
+MIN_POLYLINE_POINTS = 2
+MIN_POLYGON_POINTS = 3
+CV2_DEFAULTS = {
+    "IMREAD_COLOR": 1,
+    "IMREAD_GRAYSCALE": 0,
+    "IMREAD_UNCHANGED": -1,
+    "COLOR_BGR2GRAY": 6,
+    "COLOR_RGB2GRAY": 7,
+    "COLOR_RGB2BGR": 8,
+    "COLOR_BGR2RGB": 9,
+    "COLOR_RGB2HSV": 10,
+    "THRESH_BINARY": 0,
+    "THRESH_OTSU": 8,
+    "RETR_EXTERNAL": 0,
+    "CHAIN_APPROX_NONE": 1,
+    "CHAIN_APPROX_SIMPLE": 2,
+    "INTER_AREA": 3,
+    "MORPH_ELLIPSE": 4,
+    "MORPH_OPEN": 5,
+    "MORPH_CLOSE": 6,
+}
 
-def ensure_cv2_compat(cv2: Any) -> Any:
-    if not hasattr(cv2, "error"):
-        class CV2Error(Exception):
-            pass
 
-        cv2.error = CV2Error
+def _ensure_cv2_error_type(cv2: Any) -> None:
+    if hasattr(cv2, "error"):
+        return
 
-    defaults = {
-        "IMREAD_COLOR": 1,
-        "IMREAD_GRAYSCALE": 0,
-        "IMREAD_UNCHANGED": -1,
-        "COLOR_BGR2GRAY": 6,
-        "COLOR_RGB2GRAY": 7,
-        "COLOR_RGB2BGR": 8,
-        "COLOR_BGR2RGB": 9,
-        "COLOR_RGB2HSV": 10,
-        "THRESH_BINARY": 0,
-        "THRESH_OTSU": 8,
-        "RETR_EXTERNAL": 0,
-        "CHAIN_APPROX_NONE": 1,
-        "CHAIN_APPROX_SIMPLE": 2,
-        "INTER_AREA": 3,
-        "MORPH_ELLIPSE": 4,
-        "MORPH_OPEN": 5,
-        "MORPH_CLOSE": 6,
-    }
-    for name, value in defaults.items():
+    class CV2Error(Exception):
+        pass
+
+    cv2.error = CV2Error
+
+
+def _apply_missing_defaults(cv2: Any) -> None:
+    for name, value in CV2_DEFAULTS.items():
         if not hasattr(cv2, name):
             setattr(cv2, name, value)
 
-    if not hasattr(cv2, "setNumThreads"):
-        cv2.setNumThreads = lambda value: None
-    if not hasattr(cv2, "addWeighted"):
-        cv2.addWeighted = _add_weighted
-    if not hasattr(cv2, "imread"):
-        cv2.imread = lambda path, flag=cv2.IMREAD_COLOR: _imread(path, flag, cv2)
-    if not hasattr(cv2, "imwrite"):
-        cv2.imwrite = _imwrite
-    if not hasattr(cv2, "cvtColor"):
-        cv2.cvtColor = lambda image, code: _cvt_color(image, code, cv2)
-    if not hasattr(cv2, "resize"):
-        cv2.resize = lambda image, size, interpolation=cv2.INTER_AREA: _resize(
-            image,
-            size,
-            interpolation,
-        )
-    if not hasattr(cv2, "threshold"):
-        cv2.threshold = lambda src, thresh, maxval, threshold_type: _threshold(
-            src,
-            thresh,
-            maxval,
-            threshold_type,
-            cv2,
-        )
-    if not hasattr(cv2, "getStructuringElement"):
-        cv2.getStructuringElement = _get_structuring_element
-    if not hasattr(cv2, "morphologyEx"):
-        cv2.morphologyEx = lambda src, op, kernel: _morphology_ex(src, op, kernel, cv2)
-    if not hasattr(cv2, "erode"):
-        cv2.erode = _erode
-    if not hasattr(cv2, "findContours"):
-        cv2.findContours = lambda image, mode, method: _find_contours(image)
-    if not hasattr(cv2, "drawContours"):
-        cv2.drawContours = _draw_contours
-    if not hasattr(cv2, "fillPoly"):
-        cv2.fillPoly = _fill_poly
-    if not hasattr(cv2, "contourArea"):
-        cv2.contourArea = _contour_area
+
+def _build_missing_method_factories(cv2: Any) -> dict[str, Any]:
+    return {
+        "setNumThreads": lambda: (lambda value: None),
+        "addWeighted": lambda: _add_weighted,
+        "imread": lambda: (lambda path, flag=cv2.IMREAD_COLOR: _imread(path, flag, cv2)),
+        "imwrite": lambda: _imwrite,
+        "cvtColor": lambda: (lambda image, code: _cvt_color(image, code, cv2)),
+        "resize": lambda: (
+            lambda image, size, interpolation=cv2.INTER_AREA: _resize(
+                image,
+                size,
+                interpolation,
+            )
+        ),
+        "threshold": lambda: (
+            lambda src, thresh, maxval, threshold_type: _threshold(
+                src,
+                thresh,
+                maxval,
+                threshold_type,
+                cv2,
+            )
+        ),
+        "getStructuringElement": lambda: _get_structuring_element,
+        "morphologyEx": lambda: (
+            lambda src, op, kernel: _morphology_ex(src, op, kernel, cv2)
+        ),
+        "erode": lambda: _erode,
+        "findContours": lambda: (lambda image, mode, method: _find_contours(image)),
+        "drawContours": lambda: _draw_contours,
+        "fillPoly": lambda: _fill_poly,
+        "contourArea": lambda: _contour_area,
+    }
+
+
+def _apply_missing_methods(cv2: Any) -> None:
+    for name, factory in _build_missing_method_factories(cv2).items():
+        if not hasattr(cv2, name):
+            setattr(cv2, name, factory())
+
+
+def ensure_cv2_compat(cv2: Any) -> Any:
+    _ensure_cv2_error_type(cv2)
+    _apply_missing_defaults(cv2)
+    _apply_missing_methods(cv2)
     return cv2
 
 
@@ -100,7 +117,7 @@ def _imwrite(path: str, image: np.ndarray[Any, Any]) -> bool:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     array = np.asarray(image, dtype=np.uint8)
-    if array.ndim == 3 and array.shape[2] == 3:
+    if array.ndim == COLOR_IMAGE_NDIM and array.shape[2] == RGB_CHANNEL_COUNT:
         array = array[:, :, ::-1]
     Image.fromarray(array).save(destination)
     return True
@@ -205,7 +222,7 @@ def _draw_contours(
     selected = contours if contourIdx < 0 else [contours[contourIdx]]
     for contour in selected:
         points = np.asarray(contour).reshape(-1, 2)
-        if len(points) < 2:
+        if len(points) < MIN_POLYLINE_POINTS:
             continue
         rr, cc = polygon_perimeter(points[:, 1], points[:, 0], shape=canvas.shape[:2], clip=True)
         canvas[rr, cc] = np.asarray(color, dtype=np.uint8)
@@ -221,7 +238,7 @@ def _fill_poly(
     fill_value = int(color[0]) if color else 0
     for contour in points:
         vertices = np.asarray(contour).reshape(-1, 2)
-        if len(vertices) < 3:
+        if len(vertices) < MIN_POLYGON_POINTS:
             continue
         rr, cc = polygon(  # type: ignore[no-untyped-call]
             vertices[:, 1],
@@ -245,7 +262,7 @@ def _add_weighted(
 
 def _contour_area(contour: np.ndarray[Any, Any]) -> float:
     points = np.asarray(contour).reshape(-1, 2)
-    if len(points) < 3:
+    if len(points) < MIN_POLYGON_POINTS:
         return 0.0
     x_coords = points[:, 0].astype(np.float64)
     y_coords = points[:, 1].astype(np.float64)

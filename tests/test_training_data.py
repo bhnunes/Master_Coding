@@ -38,17 +38,31 @@ from helpers.training.data import (
     verify_patient_separation,
 )
 
+PATCH_SIDE = 4
+RGB_CHANNELS = 3
+HDF5_ROW_COUNT = 3
+FILTERED_LABEL_COUNT = 2
+SHARD_BATCH_VALUE_OFFSET = 1
+SUBSET_INDEX_COUNT = 5
+FIRST_TRAIN_PIXEL = 11
+SECOND_TRAIN_PIXEL = 44
+NORMALIZED_PIXEL = 16
+MANIFEST_ROW_COUNT = 2
+
 
 def _write_hdf5(path: Path, patient_ids: list[bytes] | None = None) -> None:
     if patient_ids is None:
         patient_ids = [b"p1", b"p2", b"p3"]
 
-    images = np.arange(3 * 4 * 4 * 3, dtype=np.uint8).reshape(3, 4, 4, 3)
+    images = np.arange(
+        HDF5_ROW_COUNT * PATCH_SIDE * PATCH_SIDE * RGB_CHANNELS,
+        dtype=np.uint8,
+    ).reshape(HDF5_ROW_COUNT, PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS)
     masks = np.array(
         [
-            np.zeros((4, 4), dtype=np.uint8),
-            np.ones((4, 4), dtype=np.uint8),
-            np.tri(4, 4, dtype=np.uint8),
+            np.zeros((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+            np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+            np.tri(PATCH_SIDE, PATCH_SIDE, dtype=np.uint8),
         ]
     )
     labels = np.array([0, 1, 0], dtype=np.uint8)
@@ -72,8 +86,11 @@ def _write_hdf5(path: Path, patient_ids: list[bytes] | None = None) -> None:
 
 
 def _write_hdf5_with_legacy_filename_dataset(path: Path) -> None:
-    images = np.arange(3 * 4 * 4 * 3, dtype=np.uint8).reshape(3, 4, 4, 3)
-    masks = np.zeros((3, 4, 4), dtype=np.uint8)
+    images = np.arange(
+        HDF5_ROW_COUNT * PATCH_SIDE * PATCH_SIDE * RGB_CHANNELS,
+        dtype=np.uint8,
+    ).reshape(HDF5_ROW_COUNT, PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS)
+    masks = np.zeros((HDF5_ROW_COUNT, PATCH_SIDE, PATCH_SIDE), dtype=np.uint8)
     labels = np.array([0, 1, 0], dtype=np.uint8)
 
     with h5py.File(path, "w") as handle:
@@ -104,11 +121,15 @@ def _write_shard_split(root: Path, split_name: str, patient_ids: list[str]) -> S
         with h5py.File(shard_dir / f"{patient_id}.h5", "w") as handle:
             handle.create_dataset(
                 "images",
-                data=np.full((1, 4, 4, 3), index + 1, dtype=np.uint8),
+                data=np.full(
+                    (1, PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS),
+                    index + SHARD_BATCH_VALUE_OFFSET,
+                    dtype=np.uint8,
+                ),
             )
             handle.create_dataset(
                 "masks",
-                data=np.full((1, 4, 4), index % 2, dtype=np.uint8),
+                data=np.full((1, PATCH_SIDE, PATCH_SIDE), index % 2, dtype=np.uint8),
             )
             handle.create_dataset("labels", data=np.array([index % 2], dtype=np.uint8))
             handle.create_dataset("patient_ids", data=np.array([patient_id.encode()], dtype="S16"))
@@ -520,7 +541,7 @@ def test_create_stratified_subset_within_patients_preserves_patient_class_groups
 
     subset_indices = sorted(subset.indices)
 
-    assert len(subset_indices) == 5
+    assert len(subset_indices) == SUBSET_INDEX_COUNT
     assert {0, 1, 2, 5}.issubset(subset_indices)
     assert any(index in subset_indices for index in (3, 4))
 
@@ -869,8 +890,8 @@ def test_prepare_training_data_reads_canonical_stage2_rows(
     first_image, first_mask = prepared.train_dataset[0]
     second_image, second_mask = prepared.train_dataset[1]
 
-    assert int(first_image[0, 0, 0]) == 11
-    assert int(second_image[0, 0, 0]) == 44
+    assert int(first_image[0, 0, 0]) == FIRST_TRAIN_PIXEL
+    assert int(second_image[0, 0, 0]) == SECOND_TRAIN_PIXEL
     assert int(first_mask[0, 0]) == 0
     assert int(second_mask[0, 0]) == 1
 
@@ -923,7 +944,7 @@ def test_prepare_training_data_uses_shared_stain_normalizer(
     image, _mask = prepared.train_dataset[0]
 
     assert normalizer.calls[0] == "p1_0.png"
-    assert int(image[0, 0, 0]) == 16
+    assert int(image[0, 0, 0]) == NORMALIZED_PIXEL
 
 
 def test_prepare_training_data_wraps_artifact_aware_loss_features(
@@ -1000,5 +1021,5 @@ def test_collect_manifest_split_provenance_reports_manifest_metadata(
     )
 
     assert provenance["master_manifest_path"] == str(master_manifest_path)
-    assert provenance["row_count"] == 2
+    assert provenance["row_count"] == MANIFEST_ROW_COUNT
     assert provenance["selection_mode"] == "stage7_selected"

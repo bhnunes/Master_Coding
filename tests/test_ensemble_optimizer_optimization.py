@@ -30,6 +30,10 @@ from helpers.ensemble_optimizer.optimization import (
     run_two_stream_optimization,
 )
 
+UINT16_MAX = 65535
+DEFAULT_THRESHOLD = 0.5
+EVAL_PATIENT_COUNT = 2
+
 
 class _ConstantBinaryModel(nn.Module):
     def __init__(self, value: float, arch_name: str = "SWIN") -> None:
@@ -236,17 +240,19 @@ def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> N
     ]
 
     threshold, metrics = _calibrate_decision_threshold(
-        patient_ids=["p1", "p2"],
-        local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
-        global_indices=np.array([0, 1]),
-        truth_memmap=truth_memmap,
-        prediction_memmaps=prediction_memmaps,
-        semantic_indices=[0],
-        semantic_weights=[1.0],
-        spatial_indices=[1],
-        spatial_weights=[1.0],
-        roi_context_scale=1,
-        roi_threshold=0.5,
+        optimization.ThresholdCalibrationConfig(
+            patient_ids=["p1", "p2"],
+            local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
+            global_indices=np.array([0, 1]),
+            truth_memmap=truth_memmap,
+            prediction_memmaps=prediction_memmaps,
+            semantic_indices=[0],
+            semantic_weights=[1.0],
+            spatial_indices=[1],
+            spatial_weights=[1.0],
+            roi_context_scale=1,
+            roi_threshold=0.5,
+        )
     )
 
     assert threshold == pytest.approx(0.2)
@@ -326,9 +332,9 @@ def test_cache_predictions_sequential_writes_memmaps_and_patient_ids(
     )
     assert trues_path.exists()
     assert truth_memmap.shape == (2, 2, 2)
-    assert prediction_memmap[0, 1, 0] == 65535
+    assert prediction_memmap[0, 1, 0] == UINT16_MAX
     assert prediction_memmap[0, 1, 1] == 0
-    assert prediction_memmap[1, 0, 0] == 65535
+    assert prediction_memmap[1, 0, 0] == UINT16_MAX
     assert prediction_memmap[1, 1, 1] == 0
     assert json.loads(pids_path.read_text(encoding="utf-8")) == ["p1", "p2"]
 
@@ -617,8 +623,8 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
 
     assert result.semantic_indices == [0]
     assert result.spatial_indices == [1]
-    assert result.roi_threshold == 0.5
-    assert result.decision_threshold == 0.5
+    assert result.roi_threshold == DEFAULT_THRESHOLD
+    assert result.decision_threshold == DEFAULT_THRESHOLD
     assert result.calibration_metrics["Calibration_metric"] == "Patient_MCC"
     assert result.holdout_metrics["Macro_AUPRC_in_ROI"] == pytest.approx(0.75)
     assert result.holdout_metrics["Macro_Spill"] == pytest.approx(0.0)
@@ -718,7 +724,7 @@ def test_run_two_stream_optimization_all_policy_penalizes_negative_false_positiv
     )
 
     assert result.holdout_metrics["Spatial_patient_policy"] == "all"
-    assert result.holdout_metrics["N_eval_patients"] == 2
+    assert result.holdout_metrics["N_eval_patients"] == EVAL_PATIENT_COUNT
     assert result.holdout_metrics["N_eval_negative_patients"] == 1
     assert result.holdout_metrics["Macro_AUPRC_in_ROI_Positive"] == pytest.approx(0.8)
     assert result.holdout_metrics["Macro_Negative_FP"] == pytest.approx(1.0)

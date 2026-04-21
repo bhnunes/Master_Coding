@@ -36,6 +36,8 @@ from helpers.training.stain_normalization import (
 NumericArray = npt.NDArray[np.generic]
 ArtifactCoverageLookup = dict[str, tuple[float, float, float, float, float]]
 ZERO_ARTIFACT_COVERAGE = (0.0, 0.0, 0.0, 0.0, 0.0)
+_MASK_IMAGE_NDIM = 3
+_SINGLE_CHANNEL_COUNT = 1
 FILENAME_DATASET_CANDIDATES = ("filenames", "filename")
 ARTIFACT_COVERAGE_COLUMNS = (
     "cov_fold",
@@ -50,6 +52,12 @@ def _decode_filename(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8")
     return str(value)
+
+
+def _squeeze_single_channel_mask(mask: Any) -> Any:
+    if mask.ndim == _MASK_IMAGE_NDIM and mask.shape[-1] == _SINGLE_CHANNEL_COUNT:
+        return mask.squeeze(-1)
+    return mask
 
 
 def _get_filenames_dataset(handle: h5py.File) -> Any:
@@ -325,9 +333,7 @@ class HybridProstateDataset(Dataset[Any]):
 
         try:
             augmented = self.transform(image=image, mask=mask)
-            transformed_mask = augmented["mask"]
-            if transformed_mask.ndim == 3 and transformed_mask.shape[-1] == 1:
-                transformed_mask = transformed_mask.squeeze(-1)
+            transformed_mask = _squeeze_single_channel_mask(augmented["mask"])
             if self.artifact_coverage_by_filename is None:
                 return augmented["image"], transformed_mask.long()
             artifact_covariates = torch.tensor(
@@ -1020,9 +1026,7 @@ class _BaseShardProstateDataset(Dataset[Any]):
 
     def _format_item(self, image: Any, mask: Any, filename: str) -> Any:
         augmented = self.transform(image=image, mask=mask)
-        transformed_mask = augmented["mask"]
-        if transformed_mask.ndim == 3 and transformed_mask.shape[-1] == 1:
-            transformed_mask = transformed_mask.squeeze(-1)
+        transformed_mask = _squeeze_single_channel_mask(augmented["mask"])
         if self.artifact_coverage_by_filename is None:
             return augmented["image"], transformed_mask.long()
         artifact_covariates = torch.tensor(

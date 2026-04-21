@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -17,6 +18,19 @@ from helpers.provenance import collect_hdf5_provenance
 
 class NormalizerProtocol(Protocol):
     def transform(self, image_rgb: Any) -> Any: ...
+
+
+@dataclass(frozen=True)
+class SplitHDF5WriteConfig:
+    split_df: pd.DataFrame
+    source_hdf5_path: Path
+    output_path: Path
+    normalizer: NormalizerProtocol | None
+    normalization_method: str
+    source_hdf5_provenance: dict[str, Any] | None = None
+    hdf5_compression: str = "NONE"
+    copy_batch_size: int = 256
+    overwrite: bool = False
 
 
 def _build_hdf5_split_signature(
@@ -110,48 +124,39 @@ def _resolve_source_paths(batch_df: pd.DataFrame, fallback_source_hdf5_path: Pat
     return pd.Series([str(fallback_source_hdf5_path)] * len(batch_df), index=batch_df.index)
 
 
-def write_split_hdf5(
-    *,
-    split_df: pd.DataFrame,
-    source_hdf5_path: Path,
-    output_path: Path,
-    normalizer: NormalizerProtocol | None,
-    normalization_method: str,
-    source_hdf5_provenance: dict[str, Any] | None = None,
-    hdf5_compression: str = "NONE",
-    copy_batch_size: int = 256,
-    overwrite: bool,
-) -> Path:
-    if split_df.empty:
-        raise ValueError(f"Cannot create '{output_path.name}' from an empty split dataframe.")
+def write_split_hdf5(config: SplitHDF5WriteConfig) -> Path:
+    if config.split_df.empty:
+        raise ValueError(
+            f"Cannot create '{config.output_path.name}' from an empty split dataframe."
+        )
 
-    resolved_source_hdf5_provenance = source_hdf5_provenance or collect_hdf5_provenance(
-        source_hdf5_path
+    resolved_source_hdf5_provenance = config.source_hdf5_provenance or collect_hdf5_provenance(
+        config.source_hdf5_path
     )
     source_signature = _build_hdf5_split_signature(
-        split_df,
+        config.split_df,
         source_hdf5_provenance=resolved_source_hdf5_provenance,
-        normalization_method=normalization_method,
+        normalization_method=config.normalization_method,
     )
-    if output_path.exists() and not overwrite:
-        return _validate_existing_split_hdf5(output_path, source_signature)
+    if config.output_path.exists() and not config.overwrite:
+        return _validate_existing_split_hdf5(config.output_path, source_signature)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    config.output_path.parent.mkdir(parents=True, exist_ok=True)
     str_dtype = h5py.string_dtype(encoding="utf-8")
-    ordered_split_df = split_df.reset_index(drop=True)
-    resolved_compression = _resolve_hdf5_compression(hdf5_compression)
+    ordered_split_df = config.split_df.reset_index(drop=True)
+    resolved_compression = _resolve_hdf5_compression(config.hdf5_compression)
     reporter = ProgressReporter(
         "Stage 5 split write",
         len(ordered_split_df),
         "rows",
-        context=output_path.name,
+        context=config.output_path.name,
     )
     reporter.log_start(
         f"rows={len(ordered_split_df)} | compression={resolved_compression or 'none'} "
-        f"| batch_size={copy_batch_size}"
+        f"| batch_size={config.copy_batch_size}"
     )
 
-    with h5py.File(output_path, "w") as dest_handle:
+    with h5py.File(config.output_path, "w") as dest_handle:
         dest_handle.attrs["source_signature"] = source_signature
         dest_handle.attrs["source_hdf5_sha256"] = resolved_source_hdf5_provenance["sha256"]
         for attr_name in (
@@ -165,7 +170,7 @@ def write_split_hdf5(
                 dest_handle.attrs[attr_name] = attr_value
 
         first_source_path = Path(
-            str(ordered_split_df.iloc[0].get("source_hdf5_path", source_hdf5_path))
+            str(ordered_split_df.iloc[0].get("source_hdf5_path", config.source_hdf5_path))
         )
         first_index = int(ordered_split_df.iloc[0]["source_row_index"])
         with h5py.File(first_source_path, "r") as first_source_handle:
@@ -193,12 +198,12 @@ def write_split_hdf5(
             "filenames", shape=(len(ordered_split_df),), dtype=str_dtype
         )
 
-        for batch_start in range(0, len(ordered_split_df), copy_batch_size):
-            batch_stop = min(batch_start + copy_batch_size, len(ordered_split_df))
+        for batch_start in range(0, len(ordered_split_df), config.copy_batch_size):
+            batch_stop = min(batch_start + config.copy_batch_size, len(ordered_split_df))
             batch_df = ordered_split_df.iloc[batch_start:batch_stop].reset_index(drop=True)
             image_batch = np.empty((len(batch_df),) + first_image.shape, dtype=np.uint8)
             mask_batch = np.empty((len(batch_df),) + first_mask.shape, dtype=np.uint8)
-            grouped_source_paths = _resolve_source_paths(batch_df, source_hdf5_path)
+            grouped_source_paths = _resolve_source_paths(batch_df, config.source_hdf5_path)
             for source_group_path, group_df in batch_df.groupby(grouped_source_paths, sort=False):
                 group_positions = group_df.index.tolist()
                 source_indices = sorted(group_df["source_row_index"].astype(int).tolist())
@@ -217,7 +222,7 @@ def write_split_hdf5(
                     source_index = int(row["source_row_index"])
                     image_batch[output_offset] = _normalize_image_array(
                         images_by_index[source_index],
-                        normalizer,
+                        config.normalizer,
                     )
                     mask_batch[output_offset] = masks_by_index[source_index]
 
@@ -231,9 +236,13 @@ def write_split_hdf5(
                 extra_parts=[f"remaining={len(ordered_split_df) - batch_stop} rows"],
             )
 
-    logging.info("Stage 5 split verify: %s | rows=%s", output_path.name, len(ordered_split_df))
+    logging.info(
+        "Stage 5 split verify: %s | rows=%s",
+        config.output_path.name,
+        len(ordered_split_df),
+    )
 
-    return output_path
+    return config.output_path
 
 
 def verify_split_hdf5_integrity(output_path: Path, split_df: pd.DataFrame) -> None:

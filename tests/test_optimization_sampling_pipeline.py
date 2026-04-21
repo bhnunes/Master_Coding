@@ -3,12 +3,16 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
 import pytest
 
-from helpers.optimization_sampling.pipeline import run_optimization_sampling
+from helpers.optimization_sampling.pipeline import (
+    OptimizationSamplingConfig,
+    run_optimization_sampling,
+)
 from helpers.optimization_sampling.sampling import (
     ImageMaskPair,
     OverlayTask,
@@ -18,9 +22,44 @@ from helpers.optimization_sampling.sampling import (
     select_sample_stems,
 )
 
+DEFAULT_COHCRAN_SAMPLE_SIZE = 385
+MASTER_POOL_SAMPLE_SIZE = 100
+PILOT_SAMPLE_SIZE = 100
+REPEATED_PATIENT_POPULATION = 500
+REPEATED_PATIENT_PILOT_SAMPLE_SIZE = 50
+SHARED_SLIDE_POPULATION = 1200
+SHARED_SLIDE_MASTER_POOL_SIZE = 120
+HDF5_SOURCE_POPULATION = 1100
+RGBA_CHANNELS = 3
+PATCH_SIDE = 4
+
+
+def _pipeline_config(
+    *,
+    source_hdf5_path: Path,
+    output_base: Path,
+    overlay_runner: Any,
+    rng: random.Random,
+) -> OptimizationSamplingConfig:
+    return OptimizationSamplingConfig(
+        source_hdf5_path=source_hdf5_path,
+        output_base=output_base,
+        confidence_level=0.95,
+        margin_of_error=0.05,
+        proportion=0.5,
+        pilot_sample_size=100,
+        master_pool_fraction=0.10,
+        overlay_color=(0, 0, 255),
+        overlay_thickness=2,
+        overlay_alpha=1.0,
+        num_processes=2,
+        rng=rng,
+        overlay_runner=overlay_runner,
+    )
+
 
 def test_calculate_cochran_sample_size_preserves_existing_defaults() -> None:
-    assert calculate_cochran_sample_size() == 385
+    assert calculate_cochran_sample_size() == DEFAULT_COHCRAN_SAMPLE_SIZE
 
 
 def test_select_sample_stems_returns_non_overlapping_groups() -> None:
@@ -34,10 +73,10 @@ def test_select_sample_stems_returns_non_overlapping_groups() -> None:
         rng=random.Random(7),
     )
 
-    assert selection.required_sample_size == 385
-    assert selection.master_pool_size == 100
-    assert len(selection.master_pool_stems) == 100
-    assert len(selection.pilot_sample_stems) == 100
+    assert selection.required_sample_size == DEFAULT_COHCRAN_SAMPLE_SIZE
+    assert selection.master_pool_size == MASTER_POOL_SAMPLE_SIZE
+    assert len(selection.master_pool_stems) == MASTER_POOL_SAMPLE_SIZE
+    assert len(selection.pilot_sample_stems) == PILOT_SAMPLE_SIZE
     assert set(selection.master_pool_stems).isdisjoint(selection.pilot_sample_stems)
 
 
@@ -56,9 +95,9 @@ def test_select_sample_stems_uses_image_level_population_even_with_repeated_pati
         rng=random.Random(9),
     )
 
-    assert selection.total_population == 500
-    assert len(selection.master_pool_stems) == 100
-    assert len(selection.pilot_sample_stems) == 50
+    assert selection.total_population == REPEATED_PATIENT_POPULATION
+    assert len(selection.master_pool_stems) == MASTER_POOL_SAMPLE_SIZE
+    assert len(selection.pilot_sample_stems) == REPEATED_PATIENT_PILOT_SAMPLE_SIZE
     assert set(selection.master_pool_stems).isdisjoint(selection.pilot_sample_stems)
 
 
@@ -75,9 +114,9 @@ def test_select_sample_stems_does_not_collapse_large_image_population_by_filenam
         rng=random.Random(5),
     )
 
-    assert selection.total_population == 1200
-    assert len(selection.master_pool_stems) == 120
-    assert len(selection.pilot_sample_stems) == 100
+    assert selection.total_population == SHARED_SLIDE_POPULATION
+    assert len(selection.master_pool_stems) == SHARED_SLIDE_MASTER_POOL_SIZE
+    assert len(selection.pilot_sample_stems) == PILOT_SAMPLE_SIZE
     assert set(selection.master_pool_stems).isdisjoint(selection.pilot_sample_stems)
 
 
@@ -123,8 +162,14 @@ def test_build_overlay_tasks_preserves_output_folder_contract(tmp_path: Path) ->
 def test_discover_hdf5_image_mask_pairs_reads_canonical_dataset(tmp_path: Path) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
     with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.create_dataset(
+            "images",
+            data=np.zeros((1, PATCH_SIDE, PATCH_SIDE, RGBA_CHANNELS), dtype=np.uint8),
+        )
+        handle.create_dataset(
+            "masks",
+            data=np.zeros((1, PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        )
         handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
         handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_7_PATCH_001.png"]))
@@ -140,13 +185,27 @@ def test_run_optimization_sampling_creates_manual_review_folders(tmp_path: Path)
     source_path = tmp_path / "SOURCE_DATASET.h5"
     output_dir = tmp_path / "output"
     with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((1100, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((1100, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.ones((1100,), dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.arange(1, 1101, dtype=np.int32))
+        handle.create_dataset(
+            "images",
+            data=np.zeros(
+                (HDF5_SOURCE_POPULATION, PATCH_SIDE, PATCH_SIDE, RGBA_CHANNELS),
+                dtype=np.uint8,
+            ),
+        )
+        handle.create_dataset(
+            "masks",
+            data=np.zeros((HDF5_SOURCE_POPULATION, PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        )
+        handle.create_dataset("labels", data=np.ones((HDF5_SOURCE_POPULATION,), dtype=np.uint8))
+        handle.create_dataset(
+            "patient_ids",
+            data=np.arange(1, HDF5_SOURCE_POPULATION + 1, dtype=np.int32),
+        )
         handle.create_dataset(
             "filenames",
-            data=np.array([f"case_{index}.png".encode() for index in range(1100)]),
+            data=np.array(
+                [f"case_{index}.png".encode() for index in range(HDF5_SOURCE_POPULATION)]
+            ),
         )
     created_outputs: list[Path] = []
 
@@ -160,22 +219,15 @@ def test_run_optimization_sampling_creates_manual_review_folders(tmp_path: Path)
         return [True] * len(tasks)
 
     summary = run_optimization_sampling(
-        source_hdf5_path=source_path,
-        output_base=output_dir,
-        confidence_level=0.95,
-        margin_of_error=0.05,
-        proportion=0.5,
-        pilot_sample_size=100,
-        master_pool_fraction=0.10,
-        overlay_color=(0, 0, 255),
-        overlay_thickness=2,
-        overlay_alpha=1.0,
-        num_processes=2,
-        rng=random.Random(3),
-        overlay_runner=fake_overlay_runner,
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            output_base=output_dir,
+            overlay_runner=fake_overlay_runner,
+            rng=random.Random(3),
+        )
     )
 
-    assert summary.total_population == 1100
+    assert summary.total_population == HDF5_SOURCE_POPULATION
     assert summary.generated_overlay_count == len(created_outputs)
     assert (output_dir / "pilot_sample" / "APPROVED").is_dir()
     assert (output_dir / "pilot_sample" / "REJECTED").is_dir()
@@ -187,14 +239,29 @@ def test_run_optimization_sampling_accepts_hdf5_source(tmp_path: Path) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
     output_dir = tmp_path / "output"
     with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((1200, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((1200, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.ones((1200,), dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.arange(1, 1201, dtype=np.int32))
+        handle.create_dataset(
+            "images",
+            data=np.zeros(
+                (SHARED_SLIDE_POPULATION, PATCH_SIDE, PATCH_SIDE, RGBA_CHANNELS),
+                dtype=np.uint8,
+            ),
+        )
+        handle.create_dataset(
+            "masks",
+            data=np.zeros((SHARED_SLIDE_POPULATION, PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        )
+        handle.create_dataset("labels", data=np.ones((SHARED_SLIDE_POPULATION,), dtype=np.uint8))
+        handle.create_dataset(
+            "patient_ids",
+            data=np.arange(1, SHARED_SLIDE_POPULATION + 1, dtype=np.int32),
+        )
         handle.create_dataset(
             "filenames",
             data=np.array(
-                [f"CANCER_PATIENT_{index}_PATCH_001.png".encode() for index in range(1, 1201)]
+                [
+                    f"CANCER_PATIENT_{index}_PATCH_001.png".encode()
+                    for index in range(1, SHARED_SLIDE_POPULATION + 1)
+                ]
             ),
         )
     created_outputs: list[Path] = []
@@ -208,21 +275,14 @@ def test_run_optimization_sampling_accepts_hdf5_source(tmp_path: Path) -> None:
         return [True] * len(tasks)
 
     summary = run_optimization_sampling(
-        source_hdf5_path=source_path,
-        output_base=output_dir,
-        confidence_level=0.95,
-        margin_of_error=0.05,
-        proportion=0.5,
-        pilot_sample_size=100,
-        master_pool_fraction=0.10,
-        overlay_color=(0, 0, 255),
-        overlay_thickness=2,
-        overlay_alpha=1.0,
-        num_processes=2,
-        rng=random.Random(3),
-        overlay_runner=fake_overlay_runner,
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            output_base=output_dir,
+            overlay_runner=fake_overlay_runner,
+            rng=random.Random(3),
+        )
     )
 
-    assert summary.total_population == 1200
+    assert summary.total_population == SHARED_SLIDE_POPULATION
     assert summary.generated_overlay_count == len(created_outputs)
     assert created_outputs[0].suffix == ".png"

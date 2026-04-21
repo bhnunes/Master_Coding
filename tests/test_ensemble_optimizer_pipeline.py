@@ -16,6 +16,9 @@ from helpers.ensemble_optimizer.pipeline import (
     run_ensemble_optimizer_pipeline,
 )
 
+DECISION_THRESHOLD = 0.6
+OPTIMIZATION_SUBSET_SCORE = 0.9
+
 
 def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> None:
     config = EnsembleOptimizerConfig(
@@ -191,10 +194,12 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
     assert run_config["optimization_patients"] == ["p1", "p2"]
     assert run_config["calibration_patients"] == ["p4"]
     assert run_config["holdout_patients"] == ["p3"]
-    assert run_config["decision_threshold"] == 0.6
+    assert run_config["decision_threshold"] == DECISION_THRESHOLD
     assert run_config["calibration_metrics"] == {"Calibration_best_mcc": 0.55}
     assert run_config["validation_master_manifest_path"].endswith("master_manifest.sqlite")
-    assert run_config["selected_models"][0]["optimization_subset_score"] == 0.9
+    assert (
+        run_config["selected_models"][0]["optimization_subset_score"] == OPTIMIZATION_SUBSET_SCORE
+    )
     assert run_config["skipped_requested_architectures"] == {}
 
 

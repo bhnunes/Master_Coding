@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import SupportsFloat, SupportsInt, cast
 
@@ -13,6 +14,20 @@ STAGE2_STAGE_NAME = "STAGE2"
 STAGE4_CLEANING_STAGE_NAME = "STAGE4_3"
 STAGE5_STAGE_NAME = "STAGE5"
 STAGE7_STAGE_NAME = "STAGE7_2"
+
+
+@dataclass(frozen=True)
+class Stage2SlideRows:
+    """Canonical Stage 2 slide payload written into the master manifest."""
+
+    source_hdf5_path: Path
+    records: Sequence[Mapping[str, object]]
+    source_slide_path: Path
+    annotation_path: Path | None
+    artifacts_geojson_path: Path | None
+    stage2_case_record_id: int
+    stage2_processing_signature: str | None
+    stage2_status: str
 
 
 def _logical_hdf5_ref(output_path: Path, dataset_name: str, row_index: int) -> str:
@@ -135,22 +150,13 @@ class MasterManifest:
             )
             connection.commit()
 
-    def replace_stage2_slide_rows(
-        self,
-        *,
-        source_hdf5_path: Path,
-        records: Sequence[Mapping[str, object]],
-        source_slide_path: Path,
-        annotation_path: Path | None,
-        artifacts_geojson_path: Path | None,
-        stage2_case_record_id: int,
-        stage2_processing_signature: str | None,
-        stage2_status: str,
-    ) -> None:
+    def replace_stage2_slide_rows(self, payload: Stage2SlideRows) -> None:
         """Replace one slide's Stage 2 rows with the canonical HDF5-backed identities."""
 
         self.initialize()
-        source_signature = self._read_source_signature(source_hdf5_path) if records else None
+        source_signature = (
+            self._read_source_signature(payload.source_hdf5_path) if payload.records else None
+        )
 
         with self._connect() as connection:
             existing_patch_ids = [
@@ -158,7 +164,7 @@ class MasterManifest:
                 for row in connection.execute(
                     "SELECT patch_id FROM patches WHERE source_hdf5_path = ? "
                     "ORDER BY source_row_index ASC",
-                    (str(source_hdf5_path),),
+                    (str(payload.source_hdf5_path),),
                 ).fetchall()
             ]
             if existing_patch_ids:
@@ -168,10 +174,10 @@ class MasterManifest:
                 )
             connection.execute(
                 "DELETE FROM patches WHERE source_hdf5_path = ?",
-                (str(source_hdf5_path),),
+                (str(payload.source_hdf5_path),),
             )
 
-            for source_row_index, record in enumerate(records):
+            for source_row_index, record in enumerate(payload.records):
                 artifact_coverages = self._artifact_coverages(record)
                 cursor = connection.execute(
                     """
@@ -199,21 +205,29 @@ class MasterManifest:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(source_hdf5_path),
+                        str(payload.source_hdf5_path),
                         source_row_index,
                         str(record["filename"]),
                         _coerce_int(record.get("patient_id"), field_name="patient_id"),
                         _coerce_int(record.get("label"), field_name="label"),
-                        str(record.get("slide_id") or source_hdf5_path.stem),
+                        str(record.get("slide_id") or payload.source_hdf5_path.stem),
                         source_signature,
-                        _logical_hdf5_ref(source_hdf5_path, "images", source_row_index),
-                        _logical_hdf5_ref(source_hdf5_path, "masks", source_row_index),
-                        str(source_slide_path),
-                        str(annotation_path) if annotation_path is not None else None,
-                        str(artifacts_geojson_path) if artifacts_geojson_path is not None else None,
-                        stage2_case_record_id,
-                        stage2_processing_signature,
-                        stage2_status,
+                        _logical_hdf5_ref(payload.source_hdf5_path, "images", source_row_index),
+                        _logical_hdf5_ref(payload.source_hdf5_path, "masks", source_row_index),
+                        str(payload.source_slide_path),
+                        (
+                            str(payload.annotation_path)
+                            if payload.annotation_path is not None
+                            else None
+                        ),
+                        (
+                            str(payload.artifacts_geojson_path)
+                            if payload.artifacts_geojson_path is not None
+                            else None
+                        ),
+                        payload.stage2_case_record_id,
+                        payload.stage2_processing_signature,
+                        payload.stage2_status,
                         artifact_coverages["cov_fold"],
                         artifact_coverages["cov_penmarking"],
                         artifact_coverages["cov_oof"],

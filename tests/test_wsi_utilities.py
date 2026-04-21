@@ -13,6 +13,7 @@ from PIL import Image
 from helpers.wsi.colors import colors_QC7
 from helpers.wsi.maps import make_overlay
 from helpers.wsi.process import (
+    SlideProcessConfig,
     _combine_mask_rows,
     _combine_mask_tiles,
     make_1class_map_thr,
@@ -27,6 +28,15 @@ from helpers.wsi.process import (
 )
 from helpers.wsi.slide_info import slide_info
 from helpers.wsi.tis_detect_helper_fx import get_preprocessing, make_class_map, to_tensor_x
+
+QC7_CLASS_COUNT = 7
+SLIDE_WEIGHT = 0.7
+HEATMAP_WEIGHT = 0.3
+FALLBACK_OBJECTIVE_POWER = 99
+SCALE_FACTOR = 2.0
+EXPECTED_GEOJSON_FEATURES = 2
+EXPECTED_CONTOUR_AREA = 16.0
+BACKGROUND_CLASS = 7
 
 
 class FakeSlide:
@@ -53,7 +63,7 @@ class FakeSlide:
 
 
 def test_colors_qc7_exposes_expected_palette_contract() -> None:
-    assert len(colors_QC7) == 7
+    assert len(colors_QC7) == QC7_CLASS_COUNT
     assert colors_QC7[0] == [128, 128, 128]
     assert colors_QC7[-1] == [255, 255, 255]
 
@@ -72,8 +82,8 @@ def test_make_overlay_resizes_heatmap_to_thumbnail(monkeypatch: pytest.MonkeyPat
     ) -> npt.NDArray[np.uint8]:
         assert slide_pixels.shape == (10, 20, 3)
         assert heatmap_pixels.shape == (10, 20, 3)
-        assert slide_weight == 0.7
-        assert heatmap_weight == 0.3
+        assert slide_weight == SLIDE_WEIGHT
+        assert heatmap_weight == HEATMAP_WEIGHT
         assert gamma == 0
         return expected
 
@@ -104,7 +114,7 @@ def test_slide_info_falls_back_when_objective_power_is_missing(
 
     result = slide_info(slide, m_p_s=256, mpp_model=1.0)
 
-    assert result[-1] == 99
+    assert result[-1] == FALLBACK_OBJECTIVE_POWER
 
 
 def test_tissue_detection_preprocessing_helpers_convert_to_channels_first() -> None:
@@ -200,19 +210,21 @@ def test_slide_process_single_processes_tissue_and_pads_output(
         model=FakeModel(),
         tis_det_map_mpp=np.zeros((512, 512), dtype=np.uint8),
         slide=slide,
-        patch_n_w_l0=1,
-        patch_n_h_l0=1,
-        p_s=10,
-        m_p_s=512,
-        colors=[[5, 10, 15]],
-        ENCODER_MODEL_1="encoder",
-        ENCODER_WEIGHTS="weights",
-        DEVICE="cpu",
-        BACK_CLASS=0,
-        MPP_MODEL_1=1.0,
-        mpp=1.0,
-        w_l0=11,
-        h_l0=12,
+        config=SlideProcessConfig(
+            patch_count_w=1,
+            patch_count_h=1,
+            patch_size=10,
+            model_patch_size=512,
+            colors=[[5, 10, 15]],
+            encoder_model="encoder",
+            encoder_weights="weights",
+            device="cpu",
+            back_class=0,
+            mpp_model=1.0,
+            slide_mpp=1.0,
+            width_l0=11,
+            height_l0=12,
+        ),
     )
 
     assert isinstance(heatmap, Image.Image)
@@ -242,24 +254,26 @@ def test_slide_process_single_uses_background_when_tissue_is_absent(
         model=FakeModel(),
         tis_det_map_mpp=np.ones((512, 512), dtype=np.uint8),
         slide=slide,
-        patch_n_w_l0=1,
-        patch_n_h_l0=1,
-        p_s=10,
-        m_p_s=512,
-        colors=[[5, 10, 15], [20, 25, 30]],
-        ENCODER_MODEL_1="encoder",
-        ENCODER_WEIGHTS="weights",
-        DEVICE="cpu",
-        BACK_CLASS=7,
-        MPP_MODEL_1=1.0,
-        mpp=1.0,
-        w_l0=10,
-        h_l0=10,
+        config=SlideProcessConfig(
+            patch_count_w=1,
+            patch_count_h=1,
+            patch_size=10,
+            model_patch_size=512,
+            colors=[[5, 10, 15], [20, 25, 30]],
+            encoder_model="encoder",
+            encoder_weights="weights",
+            device="cpu",
+            back_class=BACKGROUND_CLASS,
+            mpp_model=1.0,
+            slide_mpp=1.0,
+            width_l0=10,
+            height_l0=10,
+        ),
     )
 
     assert not slide.read_calls
     assert mask.shape == (512, 512)
-    assert np.all(mask == 7)
+    assert np.all(mask == BACKGROUND_CLASS)
 
 
 def test_mask_to_geojson_writes_scaled_polygons_and_skips_short_contours(
@@ -299,15 +313,15 @@ def test_mask_to_geojson_writes_scaled_polygons_and_skips_short_contours(
 
     monkeypatch.setattr("helpers.wsi.process.cv2.findContours", fake_find_contours)
 
-    mask_to_geojson(str(mask_path), str(output_path), scale_factor=2.0)
+    mask_to_geojson(str(mask_path), str(output_path), scale_factor=SCALE_FACTOR)
 
     geojson = json.loads(output_path.read_text(encoding="utf-8"))
 
     assert geojson["type"] == "FeatureCollection"
-    assert geojson["metadata"]["scale_factor"] == 2.0
-    assert len(geojson["features"]) == 2
+    assert geojson["metadata"]["scale_factor"] == SCALE_FACTOR
+    assert len(geojson["features"]) == EXPECTED_GEOJSON_FEATURES
     assert geojson["features"][0]["properties"]["classification"] == "Fold"
-    assert geojson["features"][0]["properties"]["area"] == 16.0
+    assert geojson["features"][0]["properties"]["area"] == EXPECTED_CONTOUR_AREA
     assert geojson["features"][0]["geometry"]["coordinates"][0][0] == [0, 0]
     assert geojson["features"][0]["geometry"]["coordinates"][0][-1] == [0, 0]
     assert geojson["features"][1]["properties"]["classification"] == "OOF"

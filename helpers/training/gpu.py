@@ -8,6 +8,9 @@ import torch
 from torch import nn
 from torch.nn import functional
 
+_IMAGE_BYTE_SCALE = 255.0
+_FLOAT_INPUT_UPPER_BOUND = 2.0
+
 
 class GPUNormalizer(nn.Module):
     """Normalize batches on-device with safe uint8 and float handling."""
@@ -22,9 +25,9 @@ class GPUNormalizer(nn.Module):
         mean = cast(torch.Tensor, self.mean)
         std = cast(torch.Tensor, self.std)
         if x.dtype == torch.uint8:
-            x = x.float() / 255.0
-        elif x.max() > 2.0:
-            x = x / 255.0
+            x = x.float() / _IMAGE_BYTE_SCALE
+        elif x.max() > _FLOAT_INPUT_UPPER_BOUND:
+            x = x / _IMAGE_BYTE_SCALE
         return (x - mean) / std
 
 

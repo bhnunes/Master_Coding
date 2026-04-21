@@ -7,6 +7,11 @@ from helpers.training.metrics import (
     TrainingHealthTracker,
 )
 
+WEIGHTED_SCORE = 3.0
+COLLAPSE_PATIENCE = 2
+PROBABILITY_THRESHOLD = 0.5
+LOGIT_PROBABILITY_CUTOFF = 0.5
+
 
 def test_running_weighted_metric_computes_average() -> None:
     tracker = RunningWeightedMetric()
@@ -14,7 +19,7 @@ def test_running_weighted_metric_computes_average() -> None:
     tracker.update(6.0, 2)
     tracker.update(3.0, 1)
 
-    assert tracker.get_average() == 3.0
+    assert tracker.get_average() == WEIGHTED_SCORE
 
 
 def test_training_health_tracker_tracks_skips_and_nan_losses() -> None:
@@ -34,7 +39,7 @@ def test_training_health_tracker_tracks_skips_and_nan_losses() -> None:
 
 
 def test_training_health_tracker_emergency_stop_uses_consecutive_collapses() -> None:
-    tracker = TrainingHealthTracker(name="run", patience_collapse=2)
+    tracker = TrainingHealthTracker(name="run", patience_collapse=COLLAPSE_PATIENCE)
 
     tracker.mark_val_collapsed()
     assert tracker.should_emergency_stop() is False
@@ -79,7 +84,7 @@ def test_advanced_metric_tracker_computes_metrics_from_probabilities() -> None:
     assert result["val_auprc"] == 1.0
     assert result["val_auroc"] == 1.0
     assert result["val_mcc_star"] == 1.0
-    assert result["fg_prevalence_at_05"] == 0.5
+    assert result["fg_prevalence_at_05"] == PROBABILITY_THRESHOLD
 
 
 def test_advanced_metric_tracker_marks_health_on_collapse() -> None:
@@ -133,7 +138,7 @@ def test_advanced_metric_tracker_extracts_probs_for_binary_logits() -> None:
 
     assert torch.allclose(single_channel, torch.tensor([[[0.5, 0.8808]]]), atol=1e-4)
     assert dual_channel.shape == (1, 1, 2)
-    assert dual_channel[0, 0, 0] > 0.5
+    assert dual_channel[0, 0, 0] > LOGIT_PROBABILITY_CUTOFF
 
 
 def test_advanced_metric_tracker_extracts_targets_and_probabilities() -> None:

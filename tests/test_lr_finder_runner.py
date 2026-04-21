@@ -15,6 +15,8 @@ from helpers.lr_finder import runner as runner_module
 from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
 from helpers.lr_finder.reporting import RunRecord
 from helpers.lr_finder.runner import (
+    LossConfigRunContext,
+    LRFinderRunConfig,
     _run_single_loss_config,
     clear_gpu,
     configure_execution_mode,
@@ -51,6 +53,45 @@ def _build_config(tmp_path: Path) -> LRFinderConfig:
         hf_token=None,
         search_space=BCEDiceSearchSpace(),
         model_plans=[ModelPlan(architecture="FPN", encoder="resnet34")],
+    )
+
+
+def _run_config(**overrides: Any) -> LRFinderRunConfig:
+    payload = {
+        "model": cast(Any, SimpleNamespace()),
+        "optimizer": cast(Any, SimpleNamespace()),
+        "criterion": cast(Any, SimpleNamespace()),
+        "train_loader": [],
+        "device": cast(Any, "cpu"),
+        "end_lr": 0.1,
+        "num_iter": 5,
+        "architecture": "FPN",
+        "amp_precision": "fp16",
+        "gpu_normalizer": cast(GPUNormalizer, lambda x: x),
+        "gpu_downscale": cast(GPUDownscale, lambda x: x),
+    }
+    payload.update(overrides)
+    return LRFinderRunConfig(**payload)
+
+
+def _loss_context(
+    *,
+    data_bundle: Any,
+    model_plan: ModelPlan,
+    params: BCEDiceParams,
+    config_index: int,
+    device: object = "cpu",
+    initial_state_dict: dict[str, torch.Tensor] | None = None,
+) -> LossConfigRunContext:
+    return LossConfigRunContext(
+        device=cast(Any, device),
+        data_bundle=data_bundle,
+        model_plan=model_plan,
+        params=params,
+        config_index=config_index,
+        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
+        gpu_downscale=cast(GPUDownscale, lambda x: x),
+        initial_state_dict=initial_state_dict or {},
     )
 
 
@@ -110,19 +151,7 @@ def test_run_lr_finder_once_raises_when_range_test_fails(
     monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
 
     with pytest.raises(RuntimeError, match="range test failed"):
-        run_lr_finder_once(
-            model=cast(Any, SimpleNamespace()),
-            optimizer=cast(Any, SimpleNamespace()),
-            criterion=cast(Any, SimpleNamespace()),
-            train_loader=[],
-            device=cast(Any, "cpu"),
-            end_lr=0.1,
-            num_iter=5,
-            architecture="FPN",
-            amp_precision="fp16",
-            gpu_normalizer=cast(GPUNormalizer, lambda x: x),
-            gpu_downscale=cast(GPUDownscale, lambda x: x),
-        )
+        run_lr_finder_once(_run_config())
 
 
 def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
@@ -155,19 +184,7 @@ def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
 
     monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
 
-    history = run_lr_finder_once(
-        model=cast(Any, SimpleNamespace()),
-        optimizer=cast(Any, SimpleNamespace()),
-        criterion=cast(Any, SimpleNamespace()),
-        train_loader=[],
-        device=cast(Any, "cpu"),
-        end_lr=0.1,
-        num_iter=5,
-        architecture="FPN",
-        amp_precision="fp16",
-        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
-        gpu_downscale=cast(GPUDownscale, lambda x: x),
-    )
+    history = run_lr_finder_once(_run_config())
 
     assert history["lr"].size == 0
     assert history["loss"].size == 0
@@ -204,19 +221,7 @@ def test_run_lr_finder_once_returns_partial_history_after_non_finite_loss(
 
     monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
 
-    history = run_lr_finder_once(
-        model=cast(Any, SimpleNamespace()),
-        optimizer=cast(Any, SimpleNamespace()),
-        criterion=cast(Any, SimpleNamespace()),
-        train_loader=[],
-        device=cast(Any, "cpu"),
-        end_lr=0.1,
-        num_iter=5,
-        architecture="FPN",
-        amp_precision="fp16",
-        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
-        gpu_downscale=cast(GPUDownscale, lambda x: x),
-    )
+    history = run_lr_finder_once(_run_config())
 
     assert history["lr"].tolist() == [1e-5, 1e-4]
     assert history["loss"].tolist() == [0.9, 0.7]
@@ -285,17 +290,14 @@ def test_run_lr_finder_once_supports_non_blocking_transfer_keyword(
     images = torch.zeros((1, 3, 8, 8), dtype=torch.float32)
     masks = torch.zeros((1, 8, 8), dtype=torch.long)
     history = run_lr_finder_once(
-        model=cast(Any, FakeModel()),
-        optimizer=cast(Any, FakeOptimizer()),
-        criterion=cast(Any, FakeLoss()),
-        train_loader=[(images, masks)],
-        device=torch.device("cpu"),
-        end_lr=0.1,
-        num_iter=1,
-        architecture="FPN",
-        amp_precision="fp16",
-        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
-        gpu_downscale=cast(GPUDownscale, lambda x: x),
+        _run_config(
+            model=cast(Any, FakeModel()),
+            optimizer=cast(Any, FakeOptimizer()),
+            criterion=cast(Any, FakeLoss()),
+            train_loader=[(images, masks)],
+            device=torch.device("cpu"),
+            num_iter=1,
+        )
     )
 
     assert history["lr"].tolist() == [1e-4]
@@ -341,14 +343,12 @@ def test_run_single_loss_config_returns_none_when_all_repeats_fail(
 
     record, completed, failed = _run_single_loss_config(
         config,
-        device=cast(Any, "cpu"),
-        data_bundle=data_bundle,
-        model_plan=model_plan,
-        params=params,
-        config_index=1,
-        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
-        gpu_downscale=cast(GPUDownscale, lambda x: x),
-        initial_state_dict={},
+        _loss_context(
+            data_bundle=data_bundle,
+            model_plan=model_plan,
+            params=params,
+            config_index=1,
+        ),
     )
 
     assert record is None
@@ -395,11 +395,11 @@ def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.BCEDiceHybridLossPaper",
-        lambda alpha, beta, gamma: SimpleNamespace(),
+        lambda config: SimpleNamespace(),
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.run_lr_finder_once",
-        lambda **kwargs: {
+        lambda config: {
             "lr": np.array([1e-5, 1e-4], dtype=np.float64),
             "loss": np.array([np.nan, np.nan], dtype=np.float64),
         },
@@ -408,14 +408,14 @@ def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
 
     record, completed, failed = _run_single_loss_config(
         config,
-        device=torch.device("cpu"),
-        data_bundle=data_bundle,
-        model_plan=model_plan,
-        params=params,
-        config_index=1,
-        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
-        gpu_downscale=cast(GPUDownscale, lambda x: x),
-        initial_state_dict={"weight": torch.tensor([1.0])},
+        _loss_context(
+            data_bundle=data_bundle,
+            model_plan=model_plan,
+            params=params,
+            config_index=1,
+            device=torch.device("cpu"),
+            initial_state_dict={"weight": torch.tensor([1.0])},
+        ),
     )
 
     assert record is None

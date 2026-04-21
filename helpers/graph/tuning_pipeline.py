@@ -77,6 +77,25 @@ class GraphTuningSummary:
     final_tau: float
 
 
+@dataclass(frozen=True)
+class GraphTuningPipelineConfig:
+    source_hdf5_path: Path
+    review_base_dir: Path
+    test_set_size: float
+    n_splits_inner_cv: int
+    n_bayesian_calls: int
+    n_initial_points: int
+    random_state: int
+    bg_intensity_range: tuple[int, int]
+    k_range: tuple[int, int]
+    min_size_range: tuple[int, int]
+    erosion_range: tuple[int, int]
+    logger: logging.Logger
+    scorer: Scorer = calculate_roi_contamination
+    optimizer: Callable[..., GraphTuningResult] | None = None
+    progress_factory: RecordProgressFactory | None = None
+
+
 def collect_review_labels(review_base_dir: Path) -> dict[str, str]:
     """Load approved/rejected labels from the manual-review folders."""
 
@@ -199,105 +218,94 @@ def evaluate_on_test_set(
     return final_tau
 
 
-def run_graph_tuning_pipeline(
-    *,
-    source_hdf5_path: Path,
-    review_base_dir: Path,
-    test_set_size: float,
-    n_splits_inner_cv: int,
-    n_bayesian_calls: int,
-    n_initial_points: int,
-    random_state: int,
-    bg_intensity_range: tuple[int, int],
-    k_range: tuple[int, int],
-    min_size_range: tuple[int, int],
-    erosion_range: tuple[int, int],
-    logger: logging.Logger,
-    scorer: Scorer = calculate_roi_contamination,
-    optimizer: Callable[..., GraphTuningResult] | None = None,
-    progress_factory: RecordProgressFactory | None = None,
-) -> GraphTuningSummary:
+def run_graph_tuning_pipeline(config: GraphTuningPipelineConfig) -> GraphTuningSummary:
     """Run Stage 4.2 graph tuning and return the best recommended parameters."""
 
     started_at = time.time()
-    logger.info("--- Hyperparameter Tuning with Bayesian Optimization ---")
-    labels_by_stem = collect_review_labels(review_base_dir)
-    logger.info("Performing pre-flight check on all source file paths...")
+    config.logger.info("--- Hyperparameter Tuning with Bayesian Optimization ---")
+    labels_by_stem = collect_review_labels(config.review_base_dir)
+    config.logger.info("Performing pre-flight check on all source file paths...")
     records = resolve_labeled_source_records(
         labels_by_stem=labels_by_stem,
-        source_hdf5_path=source_hdf5_path,
-        logger=logger,
+        source_hdf5_path=config.source_hdf5_path,
+        logger=config.logger,
     )
-    preloaded_sources = _preload_record_sources(records, scorer=scorer, logger=logger)
+    preloaded_sources = _preload_record_sources(
+        records,
+        scorer=config.scorer,
+        logger=config.logger,
+    )
 
     train_records, test_records = _split_records(
-        records, test_set_size=test_set_size, random_state=random_state
+        records,
+        test_set_size=config.test_set_size,
+        random_state=config.random_state,
     )
-    logger.info(
+    config.logger.info(
         "Data split: %s training, %s test (after validation).",
         len(train_records),
         len(test_records),
     )
-    logger.info(
+    config.logger.info(
         "Starting Bayesian Optimization with a budget of %s evaluations.",
-        n_bayesian_calls,
+        config.n_bayesian_calls,
     )
 
     search_space = build_search_space(
-        bg_intensity_range=bg_intensity_range,
-        k_range=k_range,
-        min_size_range=min_size_range,
-        erosion_range=erosion_range,
+        bg_intensity_range=config.bg_intensity_range,
+        k_range=config.k_range,
+        min_size_range=config.min_size_range,
+        erosion_range=config.erosion_range,
     )
 
     objective = _build_objective(
         train_records=train_records,
-        n_splits_inner_cv=n_splits_inner_cv,
-        random_state=random_state,
-        scorer=scorer,
+        n_splits_inner_cv=config.n_splits_inner_cv,
+        random_state=config.random_state,
+        scorer=config.scorer,
         preloaded_sources=preloaded_sources,
     )
     optimization_result = (
-        optimizer(objective=objective, search_space=search_space)
-        if optimizer is not None
+        config.optimizer(objective=objective, search_space=search_space)
+        if config.optimizer is not None
         else _run_gp_minimize(
             objective=objective,
             search_space=search_space,
-            n_bayesian_calls=n_bayesian_calls,
-            n_initial_points=n_initial_points,
-            random_state=random_state,
+            n_bayesian_calls=config.n_bayesian_calls,
+            n_initial_points=config.n_initial_points,
+            random_state=config.random_state,
         )
     )
 
-    logger.info("\n\n--- Bayesian Optimization Complete ---")
-    logger.info(
+    config.logger.info("\n\n--- Bayesian Optimization Complete ---")
+    config.logger.info(
         "Best cross-validated F1-Score (Rejected): %.3f",
         optimization_result.best_score,
     )
-    logger.info("Best graph parameters found: %s", optimization_result.best_params)
+    config.logger.info("Best graph parameters found: %s", optimization_result.best_params)
 
     if test_records:
         final_tau = evaluate_on_test_set(
             train_records=train_records,
             test_records=test_records,
             best_params=optimization_result.best_params,
-            logger=logger,
-            scorer=scorer,
-            progress_factory=progress_factory,
+            logger=config.logger,
+            scorer=config.scorer,
+            progress_factory=config.progress_factory,
             preloaded_sources=preloaded_sources,
         )
     else:
-        logger.warning("Test set is empty. Skipping final evaluation.")
+        config.logger.warning("Test set is empty. Skipping final evaluation.")
         train_rates, train_labels = _score_records(
             train_records,
             optimization_result.best_params,
-            scorer,
+            config.scorer,
             preloaded_sources=preloaded_sources,
         )
         final_tau = select_best_contamination_threshold(train_rates, train_labels)
 
-    logger.info("\nTotal execution time: %.2f minutes.", (time.time() - started_at) / 60)
-    logger.info("Final recommended tau: %.2f", final_tau)
+    config.logger.info("\nTotal execution time: %.2f minutes.", (time.time() - started_at) / 60)
+    config.logger.info("Final recommended tau: %.2f", final_tau)
     return GraphTuningSummary(
         total_labeled_pairs=len(records),
         training_pairs=len(train_records),

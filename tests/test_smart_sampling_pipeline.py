@@ -15,6 +15,13 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.pipeline import run_smart_sampling_pipeline
 from helpers.training.master_manifest_queries import load_training_records
 
+PATCH_SIDE = 4
+RGB_CHANNELS = 3
+TOTAL_INPUT_SAMPLES = 6
+SELECTED_SAMPLE_COUNT = 4
+REJECTED_SAMPLE_COUNT = 2
+PATIENT_COUNT = 2
+
 
 def _write_stage2_patient_shards_and_master_manifest(tmp_path: Path) -> Path:
     master_manifest_path = tmp_path / "master_manifest.sqlite"
@@ -100,8 +107,10 @@ def _write_patient_shard(
     filenames: list[str],
     mask_positive_rows: set[int],
 ) -> None:
-    images = np.arange(len(labels) * 4 * 4 * 3, dtype=np.uint8).reshape(len(labels), 4, 4, 3)
-    masks = np.zeros((len(labels), 4, 4), dtype=np.uint8)
+    images = np.arange(
+        len(labels) * PATCH_SIDE * PATCH_SIDE * RGB_CHANNELS, dtype=np.uint8
+    ).reshape(len(labels), PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS)
+    masks = np.zeros((len(labels), PATCH_SIDE, PATCH_SIDE), dtype=np.uint8)
     for row_index in mask_positive_rows:
         masks[row_index] = 1
     with h5py.File(shard_path, "w") as handle:
@@ -182,12 +191,12 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
     assert outputs.stats_csv_path == tmp_path / "out" / "patient_filter_stats.csv"
     assert outputs.run_config_path == tmp_path / "out" / "filter_run_config.json"
     assert outputs.summary_json_path == tmp_path / "out" / "filter_summary.json"
-    assert outputs.total_input_samples == 6
-    assert outputs.selected_sample_count == 4
-    assert outputs.rejected_sample_count == 2
-    assert outputs.kept_fraction == pytest.approx(4 / 6)
-    assert outputs.patient_count == 2
-    assert outputs.patients_reduced_count == 2
+    assert outputs.total_input_samples == TOTAL_INPUT_SAMPLES
+    assert outputs.selected_sample_count == SELECTED_SAMPLE_COUNT
+    assert outputs.rejected_sample_count == REJECTED_SAMPLE_COUNT
+    assert outputs.kept_fraction == pytest.approx(SELECTED_SAMPLE_COUNT / TOTAL_INPUT_SAMPLES)
+    assert outputs.patient_count == PATIENT_COUNT
+    assert outputs.patients_reduced_count == PATIENT_COUNT
     assert not (tmp_path / "out" / "TRAIN_FILTERED_shards").exists()
 
     selection_manifest = pd.read_csv(outputs.selection_csv_path)
@@ -201,10 +210,10 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
 
     summary = json.loads(outputs.summary_json_path.read_text(encoding="utf-8"))
     assert summary["master_manifest_path"] == str(master_manifest_path)
-    assert summary["protected_kept_samples"] == 2
-    assert summary["sampled_reducible_samples"] == 2
-    assert summary["selected_positive_label_count"] == 2
-    assert summary["selected_negative_label_count"] == 2
+    assert summary["protected_kept_samples"] == REJECTED_SAMPLE_COUNT
+    assert summary["sampled_reducible_samples"] == REJECTED_SAMPLE_COUNT
+    assert summary["selected_positive_label_count"] == REJECTED_SAMPLE_COUNT
+    assert summary["selected_negative_label_count"] == REJECTED_SAMPLE_COUNT
 
     with sqlite3.connect(master_manifest_path) as connection:
         stage_rows = connection.execute(
@@ -215,10 +224,18 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
             "SELECT stage_name, config_path, input_summary_json_path FROM runs ORDER BY run_id ASC"
         ).fetchall()
 
-    assert sum(1 for decision, *_ in stage_rows if decision == "protected_kept") == 2
-    assert sum(1 for decision, *_ in stage_rows if decision == "sampled_kept") == 2
-    assert sum(1 for decision, *_ in stage_rows if decision == "rejected_reducible") == 2
-    assert sum(1 for _, selected, _ in stage_rows if selected == 1) == 4
+    assert (
+        sum(1 for decision, *_ in stage_rows if decision == "protected_kept")
+        == REJECTED_SAMPLE_COUNT
+    )
+    assert (
+        sum(1 for decision, *_ in stage_rows if decision == "sampled_kept") == REJECTED_SAMPLE_COUNT
+    )
+    assert (
+        sum(1 for decision, *_ in stage_rows if decision == "rejected_reducible")
+        == REJECTED_SAMPLE_COUNT
+    )
+    assert sum(1 for _, selected, _ in stage_rows if selected == 1) == SELECTED_SAMPLE_COUNT
     assert {stage_name for _, _, stage_name in stage_rows} == {"STAGE7_2"}
     assert run_rows == [
         (

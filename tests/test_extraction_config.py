@@ -4,6 +4,13 @@ import pytest
 
 from helpers.extraction.config import load_database_manager_config
 
+WINDOW_SIZE = 256
+STRIDE = 128
+MATCH_PERCENTAGE = 0.75
+TISSUE_PERCENTAGE = 0.4
+DEFAULT_HISEG_XML_COORD_LEVEL = 6
+OVERRIDE_HISEG_XML_COORD_LEVEL = 5
+
 
 def test_load_database_manager_config_reads_expected_environment(tmp_path: Path) -> None:
     config = load_database_manager_config(
@@ -26,15 +33,15 @@ def test_load_database_manager_config_reads_expected_environment(tmp_path: Path)
     assert config.source_folder == tmp_path / "source"
     assert config.database_path == tmp_path / "databases" / "cases.db"
     assert config.base_path == tmp_path / "projects"
-    assert config.window_size == 256
-    assert config.stride == 128
-    assert config.match_percentage == 0.75
-    assert config.tissue_percentage == 0.4
+    assert config.window_size == WINDOW_SIZE
+    assert config.stride == STRIDE
+    assert config.match_percentage == MATCH_PERCENTAGE
+    assert config.tissue_percentage == TISSUE_PERCENTAGE
     assert config.load_cases is True
     assert config.use_advanced_artifact_filtering is True
     assert config.activate_sanity_check_geojson is True
     assert config.geojson_path == tmp_path / "source" / "GEOJSON"
-    assert config.hiseg_xml_coord_level == 6
+    assert config.hiseg_xml_coord_level == DEFAULT_HISEG_XML_COORD_LEVEL
     assert config.log_path == Path("logs/database_manager.log")
 
 
@@ -49,7 +56,7 @@ def test_load_database_manager_config_reads_hiseg_annotation_level_override(tmp_
         }
     )
 
-    assert config.hiseg_xml_coord_level == 5
+    assert config.hiseg_xml_coord_level == OVERRIDE_HISEG_XML_COORD_LEVEL
 
 
 def test_load_database_manager_config_defaults_artifact_feature_to_true(tmp_path: Path) -> None:

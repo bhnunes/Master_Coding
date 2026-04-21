@@ -10,9 +10,12 @@ import torch
 from dotenv import load_dotenv
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from helpers.logging_utils import LoggerWriter, configure_root_logger
+from helpers.logging_utils import LoggerSettings, LoggerWriter, configure_root_logger
 from helpers.training.checkpointing import (
     EarlyStopping,
+    OHEMCheckpointSettings,
+    ResumeCheckpointRequest,
+    TrainingProvenanceRequest,
     build_training_compatibility_signature,
     get_previous_metrics,
     load_checkpoint_for_resume,
@@ -26,7 +29,7 @@ from helpers.training.data import (
 )
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.loop import train_epoch, validate_epoch
-from helpers.training.losses import BCEDiceHybridLossPaper
+from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPaper
 from helpers.training.metrics import TrainingHealthTracker
 from helpers.training.models import (
     create_model,
@@ -35,6 +38,9 @@ from helpers.training.models import (
     get_loss_weights,
 )
 from helpers.training.pipeline import (
+    EpochRunConfig,
+    FinalizeArtifactsConfig,
+    RunHParams,
     build_run_hparams,
     finalize_training_artifacts,
     run_training_epochs,
@@ -58,12 +64,14 @@ load_dotenv(override=True)
 training_config = load_training_ensemble_config()
 training_logger = configure_root_logger(
     training_config.log_path,
-    logger_level=logging.INFO,
-    file_level=logging.INFO,
-    console_level=logging.INFO,
-    file_mode="a",
-    file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
-    console_pattern="%(message)s",
+    settings=LoggerSettings(
+        logger_level=logging.INFO,
+        file_level=logging.INFO,
+        console_level=logging.INFO,
+        file_mode="a",
+        file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
+        console_pattern="%(message)s",
+    ),
 )
 sys.stdout = LoggerWriter(training_logger, logging.INFO)
 sys.stderr = LoggerWriter(training_logger, logging.ERROR)
@@ -292,26 +300,28 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         experiment_name=experiment_name,
         repo_path=aim_repo_path,
         hparams=build_run_hparams(
-            experiment_name=experiment_name,
-            architecture=architecture,
-            encoder=encoder,
-            optimizer_name=optimizer_name,
-            base_learning_rate=base_learning_rate,
-            weight_decay=weight_decay,
-            batch_size=batch_size,
-            num_epochs=num_epochs,
-            workers=workers,
-            seed=seed,
-            patience=patience,
-            train_len=len(train_ds),
-            val_len=len(val_ds),
-            alpha_bce=alpha_bce,
-            beta_dice_bg=beta_dice_bg,
-            gamma_dice_fg=gamma_dice_fg,
-            run_ohem=run_ohem,
-            ohem_start_epoch=ohem_start_epoch,
-            ohem_ratio=ohem_ratio,
-            ohem_min_kept=ohem_min_kept,
+            RunHParams(
+                experiment_name=experiment_name,
+                architecture=architecture,
+                encoder=encoder,
+                optimizer_name=optimizer_name,
+                base_learning_rate=base_learning_rate,
+                weight_decay=weight_decay,
+                batch_size=batch_size,
+                num_epochs=num_epochs,
+                workers=workers,
+                seed=seed,
+                patience=patience,
+                train_len=len(train_ds),
+                val_len=len(val_ds),
+                alpha_bce=alpha_bce,
+                beta_dice_bg=beta_dice_bg,
+                gamma_dice_fg=gamma_dice_fg,
+                run_ohem=run_ohem,
+                ohem_start_epoch=ohem_start_epoch,
+                ohem_ratio=ohem_ratio,
+                ohem_min_kept=ohem_min_kept,
+            )
         ),
     )
 
@@ -356,22 +366,29 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         os.path.join(checkpoint_path, resume_checkpoint_path) if resume_checkpoint_path else None
     )
     expected_compatibility_signature = build_training_compatibility_signature(
-        dataset=train_dataset_provenance,
-        validation_dataset=validation_dataset_provenance,
-        master_manifest_path=effective_master_manifest_path,
-        run_ohem=run_ohem,
-        ohem_start_epoch=ohem_start_epoch,
-        ohem_ratio=ohem_ratio,
-        ohem_min_kept=ohem_min_kept,
+        TrainingProvenanceRequest(
+            dataset=train_dataset_provenance,
+            validation_dataset=validation_dataset_provenance,
+            master_manifest_path=effective_master_manifest_path,
+            resume_checkpoint=None,
+            ohem=OHEMCheckpointSettings(
+                run_ohem=run_ohem,
+                ohem_start_epoch=ohem_start_epoch,
+                ohem_ratio=ohem_ratio,
+                ohem_min_kept=ohem_min_kept,
+            ),
+        )
     )
 
     start_epoch = load_checkpoint_for_resume(
-        model=model,
-        optimizer=optimizer,
-        early_stopping=early_stopping,
-        checkpoint_path=full_resume_checkpoint_path,
-        device=device,
-        expected_compatibility_signature=expected_compatibility_signature,
+        ResumeCheckpointRequest(
+            model=model,
+            optimizer=optimizer,
+            early_stopping=early_stopping,
+            checkpoint_path=full_resume_checkpoint_path,
+            device=device,
+            expected_compatibility_signature=expected_compatibility_signature,
+        )
     )
 
     if early_stopping._current_best_checkpoint_on_disk_path:
@@ -384,13 +401,15 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
     print(f"Starting Training For {architecture} from epoch {start_epoch + 1}...")
 
     loss_fn = BCEDiceHybridLossPaper(
-        alpha=alpha_bce,
-        beta=beta_dice_bg,
-        gamma=gamma_dice_fg,
-        run_ohem=run_ohem,
-        ohem_start_epoch=ohem_start_epoch,
-        ohem_ratio=ohem_ratio,
-        ohem_min_kept=ohem_min_kept,
+        BCEDiceHybridLossConfig(
+            alpha=alpha_bce,
+            beta=beta_dice_bg,
+            gamma=gamma_dice_fg,
+            run_ohem=run_ohem,
+            ohem_start_epoch=ohem_start_epoch,
+            ohem_ratio=ohem_ratio,
+            ohem_min_kept=ohem_min_kept,
+        )
     )
     print(
         f"Using BCE+Dice Hybrid Loss "
@@ -407,23 +426,25 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         optimizer=optimizer,
         train_loader=train_loader,
         val_loader=val_loader,
-        health=health,
-        start_epoch=start_epoch,
-        num_epochs=num_epochs,
-        architecture=architecture,
-        unleashed=unleashed,
-        train_epoch_fn=train_epoch,
-        validate_epoch_fn=validate_epoch,
-        early_stopping=early_stopping,
-        track_epoch_metrics_fn=track_epoch_metrics,
-        loss_fn=loss_fn,
-        device=device,
-        accumulation_steps=accumulation_steps,
-        amp_precision=amp_precision,
-        gpu_normalizer=gpu_normalizer,
-        gpu_downscale=gpu_downscale,
-        use_artifact_aware_loss=use_artifact_aware_loss,
-        run=run,
+        config=EpochRunConfig(
+            health=health,
+            start_epoch=start_epoch,
+            num_epochs=num_epochs,
+            architecture=architecture,
+            unleashed=unleashed,
+            train_epoch_fn=train_epoch,
+            validate_epoch_fn=validate_epoch,
+            early_stopping=early_stopping,
+            track_epoch_metrics_fn=track_epoch_metrics,
+            loss_fn=loss_fn,
+            device=device,
+            accumulation_steps=accumulation_steps,
+            amp_precision=amp_precision,
+            gpu_normalizer=gpu_normalizer,
+            gpu_downscale=gpu_downscale,
+            use_artifact_aware_loss=use_artifact_aware_loss,
+            run=run,
+        ),
     )
     training_successful = epoch_state.training_successful
     metadata_best_path = epoch_state.metadata_best_path
@@ -446,50 +467,52 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
 
     try:
         finalize_training_artifacts(
-            best=epoch_state.best,
-            metadata_best_path=metadata_best_path,
-            fallback_checkpoint_path=(
-                str(final_best_checkpoint_path)
-                if final_best_checkpoint_path is not None
-                else full_resume_checkpoint_path
-            ),
-            device=device,
-            load_checkpoint_fn=torch.load,
-            get_previous_metrics_fn=get_previous_metrics,
-            save_metadata_fn=save_metadata,
-            save_metadata_kwargs={
-                "encoder": encoder,
-                "architecture": architecture,
-                "metadata_dir": metadata_dir,
-                "amp_log": amp_log,
-                "base_learning_rate": base_learning_rate,
-                "weight_decay": weight_decay,
-                "batch_size": batch_size,
-                "num_epochs": num_epochs,
-                "workers": workers,
-                "seed": seed,
-                "dataset": train_dataset_provenance,
-                "validation_dataset": validation_dataset_provenance,
-                "patience": patience,
-                "optimizer_name": optimizer_name,
-                "alpha_bce": alpha_bce,
-                "beta_dice_bg": beta_dice_bg,
-                "gamma_dice_fg": gamma_dice_fg,
-                "execution_mode": execution_mode,
-                "master_manifest_path": effective_master_manifest_path,
-                "use_artifact_aware_loss": use_artifact_aware_loss,
-                "run_ohem": run_ohem,
-                "ohem_start_epoch": ohem_start_epoch,
-                "ohem_ratio": ohem_ratio,
-                "ohem_min_kept": ohem_min_kept,
-                "resume_checkpoint": full_resume_checkpoint_path,
-            },
-            create_email_body_fn=create_email_body,
-            send_email_fn=send_email,
-            email_sender=email_sender,
-            email_recipients=email_recipients,
-            email_password=email_password,
-            experiment_name=experiment_name,
+            FinalizeArtifactsConfig(
+                best=epoch_state.best,
+                metadata_best_path=metadata_best_path,
+                fallback_checkpoint_path=(
+                    str(final_best_checkpoint_path)
+                    if final_best_checkpoint_path is not None
+                    else full_resume_checkpoint_path
+                ),
+                device=device,
+                load_checkpoint_fn=torch.load,
+                get_previous_metrics_fn=get_previous_metrics,
+                save_metadata_fn=save_metadata,
+                save_metadata_kwargs={
+                    "encoder": encoder,
+                    "architecture": architecture,
+                    "metadata_dir": metadata_dir,
+                    "amp_log": amp_log,
+                    "base_learning_rate": base_learning_rate,
+                    "weight_decay": weight_decay,
+                    "batch_size": batch_size,
+                    "num_epochs": num_epochs,
+                    "workers": workers,
+                    "seed": seed,
+                    "dataset": train_dataset_provenance,
+                    "validation_dataset": validation_dataset_provenance,
+                    "patience": patience,
+                    "optimizer_name": optimizer_name,
+                    "alpha_bce": alpha_bce,
+                    "beta_dice_bg": beta_dice_bg,
+                    "gamma_dice_fg": gamma_dice_fg,
+                    "execution_mode": execution_mode,
+                    "master_manifest_path": effective_master_manifest_path,
+                    "use_artifact_aware_loss": use_artifact_aware_loss,
+                    "run_ohem": run_ohem,
+                    "ohem_start_epoch": ohem_start_epoch,
+                    "ohem_ratio": ohem_ratio,
+                    "ohem_min_kept": ohem_min_kept,
+                    "resume_checkpoint": full_resume_checkpoint_path,
+                },
+                create_email_body_fn=create_email_body,
+                send_email_fn=send_email,
+                email_sender=email_sender,
+                email_recipients=email_recipients,
+                email_password=email_password,
+                experiment_name=experiment_name,
+            )
         )
 
     except Exception as e:

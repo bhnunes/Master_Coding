@@ -5,7 +5,7 @@ import os
 
 from dotenv import load_dotenv
 
-from helpers.logging_utils import configure_root_logger
+from helpers.logging_utils import LoggerSettings, configure_root_logger
 from helpers.sanity.config import load_sanity_config
 from helpers.sanity.pipeline import run_sanity_pipeline
 from helpers.sanity.reporting import build_fatal_error_report, render_sanity_report
@@ -19,12 +19,14 @@ def main() -> None:
         config = load_sanity_config(os.environ)
         logger = configure_root_logger(
             config.log_path,
-            logger_level=logging.INFO,
-            file_level=logging.INFO,
-            console_level=logging.INFO,
-            file_mode="a",
-            file_pattern="%(asctime)s - %(levelname)s - %(message)s",
-            console_pattern="%(message)s",
+            settings=LoggerSettings(
+                logger_level=logging.INFO,
+                file_level=logging.INFO,
+                console_level=logging.INFO,
+                file_mode="a",
+                file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+                console_pattern="%(message)s",
+            ),
         )
         report = run_sanity_pipeline(config)
         rendered_report = render_sanity_report(report)

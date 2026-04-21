@@ -21,6 +21,17 @@ from helpers.extraction.data_handlers import (
     _to_coord_list,
 )
 
+EXPECTED_POLYGON_COUNT = 2
+EXPECTED_SQUARE_AREA = 16.0
+EXPECTED_NON_OVERLAPPING_AREA = 12.0
+EXPECTED_HISEG_CANCER_POLYGON_COUNT = 3
+HISEG_COORD_LEVEL = 6
+EXPECTED_MIN_X = 64.0
+EXPECTED_MAX_X = 192.0
+EXPECTED_MIN_Y = 128.0
+EXPECTED_MAX_Y = 256.0
+EXPECTED_FLOAT_VALUE = 1.5
+
 
 class DummyHandler(BaseHandler):
     def __init__(self, result: object) -> None:
@@ -58,9 +69,9 @@ def test_coords_to_shapely_polygons_accepts_flat_and_nested_coordinate_formats()
         ]
     )
 
-    assert len(polygons) == 2
-    assert round(polygons[0].area, 2) == 16.0
-    assert round(polygons[1].area, 2) == 16.0
+    assert len(polygons) == EXPECTED_POLYGON_COUNT
+    assert round(polygons[0].area, 2) == EXPECTED_SQUARE_AREA
+    assert round(polygons[1].area, 2) == EXPECTED_SQUARE_AREA
 
 
 def test_remove_ambiguous_regions_removes_overlap_from_both_classes() -> None:
@@ -71,8 +82,8 @@ def test_remove_ambiguous_regions_removes_overlap_from_both_classes() -> None:
 
     clean_cancer, clean_non_cancer = _remove_ambiguous_regions(cancer, not_cancer)
 
-    assert round(clean_cancer.area, 2) == 12.0
-    assert round(clean_non_cancer.area, 2) == 12.0
+    assert round(clean_cancer.area, 2) == EXPECTED_NON_OVERLAPPING_AREA
+    assert round(clean_non_cancer.area, 2) == EXPECTED_NON_OVERLAPPING_AREA
 
 
 def test_base_handler_rejects_non_dict_results() -> None:
@@ -294,7 +305,7 @@ def test_svs_xml_handler_merges_multiple_hiseg_cancer_colors(tmp_path: Path) -> 
         hiseg_xml_coord_level=0,
     )
 
-    assert len(result["cancer_polygons"]) == 3
+    assert len(result["cancer_polygons"]) == EXPECTED_HISEG_CANCER_POLYGON_COUNT
     assert result["not_cancer_polygons"] == []
 
 
@@ -321,7 +332,7 @@ def test_svs_xml_handler_scales_hiseg_coordinates_from_configured_level(tmp_path
         FakeSlide(),
         annotation_path=str(annotation_path),
         dataset_tag="HISEG",
-        hiseg_xml_coord_level=6,
+        hiseg_xml_coord_level=HISEG_COORD_LEVEL,
     )
 
     assert result["not_cancer_polygons"] == []
@@ -329,10 +340,10 @@ def test_svs_xml_handler_scales_hiseg_coordinates_from_configured_level(tmp_path
     assert result["cancer_polygons"][0][0] == result["cancer_polygons"][0][-1]
     x_coords = [x_coord for x_coord, _ in result["cancer_polygons"][0]]
     y_coords = [y_coord for _, y_coord in result["cancer_polygons"][0]]
-    assert min(x_coords) == 64.0
-    assert max(x_coords) == 192.0
-    assert min(y_coords) == 128.0
-    assert max(y_coords) == 256.0
+    assert min(x_coords) == EXPECTED_MIN_X
+    assert max(x_coords) == EXPECTED_MAX_X
+    assert min(y_coords) == EXPECTED_MIN_Y
+    assert max(y_coords) == EXPECTED_MAX_Y
 
 
 def test_ndpi_ndpa_handler_converts_points_and_filters_titles(
@@ -408,7 +419,7 @@ def test_finalize_helpers_return_empty_lists_when_no_polygons(tmp_path: Path) ->
 
 def test_annotation_helpers_validate_required_values() -> None:
     assert _require_annotation_path({"annotation_path": "file.xml"}) == "file.xml"
-    assert _required_float("1.5") == 1.5
+    assert _required_float("1.5") == EXPECTED_FLOAT_VALUE
     assert _node_text(type("Node", (), {"text": "abc"})()) == "abc"
 
     with pytest.raises(ValueError, match="annotation_path is required"):

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from helpers.lr_finder.reporting import RunRecord, build_latex_report
 
+LATEX_RUNNER_CALLS = 2
+
 
 def test_build_latex_report_writes_tex_and_pdf(tmp_path: Path) -> None:
     plot_path = tmp_path / "FPN" / "curve.png"
@@ -39,7 +41,7 @@ def test_build_latex_report_writes_tex_and_pdf(tmp_path: Path) -> None:
     assert tex_path == tmp_path / "screening.tex"
     assert pdf_path == tmp_path / "screening.pdf"
     assert pdf_path.exists()
-    assert len(calls) == 2
+    assert len(calls) == LATEX_RUNNER_CALLS
     tex_content = tex_path.read_text(encoding="utf-8")
     assert "\\section{FPN}" in tex_content
     assert "senet154" in tex_content

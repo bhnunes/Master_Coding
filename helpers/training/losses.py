@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+BATCH_MASK_RANK = 4
+MIN_TARGET_MASK_RANK = 3
+SINGLE_CHANNEL_COUNT = 1
+BINARY_CLASS_COUNT = 2
+
+
+@dataclass(frozen=True)
+class BCEDiceHybridLossConfig:
+    """Configuration for the paper-faithful BCE + Dice hybrid loss."""
+
+    alpha: float = 0.5
+    beta: float = 0.25
+    gamma: float = 0.25
+    smooth: float = 1e-6
+    run_ohem: bool = False
+    ohem_start_epoch: int = 2
+    ohem_ratio: float = 0.25
+    ohem_min_kept: int = 1024
 
 
 class BCEDiceHybridLossPaper(nn.Module):
@@ -19,26 +40,17 @@ class BCEDiceHybridLossPaper(nn.Module):
     loss and metrics remain comparable to the non-OHEM baseline.
     """
 
-    def __init__(
-        self,
-        alpha: float = 0.5,
-        beta: float = 0.25,
-        gamma: float = 0.25,
-        smooth: float = 1e-6,
-        run_ohem: bool = False,
-        ohem_start_epoch: int = 2,
-        ohem_ratio: float = 0.25,
-        ohem_min_kept: int = 1024,
-    ) -> None:
+    def __init__(self, config: BCEDiceHybridLossConfig | None = None) -> None:
         super().__init__()
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
-        self.smooth = smooth
-        self.run_ohem = run_ohem
-        self.ohem_start_epoch = ohem_start_epoch
-        self.ohem_ratio = ohem_ratio
-        self.ohem_min_kept = ohem_min_kept
+        loss_config = config or BCEDiceHybridLossConfig()
+        self.alpha = loss_config.alpha
+        self.beta = loss_config.beta
+        self.gamma = loss_config.gamma
+        self.smooth = loss_config.smooth
+        self.run_ohem = loss_config.run_ohem
+        self.ohem_start_epoch = loss_config.ohem_start_epoch
+        self.ohem_ratio = loss_config.ohem_ratio
+        self.ohem_min_kept = loss_config.ohem_min_kept
         self._epoch: int | None = None
         self._ohem_enabled = False
 
@@ -109,18 +121,20 @@ class BCEDiceHybridLossPaper(nn.Module):
         apply_artifact_discount: bool = True,
         reduction: str = "mean",
     ) -> torch.Tensor:
-        if target.ndim == 4 and target.size(1) == 1:
+        if target.ndim == BATCH_MASK_RANK and target.size(1) == SINGLE_CHANNEL_COUNT:
             target = target.squeeze(1)
-        elif target.ndim == 4 and target.size(-1) == 1:
+        elif target.ndim == BATCH_MASK_RANK and target.size(-1) == SINGLE_CHANNEL_COUNT:
             target = target[..., 0]
 
-        assert target.ndim == 3, (
+        assert target.ndim == MIN_TARGET_MASK_RANK, (
             "[BCEDiceHybridLossPaper] Target tensor invariant violated: "
             f"expected [B,H,W] class-index mask, got shape={tuple(target.shape)} "
             f"dtype={target.dtype}. One-hot encoding must NOT be applied outside the loss."
         )
 
-        target_one_hot = F.one_hot(target, num_classes=2).permute(0, 3, 1, 2).float()
+        target_one_hot = F.one_hot(target, num_classes=BINARY_CLASS_COUNT).permute(
+            0, 3, 1, 2
+        ).float()
 
         if logits.shape != target_one_hot.shape:
             raise ValueError(

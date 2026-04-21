@@ -4,7 +4,7 @@ import argparse
 import json
 import multiprocessing as mp
 import shutil
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
 from time import perf_counter
@@ -26,6 +26,19 @@ from helpers.crossfold.io import _normalize_image_array, write_split_hdf5
 from helpers.crossfold.pipeline import run_crossfold_pipeline
 from helpers.crossfold.splitting import create_train_val_test_split_best
 from helpers.provenance import collect_hdf5_provenance
+
+
+@dataclass(frozen=True)
+class BenchmarkCrossfoldConfig:
+    source_hdf5_path: Path
+    output_dir: Path
+    optuna_trials: int
+    hdf5_compression: str
+    copy_batch_size: int
+    chunksize: int
+    entropy_thumbnail: int
+    num_workers: int
+    random_state: int
 
 
 def _time_call(label: str, fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -162,38 +175,27 @@ def _baseline_write_split_hdf5(
     return output_path
 
 
-def _build_benchmark_config(
-    *,
-    source_hdf5_path: Path,
-    output_dir: Path,
-    optuna_trials: int,
-    hdf5_compression: str,
-    copy_batch_size: int,
-    chunksize: int,
-    entropy_thumbnail: int,
-    num_workers: int,
-    random_state: int,
-) -> CrossfoldConfig:
+def _build_benchmark_config(config: BenchmarkCrossfoldConfig) -> CrossfoldConfig:
     return CrossfoldConfig(
         normalization_method="NOT_NORMALIZED",
-        source_path=source_hdf5_path,
+        source_path=config.source_hdf5_path,
         overwrite_output_dir=True,
-        random_state=random_state,
+        random_state=config.random_state,
         constraints=SplitConstraints(
             test_patient_count=20,
             validation_patient_count=20,
         ),
         objective=ObjectiveConfig(
-            optuna_trials=optuna_trials,
-            num_workers=num_workers,
-            chunksize=chunksize,
-            entropy_thumbnail=entropy_thumbnail,
+            optuna_trials=config.optuna_trials,
+            num_workers=config.num_workers,
+            chunksize=config.chunksize,
+            entropy_thumbnail=config.entropy_thumbnail,
         ),
-        hdf5_compression=hdf5_compression,
-        copy_batch_size=copy_batch_size,
+        hdf5_compression=config.hdf5_compression,
+        copy_batch_size=config.copy_batch_size,
         calc_checksums=False,
         save_entropy_cache_csv=False,
-        log_folder=output_dir / "logs",
+        log_folder=config.output_dir / "logs",
         log_file_name="benchmark.log",
     )
 
@@ -275,26 +277,30 @@ def main() -> None:
     )
 
     fast_config = _build_benchmark_config(
-        source_hdf5_path=benchmark_source,
-        output_dir=output_dir,
-        optuna_trials=args.split_trials_fast,
-        hdf5_compression="NONE",
-        copy_batch_size=args.copy_batch_size,
-        chunksize=args.chunksize,
-        entropy_thumbnail=args.entropy_thumbnail,
-        num_workers=args.num_workers,
-        random_state=42,
+        BenchmarkCrossfoldConfig(
+            source_hdf5_path=benchmark_source,
+            output_dir=output_dir,
+            optuna_trials=args.split_trials_fast,
+            hdf5_compression="NONE",
+            copy_batch_size=args.copy_batch_size,
+            chunksize=args.chunksize,
+            entropy_thumbnail=args.entropy_thumbnail,
+            num_workers=args.num_workers,
+            random_state=42,
+        )
     )
     full_config = _build_benchmark_config(
-        source_hdf5_path=benchmark_source,
-        output_dir=output_dir,
-        optuna_trials=args.split_trials_full,
-        hdf5_compression="NONE",
-        copy_batch_size=args.copy_batch_size,
-        chunksize=args.chunksize,
-        entropy_thumbnail=args.entropy_thumbnail,
-        num_workers=args.num_workers,
-        random_state=42,
+        BenchmarkCrossfoldConfig(
+            source_hdf5_path=benchmark_source,
+            output_dir=output_dir,
+            optuna_trials=args.split_trials_full,
+            hdf5_compression="NONE",
+            copy_batch_size=args.copy_batch_size,
+            chunksize=args.chunksize,
+            entropy_thumbnail=args.entropy_thumbnail,
+            num_workers=args.num_workers,
+            random_state=42,
+        )
     )
 
     reduced_trial_split = _time_call(

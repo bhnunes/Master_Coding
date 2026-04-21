@@ -21,6 +21,9 @@ cv2 = ensure_cv2_compat(cv2)
 _WORKER_HDF5_HANDLES: dict[Path, h5py.File] = {}
 _WORKER_HDF5_CLEANUP_REGISTERED = False
 _PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+IMAGE_CHANNEL_DIMENSIONS = 3
+RGBA_CHANNEL_COUNT = 4
+ALPHA_CHANNEL_INDEX = 3
 
 
 def overlay_mask_edges(
@@ -118,9 +121,12 @@ def _progress_disabled() -> bool:
 
 
 def _to_grayscale_mask(mask: Any) -> Any:
-    if getattr(mask, "ndim", 0) == 3 and getattr(mask, "shape", (0, 0, 0))[2] == 4:
-        return mask[:, :, 3]
-    if getattr(mask, "ndim", 0) == 3:
+    if (
+        getattr(mask, "ndim", 0) == IMAGE_CHANNEL_DIMENSIONS
+        and getattr(mask, "shape", (0, 0, 0))[2] == RGBA_CHANNEL_COUNT
+    ):
+        return mask[:, :, ALPHA_CHANNEL_INDEX]
+    if getattr(mask, "ndim", 0) == IMAGE_CHANNEL_DIMENSIONS:
         return cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
     return mask
 

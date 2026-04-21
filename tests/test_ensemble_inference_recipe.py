@@ -4,12 +4,17 @@ import pytest
 
 from helpers.ensemble_inference.recipe import load_recipe_payload, parse_ensemble_recipe
 
+ROI_THRESHOLD = 0.33
+DECISION_THRESHOLD = 0.57
+ROI_SCALE = 4
+SPATIAL_MODEL_WEIGHT = 0.8
+
 
 def test_parse_ensemble_recipe_preserves_contract_fields() -> None:
     recipe = {
         "ensemble_strategy": "two_stream_spatial_gating",
-        "roi_config": {"threshold": 0.33, "scale": 4},
-        "decision_config": {"threshold": 0.57},
+        "roi_config": {"threshold": ROI_THRESHOLD, "scale": ROI_SCALE},
+        "decision_config": {"threshold": DECISION_THRESHOLD},
         "model_registry": [
             {
                 "architecture": "SWIN",
@@ -23,7 +28,7 @@ def test_parse_ensemble_recipe_preserves_contract_fields() -> None:
                 "encoder": "enc-b",
                 "checkpoint_path": "/tmp/b.pth",
                 "stream_role": "spatial",
-                "weight": 0.8,
+                "weight": SPATIAL_MODEL_WEIGHT,
             },
         ],
     }
@@ -31,11 +36,11 @@ def test_parse_ensemble_recipe_preserves_contract_fields() -> None:
     parsed = parse_ensemble_recipe(load_recipe_payload(recipe))
 
     assert parsed.strategy == "two_stream_spatial_gating"
-    assert parsed.roi_threshold == 0.33
-    assert parsed.decision_threshold == 0.57
-    assert parsed.roi_scale == 4
+    assert parsed.roi_threshold == ROI_THRESHOLD
+    assert parsed.decision_threshold == DECISION_THRESHOLD
+    assert parsed.roi_scale == ROI_SCALE
     assert parsed.model_registry[0].stream_role == "semantic"
-    assert parsed.model_registry[1].weight == 0.8
+    assert parsed.model_registry[1].weight == SPATIAL_MODEL_WEIGHT
 
 
 def test_parse_ensemble_recipe_rejects_invalid_strategy() -> None:

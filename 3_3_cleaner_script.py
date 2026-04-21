@@ -7,8 +7,12 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from helpers.graph.cleaning_config import load_graph_cleaning_config
-from helpers.graph.cleaning_pipeline import build_cleaning_message, run_graph_cleaning_pipeline
-from helpers.logging_utils import configure_stage_logger
+from helpers.graph.cleaning_pipeline import (
+    GraphCleaningPipelineConfig,
+    build_cleaning_message,
+    run_graph_cleaning_pipeline,
+)
+from helpers.logging_utils import LoggerSettings, configure_stage_logger
 
 
 def main() -> None:
@@ -19,25 +23,29 @@ def main() -> None:
     logger = configure_stage_logger(
         "graph_cleaning",
         config.log_path,
-        logger_level=logging.DEBUG,
-        file_level=logging.DEBUG,
-        console_level=logging.INFO,
-        file_mode="w",
-        file_pattern="%(asctime)s - %(processName)s - %(levelname)s - %(message)s",
+        settings=LoggerSettings(
+            logger_level=logging.DEBUG,
+            file_level=logging.DEBUG,
+            console_level=logging.INFO,
+            file_mode="w",
+            file_pattern="%(asctime)s - %(processName)s - %(levelname)s - %(message)s",
+        ),
     )
     summary = run_graph_cleaning_pipeline(
-        source_hdf5_path=config.source_hdf5_path,
-        output_base_dir=config.output_base_dir,
-        graph_params=config.graph_params,
-        tau=config.tau,
-        num_workers=config.num_workers,
-        master_manifest_path=config.master_manifest_path,
-        logger=logger,
-        progress_factory=lambda iterable: tqdm(
-            iterable,
-            total=_resolve_progress_total(iterable),
-            desc="Filtering Images",
-        ),
+        GraphCleaningPipelineConfig(
+            source_hdf5_path=config.source_hdf5_path,
+            output_base_dir=config.output_base_dir,
+            graph_params=config.graph_params,
+            tau=config.tau,
+            num_workers=config.num_workers,
+            master_manifest_path=config.master_manifest_path,
+            logger=logger,
+            progress_factory=lambda iterable: tqdm(
+                iterable,
+                total=_resolve_progress_total(iterable),
+                desc="Filtering Images",
+            ),
+        )
     )
     logger.info("Loaded graph cleaning parameters from: %s", config.params_path)
     print(build_cleaning_message(summary))

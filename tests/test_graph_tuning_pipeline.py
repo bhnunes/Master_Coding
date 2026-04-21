@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
@@ -10,6 +11,7 @@ import pytest
 from helpers.graph.contamination import GraphContaminationParameters
 from helpers.graph.parameter_store import GraphCleaningParameterArtifact
 from helpers.graph.tuning_pipeline import (
+    GraphTuningPipelineConfig,
     GraphTuningResult,
     GraphTuningSummary,
     LabeledSourceRecord,
@@ -25,6 +27,37 @@ from helpers.graph.tuning_pipeline import (
     select_best_contamination_threshold,
 )
 from helpers.optimization_sampling.sampling import ImageMaskPair
+
+RESOLVED_RECORD_COUNT = 1
+BEST_THRESHOLD = 0.5
+BEST_GRAPH_K = 386.0
+
+
+def _pipeline_config(
+    *,
+    source_hdf5_path: Path,
+    review_base_dir: Path,
+    logger_name: str,
+    scorer: Any,
+    optimizer: Any,
+) -> GraphTuningPipelineConfig:
+    return GraphTuningPipelineConfig(
+        source_hdf5_path=source_hdf5_path,
+        review_base_dir=review_base_dir,
+        test_set_size=0.5,
+        n_splits_inner_cv=2,
+        n_bayesian_calls=10,
+        n_initial_points=4,
+        random_state=42,
+        bg_intensity_range=(100, 250),
+        k_range=(100, 500),
+        min_size_range=(10, 200),
+        erosion_range=(0, 10),
+        logger=logging.getLogger(logger_name),
+        scorer=scorer,
+        optimizer=optimizer,
+        progress_factory=lambda iterable, **_: iterable,
+    )
 
 
 def test_collect_review_labels_reads_approved_and_rejected_files(tmp_path: Path) -> None:
@@ -84,7 +117,7 @@ def test_resolve_labeled_source_records_supports_hdf5_source(tmp_path: Path) -> 
         logger=logging.getLogger("test_graph_tuning"),
     )
 
-    assert len(records) == 1
+    assert len(records) == RESOLVED_RECORD_COUNT
     assert str(records[0].pair.image_path).endswith("::images[0]")
 
 
@@ -100,7 +133,7 @@ def test_select_best_contamination_threshold_optimizes_rejected_f1() -> None:
 
     tau = select_best_contamination_threshold(rates, labels, thresholds=np.array([0.15, 0.5, 0.85]))
 
-    assert tau == pytest.approx(0.5)
+    assert tau == pytest.approx(BEST_THRESHOLD)
 
 
 def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
@@ -167,25 +200,17 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
         )
 
     summary = run_graph_tuning_pipeline(
-        source_hdf5_path=source_path,
-        review_base_dir=review_dir,
-        test_set_size=0.5,
-        n_splits_inner_cv=2,
-        n_bayesian_calls=10,
-        n_initial_points=4,
-        random_state=42,
-        bg_intensity_range=(100, 250),
-        k_range=(100, 500),
-        min_size_range=(10, 200),
-        erosion_range=(0, 10),
-        logger=logging.getLogger("test_graph_pipeline"),
-        scorer=fake_scorer,
-        optimizer=fake_optimizer,
-        progress_factory=lambda iterable, **_: iterable,
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            review_base_dir=review_dir,
+            logger_name="test_graph_pipeline",
+            scorer=fake_scorer,
+            optimizer=fake_optimizer,
+        )
     )
 
     assert isinstance(summary, GraphTuningSummary)
-    assert summary.best_params.k == 386.0
+    assert summary.best_params.k == BEST_GRAPH_K
     assert summary.final_tau == pytest.approx(0.21, abs=0.05)
     assert summary.best_cross_validated_f1 == 1.0
 
@@ -241,31 +266,23 @@ def test_run_graph_tuning_pipeline_accepts_hdf5_source(tmp_path: Path) -> None:
             best_score=1.0,
             best_params=GraphContaminationParameters(
                 bg_intensity_thresh=198,
-                k=386.0,
+                k=BEST_GRAPH_K,
                 min_size=200,
                 erosion_px=0,
             ),
         )
 
     summary = run_graph_tuning_pipeline(
-        source_hdf5_path=source_path,
-        review_base_dir=review_dir,
-        test_set_size=0.5,
-        n_splits_inner_cv=2,
-        n_bayesian_calls=10,
-        n_initial_points=4,
-        random_state=42,
-        bg_intensity_range=(100, 250),
-        k_range=(100, 500),
-        min_size_range=(10, 200),
-        erosion_range=(0, 10),
-        logger=logging.getLogger("test_graph_pipeline_hdf5"),
-        scorer=fake_scorer,
-        optimizer=fake_optimizer,
-        progress_factory=lambda iterable, **_: iterable,
+        _pipeline_config(
+            source_hdf5_path=source_path,
+            review_base_dir=review_dir,
+            logger_name="test_graph_pipeline_hdf5",
+            scorer=fake_scorer,
+            optimizer=fake_optimizer,
+        )
     )
 
-    assert summary.best_params.k == 386.0
+    assert summary.best_params.k == BEST_GRAPH_K
     assert summary.final_tau == pytest.approx(0.21, abs=0.05)
 
 

@@ -6,6 +6,12 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
+SINGLE_PATIENT = 1
+PAIR_PATIENT_COUNT = 2
+CALIBRATION_REQUIRED_PATIENTS = 3
+HOLDOUT_REQUIRED_PATIENTS = 4
+SMALL_COHORT_THRESHOLD = 10
+
 
 @dataclass(frozen=True)
 class HoldoutSplit:
@@ -17,9 +23,9 @@ class HoldoutSplit:
 
 
 def pick_n(total: int, frac: float) -> int:
-    if total <= 1:
+    if total <= SINGLE_PATIENT:
         return 0
-    return min(max(1, int(round(total * frac))), total - 1)
+    return min(max(SINGLE_PATIENT, int(round(total * frac))), total - SINGLE_PATIENT)
 
 
 def _allocate_subset_counts(
@@ -28,19 +34,22 @@ def _allocate_subset_counts(
     calibration_frac: float,
     holdout_frac: float,
 ) -> tuple[int, int]:
-    if total <= 1:
+    if total <= SINGLE_PATIENT:
         return 0, 0
-    if total == 2:
-        return 1, 0
+    if total == PAIR_PATIENT_COUNT:
+        return SINGLE_PATIENT, 0
 
     calibration_count = pick_n(total, calibration_frac)
     remaining_after_calibration = total - calibration_count
-    if remaining_after_calibration <= 1:
+    if remaining_after_calibration <= SINGLE_PATIENT:
         return calibration_count, 0
 
-    holdout_count = min(int(round(total * holdout_frac)), total - calibration_count - 1)
-    if holdout_frac > 0 and total >= 4:
-        holdout_count = max(1, holdout_count)
+    holdout_count = min(
+        int(round(total * holdout_frac)),
+        total - calibration_count - SINGLE_PATIENT,
+    )
+    if holdout_frac > 0 and total >= HOLDOUT_REQUIRED_PATIENTS:
+        holdout_count = max(SINGLE_PATIENT, holdout_count)
     holdout_count = max(0, holdout_count)
     return calibration_count, holdout_count
 
@@ -61,7 +70,7 @@ def build_holdout_split(
     rng.shuffle(positive)
     rng.shuffle(negative)
 
-    if len(all_patients) <= 10:
+    if len(all_patients) <= SMALL_COHORT_THRESHOLD:
         mixed: list[str] = []
         max_len = max(len(positive), len(negative))
         for index in range(max_len):
@@ -70,7 +79,7 @@ def build_holdout_split(
             if index < len(negative):
                 mixed.append(negative[index])
         calibration_patients = {mixed[-1]} if mixed else set()
-        holdout_patients = {mixed[-2]} if len(mixed) >= 4 else set()
+        holdout_patients = {mixed[-2]} if len(mixed) >= HOLDOUT_REQUIRED_PATIENTS else set()
         optimization_patients = set(mixed) - calibration_patients - holdout_patients
     else:
         n_calibration_positive, n_holdout_positive = _allocate_subset_counts(
@@ -94,12 +103,12 @@ def build_holdout_split(
             negative[n_calibration_negative + n_holdout_negative :]
         )
 
-    if len(all_patients) >= 3 and not calibration_patients:
+    if len(all_patients) >= CALIBRATION_REQUIRED_PATIENTS and not calibration_patients:
         raise RuntimeError(
             "Validation split produced 0 calibration patients. Increase "
             "ENSEMBLE_OPT_VAL_CALIBRATION_FRAC or use a different split policy."
         )
-    if len(all_patients) >= 4 and not optimization_patients:
+    if len(all_patients) >= HOLDOUT_REQUIRED_PATIENTS and not optimization_patients:
         raise RuntimeError("Validation split produced 0 optimization patients.")
 
     return HoldoutSplit(

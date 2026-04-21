@@ -7,7 +7,7 @@ import os
 import torch
 from dotenv import load_dotenv
 
-from helpers.logging_utils import configure_root_logger
+from helpers.logging_utils import LoggerSettings, configure_root_logger
 from helpers.smart_sampling.config import load_smart_sampler_config
 from helpers.smart_sampling.pipeline import run_smart_sampling_pipeline
 from helpers.training.runtime import seed_everything
@@ -22,12 +22,14 @@ def main() -> None:
         config = load_smart_sampler_config(os.environ)
         configure_root_logger(
             config.log_path,
-            logger_level=logging.INFO,
-            file_level=logging.INFO,
-            console_level=logging.INFO,
-            file_mode="a",
-            file_pattern="%(asctime)s - %(levelname)s - %(message)s",
-            console_pattern="%(message)s",
+            settings=LoggerSettings(
+                logger_level=logging.INFO,
+                file_level=logging.INFO,
+                console_level=logging.INFO,
+                file_mode="a",
+                file_pattern="%(asctime)s - %(levelname)s - %(message)s",
+                console_pattern="%(message)s",
+            ),
         )
         seed_everything(config.seed)
         if torch.cuda.is_available():

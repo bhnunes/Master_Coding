@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import smtplib
+from dataclasses import dataclass
 from email.mime.text import MIMEText
 from importlib import import_module
 from os import PathLike
@@ -15,27 +16,30 @@ def _format_metric(name: str, value: float | None) -> str:
     return f"{name}: {rendered}"
 
 
-def create_email_body(
-    checkpoint_path: str,
-    encoder: str,
-    architecture: str,
-    val_loss: float | None,
-    val_auprc: float | None,
-    val_auroc: float | None,
-    val_mcc: float | None,
-    optimizer_name: str,
-    base_learning_rate: float,
-    weight_decay: float,
-    alpha_bce: float,
-    beta_dice_bg: float,
-    gamma_dice_fg: float,
-    use_artifact_aware_loss: bool,
-    master_manifest_path: str | PathLike[str] | None,
-    run_ohem: bool,
-    ohem_start_epoch: int,
-    ohem_ratio: float,
-    ohem_min_kept: int,
-) -> str:
+@dataclass(frozen=True)
+class TrainingEmailContext:
+    checkpoint_path: str
+    encoder: str
+    architecture: str
+    val_loss: float | None
+    val_auprc: float | None
+    val_auroc: float | None
+    val_mcc: float | None
+    optimizer_name: str
+    base_learning_rate: float
+    weight_decay: float
+    alpha_bce: float
+    beta_dice_bg: float
+    gamma_dice_fg: float
+    use_artifact_aware_loss: bool
+    master_manifest_path: str | PathLike[str] | None
+    run_ohem: bool
+    ohem_start_epoch: int
+    ohem_ratio: float
+    ohem_min_kept: int
+
+
+def create_email_body(context: TrainingEmailContext) -> str:
     """Create the completion email body for a finished training run.
 
     The summary includes both independent loss modifiers so users can tell
@@ -43,32 +47,34 @@ def create_email_body(
     """
 
     master_manifest_display = (
-        os.fspath(master_manifest_path) if master_manifest_path is not None else "n/a"
+        os.fspath(context.master_manifest_path)
+        if context.master_manifest_path is not None
+        else "n/a"
     )
-    artifact_mode_display = "enabled" if use_artifact_aware_loss else "disabled"
-    ohem_mode_display = "enabled" if run_ohem else "disabled"
+    artifact_mode_display = "enabled" if context.use_artifact_aware_loss else "disabled"
+    ohem_mode_display = "enabled" if context.run_ohem else "disabled"
     return (
-        f"Training {architecture} finished.\n\n"
-        f"Checkpoint Path: {checkpoint_path}\n\n"
-        f"--- ENCODER: {encoder} ---\n"
+        f"Training {context.architecture} finished.\n\n"
+        f"Checkpoint Path: {context.checkpoint_path}\n\n"
+        f"--- ENCODER: {context.encoder} ---\n"
         f"\nBest validation metrics\n"
-        f"{_format_metric('val_loss', val_loss)}\n"
-        f"{_format_metric('val_auprc', val_auprc)}\n"
-        f"{_format_metric('val_auroc', val_auroc)}\n"
-        f"{_format_metric('val_mcc', val_mcc)}\n"
+        f"{_format_metric('val_loss', context.val_loss)}\n"
+        f"{_format_metric('val_auprc', context.val_auprc)}\n"
+        f"{_format_metric('val_auroc', context.val_auroc)}\n"
+        f"{_format_metric('val_mcc', context.val_mcc)}\n"
         f"\nRun settings\n"
-        f"optimizer: {optimizer_name}\n"
-        f"learning_rate: {base_learning_rate}\n"
-        f"weight_decay: {weight_decay}\n"
-        f"loss_alpha_bce: {alpha_bce}\n"
-        f"loss_beta_dice_bg: {beta_dice_bg}\n"
-        f"loss_gamma_dice_fg: {gamma_dice_fg}\n"
+        f"optimizer: {context.optimizer_name}\n"
+        f"learning_rate: {context.base_learning_rate}\n"
+        f"weight_decay: {context.weight_decay}\n"
+        f"loss_alpha_bce: {context.alpha_bce}\n"
+        f"loss_beta_dice_bg: {context.beta_dice_bg}\n"
+        f"loss_gamma_dice_fg: {context.gamma_dice_fg}\n"
         f"artifact_aware_loss: {artifact_mode_display}\n"
         f"master_manifest_path: {master_manifest_display}\n"
         f"run_ohem: {ohem_mode_display}\n"
-        f"ohem_start_epoch: {ohem_start_epoch}\n"
-        f"ohem_ratio: {ohem_ratio}\n"
-        f"ohem_min_kept: {ohem_min_kept}\n"
+        f"ohem_start_epoch: {context.ohem_start_epoch}\n"
+        f"ohem_ratio: {context.ohem_ratio}\n"
+        f"ohem_min_kept: {context.ohem_min_kept}\n"
     )
 
 

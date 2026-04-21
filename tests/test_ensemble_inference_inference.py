@@ -10,6 +10,42 @@ from torch import nn
 
 from helpers.ensemble_inference import inference
 
+ANALYSIS_SEED = 17
+EXPECTED_AUC = 0.75
+SECOND_SAMPLE_ID = 2
+THIRD_SAMPLE_ID = 3
+VISUALIZATION_SAMPLE_COUNT = 2
+
+
+def _analysis_config() -> inference.EnsembleAnalysisConfig:
+    return inference.EnsembleAnalysisConfig(
+        device=torch.device("cpu"),
+        roi_threshold=0.33,
+        decision_threshold=0.67,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        gpu_normalizer=_IdentityNormalizer(),
+        seed=ANALYSIS_SEED,
+    )
+
+
+def _visualization_config(
+    tmp_path: Path, *, num_samples: int
+) -> inference.VisualizationExportConfig:
+    return inference.VisualizationExportConfig(
+        device=torch.device("cpu"),
+        roi_threshold=0.5,
+        decision_threshold=0.5,
+        roi_scale=2,
+        train_mean=[0.1, 0.2, 0.3],
+        train_std=[0.4, 0.5, 0.6],
+        constituent_models_info=[],
+        gpu_normalizer=_IdentityNormalizer(),
+        output_dir=tmp_path,
+        num_samples=num_samples,
+    )
+
 
 class _ConstantBinaryModel(nn.Module):
     def __init__(self, value: float) -> None:
@@ -199,22 +235,15 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
         [nn.Identity()],
         [{"stream_role": "semantic", "weight": 1.0}],
         test_loader,
-        device=torch.device("cpu"),
-        roi_threshold=0.33,
-        decision_threshold=0.67,
-        roi_scale=2,
-        train_mean=[0.1, 0.2, 0.3],
-        train_std=[0.4, 0.5, 0.6],
-        gpu_normalizer=_IdentityNormalizer(),
-        seed=17,
+        _analysis_config(),
     )
 
-    assert captured["seed"] == 17
+    assert captured["seed"] == ANALYSIS_SEED
     assert captured["stats"] == {
         "patient-a": [{"tn": 2, "fn": 0, "fp": 0, "tp": 2}],
         "patient-b": [{"tn": 2, "fn": 0, "fp": 1, "tp": 1}],
     }
-    assert summary["auc"] == 0.75
+    assert summary["auc"] == EXPECTED_AUC
     assert summary["normalization"] == {"mean": [0.1, 0.2, 0.3], "std": [0.4, 0.5, 0.6]}
     assert summary["ensemble"] == {
         "method": "two_stream_spatial_gating",
@@ -263,17 +292,19 @@ def test_analyze_ensemble_metrics_uses_declared_threshold_for_hard_predictions(
         [nn.Identity()],
         [{"stream_role": "semantic", "weight": 1.0}],
         test_loader,
-        device=torch.device("cpu"),
-        roi_threshold=0.25,
-        decision_threshold=0.5,
-        roi_scale=2,
-        train_mean=[0.1, 0.2, 0.3],
-        train_std=[0.4, 0.5, 0.6],
-        gpu_normalizer=_IdentityNormalizer(),
-        seed=17,
+        inference.EnsembleAnalysisConfig(
+            device=torch.device("cpu"),
+            roi_threshold=0.25,
+            decision_threshold=0.5,
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            gpu_normalizer=_IdentityNormalizer(),
+            seed=ANALYSIS_SEED,
+        ),
     )
 
-    assert captured["seed"] == 17
+    assert captured["seed"] == ANALYSIS_SEED
     assert captured["stats"] == {"patient-threshold": [{"tn": 1, "fn": 1, "fp": 1, "tp": 1}]}
 
 
@@ -281,16 +312,7 @@ def test_export_visualizations_returns_empty_for_nonpositive_sample_count(tmp_pa
     output_paths = inference.export_visualizations(
         [nn.Identity()],
         cast(Any, []),
-        device=torch.device("cpu"),
-        roi_threshold=0.5,
-        decision_threshold=0.5,
-        roi_scale=2,
-        train_mean=[0.1, 0.2, 0.3],
-        train_std=[0.4, 0.5, 0.6],
-        constituent_models_info=[],
-        gpu_normalizer=_IdentityNormalizer(),
-        output_dir=tmp_path,
-        num_samples=0,
+        _visualization_config(tmp_path, num_samples=0),
     )
 
     assert output_paths == []
@@ -301,16 +323,7 @@ def test_export_visualizations_returns_empty_for_empty_or_none_batch(tmp_path: P
         inference.export_visualizations(
             [nn.Identity()],
             cast(Any, []),
-            device=torch.device("cpu"),
-            roi_threshold=0.5,
-            decision_threshold=0.5,
-            roi_scale=2,
-            train_mean=[0.1, 0.2, 0.3],
-            train_std=[0.4, 0.5, 0.6],
-            constituent_models_info=[],
-            gpu_normalizer=_IdentityNormalizer(),
-            output_dir=tmp_path / "empty",
-            num_samples=1,
+            _visualization_config(tmp_path / "empty", num_samples=1),
         )
         == []
     )
@@ -318,16 +331,7 @@ def test_export_visualizations_returns_empty_for_empty_or_none_batch(tmp_path: P
         inference.export_visualizations(
             [nn.Identity()],
             cast(Any, [None]),
-            device=torch.device("cpu"),
-            roi_threshold=0.5,
-            decision_threshold=0.5,
-            roi_scale=2,
-            train_mean=[0.1, 0.2, 0.3],
-            train_std=[0.4, 0.5, 0.6],
-            constituent_models_info=[],
-            gpu_normalizer=_IdentityNormalizer(),
-            output_dir=tmp_path / "none",
-            num_samples=1,
+            _visualization_config(tmp_path / "none", num_samples=1),
         )
         == []
     )
@@ -365,16 +369,18 @@ def test_export_visualizations_writes_requested_number_of_pngs(
     output_paths = inference.export_visualizations(
         [nn.Identity()],
         dataloader,
-        device=torch.device("cpu"),
-        roi_threshold=0.5,
-        decision_threshold=0.5,
-        roi_scale=2,
-        train_mean=[0.1, 0.2, 0.3],
-        train_std=[0.4, 0.5, 0.6],
-        constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
-        gpu_normalizer=_IdentityNormalizer(),
-        output_dir=tmp_path,
-        num_samples=1,
+        inference.VisualizationExportConfig(
+            device=torch.device("cpu"),
+            roi_threshold=0.5,
+            decision_threshold=0.5,
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
+            gpu_normalizer=_IdentityNormalizer(),
+            output_dir=tmp_path,
+            num_samples=1,
+        ),
     )
 
     assert len(output_paths) == 1
@@ -394,9 +400,9 @@ def test_export_visualizations_ranks_worst_dice_across_batches(
             sample_id = int(image[0, 0, 0].item())
             if sample_id == 1:
                 outputs.append(torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=torch.float32))
-            elif sample_id == 2:
+            elif sample_id == SECOND_SAMPLE_ID:
                 outputs.append(torch.tensor([[1.0, 0.0], [0.0, 0.0]], dtype=torch.float32))
-            elif sample_id == 3:
+            elif sample_id == THIRD_SAMPLE_ID:
                 outputs.append(torch.tensor([[1.0, 1.0], [0.0, 0.0]], dtype=torch.float32))
             else:
                 raise AssertionError(f"unexpected sample id: {sample_id}")
@@ -436,16 +442,18 @@ def test_export_visualizations_ranks_worst_dice_across_batches(
     output_paths = inference.export_visualizations(
         [nn.Identity()],
         dataloader,
-        device=torch.device("cpu"),
-        roi_threshold=0.5,
-        decision_threshold=0.5,
-        roi_scale=2,
-        train_mean=[0.1, 0.2, 0.3],
-        train_std=[0.4, 0.5, 0.6],
-        constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
-        gpu_normalizer=_IdentityNormalizer(),
-        output_dir=tmp_path,
-        num_samples=2,
+        inference.VisualizationExportConfig(
+            device=torch.device("cpu"),
+            roi_threshold=0.5,
+            decision_threshold=0.5,
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
+            gpu_normalizer=_IdentityNormalizer(),
+            output_dir=tmp_path,
+            num_samples=VISUALIZATION_SAMPLE_COUNT,
+        ),
     )
 
     assert [path.name for path in output_paths] == [

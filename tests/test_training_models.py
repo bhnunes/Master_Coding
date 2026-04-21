@@ -15,6 +15,20 @@ from helpers.training.models import (
 )
 from helpers.training.registry import get_supported_encoders
 
+REGISTRY_LEARNING_RATE = 0.123
+REGISTRY_WEIGHT_DECAY = 0.456
+REGISTRY_ALPHA_BCE = 0.1
+REGISTRY_BETA_DICE_BG = 0.2
+REGISTRY_GAMMA_DICE_FG = 0.3
+OVERRIDE_ALPHA_BCE = 0.11
+OVERRIDE_BETA_DICE_BG = 0.22
+OVERRIDE_GAMMA_DICE_FG = 0.33
+BINARY_CLASS_COUNT = 2
+ADAMW_LEARNING_RATE = 1e-3
+ADAMW_WEIGHT_DECAY = 1e-4
+SCHEDULEFREE_LEARNING_RATE = 2e-3
+SCHEDULEFREE_WEIGHT_DECAY = 3e-4
+
 
 def test_get_learning_rate_rejects_unknown_architecture() -> None:
     with pytest.raises(ValueError, match="Unknown architecture"):
@@ -29,13 +43,13 @@ def test_get_learning_rate_reads_from_registry_override(
         json.dumps(
             {
                 "FPN": {
-                    "lr": 0.123,
-                    "wd": 0.456,
+                    "lr": REGISTRY_LEARNING_RATE,
+                    "wd": REGISTRY_WEIGHT_DECAY,
                     "encoders": ["senet154"],
                     "loss": {
-                        "alpha_bce": 0.1,
-                        "beta_dice_bg": 0.2,
-                        "gamma_dice_fg": 0.3,
+                        "alpha_bce": REGISTRY_ALPHA_BCE,
+                        "beta_dice_bg": REGISTRY_BETA_DICE_BG,
+                        "gamma_dice_fg": REGISTRY_GAMMA_DICE_FG,
                     },
                 }
             }
@@ -45,15 +59,17 @@ def test_get_learning_rate_reads_from_registry_override(
 
     learning_rate, weight_decay = get_learning_rate("FPN")
 
-    assert learning_rate == 0.123
-    assert weight_decay == 0.456
+    assert learning_rate == REGISTRY_LEARNING_RATE
+    assert weight_decay == REGISTRY_WEIGHT_DECAY
 
 
 def test_get_learning_rate_rejects_malformed_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry_path = tmp_path / "registry.json"
-    registry_path.write_text(json.dumps({"FPN": {"lr": 0.123, "encoders": ["senet154"]}}))
+    registry_path.write_text(
+        json.dumps({"FPN": {"lr": REGISTRY_LEARNING_RATE, "encoders": ["senet154"]}})
+    )
     monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
 
     with pytest.raises(ValueError, match="must define 'lr', 'wd', 'encoders', and 'loss'"):
@@ -68,13 +84,13 @@ def test_get_loss_weights_reads_from_registry_override(
         json.dumps(
             {
                 "FPN": {
-                    "lr": 0.123,
-                    "wd": 0.456,
+                    "lr": REGISTRY_LEARNING_RATE,
+                    "wd": REGISTRY_WEIGHT_DECAY,
                     "encoders": ["senet154"],
                     "loss": {
-                        "alpha_bce": 0.11,
-                        "beta_dice_bg": 0.22,
-                        "gamma_dice_fg": 0.33,
+                        "alpha_bce": OVERRIDE_ALPHA_BCE,
+                        "beta_dice_bg": OVERRIDE_BETA_DICE_BG,
+                        "gamma_dice_fg": OVERRIDE_GAMMA_DICE_FG,
                     },
                 }
             }
@@ -84,9 +100,9 @@ def test_get_loss_weights_reads_from_registry_override(
 
     loss_weights = get_loss_weights("FPN")
 
-    assert loss_weights.alpha_bce == 0.11
-    assert loss_weights.beta_dice_bg == 0.22
-    assert loss_weights.gamma_dice_fg == 0.33
+    assert loss_weights.alpha_bce == OVERRIDE_ALPHA_BCE
+    assert loss_weights.beta_dice_bg == OVERRIDE_BETA_DICE_BG
+    assert loss_weights.gamma_dice_fg == OVERRIDE_GAMMA_DICE_FG
 
 
 def test_get_supported_encoders_returns_approved_research_set() -> None:
@@ -128,7 +144,7 @@ def test_create_model_uses_expected_builder_and_imagenet_weights(
     assert model["name"] == "Segformer"
     assert recorder.calls[0][1]["encoder_name"] == "resnet34"
     assert recorder.calls[0][1]["encoder_weights"] == "imagenet"
-    assert recorder.calls[0][1]["classes"] == 2
+    assert recorder.calls[0][1]["classes"] == BINARY_CLASS_COUNT
     assert recorder.calls[0][1]["activation"] is None
 
 
@@ -178,11 +194,11 @@ def test_create_model_disables_encoder_weights_for_validation(
 def test_create_optimizer_supports_adamw() -> None:
     model = torch.nn.Linear(2, 1)
 
-    optimizer = create_optimizer(model, "AdamW", 1e-3, 1e-4)
+    optimizer = create_optimizer(model, "AdamW", ADAMW_LEARNING_RATE, ADAMW_WEIGHT_DECAY)
 
     assert isinstance(optimizer, torch.optim.AdamW)
-    assert optimizer.param_groups[0]["lr"] == 1e-3
-    assert optimizer.param_groups[0]["weight_decay"] == 1e-4
+    assert optimizer.param_groups[0]["lr"] == ADAMW_LEARNING_RATE
+    assert optimizer.param_groups[0]["weight_decay"] == ADAMW_WEIGHT_DECAY
 
 
 def test_create_optimizer_supports_schedulefree(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -198,15 +214,20 @@ def test_create_optimizer_supports_schedulefree(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(training_models, "schedulefree", fake_schedulefree)
     model = torch.nn.Linear(2, 1)
 
-    optimizer = create_optimizer(model, "AdamWScheduleFree", 2e-3, 3e-4)
+    optimizer = create_optimizer(
+        model,
+        "AdamWScheduleFree",
+        SCHEDULEFREE_LEARNING_RATE,
+        SCHEDULEFREE_WEIGHT_DECAY,
+    )
 
     assert isinstance(optimizer, DummyScheduleFree)
-    assert captured["lr"] == 2e-3
-    assert captured["weight_decay"] == 3e-4
+    assert captured["lr"] == SCHEDULEFREE_LEARNING_RATE
+    assert captured["weight_decay"] == SCHEDULEFREE_WEIGHT_DECAY
     params = captured["params"]
 
     assert isinstance(params, list)
-    assert len(params) == 2
+    assert len(params) == BINARY_CLASS_COUNT
 
 
 def test_create_optimizer_rejects_unknown_name() -> None:

@@ -52,6 +52,52 @@ class CaseUpdate:
     processing_signature: str | None = None
 
 
+@dataclass(frozen=True)
+class IngestionOptions:
+    source_folder: Path
+    activate_sanity_check: bool
+    use_advanced_filtering: bool
+    geojson_path: Path | None
+
+
+@dataclass(frozen=True)
+class ExistingCaseIndex:
+    rows: Sequence[sqlite3.Row]
+    by_basename: dict[str, sqlite3.Row]
+    next_patient_id: int
+
+
+@dataclass(frozen=True)
+class IngestionDecision:
+    image_path: Path
+    annotation_path: str | None
+    input_signature: str
+    status: str
+    comments: str
+    stale_row_id: int | None = None
+
+
+@dataclass(frozen=True)
+class IngestionResources:
+    images_folder: Path
+    image_files: list[Path]
+    image_listing_elapsed: float
+    run_geojson_check: bool
+    geojson_lookup: GeoJsonLookup | None
+    geojson_lookup_elapsed: float
+    annotation_lookup: dict[str, str]
+    annotation_lookup_elapsed: float
+
+
+@dataclass(frozen=True)
+class IngestionScanSummary:
+    payload: list[tuple[str, str | None, str, str, str, str]]
+    scanned_cases: int
+    stale_updates: int
+    failed_cases: int
+    signature_scan_elapsed: float
+
+
 class ExtractionRepository:
     """SQLite-backed repository for Stage 2 case ingestion and processing."""
 
@@ -127,133 +173,25 @@ class ExtractionRepository:
             }
         )
 
-    def ingest_new_cases(
-        self,
-        source_folder: Path,
-        activate_sanity_check: bool,
-        use_advanced_filtering: bool,
-        geojson_path: Path | None,
-    ) -> None:
+    def ingest_new_cases(self, options: IngestionOptions) -> None:
         """Scan case folders and insert unseen cases into the database."""
 
         ingestion_started_at = time.perf_counter()
-        images_folder, annotations_folder, _ = self.get_source_directories(source_folder)
-        image_listing_started_at = time.perf_counter()
-        image_files = sorted(path for path in images_folder.iterdir() if path.is_file())
-        image_listing_elapsed = time.perf_counter() - image_listing_started_at
-        if not image_files:
-            raise FileNotFoundError(
-                f"The directory '{images_folder}' is empty. Please add images to process."
-            )
-
-        run_geojson_check = activate_sanity_check and use_advanced_filtering
-        geojson_lookup = None
-        geojson_lookup_elapsed = 0.0
-        if run_geojson_check:
-            if geojson_path is None or not geojson_path.is_dir():
-                raise FileNotFoundError(
-                    "GeoJSON sanity check is active, but the source GEOJSON folder "
-                    f"('{geojson_path}') is invalid."
-                )
-            geojson_lookup_started_at = time.perf_counter()
-            geojson_lookup = GeoJsonLookup.from_directory(geojson_path)
-            geojson_lookup_elapsed = time.perf_counter() - geojson_lookup_started_at
-
-        annotation_lookup_started_at = time.perf_counter()
-        annotation_lookup = {
-            path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
-        }
-        annotation_lookup_elapsed = time.perf_counter() - annotation_lookup_started_at
+        resources = self._prepare_ingestion_resources(options)
 
         with self._connect() as connection:
             existing_query_started_at = time.perf_counter()
-            existing_data = connection.execute(
-                f"SELECT ID, IMAGEPATH, PATIENT, INPUT_SIGNATURE FROM {self.table_name}"
-            ).fetchall()
+            existing_index = self._load_existing_case_index(connection)
             existing_query_elapsed = time.perf_counter() - existing_query_started_at
-            existing_by_basename = {Path(str(row["IMAGEPATH"])).name: row for row in existing_data}
-            existing_patients = {
-                int(str(row["PATIENT"])) for row in existing_data if str(row["PATIENT"]).isdigit()
-            }
-
-            next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
-            payload: list[tuple[str, str | None, str, str, str, str]] = []
-            scanned_cases = 0
-            stale_updates = 0
-            failed_cases = 0
-            signature_scan_started_at = time.perf_counter()
-            for image_path in image_files:
-                scanned_cases += 1
-                annotation_path = annotation_lookup.get(image_path.stem)
-                input_signature = self._build_input_signature(
-                    image_path,
-                    Path(annotation_path) if annotation_path is not None else None,
-                )
-                existing_row = existing_by_basename.get(image_path.name)
-                if existing_row is not None:
-                    previous_signature = str(existing_row["INPUT_SIGNATURE"] or "")
-                    if previous_signature and previous_signature != input_signature:
-                        connection.execute(
-                            f"""
-                            UPDATE {self.table_name}
-                            SET STATUS = 'STALE',
-                                COMMENTS = ?,
-                                INPUT_SIGNATURE = ?,
-                                LastUpdate = CURRENT_TIMESTAMP
-                            WHERE ID = ?
-                            """,
-                            (
-                                "Input files changed for an existing case. "
-                                "Clear stale patch outputs and reprocess this slide.",
-                                input_signature,
-                                int(existing_row["ID"]),
-                            ),
-                        )
-                        stale_updates += 1
-                    continue
-
-                status = "TO BE PROCESSED"
-                comments = ""
-                if annotation_path is None:
-                    status = "FAILED"
-                    comments = "The equivalent annotation file could not be found."
-                elif run_geojson_check:
-                    assert geojson_path is not None
-                    try:
-                        resolved_geojson = resolve_geojson_for_slide(
-                            geojson_path,
-                            image_path,
-                            lookup=geojson_lookup,
-                        )
-                    except ValueError as error:
-                        status = "FAILED"
-                        comments = f"GeoJSON Sanity Check Failed: {error}"
-                    else:
-                        if resolved_geojson is None:
-                            status = "FAILED"
-                            comments = (
-                                "GeoJSON Sanity Check Failed: "
-                                "The equivalent GeoJSON file was not found."
-                            )
-                if status == "FAILED":
-                    failed_cases += 1
-
-                payload.append(
-                    (
-                        str(image_path),
-                        annotation_path,
-                        str(next_patient_id),
-                        status,
-                        comments,
-                        input_signature,
-                    )
-                )
-                next_patient_id += 1
-
-            signature_scan_elapsed = time.perf_counter() - signature_scan_started_at
+            scan_summary = self._scan_ingestion_decisions(
+                connection=connection,
+                options=options,
+                resources=resources,
+                existing_index=existing_index,
+            )
 
             write_elapsed = 0.0
-            if payload:
+            if scan_summary.payload:
                 write_started_at = time.perf_counter()
                 connection.executemany(
                     f"""
@@ -261,7 +199,7 @@ class ExtractionRepository:
                     (IMAGEPATH, ANNOTATIONPATH, PATIENT, STATUS, COMMENTS, INPUT_SIGNATURE)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    payload,
+                    scan_summary.payload,
                 )
                 write_elapsed = time.perf_counter() - write_started_at
             commit_started_at = time.perf_counter()
@@ -274,20 +212,237 @@ class ExtractionRepository:
             "failed=%d list_images=%.3fs index_annotations=%.3fs index_geojson=%.3fs "
             "query_existing=%.3fs "
             "scan_signatures=%.3fs write_rows=%.3fs commit=%.3fs total=%.3fs",
-            scanned_cases,
-            len(existing_data),
-            len(payload),
-            stale_updates,
-            failed_cases,
-            image_listing_elapsed,
-            annotation_lookup_elapsed,
-            geojson_lookup_elapsed,
+            scan_summary.scanned_cases,
+            len(existing_index.rows),
+            len(scan_summary.payload),
+            scan_summary.stale_updates,
+            scan_summary.failed_cases,
+            resources.image_listing_elapsed,
+            resources.annotation_lookup_elapsed,
+            resources.geojson_lookup_elapsed,
             existing_query_elapsed,
-            signature_scan_elapsed,
+            scan_summary.signature_scan_elapsed,
             write_elapsed,
             commit_elapsed,
             total_elapsed,
         )
+
+    def _prepare_ingestion_resources(self, options: IngestionOptions) -> IngestionResources:
+        images_folder, annotations_folder, _ = self.get_source_directories(options.source_folder)
+        image_listing_started_at = time.perf_counter()
+        image_files = sorted(path for path in images_folder.iterdir() if path.is_file())
+        image_listing_elapsed = time.perf_counter() - image_listing_started_at
+        if not image_files:
+            raise FileNotFoundError(
+                f"The directory '{images_folder}' is empty. Please add images to process."
+            )
+
+        run_geojson_check = options.activate_sanity_check and options.use_advanced_filtering
+        geojson_lookup = None
+        geojson_lookup_elapsed = 0.0
+        if run_geojson_check:
+            if options.geojson_path is None or not options.geojson_path.is_dir():
+                raise FileNotFoundError(
+                    "GeoJSON sanity check is active, but the source GEOJSON folder "
+                    f"('{options.geojson_path}') is invalid."
+                )
+            geojson_lookup_started_at = time.perf_counter()
+            geojson_lookup = GeoJsonLookup.from_directory(options.geojson_path)
+            geojson_lookup_elapsed = time.perf_counter() - geojson_lookup_started_at
+
+        annotation_lookup_started_at = time.perf_counter()
+        annotation_lookup = {
+            path.stem: str(path) for path in sorted(annotations_folder.iterdir()) if path.is_file()
+        }
+        annotation_lookup_elapsed = time.perf_counter() - annotation_lookup_started_at
+        return IngestionResources(
+            images_folder=images_folder,
+            image_files=image_files,
+            image_listing_elapsed=image_listing_elapsed,
+            run_geojson_check=run_geojson_check,
+            geojson_lookup=geojson_lookup,
+            geojson_lookup_elapsed=geojson_lookup_elapsed,
+            annotation_lookup=annotation_lookup,
+            annotation_lookup_elapsed=annotation_lookup_elapsed,
+        )
+
+    def _scan_ingestion_decisions(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        options: IngestionOptions,
+        resources: IngestionResources,
+        existing_index: ExistingCaseIndex,
+    ) -> IngestionScanSummary:
+        payload: list[tuple[str, str | None, str, str, str, str]] = []
+        scanned_cases = 0
+        stale_updates = 0
+        failed_cases = 0
+        next_patient_id = existing_index.next_patient_id
+        signature_scan_started_at = time.perf_counter()
+        for image_path in resources.image_files:
+            scanned_cases += 1
+            decision = self._build_ingestion_decision(
+                image_path=image_path,
+                annotation_lookup=resources.annotation_lookup,
+                run_geojson_check=resources.run_geojson_check,
+                geojson_path=options.geojson_path,
+                geojson_lookup=resources.geojson_lookup,
+                existing_row=existing_index.by_basename.get(image_path.name),
+            )
+            if decision.stale_row_id is not None:
+                self._mark_case_stale(
+                    connection,
+                    decision.stale_row_id,
+                    decision.input_signature,
+                )
+                stale_updates += 1
+                continue
+            if decision.status == "FAILED":
+                failed_cases += 1
+
+            payload.append(
+                (
+                    str(decision.image_path),
+                    decision.annotation_path,
+                    str(next_patient_id),
+                    decision.status,
+                    decision.comments,
+                    decision.input_signature,
+                )
+            )
+            next_patient_id += 1
+        return IngestionScanSummary(
+            payload=payload,
+            scanned_cases=scanned_cases,
+            stale_updates=stale_updates,
+            failed_cases=failed_cases,
+            signature_scan_elapsed=time.perf_counter() - signature_scan_started_at,
+        )
+
+    def _load_existing_case_index(self, connection: sqlite3.Connection) -> ExistingCaseIndex:
+        rows = connection.execute(
+            f"SELECT ID, IMAGEPATH, PATIENT, INPUT_SIGNATURE FROM {self.table_name}"
+        ).fetchall()
+        by_basename = {Path(str(row["IMAGEPATH"])).name: row for row in rows}
+        existing_patients = {
+            int(str(row["PATIENT"])) for row in rows if str(row["PATIENT"]).isdigit()
+        }
+        next_patient_id = max(existing_patients) + 1 if existing_patients else 100001
+        return ExistingCaseIndex(
+            rows=rows,
+            by_basename=by_basename,
+            next_patient_id=next_patient_id,
+        )
+
+    def _build_ingestion_decision(
+        self,
+        *,
+        image_path: Path,
+        annotation_lookup: dict[str, str],
+        run_geojson_check: bool,
+        geojson_path: Path | None,
+        geojson_lookup: GeoJsonLookup | None,
+        existing_row: sqlite3.Row | None,
+    ) -> IngestionDecision:
+        annotation_path = annotation_lookup.get(image_path.stem)
+        input_signature = self._build_input_signature(
+            image_path,
+            Path(annotation_path) if annotation_path is not None else None,
+        )
+        stale_row_id = self._stale_row_id(existing_row, input_signature)
+        if stale_row_id is not None:
+            return IngestionDecision(
+                image_path=image_path,
+                annotation_path=annotation_path,
+                input_signature=input_signature,
+                status="STALE",
+                comments=self._stale_comment(),
+                stale_row_id=stale_row_id,
+            )
+        if existing_row is not None:
+            return IngestionDecision(
+                image_path=image_path,
+                annotation_path=annotation_path,
+                input_signature=input_signature,
+                status="EXISTING",
+                comments="",
+            )
+        status, comments = self._resolve_new_case_state(
+            image_path=image_path,
+            annotation_path=annotation_path,
+            run_geojson_check=run_geojson_check,
+            geojson_path=geojson_path,
+            geojson_lookup=geojson_lookup,
+        )
+        return IngestionDecision(
+            image_path=image_path,
+            annotation_path=annotation_path,
+            input_signature=input_signature,
+            status=status,
+            comments=comments,
+        )
+
+    def _stale_row_id(self, existing_row: sqlite3.Row | None, input_signature: str) -> int | None:
+        if existing_row is None:
+            return None
+        previous_signature = str(existing_row["INPUT_SIGNATURE"] or "")
+        if previous_signature and previous_signature != input_signature:
+            return int(existing_row["ID"])
+        return None
+
+    def _mark_case_stale(
+        self,
+        connection: sqlite3.Connection,
+        row_id: int,
+        input_signature: str,
+    ) -> None:
+        connection.execute(
+            f"""
+            UPDATE {self.table_name}
+            SET STATUS = 'STALE',
+                COMMENTS = ?,
+                INPUT_SIGNATURE = ?,
+                LastUpdate = CURRENT_TIMESTAMP
+            WHERE ID = ?
+            """,
+            (self._stale_comment(), input_signature, row_id),
+        )
+
+    def _stale_comment(self) -> str:
+        return (
+            "Input files changed for an existing case. "
+            "Clear stale patch outputs and reprocess this slide."
+        )
+
+    def _resolve_new_case_state(
+        self,
+        *,
+        image_path: Path,
+        annotation_path: str | None,
+        run_geojson_check: bool,
+        geojson_path: Path | None,
+        geojson_lookup: GeoJsonLookup | None,
+    ) -> tuple[str, str]:
+        if annotation_path is None:
+            return "FAILED", "The equivalent annotation file could not be found."
+        if not run_geojson_check:
+            return "TO BE PROCESSED", ""
+        assert geojson_path is not None
+        try:
+            resolved_geojson = resolve_geojson_for_slide(
+                geojson_path,
+                image_path,
+                lookup=geojson_lookup,
+            )
+        except ValueError as error:
+            return "FAILED", f"GeoJSON Sanity Check Failed: {error}"
+        if resolved_geojson is None:
+            return (
+                "FAILED",
+                "GeoJSON Sanity Check Failed: The equivalent GeoJSON file was not found.",
+            )
+        return "TO BE PROCESSED", ""
 
     def list_pending_cases(self) -> list[ExtractionCaseRecord]:
         """Return all cases still waiting for processing, ordered deterministically."""

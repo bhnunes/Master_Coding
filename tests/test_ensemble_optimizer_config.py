@@ -4,6 +4,14 @@ import pytest
 
 from helpers.ensemble_optimizer.config import load_ensemble_optimizer_config
 
+ENSEMBLE_SEED = 17
+ENSEMBLE_BATCH_SIZE = 12
+ENSEMBLE_WORKERS = 3
+VALIDATION_CALIBRATION_FRACTION = 0.25
+VALIDATION_HOLDOUT_FRACTION = 0.3
+SEMANTIC_TRIALS = 11
+SPATIAL_TRIALS = 13
+
 
 def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Path) -> None:
     config = load_ensemble_optimizer_config(
@@ -35,18 +43,18 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.output_dir == tmp_path / "reports"
     assert config.local_data_dir == tmp_path / "cache"
     assert config.pred_cache_dir == tmp_path / "pred_cache"
-    assert config.seed == 17
-    assert config.batch_size == 12
-    assert config.workers == 3
+    assert config.seed == ENSEMBLE_SEED
+    assert config.batch_size == ENSEMBLE_BATCH_SIZE
+    assert config.workers == ENSEMBLE_WORKERS
     assert config.sort_metric == "best_validation_DICE"
     assert config.stage_input_locally is False
     assert config.overwrite_output is False
-    assert config.val_calibration_frac == 0.25
-    assert config.val_holdout_frac == 0.3
+    assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
+    assert config.val_holdout_frac == VALIDATION_HOLDOUT_FRACTION
     assert config.semantic_architectures == ("SWIN", "SEGFORMER")
     assert config.spatial_architectures == ("FPN", "MANET")
-    assert config.num_trials_semantic == 11
-    assert config.num_trials_spatial == 13
+    assert config.num_trials_semantic == SEMANTIC_TRIALS
+    assert config.num_trials_spatial == SPATIAL_TRIALS
     assert config.log_path == Path("logs/ensemble_optimizer.log")
 
 
@@ -66,7 +74,7 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.semantic_architectures == ("SWIN", "DPT", "SEGFORMER", "UPERNET")
     assert config.spatial_architectures == ("DEEPLABV3PLUS", "UNET++", "FPN", "MANET")
     assert config.sort_metric == "best_val_auprc_pixel_score"
-    assert config.val_calibration_frac == 0.25
+    assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
 
 

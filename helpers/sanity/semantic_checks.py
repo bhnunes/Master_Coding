@@ -1,12 +1,55 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 from tqdm import tqdm
 
 from helpers.sanity.disk_checks import IndexedInspection, inspect_hdf5_row
 from helpers.sanity.models import CheckResult
+
+
+def _load_mask_positive_flag(
+    record: dict[str, object],
+    *,
+    base_dir: Path,
+    row_inspections: dict[int, IndexedInspection] | None,
+) -> bool | None:
+    if row_inspections is not None:
+        inspection = row_inspections[cast(int, record["index"])].inspection
+    else:
+        inspection = inspect_hdf5_row(
+            str(base_dir / str(record["relative_hdf5_path"])),
+            cast(int, record["hdf5_row_index"]),
+        )
+    return inspection["mask_has_positive_pixels"]
+
+
+def _build_mask_semantics_result(
+    *,
+    positive_not_cancer: list[str],
+    empty_cancer: list[str],
+    fail_on_empty_cancer_mask: bool,
+    fail_on_positive_not_cancer_mask: bool,
+) -> CheckResult:
+    failures: list[str] = []
+    if fail_on_positive_not_cancer_mask and positive_not_cancer:
+        failures.append(f"NOT_CANCER masks contain positive pixels: {positive_not_cancer[:10]}")
+    if fail_on_empty_cancer_mask and empty_cancer:
+        failures.append(f"CANCER masks are empty: {empty_cancer[:10]}")
+    if failures:
+        return CheckResult("FAIL", "; ".join(failures))
+
+    warnings: list[str] = []
+    if positive_not_cancer:
+        warnings.append(f"NOT_CANCER masks contain positive pixels: {positive_not_cancer[:10]}")
+    if empty_cancer:
+        warnings.append(f"CANCER masks are empty: {empty_cancer[:10]}")
+    if warnings:
+        return CheckResult("WARN", "; ".join(warnings))
+
+    return CheckResult("PASS", "Mask contents are semantically consistent with split labels.")
 
 
 def check_mask_label_semantics(
@@ -29,34 +72,23 @@ def check_mask_label_semantics(
         desc=f"{split}: mask semantics",
         leave=False,
     ):
-        if row_inspections is not None:
-            inspection = row_inspections[int(record["index"])].inspection
-        else:
-            inspection = inspect_hdf5_row(
-                str(base_dir / str(record["relative_hdf5_path"])), int(record["hdf5_row_index"])
-            )
-        has_positive_pixels = inspection["mask_has_positive_pixels"]
+        has_positive_pixels = _load_mask_positive_flag(
+            record,
+            base_dir=base_dir,
+            row_inspections=row_inspections,
+        )
         if has_positive_pixels is None:
             return CheckResult("FAIL", f"Unreadable mask encountered for {record['filename']}.")
         if int(record["label"]) == 0 and has_positive_pixels:
             positive_not_cancer.append(str(record["filename"]))
         if int(record["label"]) == 1 and not has_positive_pixels:
             empty_cancer.append(str(record["filename"]))
-    failures: list[str] = []
-    if fail_on_positive_not_cancer_mask and positive_not_cancer:
-        failures.append(f"NOT_CANCER masks contain positive pixels: {positive_not_cancer[:10]}")
-    if fail_on_empty_cancer_mask and empty_cancer:
-        failures.append(f"CANCER masks are empty: {empty_cancer[:10]}")
-    if failures:
-        return CheckResult("FAIL", "; ".join(failures))
-    warnings: list[str] = []
-    if positive_not_cancer:
-        warnings.append(f"NOT_CANCER masks contain positive pixels: {positive_not_cancer[:10]}")
-    if empty_cancer:
-        warnings.append(f"CANCER masks are empty: {empty_cancer[:10]}")
-    if warnings:
-        return CheckResult("WARN", "; ".join(warnings))
-    return CheckResult("PASS", "Mask contents are semantically consistent with split labels.")
+    return _build_mask_semantics_result(
+        positive_not_cancer=positive_not_cancer,
+        empty_cancer=empty_cancer,
+        fail_on_empty_cancer_mask=fail_on_empty_cancer_mask,
+        fail_on_positive_not_cancer_mask=fail_on_positive_not_cancer_mask,
+    )
 
 
 def check_class_balance_visibility(manifest_split: pd.DataFrame) -> CheckResult:

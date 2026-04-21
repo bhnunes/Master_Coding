@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
+MIN_CURVE_POINTS = 5
+
 
 @dataclass(frozen=True)
 class CurveStats:
@@ -12,7 +14,10 @@ class CurveStats:
     min_loss_lr: float
 
 
-def moving_average(values: npt.NDArray[np.float64], window: int = 5) -> npt.NDArray[np.float64]:
+def moving_average(
+    values: npt.NDArray[np.float64],
+    window: int = MIN_CURVE_POINTS,
+) -> npt.NDArray[np.float64]:
     if len(values) < window:
         return values.copy()
     kernel = np.ones(window, dtype=np.float64) / window
@@ -37,10 +42,10 @@ def compute_curve_stats(
     finite_mask = np.isfinite(trimmed_lrs) & np.isfinite(trimmed_losses) & (trimmed_lrs > 0)
     trimmed_lrs = trimmed_lrs[finite_mask]
     trimmed_losses = trimmed_losses[finite_mask]
-    if len(trimmed_lrs) < 5:
+    if len(trimmed_lrs) < MIN_CURVE_POINTS:
         return CurveStats(min_loss=float("inf"), min_loss_lr=0.0)
 
-    smooth_losses = moving_average(trimmed_losses, window=5)
+    smooth_losses = moving_average(trimmed_losses, window=MIN_CURVE_POINTS)
     minimum_index = int(np.argmin(smooth_losses))
     return CurveStats(
         min_loss=float(smooth_losses[minimum_index]),

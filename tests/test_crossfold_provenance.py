@@ -6,6 +6,7 @@ import pandas as pd
 from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold.provenance import (
+    ManifestWriteConfig,
     build_hdf5_manifest_from_split_dfs,
     build_split_stats_dataframe,
     write_manifest_and_log_stats,
@@ -110,15 +111,17 @@ def test_write_manifest_and_log_stats_writes_expected_artifacts(tmp_path: Path) 
         handle.create_dataset("filenames", data=[b"PATIENT_1_PATCH_001.png"])
 
     write_manifest_and_log_stats(
-        output_dir=tmp_path,
-        run_id="run-1",
-        normalization_method="NOT_NORMALIZED",
-        is_normalized=False,
-        source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
-        split_data=split_data,
-        manifest_df=manifest_df,
-        calc_checksums=False,
-        extra={"note": "ok"},
+        ManifestWriteConfig(
+            output_dir=tmp_path,
+            run_id="run-1",
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
+            source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=False,
+            extra={"note": "ok"},
+        )
     )
 
     assert (tmp_path / "manifest.csv").is_file()
@@ -144,15 +147,17 @@ def test_run_config_json_uses_safe_json_encoding(tmp_path: Path) -> None:
         handle.create_dataset("filenames", data=[b"PATIENT_1_PATCH_001.png"])
 
     write_manifest_and_log_stats(
-        output_dir=tmp_path,
-        run_id="run-1",
-        normalization_method="NOT_NORMALIZED",
-        is_normalized=False,
-        source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
-        split_data=split_data,
-        manifest_df=manifest_df,
-        calc_checksums=False,
-        extra={"value": 1},
+        ManifestWriteConfig(
+            output_dir=tmp_path,
+            run_id="run-1",
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
+            source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=False,
+            extra={"value": 1},
+        )
     )
 
     payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
@@ -179,15 +184,17 @@ def test_write_manifest_and_log_stats_records_stage4_cleaning_lineage(tmp_path: 
         handle.attrs["stage4_cleaning_manifest_sha256"] = "abc123"
 
     write_manifest_and_log_stats(
-        output_dir=tmp_path,
-        run_id="run-1",
-        normalization_method="NOT_NORMALIZED",
-        is_normalized=False,
-        source_hdf5_path=source_path,
-        split_data=split_data,
-        manifest_df=manifest_df,
-        calc_checksums=False,
-        extra={"value": 1},
+        ManifestWriteConfig(
+            output_dir=tmp_path,
+            run_id="run-1",
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
+            source_hdf5_path=source_path,
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=False,
+            extra={"value": 1},
+        )
     )
 
     payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))
@@ -212,14 +219,16 @@ def test_write_manifest_and_log_stats_rejects_checksum_mode_for_hdf5_manifests(
 
     try:
         write_manifest_and_log_stats(
-            output_dir=tmp_path,
-            run_id="run-1",
-            normalization_method="NOT_NORMALIZED",
-            is_normalized=False,
-            source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
-            split_data=split_data,
-            manifest_df=manifest_df,
-            calc_checksums=True,
+            ManifestWriteConfig(
+                output_dir=tmp_path,
+                run_id="run-1",
+                normalization_method="NOT_NORMALIZED",
+                is_normalized=False,
+                source_hdf5_path=tmp_path / "SOURCE_DATASET.h5",
+                split_data=split_data,
+                manifest_df=manifest_df,
+                calc_checksums=True,
+            )
         )
     except ValueError as error:
         assert "HDF5-native" in str(error)
@@ -254,15 +263,17 @@ def test_write_manifest_and_log_stats_reuses_cached_source_provenance(
 
     cached_provenance = {"path": str(source_path), "sha256": "cached-hash", "attrs": {}}
     write_manifest_and_log_stats(
-        output_dir=tmp_path,
-        run_id="run-1",
-        normalization_method="NOT_NORMALIZED",
-        is_normalized=False,
-        source_hdf5_path=source_path,
-        split_data=split_data,
-        manifest_df=manifest_df,
-        calc_checksums=False,
-        source_hdf5_provenance=cached_provenance,
+        ManifestWriteConfig(
+            output_dir=tmp_path,
+            run_id="run-1",
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
+            source_hdf5_path=source_path,
+            split_data=split_data,
+            manifest_df=manifest_df,
+            calc_checksums=False,
+            source_hdf5_provenance=cached_provenance,
+        )
     )
 
     payload = json.loads((tmp_path / "run_config.json").read_text(encoding="utf-8"))

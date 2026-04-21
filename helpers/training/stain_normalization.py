@@ -26,6 +26,7 @@ _RUIFROK_HE_STAIN_MATRIX = torch.tensor(
     dtype=torch.float32,
 )
 _EPSILON = 1e-6
+MATRIX_TENSOR_NDIM = 2
 
 
 class ImageStainNormalizer(Protocol):
@@ -261,20 +262,22 @@ def _coerce_tensor(
     if key not in state:
         raise ValueError(f"Normalization state is missing required key: {key}")
     tensor = torch.as_tensor(state[key], dtype=torch.float32, device=device)
-    if key in {"target_means", "target_stds"}:
+
+    def _expand_if_needed(expected_ndim: int, *, add_batch_dim: bool = False) -> torch.Tensor:
         if tensor.ndim == 1:
             return tensor.view(1, -1, 1, 1)
-        if tensor.ndim == 2:
-            return tensor.unsqueeze(-1).unsqueeze(-1)
-        return tensor
+        if tensor.ndim != expected_ndim:
+            return tensor
+        if add_batch_dim:
+            return tensor.unsqueeze(0)
+        return tensor.unsqueeze(-1).unsqueeze(-1)
+
+    if key in {"target_means", "target_stds"}:
+        return _expand_if_needed(MATRIX_TENSOR_NDIM)
     if key == "stain_matrix_target":
-        if tensor.ndim == 2:
-            return tensor.unsqueeze(0)
-        return tensor
+        return _expand_if_needed(MATRIX_TENSOR_NDIM, add_batch_dim=True)
     if key == "maxC_target":
-        if tensor.ndim == 1:
-            return tensor.unsqueeze(0)
-        return tensor
+        return tensor.unsqueeze(0) if tensor.ndim == 1 else tensor
     return tensor
 
 

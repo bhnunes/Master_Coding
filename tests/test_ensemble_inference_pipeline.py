@@ -12,6 +12,9 @@ from helpers.ensemble_inference.pipeline import (
     run_ensemble_inference_pipeline,
 )
 
+PIPELINE_BATCH_SIZE = 8
+PIPELINE_VISUALIZATION_SAMPLES = 3
+
 
 def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> None:
     config = EnsembleInferenceConfig(
@@ -21,10 +24,10 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
         local_data_dir=tmp_path / "cache",
         stage_input_locally=False,
         overwrite_output=True,
-        batch_size=8,
+        batch_size=PIPELINE_BATCH_SIZE,
         workers=1,
         seed=24,
-        visualization_samples=3,
+        visualization_samples=PIPELINE_VISUALIZATION_SAMPLES,
         export_csv=True,
         export_latex=True,
         export_visualizations=True,
@@ -52,8 +55,8 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
     outputs = run_ensemble_inference_pipeline(config, pipeline_runner=fake_runner)
 
     payload = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
-    assert payload["batch_size"] == 8
-    assert payload["visualization_samples"] == 3
+    assert payload["batch_size"] == PIPELINE_BATCH_SIZE
+    assert payload["visualization_samples"] == PIPELINE_VISUALIZATION_SAMPLES
     assert "runtime_environment" in payload
     assert "git_commit" in payload["runtime_environment"]
     assert outputs.recipe_copy_path.name == "recipe.json"
@@ -93,7 +96,7 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
         local_data_dir=tmp_path / "cache",
         stage_input_locally=False,
         overwrite_output=True,
-        batch_size=8,
+        batch_size=PIPELINE_BATCH_SIZE,
         workers=1,
         seed=24,
         visualization_samples=0,
@@ -178,7 +181,7 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
         local_data_dir=tmp_path / "cache",
         stage_input_locally=False,
         overwrite_output=True,
-        batch_size=8,
+        batch_size=PIPELINE_BATCH_SIZE,
         workers=1,
         seed=24,
         visualization_samples=0,

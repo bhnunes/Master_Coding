@@ -12,6 +12,16 @@ import torch
 
 from helpers.ensemble_optimizer import data as optimizer_data
 
+PATCH_SIDE = 4
+RGB_CHANNELS = 3
+EXPECTED_ROW_COUNT = 4
+EXPECTED_SHARD_COUNT = 2
+FILTERED_PATIENT_SAMPLE_COUNT = 2
+FIRST_IMAGE_PIXEL = 10
+SECOND_IMAGE_PIXEL = 20
+THIRD_IMAGE_PIXEL = 30
+VALIDATION_BATCH_SIZE = 2
+
 
 def _write_stage2_shard(
     shard_path: Path,
@@ -26,12 +36,17 @@ def _write_stage2_shard(
         handle.create_dataset(
             "images",
             data=np.stack(
-                [np.full((4, 4, 3), pixel_value, dtype=np.uint8) for pixel_value in pixel_values]
+                [
+                    np.full((PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS), pixel_value, dtype=np.uint8)
+                    for pixel_value in pixel_values
+                ]
             ),
         )
         handle.create_dataset(
             "masks",
-            data=np.stack([np.full((4, 4), label, dtype=np.uint8) for label in labels]),
+            data=np.stack(
+                [np.full((PATCH_SIDE, PATCH_SIDE), label, dtype=np.uint8) for label in labels]
+            ),
         )
         handle.create_dataset("labels", data=np.asarray(labels, dtype=np.uint8))
         handle.create_dataset(
@@ -186,7 +201,7 @@ def test_setup_validation_data_returns_layout_without_local_staging(
 
     assert layout.master_manifest_path == master_manifest_path
     assert layout.local_cache_dir is None
-    assert len(layout.records) == 4
+    assert len(layout.records) == EXPECTED_ROW_COUNT
 
 
 def test_setup_validation_data_prepares_local_cache_when_enabled(
@@ -217,8 +232,8 @@ def test_collect_validation_provenance_reports_manifest_metadata(
     provenance = optimizer_data.collect_validation_provenance(layout)
 
     assert provenance["master_manifest_path"] == str(master_manifest_path)
-    assert provenance["row_count"] == 4
-    assert provenance["shard_count"] == 2
+    assert provenance["row_count"] == EXPECTED_ROW_COUNT
+    assert provenance["shard_count"] == EXPECTED_SHARD_COUNT
 
 
 def test_validation_dataset_builds_two_channel_mask(
@@ -252,7 +267,7 @@ def test_validation_dataset_can_filter_to_allowed_patients(
 
     dataset = optimizer_data.ValidationDataset(layout, allowed_patients={"2"})
 
-    assert len(dataset) == 2
+    assert len(dataset) == FILTERED_PATIENT_SAMPLE_COUNT
     _image, _mask, patient_id = cast(tuple[torch.Tensor, torch.Tensor, str], dataset[0])
     assert patient_id == "2"
 
@@ -278,9 +293,9 @@ def test_validation_dataset_reads_canonical_rows_in_manifest_order(
         tuple[torch.Tensor, torch.Tensor, str], dataset[2]
     )
 
-    assert int(first_image[0, 0, 0]) == 10
-    assert int(second_image[0, 0, 0]) == 20
-    assert int(third_image[0, 0, 0]) == 30
+    assert int(first_image[0, 0, 0]) == FIRST_IMAGE_PIXEL
+    assert int(second_image[0, 0, 0]) == SECOND_IMAGE_PIXEL
+    assert int(third_image[0, 0, 0]) == THIRD_IMAGE_PIXEL
     assert first_patient_id == "1"
     assert second_patient_id == "1"
     assert third_patient_id == "2"
@@ -381,7 +396,11 @@ def test_create_validation_dataloader_uses_expected_collate_and_worker_init(
         stage_input_locally=False,
     )
 
-    dataloader = optimizer_data.create_validation_dataloader(layout, batch_size=2, workers=0)
+    dataloader = optimizer_data.create_validation_dataloader(
+        layout,
+        batch_size=VALIDATION_BATCH_SIZE,
+        workers=0,
+    )
 
     assert dataloader.collate_fn is optimizer_data.collate_validation_batch
     assert dataloader.worker_init_fn is optimizer_data.worker_init_fn  # type: ignore[attr-defined]

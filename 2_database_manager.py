@@ -12,20 +12,27 @@ from tqdm import tqdm
 
 from helpers.extraction.artifact_lookup import (
     GeoJsonLookup,
+    ProcessingSignatureConfig,
     build_processing_signature,
     resolve_geojson_for_slide,
 )
 from helpers.extraction.config import DatabaseManagerConfig, load_database_manager_config
 from helpers.extraction.image_reader_service import (
     SlideProcessingRequest,
+    SlideProcessingResult,
     SlideRuntimeSettings,
     load_slide_runtime_settings,
     run_slide_processing,
 )
-from helpers.extraction.master_manifest import MasterManifest
-from helpers.extraction.repository import CaseUpdate, ExtractionCaseRecord, ExtractionRepository
+from helpers.extraction.master_manifest import MasterManifest, Stage2SlideRows
+from helpers.extraction.repository import (
+    CaseUpdate,
+    ExtractionCaseRecord,
+    ExtractionRepository,
+    IngestionOptions,
+)
 from helpers.extraction.staging import stage_wsi_locally
-from helpers.logging_utils import configure_root_logger
+from helpers.logging_utils import LoggerSettings, configure_root_logger
 
 
 class Style:
@@ -141,16 +148,18 @@ def build_processing_signature_for_case(
     if case.annotation_path is None:
         raise ValueError(f"Case {case.record_id} is missing an annotation path.")
     return build_processing_signature(
-        image_path=case.image_path,
-        annotation_path=case.annotation_path,
-        artifacts_geojson_path=artifacts_geojson_path,
-        window_size=config.window_size,
-        stride=config.stride,
-        match_percentage=config.match_percentage,
-        tissue_percentage=config.tissue_percentage,
-        target_level=runtime_settings.target_level,
-        use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
-        hiseg_xml_coord_level=config.hiseg_xml_coord_level,
+        ProcessingSignatureConfig(
+            image_path=case.image_path,
+            annotation_path=case.annotation_path,
+            artifacts_geojson_path=artifacts_geojson_path,
+            window_size=config.window_size,
+            stride=config.stride,
+            match_percentage=config.match_percentage,
+            tissue_percentage=config.tissue_percentage,
+            target_level=runtime_settings.target_level,
+            use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
+            hiseg_xml_coord_level=config.hiseg_xml_coord_level,
+        )
     )
 
 
@@ -188,21 +197,200 @@ def build_slide_request(
     )
 
 
+def _configure_stage2_logger(config: DatabaseManagerConfig) -> logging.Logger:
+    logger = configure_root_logger(
+        config.log_path,
+        settings=LoggerSettings(
+            logger_level=logging.INFO,
+            file_level=logging.INFO,
+            console_level=logging.INFO,
+            file_mode="a",
+            file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
+            console_pattern="%(message)s",
+        ),
+    )
+    logger.info("Stage 2 log file: %s", config.log_path)
+    return logger
+
+
+def _build_geojson_lookup(config: DatabaseManagerConfig) -> GeoJsonLookup | None:
+    if config.geojson_path is None:
+        return None
+    if not (config.use_advanced_artifact_filtering or config.activate_sanity_check_geojson):
+        return None
+    return GeoJsonLookup.from_directory(config.geojson_path)
+
+
+def _raise_for_stale_inputs(repository: ExtractionRepository) -> None:
+    stale_cases = repository.list_stale_cases()
+    if not stale_cases:
+        return
+
+    stale_names = ", ".join(case.image_path.name for case in stale_cases[:5])
+    raise ValueError(
+        "Stage 2 detected stale extraction inputs for existing cases. "
+        "Clear stale extraction outputs and reprocess before continuing. "
+        f"Examples: {stale_names}"
+    )
+
+
+def _raise_for_stale_processed_cases(
+    repository: ExtractionRepository,
+    config: DatabaseManagerConfig,
+    runtime_settings: SlideRuntimeSettings,
+    *,
+    geojson_lookup: GeoJsonLookup | None,
+) -> None:
+    stale_processed_cases: list[str] = []
+    for case in repository.list_completed_cases():
+        if case.annotation_path is None or case.processing_signature is None:
+            continue
+
+        artifacts_geojson_path = resolve_artifacts_geojson(
+            case,
+            config,
+            geojson_lookup=geojson_lookup,
+        )
+        expected_processing_signature = build_processing_signature_for_case(
+            case,
+            config,
+            runtime_settings,
+            artifacts_geojson_path=artifacts_geojson_path,
+        )
+        if expected_processing_signature != case.processing_signature:
+            stale_processed_cases.append(case.image_path.name)
+
+    if not stale_processed_cases:
+        return
+
+    examples = ", ".join(stale_processed_cases[:5])
+    raise ValueError(
+        "Stage 2 detected completed slides whose processing inputs or settings changed. "
+        "Clear stale extraction outputs and reprocess before continuing. "
+        f"Examples: {examples}"
+    )
+
+
+def _process_pending_case(
+    case: ExtractionCaseRecord,
+    *,
+    config: DatabaseManagerConfig,
+    repository: ExtractionRepository,
+    runtime_settings: SlideRuntimeSettings,
+    geojson_lookup: GeoJsonLookup | None,
+    master_manifest: MasterManifest,
+) -> SlideProcessingResult:
+    repository.mark_processing(case.record_id)
+    started_at = time.perf_counter()
+    artifacts_geojson_path = resolve_artifacts_geojson(
+        case,
+        config,
+        geojson_lookup=geojson_lookup,
+    )
+    processing_signature = build_processing_signature_for_case(
+        case,
+        config,
+        runtime_settings,
+        artifacts_geojson_path=artifacts_geojson_path,
+    )
+    slide_request = build_slide_request(
+        case,
+        config,
+        runtime_settings,
+        artifacts_geojson_path=artifacts_geojson_path,
+    )
+    with stage_wsi_locally(
+        source_path=case.image_path,
+        cache_dir=(config.local_slide_cache_dir if config.copy_wsi_to_local_cache else None),
+        patient_id=case.patient,
+    ) as staged_image_path:
+        result = run_slide_processing(
+            build_slide_request(
+                case,
+                config,
+                runtime_settings,
+                image_path=staged_image_path,
+                artifacts_geojson_path=artifacts_geojson_path,
+            )
+        )
+    if slide_request.hdf5_output_path is not None:
+        master_manifest.replace_stage2_slide_rows(
+            Stage2SlideRows(
+                source_hdf5_path=slide_request.hdf5_output_path,
+                records=result.artifact_patch_records,
+                source_slide_path=case.image_path,
+                annotation_path=case.annotation_path,
+                artifacts_geojson_path=artifacts_geojson_path,
+                stage2_case_record_id=case.record_id,
+                stage2_processing_signature=processing_signature,
+                stage2_status=result.status,
+            )
+        )
+    elapsed_minutes = (time.perf_counter() - started_at) / 60
+    repository.update_case(
+        case.record_id,
+        CaseUpdate(
+            cancer_qtd=result.cancer_patches_created,
+            non_cancer_qtd=result.not_cancer_patches_created,
+            exec_time_minutes=elapsed_minutes,
+            comments=result.comments[-240:],
+            status=result.status,
+            window_size=config.window_size,
+            stride=config.stride,
+            match_percentage=config.match_percentage,
+            tissue_percentage=config.tissue_percentage,
+            processing_signature=processing_signature,
+        ),
+    )
+    return result
+
+
+def _run_pending_processing(
+    cases_to_process: list[ExtractionCaseRecord],
+    *,
+    logger: logging.Logger,
+    config: DatabaseManagerConfig,
+    repository: ExtractionRepository,
+    runtime_settings: SlideRuntimeSettings,
+    geojson_lookup: GeoJsonLookup | None,
+    master_manifest: MasterManifest,
+) -> None:
+    print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.ROCKET} STARTING PROCESSING ---{Style.RESET}")
+    with suppress_console_logging(logger):
+        with tqdm(
+            total=len(cases_to_process), desc=f"{Style.CYAN}Processing WSI slides{Style.RESET}"
+        ) as progress_bar:
+            for case in cases_to_process:
+                progress_bar.set_description(
+                    f"Processing: {Style.CYAN}{case.image_path.name}{Style.RESET}"
+                )
+                if case.annotation_path is None:
+                    progress_bar.update(1)
+                    continue
+
+                result = _process_pending_case(
+                    case,
+                    config=config,
+                    repository=repository,
+                    runtime_settings=runtime_settings,
+                    geojson_lookup=geojson_lookup,
+                    master_manifest=master_manifest,
+                )
+                progress_bar.update(1)
+                progress_bar.set_postfix(
+                    cancer=result.cancer_patches_created,
+                    non_cancer=result.not_cancer_patches_created,
+                    artifact_rows=len(result.artifact_patch_records),
+                    status=result.status,
+                )
+
+
 def main_process() -> None:
     """Main orchestration function."""
 
     load_dotenv(override=True)
     config = load_database_manager_config(os.environ)
-    logger = configure_root_logger(
-        config.log_path,
-        logger_level=logging.INFO,
-        file_level=logging.INFO,
-        console_level=logging.INFO,
-        file_mode="a",
-        file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
-        console_pattern="%(message)s",
-    )
-    logger.info("Stage 2 log file: %s", config.log_path)
+    logger = _configure_stage2_logger(config)
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
     master_manifest = MasterManifest(config.master_manifest_path)
     master_manifest.initialize()
@@ -222,141 +410,40 @@ def main_process() -> None:
         logger.info("Starting Stage 2 ingestion for tag=%s", config.tag)
         print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.CHECK} INGESTION PROCESS ---{Style.RESET}")
         repository.ingest_new_cases(
-            source_folder=config.source_folder,
-            activate_sanity_check=config.activate_sanity_check_geojson,
-            use_advanced_filtering=config.use_advanced_artifact_filtering,
-            geojson_path=config.geojson_path,
+            IngestionOptions(
+                source_folder=config.source_folder,
+                activate_sanity_check=config.activate_sanity_check_geojson,
+                use_advanced_filtering=config.use_advanced_artifact_filtering,
+                geojson_path=config.geojson_path,
+            )
         )
         print_ingestion_summary()
         return
 
     runtime_settings = load_slide_runtime_settings(os.environ)
-    geojson_lookup = (
-        GeoJsonLookup.from_directory(config.geojson_path)
-        if config.geojson_path is not None
-        and (config.use_advanced_artifact_filtering or config.activate_sanity_check_geojson)
-        else None
-    )
+    geojson_lookup = _build_geojson_lookup(config)
     logger.info("Starting Stage 2 processing for tag=%s", config.tag)
-    stale_cases = repository.list_stale_cases()
-    if stale_cases:
-        stale_names = ", ".join(case.image_path.name for case in stale_cases[:5])
-        raise ValueError(
-            "Stage 2 detected stale extraction inputs for existing cases. "
-            "Clear stale extraction outputs and reprocess before continuing. "
-            f"Examples: {stale_names}"
-        )
-    stale_processed_cases = []
-    for case in repository.list_completed_cases():
-        if case.annotation_path is None or case.processing_signature is None:
-            continue
-        artifacts_geojson_path = resolve_artifacts_geojson(
-            case,
-            config,
-            geojson_lookup=geojson_lookup,
-        )
-        expected_processing_signature = build_processing_signature_for_case(
-            case,
-            config,
-            runtime_settings,
-            artifacts_geojson_path=artifacts_geojson_path,
-        )
-        if expected_processing_signature != case.processing_signature:
-            stale_processed_cases.append(case.image_path.name)
-    if stale_processed_cases:
-        examples = ", ".join(stale_processed_cases[:5])
-        raise ValueError(
-            "Stage 2 detected completed slides whose processing inputs or settings changed. "
-            "Clear stale extraction outputs and reprocess before continuing. "
-            f"Examples: {examples}"
-        )
+    _raise_for_stale_inputs(repository)
+    _raise_for_stale_processed_cases(
+        repository,
+        config,
+        runtime_settings,
+        geojson_lookup=geojson_lookup,
+    )
     cases_to_process = repository.list_pending_cases()
     if not cases_to_process:
         print(f"\n{Style.INFO} No cases to process with status 'TO BE PROCESSED'.")
         return
 
-    print(f"\n{Style.BLUE}{Style.BOLD}--- {Style.ROCKET} STARTING PROCESSING ---{Style.RESET}")
-    with suppress_console_logging(logger):
-        with tqdm(
-            total=len(cases_to_process), desc=f"{Style.CYAN}Processing WSI slides{Style.RESET}"
-        ) as progress_bar:
-            for case in cases_to_process:
-                progress_bar.set_description(
-                    f"Processing: {Style.CYAN}{case.image_path.name}{Style.RESET}"
-                )
-                if case.annotation_path is None:
-                    progress_bar.update(1)
-                    continue
-
-                repository.mark_processing(case.record_id)
-                started_at = time.perf_counter()
-                artifacts_geojson_path = resolve_artifacts_geojson(
-                    case,
-                    config,
-                    geojson_lookup=geojson_lookup,
-                )
-                processing_signature = build_processing_signature_for_case(
-                    case,
-                    config,
-                    runtime_settings,
-                    artifacts_geojson_path=artifacts_geojson_path,
-                )
-                slide_request = build_slide_request(
-                    case,
-                    config,
-                    runtime_settings,
-                    artifacts_geojson_path=artifacts_geojson_path,
-                )
-                with stage_wsi_locally(
-                    source_path=case.image_path,
-                    cache_dir=(
-                        config.local_slide_cache_dir if config.copy_wsi_to_local_cache else None
-                    ),
-                    patient_id=case.patient,
-                ) as staged_image_path:
-                    result = run_slide_processing(
-                        build_slide_request(
-                            case,
-                            config,
-                            runtime_settings,
-                            image_path=staged_image_path,
-                            artifacts_geojson_path=artifacts_geojson_path,
-                        )
-                    )
-                if slide_request.hdf5_output_path is not None:
-                    master_manifest.replace_stage2_slide_rows(
-                        source_hdf5_path=slide_request.hdf5_output_path,
-                        records=result.artifact_patch_records,
-                        source_slide_path=case.image_path,
-                        annotation_path=case.annotation_path,
-                        artifacts_geojson_path=artifacts_geojson_path,
-                        stage2_case_record_id=case.record_id,
-                        stage2_processing_signature=processing_signature,
-                        stage2_status=result.status,
-                    )
-                elapsed_minutes = (time.perf_counter() - started_at) / 60
-                repository.update_case(
-                    case.record_id,
-                    CaseUpdate(
-                        cancer_qtd=result.cancer_patches_created,
-                        non_cancer_qtd=result.not_cancer_patches_created,
-                        exec_time_minutes=elapsed_minutes,
-                        comments=result.comments[-240:],
-                        status=result.status,
-                        window_size=config.window_size,
-                        stride=config.stride,
-                        match_percentage=config.match_percentage,
-                        tissue_percentage=config.tissue_percentage,
-                        processing_signature=processing_signature,
-                    ),
-                )
-                progress_bar.update(1)
-                progress_bar.set_postfix(
-                    cancer=result.cancer_patches_created,
-                    non_cancer=result.not_cancer_patches_created,
-                    artifact_rows=len(result.artifact_patch_records),
-                    status=result.status,
-                )
+    _run_pending_processing(
+        cases_to_process,
+        logger=logger,
+        config=config,
+        repository=repository,
+        runtime_settings=runtime_settings,
+        geojson_lookup=geojson_lookup,
+        master_manifest=master_manifest,
+    )
 
 
 if __name__ == "__main__":

@@ -17,6 +17,9 @@ _MODULE_SPEC.loader.exec_module(_MODULE)
 build_slide_request = _MODULE.build_slide_request
 
 
+HISEG_XML_COORD_LEVEL = 6
+
+
 def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -> None:
     case = ExtractionCaseRecord(
         record_id=1,
@@ -79,7 +82,7 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
 
     assert request.hdf5_output_path == tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide_a.h5"
     assert request.dataset_tag == "TEST"
-    assert request.hiseg_xml_coord_level == 6
+    assert request.hiseg_xml_coord_level == HISEG_XML_COORD_LEVEL
     assert request.hdf5_compression == "gzip"
     assert request.preload_scan_area_max_bytes == 0
 

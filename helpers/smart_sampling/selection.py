@@ -15,6 +15,7 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.gist import select_gist_facility_location
 
 _GIST_MAX_CANDIDATE_POOL = 4096
+MIN_REDUCED_SAMPLE_COUNT = 2
 
 
 class EmbeddingProvider(Protocol):
@@ -77,14 +78,56 @@ class PatientProtectionMetadata:
     mask_positive_mask: npt.NDArray[np.bool_]
 
 
+@dataclass
+class _EmbeddingCache:
+    h5_path: str
+    extractor: EmbeddingProvider
+    cache: dict[int, npt.NDArray[np.float32]]
+
+    def fetch(self, indices: npt.NDArray[np.int64]) -> npt.NDArray[np.float32]:
+        ordered_indices = np.asarray(indices, dtype=np.int64)
+        missing = np.asarray(
+            [index for index in ordered_indices.tolist() if int(index) not in self.cache],
+            dtype=np.int64,
+        )
+        if len(missing) > 0:
+            missing_embeddings = self.extractor.get_embeddings(self.h5_path, missing)
+            for index, embedding in zip(missing.tolist(), missing_embeddings, strict=False):
+                self.cache[int(index)] = np.asarray(embedding, dtype=np.float32)
+        return np.stack([self.cache[int(index)] for index in ordered_indices.tolist()]).astype(
+            np.float32,
+            copy=False,
+        )
+
+
+@dataclass(frozen=True)
+class _PatientSelectionCounts:
+    protected_positive_label_count: int
+    protected_mask_positive_count: int
+    reducible_count: int
+    total_positive_label_count: int
+    total_negative_label_count: int
+    selected_positive_label_count: int
+    selected_negative_label_count: int
+
+
+@dataclass(frozen=True)
+class _PatientSelectionBuildRequest:
+    patient_id: int
+    selected_indices: npt.NDArray[np.int64]
+    protected_indices: npt.NDArray[np.int64]
+    sampled_indices: npt.NDArray[np.int64]
+    chosen_n_embed: int
+
+
 def compute_k(n_samples: int, config: Any) -> int:
     if n_samples == 0:
         return 1
     raw_k = int(float(np.sqrt(n_samples)))
     k = max(config.K_MIN, min(raw_k, config.K_MAX))
     if n_samples < config.K_MIN:
-        k = max(2, int(n_samples / 10))
-        if k < 2:
+        k = max(MIN_REDUCED_SAMPLE_COUNT, int(n_samples / 10))
+        if k < MIN_REDUCED_SAMPLE_COUNT:
             k = n_samples
     return int(k)
 
@@ -327,160 +370,264 @@ def select_patient_samples(
     protected_mask_positive_count = int(np.sum(mask_positive_mask[protected_mask]))
 
     if reducible_count == 0:
-        return PatientSelectionResult(
+        return _protected_only_result(
             patient_id=patient_id,
-            selected_indices=np.asarray(sorted(protected_indices.tolist()), dtype=np.int64),
-            protected_indices=np.asarray(sorted(protected_indices.tolist()), dtype=np.int64),
-            sampled_indices=np.empty(0, dtype=np.int64),
-            chosen_n_embed=0,
-            k_clusters=0,
-            selection_method="protected_only",
-            stability_history=[],
-            retention_history=[],
-            protected_count=len(protected_indices),
+            protected_indices=protected_indices,
             protected_positive_label_count=protected_positive_label_count,
             protected_mask_positive_count=protected_mask_positive_count,
-            reducible_count=0,
             total_positive_label_count=total_positive_label_count,
             total_negative_label_count=total_negative_label_count,
-            selected_positive_label_count=total_positive_label_count,
-            selected_negative_label_count=total_negative_label_count,
-            adaptive_m_target=0,
-            heldout_count=0,
-            plateau_threshold=None,
-            plateau_trigger_improvement=None,
-            plateau_trigger_keep_count=None,
-            plateau_trigger_step=None,
-            plateau_stop_reason=None,
-            plateau_evaluation_mode=None,
-            selected_reducible_count=0,
-            rejected_reducible_count=0,
         )
+
+    rng = np.random.default_rng(config.seed + patient_id)
+    embedding_cache = _EmbeddingCache(h5_path=h5_path, extractor=extractor, cache={})
+    stability_history, _ = _resolve_stability_subset_embeddings(
+        reducible_indices=reducible_indices,
+        config=config,
+        rng=rng,
+        embedding_cache=embedding_cache,
+    )
+    selection_decision, sampled_indices, selected_indices, chosen_n_embed = _run_patient_selection(
+        reducible_indices=reducible_indices,
+        protected_indices=protected_indices,
+        config=config,
+        rng=rng,
+        embedding_cache=embedding_cache,
+    )
+    selected_mask = np.isin(patient_indices, selected_indices)
+    selected_positive_label_count = int(np.sum(patient_labels[selected_mask] > 0))
+    selected_negative_label_count = int(np.sum(patient_labels[selected_mask] <= 0))
+    return _build_patient_selection_result(
+        request=_PatientSelectionBuildRequest(
+            patient_id=patient_id,
+            selected_indices=selected_indices,
+            protected_indices=protected_indices,
+            sampled_indices=sampled_indices,
+            chosen_n_embed=chosen_n_embed,
+        ),
+        selection_decision=selection_decision,
+        stability_history=stability_history,
+        counts=_PatientSelectionCounts(
+            protected_positive_label_count=protected_positive_label_count,
+            protected_mask_positive_count=protected_mask_positive_count,
+            reducible_count=reducible_count,
+            total_positive_label_count=total_positive_label_count,
+            total_negative_label_count=total_negative_label_count,
+            selected_positive_label_count=selected_positive_label_count,
+            selected_negative_label_count=selected_negative_label_count,
+        ),
+    )
+
+
+def _protected_only_result(
+    *,
+    patient_id: int,
+    protected_indices: npt.NDArray[np.int64],
+    protected_positive_label_count: int,
+    protected_mask_positive_count: int,
+    total_positive_label_count: int,
+    total_negative_label_count: int,
+) -> PatientSelectionResult:
+    sorted_protected = np.asarray(sorted(protected_indices.tolist()), dtype=np.int64)
+    return PatientSelectionResult(
+        patient_id=patient_id,
+        selected_indices=sorted_protected,
+        protected_indices=sorted_protected,
+        sampled_indices=np.empty(0, dtype=np.int64),
+        chosen_n_embed=0,
+        k_clusters=0,
+        selection_method="protected_only",
+        stability_history=[],
+        retention_history=[],
+        protected_count=len(sorted_protected),
+        protected_positive_label_count=protected_positive_label_count,
+        protected_mask_positive_count=protected_mask_positive_count,
+        reducible_count=0,
+        total_positive_label_count=total_positive_label_count,
+        total_negative_label_count=total_negative_label_count,
+        selected_positive_label_count=total_positive_label_count,
+        selected_negative_label_count=total_negative_label_count,
+        adaptive_m_target=0,
+        heldout_count=0,
+        plateau_threshold=None,
+        plateau_trigger_improvement=None,
+        plateau_trigger_keep_count=None,
+        plateau_trigger_step=None,
+        plateau_stop_reason=None,
+        plateau_evaluation_mode=None,
+        selected_reducible_count=0,
+        rejected_reducible_count=0,
+    )
+
+
+def _resolve_stability_subset_embeddings(
+    *,
+    reducible_indices: npt.NDArray[np.int64],
+    config: SmartSamplerConfig,
+    rng: np.random.Generator,
+    embedding_cache: _EmbeddingCache,
+) -> tuple[list[tuple[int, float]], npt.NDArray[np.float32]]:
+    reducible_count = len(reducible_indices)
+    if reducible_count <= int(config.n_start * 1.5):
+        return [(reducible_count, 1.0)], embedding_cache.fetch(reducible_indices)
 
     n_curr = min(config.n_start, reducible_count)
     stability_history: list[tuple[int, float]] = []
-    stability_subset_embeddings: npt.NDArray[np.float32] | None = None
-    embedding_cache: dict[int, npt.NDArray[np.float32]] = {}
+    step = 0
+    while step < config.max_steps:
+        if n_curr >= reducible_count:
+            return stability_history, embedding_cache.fetch(reducible_indices)
 
-    rng = np.random.default_rng(config.seed + patient_id)
-
-    def fetch_embeddings(indices: npt.NDArray[np.int64]) -> npt.NDArray[np.float32]:
-        ordered_indices = np.asarray(indices, dtype=np.int64)
-        missing = np.asarray(
-            [index for index in ordered_indices.tolist() if int(index) not in embedding_cache],
-            dtype=np.int64,
+        avg_score, accepted_embeddings = _measure_stability_step(
+            reducible_indices=reducible_indices,
+            n_curr=n_curr,
+            config=config,
+            rng=rng,
+            embedding_cache=embedding_cache,
         )
-        if len(missing) > 0:
-            missing_embeddings = extractor.get_embeddings(h5_path, missing)
-            for index, embedding in zip(missing.tolist(), missing_embeddings, strict=False):
-                embedding_cache[int(index)] = np.asarray(embedding, dtype=np.float32)
-        return np.stack([embedding_cache[int(index)] for index in ordered_indices.tolist()]).astype(
-            np.float32,
-            copy=False,
-        )
+        stability_history.append((n_curr, avg_score))
+        if avg_score >= config.stability_threshold:
+            return stability_history, accepted_embeddings
 
-    if reducible_count <= int(config.n_start * 1.5):
-        stability_subset_embeddings = fetch_embeddings(reducible_indices)
-        stability_history.append((reducible_count, 1.0))
-    else:
-        step = 0
-        while step < config.max_steps:
-            if n_curr >= reducible_count:
-                stability_subset_embeddings = fetch_embeddings(reducible_indices)
-                break
+        new_n = int(n_curr * config.growth_factor)
+        if new_n >= config.n_max or new_n >= reducible_count:
+            return stability_history, embedding_cache.fetch(reducible_indices)
+        n_curr = new_n
+        step += 1
 
-            repeat_scores: list[float] = []
-            accepted_emb_s1: npt.NDArray[np.float32] | None = None
-            for _ in range(config.stability_repeats):
-                idx_s1 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
-                idx_s2 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
-                emb_s1 = fetch_embeddings(idx_s1)
-                emb_s2 = fetch_embeddings(idx_s2)
-                repeat_scores.append(
-                    float(
-                        calculate_stability_score(
-                            emb_s1, emb_s2, idx_s1, idx_s2, _selection_namespace(config)
-                        )
-                    )
+    return stability_history, embedding_cache.fetch(reducible_indices)
+
+
+def _measure_stability_step(
+    *,
+    reducible_indices: npt.NDArray[np.int64],
+    n_curr: int,
+    config: SmartSamplerConfig,
+    rng: np.random.Generator,
+    embedding_cache: _EmbeddingCache,
+) -> tuple[float, npt.NDArray[np.float32]]:
+    repeat_scores: list[float] = []
+    accepted_embeddings: npt.NDArray[np.float32] | None = None
+    for _ in range(config.stability_repeats):
+        idx_s1 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
+        idx_s2 = np.sort(rng.choice(reducible_indices, n_curr, replace=False))
+        emb_s1 = embedding_cache.fetch(idx_s1)
+        emb_s2 = embedding_cache.fetch(idx_s2)
+        repeat_scores.append(
+            float(
+                calculate_stability_score(
+                    emb_s1,
+                    emb_s2,
+                    idx_s1,
+                    idx_s2,
+                    _selection_namespace(config),
                 )
-                if accepted_emb_s1 is None:
-                    accepted_emb_s1 = emb_s1
+            )
+        )
+        if accepted_embeddings is None:
+            accepted_embeddings = emb_s1
+    assert accepted_embeddings is not None
+    return float(np.mean(repeat_scores)), accepted_embeddings
 
-            avg_score = float(np.mean(repeat_scores))
-            stability_history.append((n_curr, avg_score))
 
-            if avg_score >= config.stability_threshold:
-                assert accepted_emb_s1 is not None
-                stability_subset_embeddings = accepted_emb_s1
-                break
-
-            new_n = int(n_curr * config.growth_factor)
-            if new_n >= config.n_max or new_n >= reducible_count:
-                stability_subset_embeddings = fetch_embeddings(reducible_indices)
-                break
-            n_curr = new_n
-            step += 1
-
-    if stability_subset_embeddings is None:
-        stability_subset_embeddings = fetch_embeddings(reducible_indices)
-
+def _run_patient_selection(
+    *,
+    reducible_indices: npt.NDArray[np.int64],
+    protected_indices: npt.NDArray[np.int64],
+    config: SmartSamplerConfig,
+    rng: np.random.Generator,
+    embedding_cache: _EmbeddingCache,
+) -> tuple[SelectionDecision, npt.NDArray[np.int64], npt.NDArray[np.int64], int]:
     selection_pool, heldout_indices = _split_selection_and_holdout(
         reducible_indices=reducible_indices,
         config=config,
         rng=rng,
     )
-    selection_embeddings = fetch_embeddings(selection_pool)
-    heldout_embeddings = (
-        fetch_embeddings(heldout_indices)
-        if len(heldout_indices) > 0
-        else np.empty((0, selection_embeddings.shape[1]), dtype=np.float32)
+    selection_embeddings = embedding_cache.fetch(selection_pool)
+    heldout_embeddings = _heldout_embeddings(
+        heldout_indices=heldout_indices,
+        selection_embeddings=selection_embeddings,
+        embedding_cache=embedding_cache,
     )
-    m_ceiling = min(config.m_max, reducible_count)
-    if getattr(config, "use_gist", False):
-        selection_decision = select_diverse_samples_gist(
-            selection_embeddings,
-            selection_pool,
-            m_ceiling,
-            _selection_namespace(config),
-            evaluation_embeddings=heldout_embeddings if len(heldout_indices) > 0 else None,
-        )
-    else:
-        selection_decision = select_diverse_samples(
-            selection_embeddings,
-            selection_pool,
-            m_ceiling,
-            _selection_namespace(config),
-            evaluation_embeddings=heldout_embeddings if len(heldout_indices) > 0 else None,
-        )
-    sampled_indices = selection_decision.selected_indices
-
-    selected_indices = np.asarray(
-        sorted(np.concatenate([protected_indices, sampled_indices]).tolist()),
+    evaluation_embeddings = heldout_embeddings if len(heldout_indices) > 0 else None
+    selection_decision = _select_reducible_pool(
+        selection_embeddings=selection_embeddings,
+        selection_pool=selection_pool,
+        reducible_count=len(reducible_indices),
+        config=config,
+        evaluation_embeddings=evaluation_embeddings,
+    )
+    sampled_indices = np.asarray(
+        sorted(selection_decision.selected_indices.tolist()),
         dtype=np.int64,
     )
-    sampled_indices = np.asarray(sorted(sampled_indices.tolist()), dtype=np.int64)
-    protected_indices = np.asarray(sorted(protected_indices.tolist()), dtype=np.int64)
-    selected_mask = np.isin(patient_indices, selected_indices)
-    selected_positive_label_count = int(np.sum(patient_labels[selected_mask] > 0))
-    selected_negative_label_count = int(np.sum(patient_labels[selected_mask] <= 0))
+    sorted_protected = np.asarray(sorted(protected_indices.tolist()), dtype=np.int64)
+    selected_indices = np.asarray(
+        sorted(np.concatenate([sorted_protected, sampled_indices]).tolist()),
+        dtype=np.int64,
+    )
+    return selection_decision, sampled_indices, selected_indices, len(selection_embeddings)
+
+
+def _heldout_embeddings(
+    *,
+    heldout_indices: npt.NDArray[np.int64],
+    selection_embeddings: npt.NDArray[np.float32],
+    embedding_cache: _EmbeddingCache,
+) -> npt.NDArray[np.float32]:
+    if len(heldout_indices) == 0:
+        return np.empty((0, selection_embeddings.shape[1]), dtype=np.float32)
+    return embedding_cache.fetch(heldout_indices)
+
+
+def _select_reducible_pool(
+    *,
+    selection_embeddings: npt.NDArray[np.float32],
+    selection_pool: npt.NDArray[np.int64],
+    reducible_count: int,
+    config: SmartSamplerConfig,
+    evaluation_embeddings: npt.NDArray[np.float32] | None,
+) -> SelectionDecision:
+    m_ceiling = min(config.m_max, reducible_count)
+    selector = (
+        select_diverse_samples_gist
+        if getattr(config, "use_gist", False)
+        else select_diverse_samples
+    )
+    return selector(
+        selection_embeddings,
+        selection_pool,
+        m_ceiling,
+        _selection_namespace(config),
+        evaluation_embeddings=evaluation_embeddings,
+    )
+
+
+def _build_patient_selection_result(
+    *,
+    request: _PatientSelectionBuildRequest,
+    selection_decision: SelectionDecision,
+    stability_history: list[tuple[int, float]],
+    counts: _PatientSelectionCounts,
+) -> PatientSelectionResult:
     return PatientSelectionResult(
-        patient_id=patient_id,
-        selected_indices=selected_indices,
-        protected_indices=protected_indices,
-        sampled_indices=sampled_indices,
-        chosen_n_embed=len(selection_embeddings),
+        patient_id=request.patient_id,
+        selected_indices=request.selected_indices,
+        protected_indices=np.asarray(sorted(request.protected_indices.tolist()), dtype=np.int64),
+        sampled_indices=request.sampled_indices,
+        chosen_n_embed=request.chosen_n_embed,
         k_clusters=selection_decision.k_clusters,
         selection_method=selection_decision.selection_method,
         stability_history=stability_history,
         retention_history=selection_decision.retention_history,
-        protected_count=len(protected_indices),
-        protected_positive_label_count=protected_positive_label_count,
-        protected_mask_positive_count=protected_mask_positive_count,
-        reducible_count=reducible_count,
-        total_positive_label_count=total_positive_label_count,
-        total_negative_label_count=total_negative_label_count,
-        selected_positive_label_count=selected_positive_label_count,
-        selected_negative_label_count=selected_negative_label_count,
+        protected_count=len(request.protected_indices),
+        protected_positive_label_count=counts.protected_positive_label_count,
+        protected_mask_positive_count=counts.protected_mask_positive_count,
+        reducible_count=counts.reducible_count,
+        total_positive_label_count=counts.total_positive_label_count,
+        total_negative_label_count=counts.total_negative_label_count,
+        selected_positive_label_count=counts.selected_positive_label_count,
+        selected_negative_label_count=counts.selected_negative_label_count,
         adaptive_m_target=selection_decision.adaptive_m_target,
         heldout_count=selection_decision.heldout_count,
         plateau_threshold=selection_decision.plateau_threshold,
@@ -489,8 +636,8 @@ def select_patient_samples(
         plateau_trigger_step=selection_decision.plateau_trigger_step,
         plateau_stop_reason=selection_decision.plateau_stop_reason,
         plateau_evaluation_mode=selection_decision.plateau_evaluation_mode,
-        selected_reducible_count=len(sampled_indices),
-        rejected_reducible_count=reducible_count - len(sampled_indices),
+        selected_reducible_count=len(request.sampled_indices),
+        rejected_reducible_count=counts.reducible_count - len(request.sampled_indices),
     )
 
 

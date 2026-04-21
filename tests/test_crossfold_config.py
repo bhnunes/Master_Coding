@@ -4,6 +4,18 @@ import pytest
 
 from helpers.crossfold.config import load_crossfold_config
 
+TEST_RANDOM_STATE = 7
+DEFAULT_TEST_PATIENT_COUNT = 20
+EXPLICIT_TEST_PATIENT_COUNT = 24
+DEFAULT_VALIDATION_PATIENT_COUNT = 20
+EXPLICIT_VALIDATION_PATIENT_COUNT = 21
+DEFAULT_OPTUNA_TRIALS = 1000
+EXPLICIT_OPTUNA_TRIALS = 99
+ENTROPY_WORKERS = 3
+ENTROPY_CHUNKSIZE = 64
+ENTROPY_THUMBNAIL = 256
+COPY_BATCH_SIZE = 32
+
 
 def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> None:
     config = load_crossfold_config(
@@ -28,15 +40,15 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     assert config.source_path == tmp_path / "SOURCE_DATASET.h5"
     assert config.normalization_method == "MACENKO"
     assert config.overwrite_output_dir is False
-    assert config.random_state == 7
-    assert config.constraints.test_patient_count == 24
-    assert config.constraints.validation_patient_count == 21
-    assert config.objective.optuna_trials == 99
-    assert config.objective.num_workers == 3
-    assert config.objective.chunksize == 64
-    assert config.objective.entropy_thumbnail == 256
+    assert config.random_state == TEST_RANDOM_STATE
+    assert config.constraints.test_patient_count == EXPLICIT_TEST_PATIENT_COUNT
+    assert config.constraints.validation_patient_count == EXPLICIT_VALIDATION_PATIENT_COUNT
+    assert config.objective.optuna_trials == EXPLICIT_OPTUNA_TRIALS
+    assert config.objective.num_workers == ENTROPY_WORKERS
+    assert config.objective.chunksize == ENTROPY_CHUNKSIZE
+    assert config.objective.entropy_thumbnail == ENTROPY_THUMBNAIL
     assert config.hdf5_compression == "LZF"
-    assert config.copy_batch_size == 32
+    assert config.copy_batch_size == COPY_BATCH_SIZE
     assert config.calc_checksums is True
     assert config.save_entropy_cache_csv is False
     assert config.log_path == Path("logs/data_preparation.log")
@@ -98,9 +110,9 @@ def test_load_crossfold_config_defaults_new_split_surface(tmp_path: Path) -> Non
         }
     )
 
-    assert config.constraints.test_patient_count == 20
-    assert config.constraints.validation_patient_count == 20
-    assert config.objective.optuna_trials == 1000
+    assert config.constraints.test_patient_count == DEFAULT_TEST_PATIENT_COUNT
+    assert config.constraints.validation_patient_count == DEFAULT_VALIDATION_PATIENT_COUNT
+    assert config.objective.optuna_trials == DEFAULT_OPTUNA_TRIALS
 
 
 def test_load_crossfold_config_ignores_removed_legacy_split_env_vars(tmp_path: Path) -> None:
@@ -113,8 +125,8 @@ def test_load_crossfold_config_ignores_removed_legacy_split_env_vars(tmp_path: P
         }
     )
 
-    assert config.constraints.test_patient_count == 20
-    assert config.objective.optuna_trials == 1000
+    assert config.constraints.test_patient_count == DEFAULT_TEST_PATIENT_COUNT
+    assert config.objective.optuna_trials == DEFAULT_OPTUNA_TRIALS
 
 
 def test_load_crossfold_config_clamps_optuna_trials_to_positive_value(tmp_path: Path) -> None:

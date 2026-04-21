@@ -31,7 +31,11 @@ from helpers.ensemble_optimizer.optimization import (
     predict_with_tta_batched,
     run_two_stream_optimization,
 )
-from helpers.ensemble_optimizer.reporting import build_recipe_metadata, write_recipe_metadata
+from helpers.ensemble_optimizer.reporting import (
+    RecipeMetadataConfig,
+    build_recipe_metadata,
+    write_recipe_metadata,
+)
 from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
 from helpers.provenance import build_split_fingerprint
 from helpers.training.gpu import GPUNormalizer
@@ -41,6 +45,8 @@ from helpers.training.utils import get_formatted_datetime_string
 
 LOGGER = logging.getLogger(__name__)
 _PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+_ENSEMBLE_SELECTION_MIN_MODELS = 2
+_PROBABILITY_THRESHOLD = 0.5
 
 
 def _progress_file() -> Any:
@@ -109,8 +115,8 @@ def _compute_candidate_subset_score(
             mask_tensor = masks.to(device)
             probabilities = predict_with_tta_batched(model, images, selected_model.architecture)
             tracker.update_from_probs_fg(probabilities, mask_tensor)
-            pred_fg = probabilities >= 0.5
-            true_fg = mask_tensor[:, 1, :, :] > 0.5
+            pred_fg = probabilities >= _PROBABILITY_THRESHOLD
+            true_fg = mask_tensor[:, 1, :, :] > _PROBABILITY_THRESHOLD
             tp += int((pred_fg & true_fg).sum().item())
             fp += int((pred_fg & ~true_fg).sum().item())
             fn += int((~pred_fg & true_fg).sum().item())
@@ -191,7 +197,7 @@ def _select_models_from_optimization_subset(
         requested_architectures=requested_architectures,
         score_getter=lambda item: subset_scores[item.metadata_filename],
     )
-    if len(selected_models) < 2:
+    if len(selected_models) < _ENSEMBLE_SELECTION_MIN_MODELS:
         raise ValueError(
             "Fewer than 2 requested architectures had valid scored candidates. "
             f"Requested={list(requested_architectures)} skipped={skipped_architectures}"
@@ -288,22 +294,24 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     compatibility_signature = str(selected_models[0].raw_metadata["compatibility_signature"])
     validation_provenance = collect_validation_provenance(validation_layout)
     payload = build_recipe_metadata(
-        selected_models=selected_models,
-        semantic_indices=optimization_result.semantic_indices,
-        spatial_indices=optimization_result.spatial_indices,
-        semantic_weights=optimization_result.semantic_weights,
-        spatial_weights=optimization_result.spatial_weights,
-        roi_context_scale=config.roi_context_scale,
-        roi_threshold=optimization_result.roi_threshold,
-        decision_threshold=optimization_result.decision_threshold,
-        spill_penalty_lambda=config.spill_penalty_lambda,
-        spatial_patient_policy=config.spatial_patient_policy,
-        calibration_metrics=optimization_result.calibration_metrics,
-        holdout_metrics=optimization_result.holdout_metrics,
-        generated_at=timestamp,
-        compatibility_signature=compatibility_signature,
-        validation_provenance=validation_provenance,
-        split_fingerprint=split_fingerprint,
+        config=RecipeMetadataConfig(
+            selected_models=selected_models,
+            semantic_indices=optimization_result.semantic_indices,
+            spatial_indices=optimization_result.spatial_indices,
+            semantic_weights=optimization_result.semantic_weights,
+            spatial_weights=optimization_result.spatial_weights,
+            roi_context_scale=config.roi_context_scale,
+            roi_threshold=optimization_result.roi_threshold,
+            decision_threshold=optimization_result.decision_threshold,
+            spill_penalty_lambda=config.spill_penalty_lambda,
+            spatial_patient_policy=config.spatial_patient_policy,
+            calibration_metrics=optimization_result.calibration_metrics,
+            holdout_metrics=optimization_result.holdout_metrics,
+            generated_at=timestamp,
+            compatibility_signature=compatibility_signature,
+            validation_provenance=validation_provenance,
+            split_fingerprint=split_fingerprint,
+        )
     )
     recipe_path = write_recipe_metadata(payload, config.output_dir, timestamp)
     run_config_path = config.output_dir / "ensemble_optimizer_run_config.json"

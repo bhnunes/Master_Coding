@@ -10,6 +10,8 @@ from shapely.geometry import Polygon
 
 from helpers.extraction import patch_engine
 
+WORKER_COUNT = 2
+
 
 def test_chunk_coordinates_groups_work_into_stable_batches() -> None:
     chunk_coordinates = cast(
@@ -81,7 +83,7 @@ def test_iter_window_results_flattens_batch_results(monkeypatch: pytest.MonkeyPa
 
     class FakePool:
         def __init__(self, *, processes: int, initializer: Any, initargs: tuple[Any, ...]) -> None:
-            assert processes == 2
+            assert processes == WORKER_COUNT
             initializer(*initargs)
 
         def __enter__(self) -> FakePool:

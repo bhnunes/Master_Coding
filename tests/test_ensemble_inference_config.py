@@ -4,6 +4,9 @@ from pathlib import Path
 
 from helpers.ensemble_inference.config import load_ensemble_inference_config
 
+DEFAULT_BATCH_SIZE = 32
+DEFAULT_VISUALIZATION_SAMPLES = 5
+
 
 def test_load_ensemble_inference_config_uses_defaults(tmp_path: Path) -> None:
     env = {
@@ -17,7 +20,7 @@ def test_load_ensemble_inference_config_uses_defaults(tmp_path: Path) -> None:
     assert config.master_manifest_path == tmp_path / "master_manifest.sqlite"
     assert config.output_dir is None
     assert config.stage_input_locally is True
-    assert config.batch_size == 32
-    assert config.visualization_samples == 5
+    assert config.batch_size == DEFAULT_BATCH_SIZE
+    assert config.visualization_samples == DEFAULT_VISUALIZATION_SAMPLES
     assert config.export_latex is True
     assert config.log_path == Path("logs/ensemble_inference.log")

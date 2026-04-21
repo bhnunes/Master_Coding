@@ -4,6 +4,16 @@ import pytest
 
 from helpers.graph.tuning_config import load_graph_tuning_config
 
+TEST_SET_SIZE = 0.25
+INNER_CV_SPLITS = 4
+BAYESIAN_CALLS = 60
+INITIAL_POINTS = 12
+RANDOM_STATE = 99
+BG_INTENSITY_RANGE = (120, 220)
+K_RANGE = (110, 510)
+MIN_SIZE_RANGE = (20, 180)
+EROSION_RANGE = (1, 8)
+
 
 def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
@@ -34,15 +44,15 @@ def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> 
     assert config.review_base_dir == tmp_path / "review"
     assert config.log_folder == tmp_path / "logs"
     assert config.log_file_name == "graph.log"
-    assert config.test_set_size == 0.25
-    assert config.n_splits_inner_cv == 4
-    assert config.n_bayesian_calls == 60
-    assert config.n_initial_points == 12
-    assert config.random_state == 99
-    assert config.bg_intensity_range == (120, 220)
-    assert config.k_range == (110, 510)
-    assert config.min_size_range == (20, 180)
-    assert config.erosion_range == (1, 8)
+    assert config.test_set_size == TEST_SET_SIZE
+    assert config.n_splits_inner_cv == INNER_CV_SPLITS
+    assert config.n_bayesian_calls == BAYESIAN_CALLS
+    assert config.n_initial_points == INITIAL_POINTS
+    assert config.random_state == RANDOM_STATE
+    assert config.bg_intensity_range == BG_INTENSITY_RANGE
+    assert config.k_range == K_RANGE
+    assert config.min_size_range == MIN_SIZE_RANGE
+    assert config.erosion_range == EROSION_RANGE
 
 
 def test_load_graph_tuning_config_requires_hdf5_source() -> None:

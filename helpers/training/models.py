@@ -9,6 +9,31 @@ from torch import nn
 
 from helpers.training.registry import TrainingLossWeights, get_training_model_registry_entry
 
+COMMON_MODEL_ARGS = {
+    "in_channels": 3,
+    "classes": 2,
+    "activation": None,
+}
+MODEL_BUILDERS: dict[str, tuple[str, dict[str, object]]] = {
+    "SWIN": ("Unet", {"decoder_attention_type": None}),
+    "DEEPLABV3PLUS": ("DeepLabV3Plus", {"decoder_attention_type": None}),
+    "DPT": ("DPT", {"decoder_readout": "ignore"}),
+    "UNET++": ("UnetPlusPlus", {"decoder_attention_type": None}),
+    "FPN": ("FPN", {"decoder_attention_type": None}),
+    "SEGFORMER": ("Segformer", {"decoder_attention_type": None}),
+    "MANET": ("MAnet", {"decoder_attention_type": None}),
+    "UPERNET": ("UPerNet", {"decoder_attention_type": None}),
+    "INCEPTIONRESNETV2": ("Unet", {"decoder_attention_type": None}),
+}
+
+
+def _resolve_encoder_weights(encoder: str, *, validation: bool) -> str | bool | None:
+    if validation:
+        return None
+    if encoder.startswith("tu-"):
+        return True
+    return "imagenet"
+
 
 def get_learning_rate(architecture: str) -> tuple[float, float]:
     """Return the existing learning-rate and weight-decay defaults by architecture."""
@@ -26,41 +51,19 @@ def get_loss_weights(architecture: str) -> TrainingLossWeights:
 def create_model(architecture: str, encoder: str, validation: bool = False) -> nn.Module:
     """Create the configured segmentation model."""
 
-    if validation:
-        encoder_weights: str | bool | None = None
-    elif encoder.startswith("tu-"):
-        encoder_weights = True
-    else:
-        encoder_weights = "imagenet"
+    builder_config = MODEL_BUILDERS.get(architecture.upper())
+    if builder_config is None:
+        raise ValueError(f"Unknown architecture: {architecture}")
+
+    builder_name, extra_args = builder_config
     common_args = {
         "encoder_name": encoder,
-        "encoder_weights": encoder_weights,
-        "in_channels": 3,
-        "classes": 2,
-        "activation": None,
+        "encoder_weights": _resolve_encoder_weights(encoder, validation=validation),
+        **COMMON_MODEL_ARGS,
+        **extra_args,
     }
-
-    arch = architecture.upper()
-    if arch == "SWIN":
-        return cast(nn.Module, smp.Unet(**common_args, decoder_attention_type=None))
-    if arch == "DEEPLABV3PLUS":
-        return cast(nn.Module, smp.DeepLabV3Plus(**common_args, decoder_attention_type=None))
-    if arch == "DPT":
-        return cast(nn.Module, smp.DPT(**common_args, decoder_readout="ignore"))
-    if arch == "UNET++":
-        return cast(nn.Module, smp.UnetPlusPlus(**common_args, decoder_attention_type=None))
-    if arch == "FPN":
-        return cast(nn.Module, smp.FPN(**common_args, decoder_attention_type=None))
-    if arch == "SEGFORMER":
-        return cast(nn.Module, smp.Segformer(**common_args, decoder_attention_type=None))
-    if arch == "MANET":
-        return cast(nn.Module, smp.MAnet(**common_args, decoder_attention_type=None))
-    if arch == "UPERNET":
-        return cast(nn.Module, smp.UPerNet(**common_args, decoder_attention_type=None))
-    if arch == "INCEPTIONRESNETV2":
-        return cast(nn.Module, smp.Unet(**common_args, decoder_attention_type=None))
-
-    raise ValueError(f"Unknown architecture: {architecture}")
+    builder = getattr(smp, builder_name)
+    return cast(nn.Module, builder(**common_args))
 
 
 def create_optimizer(

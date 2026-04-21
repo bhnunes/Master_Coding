@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -10,42 +11,44 @@ from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
 from helpers.provenance import hash_file_sha256, hash_json_payload
 
 
-def build_recipe_metadata(
-    *,
-    selected_models: list[SelectedModelMetadata],
-    semantic_indices: list[int],
-    spatial_indices: list[int],
-    semantic_weights: list[float],
-    spatial_weights: list[float],
-    roi_context_scale: int,
-    roi_threshold: float,
-    decision_threshold: float,
-    spill_penalty_lambda: float,
-    spatial_patient_policy: str,
-    calibration_metrics: dict[str, float | int | str],
-    holdout_metrics: dict[str, float | int | str],
-    generated_at: str,
-    compatibility_signature: str,
-    validation_provenance: dict[str, Any],
-    split_fingerprint: str,
-) -> dict[str, Any]:
-    final_semantic_weights = np.zeros(len(selected_models), dtype=np.float64)
-    for index, global_index in enumerate(semantic_indices):
-        final_semantic_weights[global_index] = semantic_weights[index]
+@dataclass(frozen=True)
+class RecipeMetadataConfig:
+    selected_models: list[SelectedModelMetadata]
+    semantic_indices: list[int]
+    spatial_indices: list[int]
+    semantic_weights: list[float]
+    spatial_weights: list[float]
+    roi_context_scale: int
+    roi_threshold: float
+    decision_threshold: float
+    spill_penalty_lambda: float
+    spatial_patient_policy: str
+    calibration_metrics: dict[str, float | int | str]
+    holdout_metrics: dict[str, float | int | str]
+    generated_at: str
+    compatibility_signature: str
+    validation_provenance: dict[str, Any]
+    split_fingerprint: str
 
-    final_spatial_weights = np.zeros(len(selected_models), dtype=np.float64)
-    for index, global_index in enumerate(spatial_indices):
-        final_spatial_weights[global_index] = spatial_weights[index]
+
+def build_recipe_metadata(config: RecipeMetadataConfig) -> dict[str, Any]:
+    final_semantic_weights = np.zeros(len(config.selected_models), dtype=np.float64)
+    for index, global_index in enumerate(config.semantic_indices):
+        final_semantic_weights[global_index] = config.semantic_weights[index]
+
+    final_spatial_weights = np.zeros(len(config.selected_models), dtype=np.float64)
+    for index, global_index in enumerate(config.spatial_indices):
+        final_spatial_weights[global_index] = config.spatial_weights[index]
 
     model_registry: list[dict[str, Any]] = []
-    for index, selected_model in enumerate(selected_models):
+    for index, selected_model in enumerate(config.selected_models):
         raw_hyperparameters = selected_model.raw_metadata.get("hyperparameters", {})
         stream_role = "none"
         weight = 0.0
-        if index in semantic_indices:
+        if index in config.semantic_indices:
             stream_role = "semantic"
             weight = float(final_semantic_weights[index])
-        elif index in spatial_indices:
+        elif index in config.spatial_indices:
             stream_role = "spatial"
             weight = float(final_spatial_weights[index])
         model_registry.append(
@@ -92,42 +95,42 @@ def build_recipe_metadata(
     stream_order = {"semantic": 0, "spatial": 1, "none": 2}
     model_registry.sort(key=lambda item: (stream_order[item["stream_role"]], -item["weight"]))
     payload = {
-        "experiment_id": f"two_stream_opt_{generated_at}",
-        "datetime": generated_at,
+        "experiment_id": f"two_stream_opt_{config.generated_at}",
+        "datetime": config.generated_at,
         "ensemble_strategy": "two_stream_spatial_gating",
-        "compatibility_signature": compatibility_signature,
+        "compatibility_signature": config.compatibility_signature,
         "roi_config": {
             "method": "lowpass_upsample_threshold",
-            "scale": roi_context_scale,
-            "threshold": roi_threshold,
+            "scale": config.roi_context_scale,
+            "threshold": config.roi_threshold,
         },
         "decision_config": {
             "method": "patient_mcc_calibration",
-            "threshold": decision_threshold,
+            "threshold": config.decision_threshold,
             "metric": "Patient_MCC",
             "operator": ">",
         },
         "spatial_config": {
-            "spill_lambda": spill_penalty_lambda,
-            "patient_policy": spatial_patient_policy,
+            "spill_lambda": config.spill_penalty_lambda,
+            "patient_policy": config.spatial_patient_policy,
         },
         "model_registry": model_registry,
-        "calibration_metrics": calibration_metrics,
-        "holdout_metrics": holdout_metrics,
+        "calibration_metrics": config.calibration_metrics,
+        "holdout_metrics": config.holdout_metrics,
         "provenance": {
-            "validation": validation_provenance,
+            "validation": config.validation_provenance,
             "validation_lineage": {
-                "master_manifest_sha256": validation_provenance.get("attrs", {}).get(
+                "master_manifest_sha256": config.validation_provenance.get("attrs", {}).get(
                     "master_manifest_sha256"
                 ),
-                "normalization_method": validation_provenance.get("attrs", {}).get(
+                "normalization_method": config.validation_provenance.get("attrs", {}).get(
                     "normalization_method"
                 ),
-                "normalization_artifact_id": validation_provenance.get("attrs", {}).get(
+                "normalization_artifact_id": config.validation_provenance.get("attrs", {}).get(
                     "normalization_artifact_id"
                 ),
             },
-            "split_fingerprint": split_fingerprint,
+            "split_fingerprint": config.split_fingerprint,
         },
     }
     payload["recipe_signature"] = hash_json_payload(payload)

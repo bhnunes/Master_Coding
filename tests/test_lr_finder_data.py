@@ -14,6 +14,19 @@ from torch.utils.data import Dataset
 from helpers.lr_finder import data as lr_data
 from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
 
+PATCH_SIDE = 4
+RGB_CHANNELS = 3
+LR_FINDER_BATCH_SIZE = 2
+LR_FINDER_LHS_SAMPLES = 2
+LR_FINDER_END_LR = 0.1
+LR_FINDER_NUM_ITER = 5
+WEIGHT_DECAY = 1e-4
+START_LR = 1e-8
+VALIDATION_ROW_COUNT = 2
+FIRST_TRAIN_PIXEL = 11
+SECOND_TRAIN_PIXEL = 44
+NORMALIZED_FIRST_PIXEL = 16
+
 
 def _build_config(tmp_path: Path, *, smart_sampling: bool = False) -> LRFinderConfig:
     return LRFinderConfig(
@@ -26,16 +39,16 @@ def _build_config(tmp_path: Path, *, smart_sampling: bool = False) -> LRFinderCo
         execution_mode="PAPER",
         amp_precision="fp32",
         seed=24,
-        batch_size=2,
+        batch_size=LR_FINDER_BATCH_SIZE,
         workers=0,
         use_subset=False,
         subset_ratio=1.0,
-        num_lhs_samples=2,
-        end_lr=0.1,
-        num_iter=5,
+        num_lhs_samples=LR_FINDER_LHS_SAMPLES,
+        end_lr=LR_FINDER_END_LR,
+        num_iter=LR_FINDER_NUM_ITER,
         num_repeats=1,
-        optimizer_weight_decay=1e-4,
-        optimizer_start_lr=1e-8,
+        optimizer_weight_decay=WEIGHT_DECAY,
+        optimizer_start_lr=START_LR,
         pdf_name="report.pdf",
         hf_token=None,
         search_space=BCEDiceSearchSpace(),
@@ -56,12 +69,17 @@ def _write_stage2_shard(
         handle.create_dataset(
             "images",
             data=np.stack(
-                [np.full((4, 4, 3), pixel_value, dtype=np.uint8) for pixel_value in pixel_values]
+                [
+                    np.full((PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS), pixel_value, dtype=np.uint8)
+                    for pixel_value in pixel_values
+                ]
             ),
         )
         handle.create_dataset(
             "masks",
-            data=np.stack([np.full((4, 4), label, dtype=np.uint8) for label in labels]),
+            data=np.stack(
+                [np.full((PATCH_SIDE, PATCH_SIDE), label, dtype=np.uint8) for label in labels]
+            ),
         )
         handle.create_dataset("labels", data=np.asarray(labels, dtype=np.uint8))
         handle.create_dataset(
@@ -292,7 +310,7 @@ def test_prepare_training_data_uses_sqlite_rows_for_smart_sampling(
     assert prepared.training_provenance["split"] == "TRAIN"
     assert prepared.training_provenance["smart_sampling"] is True
     assert prepared.validation_provenance["split"] == "VALIDATION"
-    assert prepared.validation_provenance["row_count"] == 2
+    assert prepared.validation_provenance["row_count"] == VALIDATION_ROW_COUNT
 
 
 def test_prepare_training_data_reads_canonical_stage2_rows(
@@ -304,8 +322,8 @@ def test_prepare_training_data_reads_canonical_stage2_rows(
     first_image, first_mask = prepared.dataset[0]
     second_image, second_mask = prepared.dataset[1]
 
-    assert int(first_image[0, 0, 0]) == 11
-    assert int(second_image[0, 0, 0]) == 44
+    assert int(first_image[0, 0, 0]) == FIRST_TRAIN_PIXEL
+    assert int(second_image[0, 0, 0]) == SECOND_TRAIN_PIXEL
     assert int(first_mask[0, 0]) == 0
     assert int(second_mask[0, 0]) == 1
 
@@ -322,7 +340,7 @@ def test_prepare_training_data_uses_shared_stain_normalizer(
     image, _mask = prepared.dataset[0]
 
     assert normalizer.calls == ["p1_0.png"]
-    assert int(image[0, 0, 0]) == 16
+    assert int(image[0, 0, 0]) == NORMALIZED_FIRST_PIXEL
 
 
 def test_prepare_training_data_builds_weights_and_subset(

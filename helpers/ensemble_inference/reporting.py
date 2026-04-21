@@ -81,6 +81,33 @@ class EnsembleReportContent:
     confusion_rows: tuple[tuple[str, int, int], ...]
 
 
+@dataclass(frozen=True)
+class CsvReportConfig:
+    output_dir: Path
+    timestamp: str
+    recipe_path: Path
+    dataset_dir: Path
+    seed: int
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class LatexReportConfig:
+    cm_png_path: Path
+    output_dir: Path
+    timestamp: str
+    report_name_prefix: str = "FINAL_ENSEMBLE_REPORT"
+    latex_runner: Callable[[list[str], Path], Any] | None = None
+
+
+@dataclass(frozen=True)
+class MarkdownReportConfig:
+    output_dir: Path
+    timestamp: str
+    project_env_vars: tuple[tuple[str, str], ...] | None = None
+    report_name_prefix: str = "FINAL_ENSEMBLE_REPORT"
+
+
 def save_confusion_matrix_png(tp: int, fp: int, fn: int, tn: int, out_path_png: Path) -> Path:
     cm = np.array([[tn, fp], [fn, tp]], dtype=np.float64)
     row_sums = cm.sum(axis=1, keepdims=True)
@@ -131,36 +158,30 @@ def render_scientific_analysis_report(metrics_results: dict[str, Any]) -> str:
 
 
 def export_results_to_csv(
-    *,
     ensemble_recipe: dict[str, Any],
     metrics_results: dict[str, Any],
-    output_dir: Path,
-    timestamp: str,
-    recipe_path: Path,
-    dataset_dir: Path,
-    seed: int,
-    batch_size: int,
+    config: CsvReportConfig,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    filepath = output_dir / f"FINAL_EVALUATION_REPORT_{timestamp}.csv"
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    filepath = config.output_dir / f"FINAL_EVALUATION_REPORT_{config.timestamp}.csv"
     config_data = {
-            "Parameter": [
-                "Experiment Datetime",
-                "Ensemble Recipe Path",
-                "Master Manifest Path",
-                "Evaluation Set",
-                "Random Seed",
-                "Batch Size",
+        "Parameter": [
+            "Experiment Datetime",
+            "Ensemble Recipe Path",
+            "Master Manifest Path",
+            "Evaluation Set",
+            "Random Seed",
+            "Batch Size",
             "ROI Gate Threshold",
             "Decision Threshold",
         ],
         "Value": [
-            timestamp,
-            str(recipe_path),
-            str(dataset_dir),
+            config.timestamp,
+            str(config.recipe_path),
+            str(config.dataset_dir),
             "TEST",
-            seed,
-            batch_size,
+            config.seed,
+            config.batch_size,
             ensemble_recipe.get("roi_config", {}).get("threshold", "FAILED"),
             ensemble_recipe.get("decision_config", {}).get("threshold", "FAILED"),
         ],
@@ -394,26 +415,21 @@ def _build_report_content(
 
 
 def write_ensemble_report_latex(
-    *,
     ensemble_recipe: dict[str, Any],
     ensemble_metrics: dict[str, Any],
     train_mean: list[float],
     train_std: list[float],
-    cm_png_path: Path,
-    output_dir: Path,
-    timestamp: str,
-    report_name_prefix: str = "FINAL_ENSEMBLE_REPORT",
-    latex_runner: Callable[[list[str], Path], Any] | None = None,
+    config: LatexReportConfig,
 ) -> tuple[Path, Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    tex_path = output_dir / f"{report_name_prefix}_{timestamp}.tex"
-    pdf_path = output_dir / f"{report_name_prefix}_{timestamp}.pdf"
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    tex_path = config.output_dir / f"{config.report_name_prefix}_{config.timestamp}.tex"
+    pdf_path = config.output_dir / f"{config.report_name_prefix}_{config.timestamp}.pdf"
     report_content = _build_report_content(
         ensemble_recipe=ensemble_recipe,
         ensemble_metrics=ensemble_metrics,
         train_mean=train_mean,
         train_std=train_std,
-        timestamp=timestamp,
+        timestamp=config.timestamp,
     )
 
     lines = [
@@ -489,9 +505,9 @@ def write_ensemble_report_latex(
         ]
     )
 
-    cm_target = output_dir / cm_png_path.name
-    if cm_png_path.resolve() != cm_target.resolve():
-        shutil.copy2(cm_png_path, cm_target)
+    cm_target = config.output_dir / config.cm_png_path.name
+    if config.cm_png_path.resolve() != cm_target.resolve():
+        shutil.copy2(config.cm_png_path, cm_target)
     lines.extend(
         [
             r"\section*{Confusion Matrix}",
@@ -504,10 +520,10 @@ def write_ensemble_report_latex(
     )
     tex_path.write_text("\n".join(lines), encoding="utf-8")
 
-    runner = latex_runner or _run_pdflatex
+    runner = config.latex_runner or _run_pdflatex
     command = ["pdflatex", "-interaction=nonstopmode", tex_path.name]
-    runner(command, output_dir)
-    built_pdf = output_dir / f"{tex_path.stem}.pdf"
+    runner(command, config.output_dir)
+    built_pdf = config.output_dir / f"{tex_path.stem}.pdf"
     if built_pdf.exists() and built_pdf != pdf_path:
         built_pdf.replace(pdf_path)
     if not pdf_path.exists():
@@ -516,28 +532,24 @@ def write_ensemble_report_latex(
 
 
 def write_ensemble_report_markdown(
-    *,
     ensemble_recipe: dict[str, Any],
     ensemble_metrics: dict[str, Any],
     train_mean: list[float],
     train_std: list[float],
-    output_dir: Path,
-    timestamp: str,
-    project_env_vars: tuple[tuple[str, str], ...] | None = None,
-    report_name_prefix: str = "FINAL_ENSEMBLE_REPORT",
+    config: MarkdownReportConfig,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    markdown_path = output_dir / f"{report_name_prefix}_{timestamp}.md"
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    markdown_path = config.output_dir / f"{config.report_name_prefix}_{config.timestamp}.md"
     report_content = _build_report_content(
         ensemble_recipe=ensemble_recipe,
         ensemble_metrics=ensemble_metrics,
         train_mean=train_mean,
         train_std=train_std,
-        timestamp=timestamp,
+        timestamp=config.timestamp,
     )
     env_rows = (
-        _sanitize_project_env_values(project_env_vars)
-        if project_env_vars is not None
+        _sanitize_project_env_values(config.project_env_vars)
+        if config.project_env_vars is not None
         else _load_project_env_values()
     )
 

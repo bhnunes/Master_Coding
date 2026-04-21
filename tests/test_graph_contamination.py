@@ -15,6 +15,13 @@ from helpers.graph.contamination import (
     coerce_graph_contamination_parameters,
 )
 
+BG_INTENSITY_THRESHOLD = 198
+GRAPH_SCALE = 386.0
+MIN_COMPONENT_SIZE = 200
+SEGMENTATION_SCALE = 100.0
+SEGMENTATION_SIGMA = 0.5
+SEGMENTATION_MIN_SIZE = 10
+
 
 def test_coerce_graph_contamination_parameters_casts_numpy_values() -> None:
     params = coerce_graph_contamination_parameters(
@@ -27,9 +34,9 @@ def test_coerce_graph_contamination_parameters_casts_numpy_values() -> None:
     )
 
     assert params == GraphContaminationParameters(
-        bg_intensity_thresh=198,
-        k=386.0,
-        min_size=200,
+        bg_intensity_thresh=BG_INTENSITY_THRESHOLD,
+        k=GRAPH_SCALE,
+        min_size=MIN_COMPONENT_SIZE,
         erosion_px=0,
     )
 
@@ -132,9 +139,9 @@ def test_calculate_roi_contamination_returns_expected_rate(
         image_input: npt.NDArray[np.uint8], *, scale: float, sigma: float, min_size: int
     ) -> npt.NDArray[np.int32]:
         assert np.array_equal(image_input, image)
-        assert scale == 100.0
-        assert sigma == 0.5
-        assert min_size == 10
+        assert scale == SEGMENTATION_SCALE
+        assert sigma == SEGMENTATION_SIGMA
+        assert min_size == SEGMENTATION_MIN_SIZE
         return segment_map
 
     monkeypatch.setattr(

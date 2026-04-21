@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict
 
 import numpy as np
@@ -10,6 +11,8 @@ import pandas as pd
 from tqdm import tqdm
 
 from helpers.crossfold.config import ObjectiveConfig, SplitConstraints
+
+MIN_HELD_OUT_PATIENTS_PER_SPLIT = 20
 
 
 class TrialWeightSuggester(Protocol):
@@ -23,6 +26,18 @@ class SplitState(TypedDict):
     cancer_samples: int
     cancer_ratio: float
     non_cancer_samples: int
+
+
+@dataclass(frozen=True)
+class SplitReturnConfig:
+    df: pd.DataFrame
+    patient_df: pd.DataFrame
+    train_patients: set[int]
+    val_patients: set[int]
+    test_patients: set[int]
+    seed: int
+    sizing_meta: dict[str, Any]
+    loss: float
 
 
 def _progress_file() -> Any:
@@ -258,9 +273,9 @@ def validate_split_patient_counts(
     """Validate the requested split capacities before optimization starts."""
 
     total_patients = len(patient_df)
-    if test_patient_count < 20:
+    if test_patient_count < MIN_HELD_OUT_PATIENTS_PER_SPLIT:
         raise ValueError("TEST patient count must be at least 20.")
-    if validation_patient_count < 20:
+    if validation_patient_count < MIN_HELD_OUT_PATIENTS_PER_SPLIT:
         raise ValueError("VALIDATION patient count must be at least 20.")
     if test_patient_count + validation_patient_count >= total_patients:
         raise ValueError(
@@ -464,46 +479,51 @@ def optimize_patient_split_with_optuna(
     }
 
 
-def _build_split_return(
-    df: pd.DataFrame,
-    patient_df: pd.DataFrame,
-    train_patients: set[int],
-    val_patients: set[int],
-    test_patients: set[int],
-    seed: int,
-    sizing_meta: dict[str, Any],
-    loss: float,
-) -> dict[str, Any]:
-    split_by_patient = {patient_id: "TRAIN" for patient_id in train_patients}
-    split_by_patient.update({patient_id: "VALIDATION" for patient_id in val_patients})
-    split_by_patient.update({patient_id: "TEST" for patient_id in test_patients})
-    row_split = df["patient_id"].map(lambda patient_id: split_by_patient.get(int(patient_id)))
-    train_df = df[row_split == "TRAIN"].reset_index(drop=True)
-    val_df = df[row_split == "VALIDATION"].reset_index(drop=True)
-    test_df = df[row_split == "TEST"].reset_index(drop=True)
+def _build_split_return(config: SplitReturnConfig) -> dict[str, Any]:
+    split_by_patient = {patient_id: "TRAIN" for patient_id in config.train_patients}
+    split_by_patient.update({patient_id: "VALIDATION" for patient_id in config.val_patients})
+    split_by_patient.update({patient_id: "TEST" for patient_id in config.test_patients})
+    row_split = config.df["patient_id"].map(
+        lambda patient_id: split_by_patient.get(int(patient_id))
+    )
+    train_df = config.df[row_split == "TRAIN"].reset_index(drop=True)
+    val_df = config.df[row_split == "VALIDATION"].reset_index(drop=True)
+    test_df = config.df[row_split == "TEST"].reset_index(drop=True)
     logging.info(
         "Split OK (seed=%s): patients train/val/test=%s/%s/%s | "
         "images train/val/test=%s/%s/%s | loss=%.6f",
-        seed,
-        len(train_patients),
-        len(val_patients),
-        len(test_patients),
-        int(patient_df[patient_df["patient_id"].isin(sorted(train_patients))]["n_images"].sum()),
-        int(patient_df[patient_df["patient_id"].isin(sorted(val_patients))]["n_images"].sum()),
-        int(patient_df[patient_df["patient_id"].isin(sorted(test_patients))]["n_images"].sum()),
-        loss,
+        config.seed,
+        len(config.train_patients),
+        len(config.val_patients),
+        len(config.test_patients),
+        int(
+            config.patient_df[config.patient_df["patient_id"].isin(sorted(config.train_patients))][
+                "n_images"
+            ].sum()
+        ),
+        int(
+            config.patient_df[config.patient_df["patient_id"].isin(sorted(config.val_patients))][
+                "n_images"
+            ].sum()
+        ),
+        int(
+            config.patient_df[config.patient_df["patient_id"].isin(sorted(config.test_patients))][
+                "n_images"
+            ].sum()
+        ),
+        config.loss,
     )
     return {
         "train_df": train_df,
         "val_df": val_df,
         "test_df": test_df,
-        "train_patients": sorted(train_patients),
-        "val_patients": sorted(val_patients),
-        "test_patients": sorted(test_patients),
-        "split_seed": seed,
+        "train_patients": sorted(config.train_patients),
+        "val_patients": sorted(config.val_patients),
+        "test_patients": sorted(config.test_patients),
+        "split_seed": config.seed,
         "split_attempt": 1,
-        "objective_score": loss,
-        "constraints": {**sizing_meta, "random_state": None},
+        "objective_score": config.loss,
+        "constraints": {**config.sizing_meta, "random_state": None},
     }
 
 
@@ -547,14 +567,16 @@ def create_train_val_test_split_best(
         objective.optuna_trials,
     )
     split_result = _build_split_return(
-        df,
-        patient_df,
-        train_patients,
-        val_patients,
-        test_patients,
-        random_state,
-        sizing_meta,
-        float(optimization_result["loss"]),
+        SplitReturnConfig(
+            df=df,
+            patient_df=patient_df,
+            train_patients=train_patients,
+            val_patients=val_patients,
+            test_patients=test_patients,
+            seed=random_state,
+            sizing_meta=sizing_meta,
+            loss=float(optimization_result["loss"]),
+        )
     )
     split_result["verification"] = optimization_result["verification"]
     split_result["best_value"] = optimization_result["best_value"]

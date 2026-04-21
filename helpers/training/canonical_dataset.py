@@ -15,6 +15,10 @@ from helpers.patient_shard_cache import PatientShardCache
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 from helpers.training.stain_normalization import ImageStainNormalizer
 
+_TWO_CHANNEL_MASK_COUNT = 2
+_MASK_IMAGE_NDIM = 3
+_SINGLE_CHANNEL_COUNT = 1
+
 MaskMode = Literal["raw", "binary", "two_channel"]
 
 
@@ -163,7 +167,7 @@ class CanonicalRowHDF5Dataset(Dataset[Any]):
         if self.mask_mode == "two_channel":
             mask_array = np.asarray(mask)
             two_channel_mask = np.zeros(
-                (mask_array.shape[0], mask_array.shape[1], 2),
+                (mask_array.shape[0], mask_array.shape[1], _TWO_CHANNEL_MASK_COUNT),
                 dtype=np.float32,
             )
             two_channel_mask[mask_array == 0, 0] = 1.0
@@ -174,14 +178,14 @@ class CanonicalRowHDF5Dataset(Dataset[Any]):
     def _finalize_mask(self, mask: Any) -> torch.Tensor:
         if self.mask_mode == "two_channel":
             final_mask = mask
-            if final_mask.shape[0] != 2:
+            if final_mask.shape[0] != _TWO_CHANNEL_MASK_COUNT:
                 final_mask = final_mask.permute(2, 0, 1)
             return cast(torch.Tensor, final_mask)
         if not torch.is_tensor(mask):
             mask = torch.from_numpy(np.asarray(mask))
         if self.mask_mode == "binary":
             return cast(torch.Tensor, mask.to(torch.uint8))
-        if mask.ndim == 3 and mask.shape[-1] == 1:
+        if mask.ndim == _MASK_IMAGE_NDIM and mask.shape[-1] == _SINGLE_CHANNEL_COUNT:
             mask = mask.squeeze(-1)
         return cast(torch.Tensor, mask.long())
 

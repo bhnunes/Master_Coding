@@ -4,6 +4,16 @@ import pytest
 
 from helpers.training.config import load_training_ensemble_config
 
+TRAINING_WORKERS = 6
+TRAINING_BATCH_SIZE = 12
+VALIDATION_BATCH_SIZE = 48
+OHEM_START_EPOCH = 3
+OHEM_RATIO = 0.4
+OHEM_MIN_KEPT = 2048
+DEFAULT_OHEM_START_EPOCH = 2
+DEFAULT_OHEM_RATIO = 0.25
+DEFAULT_OHEM_MIN_KEPT = 1024
+
 
 def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path) -> None:
     config = load_training_ensemble_config(
@@ -49,17 +59,17 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.architecture == "SEGFORMER"
     assert config.encoder == "mit_b5"
     assert config.resume_checkpoint == Path("resume/checkpoint.pth")
-    assert config.workers == 6
-    assert config.batch_size == 12
-    assert config.val_batch_size == 48
+    assert config.workers == TRAINING_WORKERS
+    assert config.batch_size == TRAINING_BATCH_SIZE
+    assert config.val_batch_size == VALIDATION_BATCH_SIZE
     assert config.amp_precision == "bf16"
     assert config.execution_mode == "PAPER"
     assert config.smart_sampling is False
     assert config.unleashed is True
     assert config.run_ohem is True
-    assert config.ohem_start_epoch == 3
-    assert config.ohem_ratio == 0.4
-    assert config.ohem_min_kept == 2048
+    assert config.ohem_start_epoch == OHEM_START_EPOCH
+    assert config.ohem_ratio == OHEM_RATIO
+    assert config.ohem_min_kept == OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is True
     assert config.log_path == Path("logs/training_ensemble.log")
 
@@ -82,9 +92,9 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.amp_precision == "fp16"
     assert config.execution_mode == "PAPER"
     assert config.run_ohem is False
-    assert config.ohem_start_epoch == 2
-    assert config.ohem_ratio == 0.25
-    assert config.ohem_min_kept == 1024
+    assert config.ohem_start_epoch == DEFAULT_OHEM_START_EPOCH
+    assert config.ohem_ratio == DEFAULT_OHEM_RATIO
+    assert config.ohem_min_kept == DEFAULT_OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is False
     assert config.master_manifest_path == tmp_path / "dataset" / "master_manifest.sqlite"
     assert config.log_path == Path("logs/training_ensemble.log")

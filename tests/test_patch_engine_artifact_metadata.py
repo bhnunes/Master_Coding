@@ -10,6 +10,9 @@ from helpers.extraction.patch_engine import (
     get_zero_artifact_coverages,
 )
 
+FOLD_OVERLAP = 0.25
+PENMARKING_OVERLAP = 0.2
+
 
 def test_compute_artifact_coverages_for_patch_returns_per_class_overlap_ratios() -> None:
     patch_polygon = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
@@ -25,8 +28,8 @@ def test_compute_artifact_coverages_for_patch_returns_per_class_overlap_ratios()
         patch_area=100.0,
     )
 
-    assert coverages["cov_fold"] == 0.25
-    assert coverages["cov_penmarking"] == 0.2
+    assert coverages["cov_fold"] == FOLD_OVERLAP
+    assert coverages["cov_penmarking"] == PENMARKING_OVERLAP
     assert coverages["cov_oof"] == 0.0
     assert coverages["cov_darkspot_foreign"] == 0.0
     assert coverages["cov_edge_airbubble"] == 0.0

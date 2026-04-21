@@ -70,92 +70,64 @@ def _resolve_amp_precision(
     arch = architecture.upper()
     choice = amp_precision.lower()
 
-    if not torch.cuda.is_available():
+    def _resolution(
+        dtype: torch.dtype,
+        *,
+        scaler: GradScaler | None,
+        reason: str,
+    ) -> tuple[torch.dtype, GradScaler | None, dict[str, str]]:
         return (
-            torch.float32,
-            None,
+            dtype,
+            scaler,
             {
                 "amp_precision_requested": choice,
-                "amp_dtype_effective": "float32",
-                "amp_reason": "cpu_no_cuda",
+                "amp_dtype_effective": str(dtype).removeprefix("torch."),
+                "amp_reason": reason,
             },
         )
+
+    def _auto_resolution() -> tuple[torch.dtype, GradScaler | None, dict[str, str]]:
+        if prefer_bf16_if_available and bf16_supported:
+            return _resolution(
+                torch.bfloat16,
+                scaler=None,
+                reason="auto_prefer_bf16_supported",
+            )
+        return _resolution(
+            torch.float16,
+            scaler=GradScaler("cuda"),
+            reason="auto_fallback_fp16",
+        )
+
+    if not torch.cuda.is_available():
+        return _resolution(torch.float32, scaler=None, reason="cpu_no_cuda")
 
     if arch == "DPT":
-        return (
-            torch.float32,
-            None,
-            {
-                "amp_precision_requested": choice,
-                "amp_dtype_effective": "float32",
-                "amp_reason": "arch_forced_fp32",
-            },
-        )
+        return _resolution(torch.float32, scaler=None, reason="arch_forced_fp32")
 
     bf16_supported = bool(getattr(torch.cuda, "is_bf16_supported", lambda: False)())
-
-    if choice == "fp32":
-        return (
-            torch.float32,
-            None,
-            {
-                "amp_precision_requested": choice,
-                "amp_dtype_effective": "float32",
-                "amp_reason": "user_forced_fp32",
-            },
+    if choice == "bf16" and not bf16_supported:
+        raise RuntimeError(
+            "AMP_PRECISION='bf16' requested but CUDA BF16 is not supported "
+            "on this GPU/torch build."
         )
 
-    if choice == "bf16":
-        if not bf16_supported:
-            raise RuntimeError(
-                "AMP_PRECISION='bf16' requested but CUDA BF16 is not supported "
-                "on this GPU/torch build."
-            )
-        return (
-            torch.bfloat16,
-            None,
-            {
-                "amp_precision_requested": choice,
-                "amp_dtype_effective": "bfloat16",
-                "amp_reason": "user_forced_bf16",
-            },
-        )
-
-    if choice == "fp16":
-        return (
+    resolution_by_choice = {
+        "fp32": lambda: _resolution(torch.float32, scaler=None, reason="user_forced_fp32"),
+        "bf16": lambda: _resolution(torch.bfloat16, scaler=None, reason="user_forced_bf16"),
+        "fp16": lambda: _resolution(
             torch.float16,
-            GradScaler("cuda"),
-            {
-                "amp_precision_requested": choice,
-                "amp_dtype_effective": "float16",
-                "amp_reason": "user_forced_fp16",
-            },
+            scaler=GradScaler("cuda"),
+            reason="user_forced_fp16",
+        ),
+        "auto": _auto_resolution,
+    }
+    resolver = resolution_by_choice.get(choice)
+    if resolver is None:
+        raise ValueError(
+            f"Invalid AMP_PRECISION='{amp_precision}'. Use one of: fp32, bf16, fp16, auto."
         )
-
-    if choice == "auto":
-        if prefer_bf16_if_available and bf16_supported:
-            return (
-                torch.bfloat16,
-                None,
-                {
-                    "amp_precision_requested": choice,
-                    "amp_dtype_effective": "bfloat16",
-                    "amp_reason": "auto_prefer_bf16_supported",
-                },
-            )
-        return (
-            torch.float16,
-            GradScaler("cuda"),
-            {
-                "amp_precision_requested": choice,
-                "amp_dtype_effective": "float16",
-                "amp_reason": "auto_fallback_fp16",
-            },
-        )
-
-    raise ValueError(
-        f"Invalid AMP_PRECISION='{amp_precision}'. Use one of: fp32, bf16, fp16, auto."
-    )
+    return resolver()
 
 
 def setup_precision(

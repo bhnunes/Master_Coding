@@ -13,6 +13,9 @@ import helpers.artifact.processor as processor_module
 from helpers.artifact.config import ArtifactDetectionConfig
 from helpers.artifact.processor import (
     ArtifactProcessor,
+    HorizontalTileAppend,
+    TileGrid,
+    VerticalTileAppend,
     _append_horizontal_tile,
     _append_vertical_tile,
     _combine_horizontal_tiles,
@@ -63,10 +66,20 @@ def test_process_slide_creates_output_dir_and_calls_internal_steps(tmp_path: Pat
 def test_crop_tile_handles_regular_right_bottom_and_corner_tiles() -> None:
     image = Image.fromarray(np.arange(100, dtype=np.uint8).reshape(10, 10))
 
-    regular = _crop_tile(image, 0, 0, 2, 2, 4, 10, 10)
-    right_edge = _crop_tile(image, 2, 0, 2, 2, 4, 10, 10)
-    bottom_edge = _crop_tile(image, 0, 2, 2, 2, 4, 10, 10)
-    corner = _crop_tile(image, 2, 2, 2, 2, 4, 10, 10)
+    grid = TileGrid(
+        tiles_x=2,
+        tiles_y=2,
+        patch_size=4,
+        width=10,
+        height=10,
+        overhang_x=2,
+        overhang_y=2,
+    )
+
+    regular = _crop_tile(image, 0, 0, grid)
+    right_edge = _crop_tile(image, 2, 0, grid)
+    bottom_edge = _crop_tile(image, 0, 2, grid)
+    corner = _crop_tile(image, 2, 2, grid)
 
     assert regular.size == (4, 4)
     assert regular.getbbox() == (0, 0, 4, 4)
@@ -82,35 +95,25 @@ def test_append_horizontal_tile_handles_init_full_append_and_overhang() -> None:
     mask = np.array([[1, 2], [3, 4]], dtype=np.uint8)
     class_mask = np.dstack([mask, mask, mask])
 
-    first_image, first_class_map = _append_horizontal_tile(None, None, mask, class_mask, 0, 2, 2, 1)
+    first_image, first_class_map = _append_horizontal_tile(
+        HorizontalTileAppend(None, None, mask, class_mask, 0, 2, 2, 1)
+    )
     assert np.array_equal(first_image, mask)
     assert np.array_equal(first_class_map, class_mask)
 
     with pytest.raises(RuntimeError, match="Horizontal stitching state"):
-        _append_horizontal_tile(None, class_mask, mask, class_mask, 1, 2, 2, 1)
+        _append_horizontal_tile(
+            HorizontalTileAppend(None, class_mask, mask, class_mask, 1, 2, 2, 1)
+        )
 
     appended, appended_class_map = _append_horizontal_tile(
-        first_image,
-        first_class_map,
-        mask,
-        class_mask,
-        1,
-        2,
-        2,
-        1,
+        HorizontalTileAppend(first_image, first_class_map, mask, class_mask, 1, 2, 2, 1)
     )
     assert appended.shape == (2, 4)
     assert appended_class_map.shape == (2, 4, 3)
 
     clipped, clipped_class_map = _append_horizontal_tile(
-        first_image,
-        first_class_map,
-        mask,
-        class_mask,
-        2,
-        2,
-        2,
-        1,
+        HorizontalTileAppend(first_image, first_class_map, mask, class_mask, 2, 2, 2, 1)
     )
     assert clipped.shape == (2, 3)
     assert clipped_class_map.shape == (2, 3, 3)
@@ -120,35 +123,23 @@ def test_append_vertical_tile_handles_init_full_append_and_overhang() -> None:
     row = np.array([[1, 2], [3, 4]], dtype=np.uint8)
     class_row = np.dstack([row, row, row])
 
-    first_image, first_class_map = _append_vertical_tile(None, None, row, class_row, 0, 2, 2, 1)
+    first_image, first_class_map = _append_vertical_tile(
+        VerticalTileAppend(None, None, row, class_row, 0, 2, 2, 1)
+    )
     assert np.array_equal(first_image, row)
     assert np.array_equal(first_class_map, class_row)
 
     with pytest.raises(RuntimeError, match="Vertical stitching state"):
-        _append_vertical_tile(None, class_row, row, class_row, 1, 2, 2, 1)
+        _append_vertical_tile(VerticalTileAppend(None, class_row, row, class_row, 1, 2, 2, 1))
 
     appended, appended_class_map = _append_vertical_tile(
-        first_image,
-        first_class_map,
-        row,
-        class_row,
-        1,
-        2,
-        2,
-        1,
+        VerticalTileAppend(first_image, first_class_map, row, class_row, 1, 2, 2, 1)
     )
     assert appended.shape == (4, 2)
     assert appended_class_map.shape == (4, 2, 3)
 
     clipped, clipped_class_map = _append_vertical_tile(
-        first_image,
-        first_class_map,
-        row,
-        class_row,
-        2,
-        2,
-        2,
-        1,
+        VerticalTileAppend(first_image, first_class_map, row, class_row, 2, 2, 2, 1)
     )
     assert clipped.shape == (3, 2)
     assert clipped_class_map.shape == (3, 2, 3)

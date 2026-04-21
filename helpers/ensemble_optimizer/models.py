@@ -10,6 +10,7 @@ from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
 from helpers.training.models import create_model
 
 LOGGER = logging.getLogger(__name__)
+_MIN_REQUIRED_ENSEMBLE_MODELS = 2
 
 
 def load_checkpoint_strict_without_aux(
@@ -95,7 +96,7 @@ def load_ensemble_models(
         except Exception as error:
             failed_loads += 1
             LOGGER.warning("Failed to load model %s: %s", selected_model.checkpoint_path, error)
-    if len(ensemble_models) < 2:
+    if len(ensemble_models) < _MIN_REQUIRED_ENSEMBLE_MODELS:
         raise RuntimeError("Fewer than 2 models loaded. Ensemble optimization requires at least 2.")
     LOGGER.info(
         "Loaded %s/%s selected models%s.",

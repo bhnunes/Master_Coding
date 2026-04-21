@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -49,6 +50,18 @@ _UPSTREAM_LINEAGE_ATTRS = (
     "source_split_hdf5_path",
     "source_split_hdf5_sha256",
 )
+
+
+@dataclass(frozen=True)
+class FilteredPatientShardWrite:
+    patient_id: int
+    source_shard_path: Path
+    source_relative_path: str
+    output_path: Path
+    output_relative_path: str
+    selected_row_indices: list[int]
+    signature_source_dir: Path | None
+    stage7_summary_attrs: dict[str, int] | None = None
 
 
 def _hash_json_payload(payload: dict[str, Any]) -> str:
@@ -468,13 +481,15 @@ def write_filtered_shards(
         source_shard_path = source_shard_dir.parent / relative_hdf5_path
         patient_manifest_row, patient_sample_rows = write_filtered_patient_shard(
             config,
-            patient_id=patient_id,
-            source_shard_path=source_shard_path,
-            source_relative_path=relative_hdf5_path,
-            output_path=output_path,
-            output_relative_path=output_relative_path,
-            selected_row_indices=sorted(row_indices),
-            signature_source_dir=signature_source_dir,
+            FilteredPatientShardWrite(
+                patient_id=patient_id,
+                source_shard_path=source_shard_path,
+                source_relative_path=relative_hdf5_path,
+                output_path=output_path,
+                output_relative_path=output_relative_path,
+                selected_row_indices=sorted(row_indices),
+                signature_source_dir=signature_source_dir,
+            ),
         )
         manifest_rows.append(patient_manifest_row)
         sample_manifest_rows.extend(patient_sample_rows)
@@ -493,30 +508,23 @@ def write_filtered_shards(
 
 def write_filtered_patient_shard(
     config: SmartSamplerConfig,
-    *,
-    patient_id: int,
-    source_shard_path: Path,
-    source_relative_path: str,
-    output_path: Path,
-    output_relative_path: str,
-    selected_row_indices: list[int],
-    signature_source_dir: Path | None,
-    stage7_summary_attrs: dict[str, int] | None = None,
+    payload: FilteredPatientShardWrite,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    output_path = payload.output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     selection_signature = _build_filtered_patient_shard_signature(
-        patient_id=patient_id,
-        selected_row_indices=selected_row_indices,
-        source_shard_path=source_shard_path,
-        source_relative_path=source_relative_path,
-        output_relative_path=output_relative_path,
+        patient_id=payload.patient_id,
+        selected_row_indices=payload.selected_row_indices,
+        source_shard_path=payload.source_shard_path,
+        source_relative_path=payload.source_relative_path,
+        output_relative_path=payload.output_relative_path,
         config=config,
-        signature_source_dir=signature_source_dir,
+        signature_source_dir=payload.signature_source_dir,
     )
-    with h5py.File(source_shard_path, "r") as source_handle:
+    with h5py.File(payload.source_shard_path, "r") as source_handle:
         guardrail(source_handle)
         filename_key = resolve_filename_key(source_handle)
-        selected_indices = np.asarray(selected_row_indices, dtype=np.int64)
+        selected_indices = np.asarray(payload.selected_row_indices, dtype=np.int64)
         images_data = np.asarray(source_handle["images"][selected_indices], dtype=np.uint8)
         masks_data = np.asarray(source_handle["masks"][selected_indices], dtype=np.uint8)
         labels_data = np.asarray(source_handle["labels"][selected_indices], dtype=np.uint8)
@@ -529,9 +537,10 @@ def write_filtered_patient_shard(
         ]
 
         unique_patient_ids = {int(value) for value in patient_ids_data.tolist()}
-        if unique_patient_ids != {patient_id}:
+        if unique_patient_ids != {payload.patient_id}:
             raise ValueError(
-                f"Filtered Stage 7 shard for patient {patient_id} contains unexpected patient ids: "
+                "Filtered Stage 7 shard for patient "
+                f"{payload.patient_id} contains unexpected patient ids: "
                 f"{sorted(unique_patient_ids)}."
             )
 
@@ -541,13 +550,15 @@ def write_filtered_patient_shard(
                 if attr_value is not None:
                     dest_handle.attrs[attr_name] = attr_value
             dest_handle.attrs["selection_signature"] = selection_signature
-            dest_handle.attrs["patient_id"] = patient_id
+            dest_handle.attrs["patient_id"] = payload.patient_id
             dest_handle.attrs["split_name"] = "TRAIN_FILTERED"
-            dest_handle.attrs["source_patient_relative_hdf5_path"] = source_relative_path
-            dest_handle.attrs["source_patient_shard_path"] = str(source_shard_path)
-            dest_handle.attrs["source_patient_shard_sha256"] = hash_file_sha256(source_shard_path)
+            dest_handle.attrs["source_patient_relative_hdf5_path"] = payload.source_relative_path
+            dest_handle.attrs["source_patient_shard_path"] = str(payload.source_shard_path)
+            dest_handle.attrs["source_patient_shard_sha256"] = hash_file_sha256(
+                payload.source_shard_path
+            )
             dest_handle.attrs["source_patient_shard_row_indices_json"] = json.dumps(
-                selected_row_indices
+                payload.selected_row_indices
             )
             source_shard_selection_signature = source_handle.attrs.get("selection_signature")
             if source_shard_selection_signature is not None:
@@ -556,8 +567,8 @@ def write_filtered_patient_shard(
                 )
             for attr_name, attr_value in _stage7_metadata_payload(config).items():
                 dest_handle.attrs[attr_name] = attr_value
-            if stage7_summary_attrs is not None:
-                for attr_name, attr_value in stage7_summary_attrs.items():
+            if payload.stage7_summary_attrs is not None:
+                for attr_name, attr_value in payload.stage7_summary_attrs.items():
                     dest_handle.attrs[attr_name] = attr_value
 
             str_dtype = h5py.string_dtype(encoding="utf-8")
@@ -583,17 +594,17 @@ def write_filtered_patient_shard(
 
     manifest_row = {
         "split": "TRAIN_FILTERED",
-        "patient_id": patient_id,
-        "relative_hdf5_path": output_relative_path,
-        "rows": len(selected_row_indices),
+        "patient_id": payload.patient_id,
+        "relative_hdf5_path": payload.output_relative_path,
+        "rows": len(payload.selected_row_indices),
         "label_0_count": int((labels_data == 0).sum()),
         "label_1_count": int((labels_data == 1).sum()),
     }
     sample_manifest_rows = [
         {
             "split": "TRAIN_FILTERED",
-            "patient_id": patient_id,
-            "relative_hdf5_path": output_relative_path,
+            "patient_id": payload.patient_id,
+            "relative_hdf5_path": payload.output_relative_path,
             "row_in_shard": row_in_shard,
             "label": int(label),
             "filename": filename,

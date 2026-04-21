@@ -12,6 +12,17 @@ import torch
 
 from helpers.ensemble_inference import data as inference_data
 
+PATCH_SIDE = 4
+RGB_CHANNELS = 3
+EXPECTED_RECORD_COUNT = 3
+EXPECTED_SHARD_COUNT = 2
+FIRST_IMAGE_PIXEL = 7
+SECOND_IMAGE_PIXEL = 8
+THIRD_IMAGE_PIXEL = 9
+FULL_MASK_SUM = 16
+TEST_BATCH_SIZE = 2
+PREFETCH_FACTOR = 4
+
 
 def _write_stage2_shard(
     shard_path: Path,
@@ -27,13 +38,19 @@ def _write_stage2_shard(
         handle.create_dataset(
             "images",
             data=np.stack(
-                [np.full((4, 4, 3), pixel_value, dtype=np.uint8) for pixel_value in pixel_values]
+                [
+                    np.full((PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS), pixel_value, dtype=np.uint8)
+                    for pixel_value in pixel_values
+                ]
             ),
         )
         handle.create_dataset(
             "masks",
             data=np.stack(
-                [np.full((4, 4), mask_value, dtype=np.uint8) for mask_value in mask_values]
+                [
+                    np.full((PATCH_SIDE, PATCH_SIDE), mask_value, dtype=np.uint8)
+                    for mask_value in mask_values
+                ]
             ),
         )
         handle.create_dataset("labels", data=np.asarray(labels, dtype=np.uint8))
@@ -181,7 +198,7 @@ def test_setup_test_data_returns_layout_when_staging_disabled(
 
     assert layout.master_manifest_path == master_manifest_path
     assert layout.local_cache_dir is None
-    assert len(layout.records) == 3
+    assert len(layout.records) == EXPECTED_RECORD_COUNT
 
 
 def test_setup_test_data_prepares_local_cache_when_staging_enabled(
@@ -221,8 +238,8 @@ def test_collect_test_dataset_provenance_reports_manifest_metadata(
     provenance = inference_data.collect_test_dataset_provenance(layout)
 
     assert provenance["master_manifest_path"] == str(master_manifest_path)
-    assert provenance["row_count"] == 3
-    assert provenance["shard_count"] == 2
+    assert provenance["row_count"] == EXPECTED_RECORD_COUNT
+    assert provenance["shard_count"] == EXPECTED_SHARD_COUNT
     assert provenance["attrs"] == {
         "master_manifest_sha256": provenance["master_manifest_sha256"],
         "normalization_method": "none",
@@ -251,12 +268,12 @@ def test_test_dataset_reads_canonical_rows_in_manifest_order(
         tuple[torch.Tensor, torch.Tensor, str, str], dataset[2]
     )
 
-    assert int(first_image[0, 0, 0]) == 7
-    assert int(second_image[0, 0, 0]) == 8
-    assert int(third_image[0, 0, 0]) == 9
+    assert int(first_image[0, 0, 0]) == FIRST_IMAGE_PIXEL
+    assert int(second_image[0, 0, 0]) == SECOND_IMAGE_PIXEL
+    assert int(third_image[0, 0, 0]) == THIRD_IMAGE_PIXEL
     assert int(first_mask.sum()) == 0
-    assert int(second_mask.sum()) == 16
-    assert int(third_mask.sum()) == 16
+    assert int(second_mask.sum()) == FULL_MASK_SUM
+    assert int(third_mask.sum()) == FULL_MASK_SUM
     assert first_patient_id == "1"
     assert second_patient_id == "1"
     assert third_patient_id == "2"
@@ -349,10 +366,14 @@ def test_create_test_dataloader_sets_worker_dependent_flags(
         stage_input_locally=False,
     )
 
-    loader = inference_data.create_test_dataloader(layout, batch_size=2, workers=1)
+    loader = inference_data.create_test_dataloader(
+        layout,
+        batch_size=TEST_BATCH_SIZE,
+        workers=1,
+    )
 
-    assert loader.batch_size == 2
+    assert loader.batch_size == TEST_BATCH_SIZE
     assert loader.persistent_workers is True
-    assert loader.prefetch_factor == 4
+    assert loader.prefetch_factor == PREFETCH_FACTOR
     assert loader.collate_fn is inference_data.collate_test_batch
     assert loader.worker_init_fn is inference_data.worker_init_fn  # type: ignore[attr-defined]

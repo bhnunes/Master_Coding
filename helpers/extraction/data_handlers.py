@@ -40,6 +40,21 @@ class ChileLabelColors:
 
 CHILE_LABEL_COLORS = ChileLabelColors()
 
+MIN_POLYGON_POINTS = 3
+MIN_FLAT_COORD_VALUES = 6
+NDPI_CANCER_LABELS = frozenset({"R1", "R2", "R3", "R4", "R5"})
+NDPI_NON_CANCER_LABELS = frozenset({"BG", "T", "N", "A"})
+
+
+@dataclass(frozen=True)
+class NdpiSlideCalibration:
+    offset_x_nm: int
+    offset_y_nm: int
+    nm_per_pixel_x: float
+    nm_per_pixel_y: float
+    slide_width_level0: int
+    slide_height_level0: int
+
 
 def _to_coord_list(geometry: Polygon | MultiPolygon) -> list[list[tuple[float, float]]]:
     """Convert a Shapely polygon geometry into plain coordinate lists."""
@@ -66,11 +81,11 @@ def _coords_to_shapely_polygons(coord_lists: list[Any]) -> list[Polygon]:
             continue
 
         if isinstance(points_raw[0], (int, float)):
-            if len(points_raw) < 6:
+            if len(points_raw) < MIN_FLAT_COORD_VALUES:
                 continue
             points = [(points_raw[i], points_raw[i + 1]) for i in range(0, len(points_raw), 2)]
         else:
-            if len(points_raw) < 3:
+            if len(points_raw) < MIN_POLYGON_POINTS:
                 continue
             points = points_raw
 
@@ -164,7 +179,7 @@ class SVS_XML_Handler(BaseHandler):
                     for vertex in region.findall(".//Vertex")
                     if vertex.get("X") is not None and vertex.get("Y") is not None
                 ]
-                if len(vertices) < 3:
+                if len(vertices) < MIN_POLYGON_POINTS:
                     continue
                 if is_cancer:
                     raw_cancer_coords.append(vertices)
@@ -218,7 +233,7 @@ class SVS_XML_Handler(BaseHandler):
                 for node in annotation.findall("./Coordinates/Coordinate")
                 if node.get("X") is not None and node.get("Y") is not None
             ]
-            if len(vertices) < 3:
+            if len(vertices) < MIN_POLYGON_POINTS:
                 continue
             if is_cancer:
                 raw_cancer_coords.append(vertices)
@@ -237,20 +252,9 @@ class NDPI_NDPA_Handler(BaseHandler):
         if not os.path.exists(annotation_path):
             raise FileNotFoundError(f"Annotation file not found: {annotation_path}")
 
-        cancer_labels = {"R1", "R2", "R3", "R4", "R5"}
-        non_cancer_labels = {"BG", "T", "N", "A"}
         raw_cancer_polygons: list[Polygon] = []
         raw_not_cancer_polygons: list[Polygon] = []
-
-        openslide_module = load_openslide_module()
-
-        offset_x_nm = int(slide.properties.get("hamamatsu.XOffsetFromSlideCentre", 0))
-        offset_y_nm = int(slide.properties.get("hamamatsu.YOffsetFromSlideCentre", 0))
-        mpp_x = float(slide.properties.get(openslide_module.PROPERTY_NAME_MPP_X, 0.25))
-        mpp_y = float(slide.properties.get(openslide_module.PROPERTY_NAME_MPP_Y, 0.25))
-        nm_per_pixel_x = mpp_x * 1000
-        nm_per_pixel_y = mpp_y * 1000
-        slide_width_level0, slide_height_level0 = slide.level_dimensions[0]
+        calibration = _build_ndpi_slide_calibration(slide)
 
         root = ET.parse(annotation_path).getroot()
         for view in root.findall("ndpviewstate"):
@@ -259,33 +263,12 @@ class NDPI_NDPA_Handler(BaseHandler):
                 continue
 
             label = title_element.text.strip()
-            is_cancer = label in cancer_labels
-            is_non_cancer = label in non_cancer_labels
+            is_cancer, is_non_cancer = _classify_ndpi_label(label)
             if not (is_cancer or is_non_cancer):
                 continue
 
-            pointlist = view.find("annotation/pointlist")
-            if pointlist is None:
-                continue
-
-            temp_poly_coords: list[tuple[float, float]] = []
-            for point in pointlist.findall("point"):
-                try:
-                    x_nm = _required_float(_node_text(point.find("x")))
-                    y_nm = _required_float(_node_text(point.find("y")))
-                    x_pixel = ((x_nm - offset_x_nm) / nm_per_pixel_x) + (slide_width_level0 / 2)
-                    y_pixel = ((y_nm - offset_y_nm) / nm_per_pixel_y) + (slide_height_level0 / 2)
-                    temp_poly_coords.append((x_pixel, y_pixel))
-                except (ValueError, TypeError, AttributeError):
-                    continue
-
-            if len(temp_poly_coords) < 3:
-                continue
-
-            polygon = Polygon(temp_poly_coords)
-            if not polygon.is_valid:
-                polygon = polygon.buffer(0)
-            if not polygon.is_valid or polygon.is_empty or not isinstance(polygon, Polygon):
+            polygon = _build_ndpi_polygon(view, calibration)
+            if polygon is None:
                 continue
             if is_cancer:
                 raw_cancer_polygons.append(polygon)
@@ -402,3 +385,66 @@ def _is_hiseg_tag(value: object) -> bool:
 
 def _is_chile_tag(value: object) -> bool:
     return isinstance(value, str) and value.strip() == "CHILE"
+
+
+def _build_ndpi_slide_calibration(slide: Any) -> NdpiSlideCalibration:
+    openslide_module = load_openslide_module()
+    mpp_x = float(slide.properties.get(openslide_module.PROPERTY_NAME_MPP_X, 0.25))
+    mpp_y = float(slide.properties.get(openslide_module.PROPERTY_NAME_MPP_Y, 0.25))
+    slide_width_level0, slide_height_level0 = slide.level_dimensions[0]
+    return NdpiSlideCalibration(
+        offset_x_nm=int(slide.properties.get("hamamatsu.XOffsetFromSlideCentre", 0)),
+        offset_y_nm=int(slide.properties.get("hamamatsu.YOffsetFromSlideCentre", 0)),
+        nm_per_pixel_x=mpp_x * 1000,
+        nm_per_pixel_y=mpp_y * 1000,
+        slide_width_level0=slide_width_level0,
+        slide_height_level0=slide_height_level0,
+    )
+
+
+def _classify_ndpi_label(label: str) -> tuple[bool, bool]:
+    return label in NDPI_CANCER_LABELS, label in NDPI_NON_CANCER_LABELS
+
+
+def _build_ndpi_polygon(
+    view: ET.Element,
+    calibration: NdpiSlideCalibration,
+) -> Polygon | None:
+    pointlist = view.find("annotation/pointlist")
+    if pointlist is None:
+        return None
+
+    temp_poly_coords: list[tuple[float, float]] = []
+    for point in pointlist.findall("point"):
+        pixel_coords = _ndpi_point_to_pixel_coords(point, calibration)
+        if pixel_coords is not None:
+            temp_poly_coords.append(pixel_coords)
+
+    if len(temp_poly_coords) < MIN_POLYGON_POINTS:
+        return None
+
+    polygon = Polygon(temp_poly_coords)
+    if not polygon.is_valid:
+        polygon = polygon.buffer(0)
+    if not polygon.is_valid or polygon.is_empty or not isinstance(polygon, Polygon):
+        return None
+    return polygon
+
+
+def _ndpi_point_to_pixel_coords(
+    point: ET.Element,
+    calibration: NdpiSlideCalibration,
+) -> tuple[float, float] | None:
+    try:
+        x_nm = _required_float(_node_text(point.find("x")))
+        y_nm = _required_float(_node_text(point.find("y")))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    x_pixel = ((x_nm - calibration.offset_x_nm) / calibration.nm_per_pixel_x) + (
+        calibration.slide_width_level0 / 2
+    )
+    y_pixel = ((y_nm - calibration.offset_y_nm) / calibration.nm_per_pixel_y) + (
+        calibration.slide_height_level0 / 2
+    )
+    return x_pixel, y_pixel

@@ -27,6 +27,9 @@ _REQUIRED_HDF5_DATASETS = (
 _OPTIONAL_HDF5_DATASETS = ("slide_ids", "source_image_paths", "source_mask_paths")
 _COPY_BUFFER_BYTES = 8 * 1024 * 1024
 _PROGRESS_LOG_INTERVAL_SECONDS = 1.5
+_BINARY_UNIT_BASE = 1024.0
+_IMAGE_DATASET_NDIM = 4
+_MASK_DATASET_NDIM = 3
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,65 @@ class _MergeRowReference:
     slide_id: str | None
 
 
+@dataclass(frozen=True)
+class _FilterCopyPlan:
+    canonical_source_signature: str
+    source_signature: str
+    selected_rows: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _FilterSourceDatasets:
+    images: Any
+    masks: Any
+    labels: Any
+    patient_ids: Any
+    filenames: Any
+    slide_ids: Any | None
+    source_image_paths: Any | None
+    source_mask_paths: Any | None
+
+
+@dataclass(frozen=True)
+class _FilterDestinationDatasets:
+    images: Any
+    masks: Any
+    labels: Any
+    patient_ids: Any
+    filenames: Any
+    source_image_paths: Any
+    source_mask_paths: Any
+    source_row_indices: Any
+    slide_ids: Any | None
+
+
+@dataclass(frozen=True)
+class _MergeScanResult:
+    shard_metadata: list[_ShardMetadata]
+    row_references: list[_MergeRowReference]
+
+
+@dataclass(frozen=True)
+class _MergeDestinationDatasets:
+    images: Any
+    masks: Any
+    labels: Any
+    patient_ids: Any
+    filenames: Any
+    source_image_paths: Any
+    source_mask_paths: Any
+    slide_ids: Any | None
+
+
+@dataclass(frozen=True)
+class _MergeBatchContext:
+    shard_handles: list[h5py.File]
+    shard_metadata: list[_ShardMetadata]
+    destination: _MergeDestinationDatasets
+    image_shape: tuple[int, ...]
+    mask_shape: tuple[int, ...]
+
+
 def _format_duration(seconds: float) -> str:
     if seconds <= 0:
         return "00:00"
@@ -61,11 +123,11 @@ def _format_bytes(byte_count: int) -> str:
     units = ["B", "KiB", "MiB", "GiB", "TiB"]
     value = float(byte_count)
     for unit in units:
-        if value < 1024.0 or unit == units[-1]:
+        if value < _BINARY_UNIT_BASE or unit == units[-1]:
             if unit == "B":
                 return f"{int(value)} {unit}"
             return f"{value:.1f} {unit}"
-        value /= 1024.0
+        value /= _BINARY_UNIT_BASE
     return f"{byte_count} B"
 
 
@@ -201,7 +263,7 @@ def _validate_source_hdf5_contract(source_path: Path) -> None:
 
         images = cast(Any, handle["images"])
         masks = cast(Any, handle["masks"])
-        if images.ndim != 4 or masks.ndim != 3:
+        if images.ndim != _IMAGE_DATASET_NDIM or masks.ndim != _MASK_DATASET_NDIM:
             raise ValueError(
                 f"Source HDF5 dataset '{source_path}' must store 4D images and 3D masks."
             )
@@ -419,15 +481,7 @@ def _sorted_indices(
     return indices[order], order
 
 
-def filter_source_hdf5_by_manifest(
-    source_path: Path,
-    manifest_path: Path,
-    output_path: Path,
-    *,
-    overwrite: bool,
-    compression: str | None,
-    copy_batch_size: int,
-) -> Path:
+def _build_filter_copy_plan(source_path: Path, manifest_path: Path) -> _FilterCopyPlan:
     _validate_source_hdf5_contract(source_path)
     with h5py.File(source_path, "r") as source_handle:
         raw_source_signature = source_handle.attrs.get("source_signature")
@@ -437,6 +491,7 @@ def filter_source_hdf5_by_manifest(
             "Stage 3 accepted-manifest filtering requires a canonical source HDF5 with "
             "source_signature."
         )
+
     canonical_source_signature = _normalize_hdf5_string(raw_source_signature)
     selected_rows = _load_accepted_manifest_rows(
         source_path,
@@ -450,12 +505,191 @@ def filter_source_hdf5_by_manifest(
             "source_row_indices": [row["source_row_index"] for row in selected_rows],
         }
     )
-    if output_path.exists() and not overwrite:
-        return _validate_existing_hdf5(output_path, source_signature)
+    return _FilterCopyPlan(
+        canonical_source_signature=canonical_source_signature,
+        source_signature=source_signature,
+        selected_rows=selected_rows,
+    )
 
-    total_rows = len(selected_rows)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+def _filter_source_datasets(source_handle: h5py.File) -> _FilterSourceDatasets:
+    slide_ids = source_handle.get("slide_ids")
+    source_image_paths = source_handle.get("source_image_paths")
+    source_mask_paths = source_handle.get("source_mask_paths")
+    return _FilterSourceDatasets(
+        images=cast(Any, source_handle["images"]),
+        masks=cast(Any, source_handle["masks"]),
+        labels=cast(Any, source_handle["labels"]),
+        patient_ids=cast(Any, source_handle["patient_ids"]),
+        filenames=cast(Any, source_handle["filenames"]),
+        slide_ids=cast(Any, slide_ids) if slide_ids is not None else None,
+        source_image_paths=(
+            cast(Any, source_image_paths) if source_image_paths is not None else None
+        ),
+        source_mask_paths=cast(Any, source_mask_paths) if source_mask_paths is not None else None,
+    )
+
+
+def _create_filter_destination_datasets(
+    dest_handle: h5py.File,
+    *,
+    total_rows: int,
+    image_shape: tuple[int, ...],
+    mask_shape: tuple[int, ...],
+    dataset_kwargs: dict[str, Any],
+    include_slide_ids: bool,
+) -> _FilterDestinationDatasets:
     str_dtype = h5py.string_dtype(encoding="utf-8")
+    return _FilterDestinationDatasets(
+        images=dest_handle.create_dataset(
+            "images",
+            shape=(total_rows,) + image_shape,
+            dtype="uint8",
+            **dataset_kwargs,
+        ),
+        masks=dest_handle.create_dataset(
+            "masks",
+            shape=(total_rows,) + mask_shape,
+            dtype="uint8",
+            **dataset_kwargs,
+        ),
+        labels=dest_handle.create_dataset("labels", shape=(total_rows,), dtype="uint8"),
+        patient_ids=dest_handle.create_dataset("patient_ids", shape=(total_rows,), dtype="int32"),
+        filenames=dest_handle.create_dataset("filenames", shape=(total_rows,), dtype=str_dtype),
+        source_image_paths=dest_handle.create_dataset(
+            "source_image_paths", shape=(total_rows,), dtype=str_dtype
+        ),
+        source_mask_paths=dest_handle.create_dataset(
+            "source_mask_paths", shape=(total_rows,), dtype=str_dtype
+        ),
+        source_row_indices=dest_handle.create_dataset(
+            "source_row_indices", shape=(total_rows,), dtype="int32"
+        ),
+        slide_ids=dest_handle.create_dataset("slide_ids", shape=(total_rows,), dtype=str_dtype)
+        if include_slide_ids
+        else None,
+    )
+
+
+def _normalize_string_rows(
+    dataset: Any,
+    sorted_indices: npt.NDArray[np.int64],
+    order: npt.NDArray[np.int64],
+) -> list[str]:
+    return [
+        _normalize_hdf5_string(value)
+        for value in _read_sorted_rows(dataset, sorted_indices, dtype=object)[order]
+    ]
+
+
+def _copy_filter_batch(
+    *,
+    source_path: Path,
+    source: _FilterSourceDatasets,
+    destination: _FilterDestinationDatasets,
+    batch_rows: list[dict[str, Any]],
+    start: int,
+    end: int,
+) -> None:
+    batch_indices = np.fromiter(
+        (int(row["source_row_index"]) for row in batch_rows),
+        dtype=np.int64,
+        count=len(batch_rows),
+    )
+    sorted_indices, order = _sorted_indices(batch_indices)
+    batch_images = np.empty((len(batch_rows),) + tuple(source.images.shape[1:]), dtype=np.uint8)
+    batch_masks = np.empty((len(batch_rows),) + tuple(source.masks.shape[1:]), dtype=np.uint8)
+    batch_images[order] = _read_sorted_rows(source.images, sorted_indices, dtype=np.uint8)
+    batch_masks[order] = _read_sorted_rows(source.masks, sorted_indices, dtype=np.uint8)
+
+    destination.labels[start:end] = _read_sorted_rows(
+        source.labels,
+        sorted_indices,
+        dtype=np.uint8,
+    )[order]
+    destination.patient_ids[start:end] = _read_sorted_rows(
+        source.patient_ids, sorted_indices, dtype=np.int32
+    )[order]
+    destination.filenames[start:end] = _normalize_string_rows(
+        source.filenames,
+        sorted_indices,
+        order,
+    )
+    destination.source_image_paths[start:end] = _resolve_filter_reference_rows(
+        dataset=source.source_image_paths,
+        sorted_indices=sorted_indices,
+        order=order,
+        source_path=source_path,
+        dataset_name="images",
+        batch_indices=batch_indices,
+    )
+    destination.source_mask_paths[start:end] = _resolve_filter_reference_rows(
+        dataset=source.source_mask_paths,
+        sorted_indices=sorted_indices,
+        order=order,
+        source_path=source_path,
+        dataset_name="masks",
+        batch_indices=batch_indices,
+    )
+    destination.source_row_indices[start:end] = batch_indices.astype(np.int32, copy=False)
+    if destination.slide_ids is not None and source.slide_ids is not None:
+        destination.slide_ids[start:end] = _normalize_string_rows(
+            source.slide_ids,
+            sorted_indices,
+            order,
+        )
+    destination.images[start:end] = batch_images
+    destination.masks[start:end] = batch_masks
+
+
+def _resolve_filter_reference_rows(
+    *,
+    dataset: Any | None,
+    sorted_indices: npt.NDArray[np.int64],
+    order: npt.NDArray[np.int64],
+    source_path: Path,
+    dataset_name: str,
+    batch_indices: npt.NDArray[np.int64],
+) -> list[str]:
+    if dataset is not None:
+        return _normalize_string_rows(dataset, sorted_indices, order)
+    return [
+        _build_logical_hdf5_ref(source_path, dataset_name, int(index)) for index in batch_indices
+    ]
+
+
+def _set_filter_output_attrs(
+    *,
+    source_handle: h5py.File,
+    dest_handle: h5py.File,
+    source_signature: str,
+    manifest_path: Path,
+    total_rows: int,
+) -> None:
+    upstream_signature = source_handle.attrs.get("source_signature")
+    if upstream_signature is not None:
+        dest_handle.attrs["upstream_source_signature"] = upstream_signature
+    dest_handle.attrs["source_signature"] = source_signature
+    dest_handle.attrs["stage4_cleaning_manifest_path"] = str(manifest_path)
+    dest_handle.attrs["stage4_cleaning_manifest_sha256"] = hash_file_sha256(manifest_path)
+    dest_handle.attrs["stage4_cleaning_selected_rows"] = total_rows
+
+
+def filter_source_hdf5_by_manifest(
+    source_path: Path,
+    manifest_path: Path,
+    output_path: Path,
+    *,
+    overwrite: bool,
+    compression: str | None,
+    copy_batch_size: int,
+) -> Path:
+    filter_plan = _build_filter_copy_plan(source_path, manifest_path)
+    if output_path.exists() and not overwrite:
+        return _validate_existing_hdf5(output_path, filter_plan.source_signature)
+
+    total_rows = len(filter_plan.selected_rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     dataset_kwargs = _dataset_kwargs(compression)
     reporter = _ProgressReporter("Filter progress", total_rows, "rows")
     reporter.log_start(
@@ -464,121 +698,27 @@ def filter_source_hdf5_by_manifest(
         f"compression={compression or 'none'} | batch_size={copy_batch_size}"
     )
     with h5py.File(source_path, "r") as source_handle, h5py.File(output_path, "w") as dest_handle:
-        source_images = cast(Any, source_handle["images"])
-        source_masks = cast(Any, source_handle["masks"])
-        images = dest_handle.create_dataset(
-            "images",
-            shape=(total_rows,) + tuple(source_images.shape[1:]),
-            dtype="uint8",
-            **dataset_kwargs,
+        source_datasets = _filter_source_datasets(source_handle)
+        destination_datasets = _create_filter_destination_datasets(
+            dest_handle,
+            total_rows=total_rows,
+            image_shape=tuple(source_datasets.images.shape[1:]),
+            mask_shape=tuple(source_datasets.masks.shape[1:]),
+            dataset_kwargs=dataset_kwargs,
+            include_slide_ids=source_datasets.slide_ids is not None,
         )
-        masks = dest_handle.create_dataset(
-            "masks",
-            shape=(total_rows,) + tuple(source_masks.shape[1:]),
-            dtype="uint8",
-            **dataset_kwargs,
-        )
-        labels = dest_handle.create_dataset("labels", shape=(total_rows,), dtype="uint8")
-        patient_ids = dest_handle.create_dataset("patient_ids", shape=(total_rows,), dtype="int32")
-        filenames = dest_handle.create_dataset("filenames", shape=(total_rows,), dtype=str_dtype)
-        source_image_paths = dest_handle.create_dataset(
-            "source_image_paths", shape=(total_rows,), dtype=str_dtype
-        )
-        source_mask_paths = dest_handle.create_dataset(
-            "source_mask_paths", shape=(total_rows,), dtype=str_dtype
-        )
-        source_row_indices = dest_handle.create_dataset(
-            "source_row_indices", shape=(total_rows,), dtype="int32"
-        )
-        slide_ids_source = source_handle.get("slide_ids")
-        source_image_refs = source_handle.get("source_image_paths")
-        source_mask_refs = source_handle.get("source_mask_paths")
-        slide_ids = (
-            dest_handle.create_dataset("slide_ids", shape=(total_rows,), dtype=str_dtype)
-            if slide_ids_source is not None
-            else None
-        )
-
-        source_labels = cast(Any, source_handle["labels"])
-        source_patient_ids = cast(Any, source_handle["patient_ids"])
-        source_filenames = cast(Any, source_handle["filenames"])
-        source_slide_ids = cast(Any, slide_ids_source) if slide_ids_source is not None else None
-        source_image_paths_dataset = (
-            cast(Any, source_image_refs) if source_image_refs is not None else None
-        )
-        source_mask_paths_dataset = (
-            cast(Any, source_mask_refs) if source_mask_refs is not None else None
-        )
-        _validate_manifest_rows_against_source(source_handle, selected_rows)
+        _validate_manifest_rows_against_source(source_handle, filter_plan.selected_rows)
 
         for start in range(0, total_rows, copy_batch_size):
             end = min(start + copy_batch_size, total_rows)
-            batch_rows = selected_rows[start:end]
-            batch_indices = np.fromiter(
-                (int(row["source_row_index"]) for row in batch_rows),
-                dtype=np.int64,
-                count=len(batch_rows),
+            _copy_filter_batch(
+                source_path=source_path,
+                source=source_datasets,
+                destination=destination_datasets,
+                batch_rows=filter_plan.selected_rows[start:end],
+                start=start,
+                end=end,
             )
-            sorted_indices, order = _sorted_indices(batch_indices)
-
-            batch_images = np.empty(
-                (len(batch_rows),) + tuple(source_images.shape[1:]), dtype=np.uint8
-            )
-            batch_masks = np.empty(
-                (len(batch_rows),) + tuple(source_masks.shape[1:]), dtype=np.uint8
-            )
-            batch_images[order] = _read_sorted_rows(source_images, sorted_indices, dtype=np.uint8)
-            batch_masks[order] = _read_sorted_rows(source_masks, sorted_indices, dtype=np.uint8)
-            labels[start:end] = _read_sorted_rows(source_labels, sorted_indices, dtype=np.uint8)[
-                order
-            ]
-            patient_ids[start:end] = _read_sorted_rows(
-                source_patient_ids, sorted_indices, dtype=np.int32
-            )[order]
-            filenames[start:end] = [
-                _normalize_hdf5_string(value)
-                for value in _read_sorted_rows(source_filenames, sorted_indices, dtype=object)[
-                    order
-                ]
-            ]
-            if source_image_paths_dataset is not None:
-                source_image_paths[start:end] = [
-                    _normalize_hdf5_string(value)
-                    for value in _read_sorted_rows(
-                        source_image_paths_dataset,
-                        sorted_indices,
-                        dtype=object,
-                    )[order]
-                ]
-            else:
-                source_image_paths[start:end] = [
-                    _build_logical_hdf5_ref(source_path, "images", int(index))
-                    for index in batch_indices
-                ]
-            if source_mask_paths_dataset is not None:
-                source_mask_paths[start:end] = [
-                    _normalize_hdf5_string(value)
-                    for value in _read_sorted_rows(
-                        source_mask_paths_dataset,
-                        sorted_indices,
-                        dtype=object,
-                    )[order]
-                ]
-            else:
-                source_mask_paths[start:end] = [
-                    _build_logical_hdf5_ref(source_path, "masks", int(index))
-                    for index in batch_indices
-                ]
-            source_row_indices[start:end] = batch_indices.astype(np.int32, copy=False)
-            if slide_ids is not None and source_slide_ids is not None:
-                slide_ids[start:end] = [
-                    _normalize_hdf5_string(value)
-                    for value in _read_sorted_rows(source_slide_ids, sorted_indices, dtype=object)[
-                        order
-                    ]
-                ]
-            images[start:end] = batch_images
-            masks[start:end] = batch_masks
             reporter.log(
                 completed_units=end,
                 extra_parts=[
@@ -588,13 +728,13 @@ def filter_source_hdf5_by_manifest(
                 ],
             )
 
-        upstream_signature = source_handle.attrs.get("source_signature")
-        if upstream_signature is not None:
-            dest_handle.attrs["upstream_source_signature"] = upstream_signature
-        dest_handle.attrs["source_signature"] = source_signature
-        dest_handle.attrs["stage4_cleaning_manifest_path"] = str(manifest_path)
-        dest_handle.attrs["stage4_cleaning_manifest_sha256"] = hash_file_sha256(manifest_path)
-        dest_handle.attrs["stage4_cleaning_selected_rows"] = total_rows
+        _set_filter_output_attrs(
+            source_handle=source_handle,
+            dest_handle=dest_handle,
+            source_signature=filter_plan.source_signature,
+            manifest_path=manifest_path,
+            total_rows=total_rows,
+        )
     reporter.log(
         completed_units=total_rows,
         force=True,
@@ -671,6 +811,199 @@ def _merge_signature(
     return _signature_hexdigest(payload)
 
 
+def _scan_merge_inputs(
+    *,
+    shard_paths: list[Path],
+    shard_handles: list[h5py.File],
+    reporter: _ProgressReporter,
+) -> _MergeScanResult:
+    shard_metadata: list[_ShardMetadata] = []
+    row_references: list[_MergeRowReference] = []
+    for shard_index, (shard_path, handle) in enumerate(
+        zip(shard_paths, shard_handles, strict=True), start=1
+    ):
+        _validate_source_hdf5_contract(shard_path)
+        row_count = len(cast(Any, handle["filenames"]))
+        shard_metadata.append(
+            _ShardMetadata(
+                path=shard_path,
+                row_count=row_count,
+                source_signature=_shard_source_signature(handle, shard_path),
+            )
+        )
+        row_references.extend(
+            _build_merge_row_references(shard_index=shard_index - 1, handle=handle)
+        )
+        reporter.log(
+            completed_units=shard_index,
+            extra_parts=[
+                f"last_shard={shard_path.name}",
+                f"rows_discovered={len(row_references)}",
+                f"remaining_shards={len(shard_paths) - shard_index}",
+            ],
+        )
+    return _MergeScanResult(shard_metadata=shard_metadata, row_references=row_references)
+
+
+def _create_merge_destination_datasets(
+    output_handle: h5py.File,
+    *,
+    total_rows: int,
+    image_shape: tuple[int, ...],
+    mask_shape: tuple[int, ...],
+    dataset_kwargs: dict[str, Any],
+    include_slide_ids: bool,
+) -> _MergeDestinationDatasets:
+    str_dtype = h5py.string_dtype(encoding="utf-8")
+    return _MergeDestinationDatasets(
+        images=output_handle.create_dataset(
+            "images",
+            shape=(total_rows,) + image_shape,
+            dtype="uint8",
+            **dataset_kwargs,
+        ),
+        masks=output_handle.create_dataset(
+            "masks",
+            shape=(total_rows,) + mask_shape,
+            dtype="uint8",
+            **dataset_kwargs,
+        ),
+        labels=output_handle.create_dataset("labels", shape=(total_rows,), dtype="uint8"),
+        patient_ids=output_handle.create_dataset("patient_ids", shape=(total_rows,), dtype="int32"),
+        filenames=output_handle.create_dataset("filenames", shape=(total_rows,), dtype=str_dtype),
+        source_image_paths=output_handle.create_dataset(
+            "source_image_paths", shape=(total_rows,), dtype=str_dtype
+        ),
+        source_mask_paths=output_handle.create_dataset(
+            "source_mask_paths", shape=(total_rows,), dtype=str_dtype
+        ),
+        slide_ids=output_handle.create_dataset("slide_ids", shape=(total_rows,), dtype=str_dtype)
+        if include_slide_ids
+        else None,
+    )
+
+
+def _positions_by_shard(batch_rows: list[_MergeRowReference]) -> dict[int, list[int]]:
+    positions_by_shard: dict[int, list[int]] = {}
+    for position, row in enumerate(batch_rows):
+        positions_by_shard.setdefault(row.shard_index, []).append(position)
+    return positions_by_shard
+
+
+def _read_merge_reference_rows(
+    *,
+    shard_handle: h5py.File,
+    shard_path: Path,
+    sorted_indices: npt.NDArray[np.int64],
+    dataset_name: str,
+) -> list[str]:
+    dataset = shard_handle.get(dataset_name)
+    if dataset is not None:
+        return [
+            _normalize_hdf5_string(value)
+            for value in _read_sorted_rows(cast(Any, dataset), sorted_indices, dtype=object)
+        ]
+    logical_dataset_name = dataset_name.removeprefix("source_").removesuffix("_paths")
+    return [
+        _build_logical_hdf5_ref(shard_path, logical_dataset_name, int(source_index))
+        for source_index in sorted_indices
+    ]
+
+
+def _copy_merge_batch(
+    *,
+    context: _MergeBatchContext,
+    batch_rows: list[_MergeRowReference],
+    start: int,
+    end: int,
+) -> int:
+    batch_read_rows = 0
+    batch_images = np.empty((len(batch_rows),) + context.image_shape, dtype=np.uint8)
+    batch_masks = np.empty((len(batch_rows),) + context.mask_shape, dtype=np.uint8)
+    batch_labels = np.empty(len(batch_rows), dtype=np.uint8)
+    batch_patient_ids = np.empty(len(batch_rows), dtype=np.int32)
+    batch_filenames = np.empty(len(batch_rows), dtype=object)
+    batch_source_image_paths = np.empty(len(batch_rows), dtype=object)
+    batch_source_mask_paths = np.empty(len(batch_rows), dtype=object)
+    batch_slide_ids = (
+        np.empty(len(batch_rows), dtype=object)
+        if context.destination.slide_ids is not None
+        else None
+    )
+
+    for shard_index, positions in _positions_by_shard(batch_rows).items():
+        shard_handle = context.shard_handles[shard_index]
+        source_indices = np.fromiter(
+            (batch_rows[position].source_row_index for position in positions),
+            dtype=np.int64,
+            count=len(positions),
+        )
+        batch_read_rows += len(source_indices)
+        sorted_indices, order = _sorted_indices(source_indices)
+        ordered_positions = np.asarray(positions, dtype=np.int64)[order]
+
+        batch_images[ordered_positions] = _read_sorted_rows(
+            cast(Any, shard_handle["images"]),
+            sorted_indices,
+            dtype=np.uint8,
+        )
+        batch_masks[ordered_positions] = _read_sorted_rows(
+            cast(Any, shard_handle["masks"]),
+            sorted_indices,
+            dtype=np.uint8,
+        )
+        batch_labels[ordered_positions] = _read_sorted_rows(
+            cast(Any, shard_handle["labels"]),
+            sorted_indices,
+            dtype=np.uint8,
+        )
+        batch_patient_ids[ordered_positions] = _read_sorted_rows(
+            cast(Any, shard_handle["patient_ids"]),
+            sorted_indices,
+            dtype=np.int32,
+        )
+        batch_filenames[ordered_positions] = _normalize_string_rows(
+            cast(Any, shard_handle["filenames"]),
+            sorted_indices,
+            np.arange(len(sorted_indices), dtype=np.int64),
+        )
+        batch_source_image_paths[ordered_positions] = _read_merge_reference_rows(
+            shard_handle=shard_handle,
+            shard_path=context.shard_metadata[shard_index].path,
+            sorted_indices=sorted_indices,
+            dataset_name="source_image_paths",
+        )
+        batch_source_mask_paths[ordered_positions] = _read_merge_reference_rows(
+            shard_handle=shard_handle,
+            shard_path=context.shard_metadata[shard_index].path,
+            sorted_indices=sorted_indices,
+            dataset_name="source_mask_paths",
+        )
+
+        if batch_slide_ids is not None:
+            shard_slide_ids = shard_handle.get("slide_ids")
+            batch_slide_ids[ordered_positions] = (
+                _normalize_string_rows(
+                    cast(Any, shard_slide_ids),
+                    sorted_indices,
+                    np.arange(len(sorted_indices), dtype=np.int64),
+                )
+                if shard_slide_ids is not None
+                else ""
+            )
+
+    context.destination.images[start:end] = batch_images
+    context.destination.masks[start:end] = batch_masks
+    context.destination.labels[start:end] = batch_labels
+    context.destination.patient_ids[start:end] = batch_patient_ids
+    context.destination.filenames[start:end] = batch_filenames.tolist()
+    context.destination.source_image_paths[start:end] = batch_source_image_paths.tolist()
+    context.destination.source_mask_paths[start:end] = batch_source_mask_paths.tolist()
+    if context.destination.slide_ids is not None and batch_slide_ids is not None:
+        context.destination.slide_ids[start:end] = batch_slide_ids.tolist()
+    return batch_read_rows
+
+
 def merge_source_hdf5_shards(
     shard_dir: Path,
     output_path: Path,
@@ -694,36 +1027,16 @@ def merge_source_hdf5_shards(
         shard_handles = [
             stack.enter_context(h5py.File(shard_path, "r")) for shard_path in shard_paths
         ]
-        shard_metadata: list[_ShardMetadata] = []
-        row_references: list[_MergeRowReference] = []
+        scan_result = _scan_merge_inputs(
+            shard_paths=shard_paths,
+            shard_handles=shard_handles,
+            reporter=shard_scan_reporter,
+        )
 
-        for shard_index, (shard_path, handle) in enumerate(
-            zip(shard_paths, shard_handles, strict=True), start=1
-        ):
-            _validate_source_hdf5_contract(shard_path)
-            row_count = len(cast(Any, handle["filenames"]))
-            shard_metadata.append(
-                _ShardMetadata(
-                    path=shard_path,
-                    row_count=row_count,
-                    source_signature=_shard_source_signature(handle, shard_path),
-                )
-            )
-            row_references.extend(
-                _build_merge_row_references(shard_index=shard_index - 1, handle=handle)
-            )
-            shard_scan_reporter.log(
-                completed_units=shard_index,
-                extra_parts=[
-                    f"last_shard={shard_path.name}",
-                    f"rows_discovered={len(row_references)}",
-                    f"remaining_shards={len(shard_paths) - shard_index}",
-                ],
-            )
-
+        row_references = scan_result.row_references
         row_references.sort(key=lambda row: (row.patient_id, row.filename))
         source_signature = _merge_signature(
-            shard_metadata=shard_metadata,
+            shard_metadata=scan_result.shard_metadata,
             row_references=row_references,
         )
         if output_path.exists() and not overwrite:
@@ -731,7 +1044,6 @@ def merge_source_hdf5_shards(
 
         total_rows = len(row_references)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        str_dtype = h5py.string_dtype(encoding="utf-8")
         first_images = cast(Any, shard_handles[0]["images"])
         first_masks = cast(Any, shard_handles[0]["masks"])
         image_shape = tuple(first_images.shape[1:])
@@ -745,160 +1057,30 @@ def merge_source_hdf5_shards(
         )
 
         with h5py.File(output_path, "w") as output_handle:
-            images = output_handle.create_dataset(
-                "images",
-                shape=(total_rows,) + image_shape,
-                dtype="uint8",
-                **dataset_kwargs,
+            destination = _create_merge_destination_datasets(
+                output_handle,
+                total_rows=total_rows,
+                image_shape=image_shape,
+                mask_shape=mask_shape,
+                dataset_kwargs=dataset_kwargs,
+                include_slide_ids=has_slide_ids,
             )
-            masks = output_handle.create_dataset(
-                "masks",
-                shape=(total_rows,) + mask_shape,
-                dtype="uint8",
-                **dataset_kwargs,
-            )
-            labels = output_handle.create_dataset("labels", shape=(total_rows,), dtype="uint8")
-            patient_ids = output_handle.create_dataset(
-                "patient_ids", shape=(total_rows,), dtype="int32"
-            )
-            filenames = output_handle.create_dataset(
-                "filenames", shape=(total_rows,), dtype=str_dtype
-            )
-            source_image_paths = output_handle.create_dataset(
-                "source_image_paths", shape=(total_rows,), dtype=str_dtype
-            )
-            source_mask_paths = output_handle.create_dataset(
-                "source_mask_paths", shape=(total_rows,), dtype=str_dtype
-            )
-            slide_ids = (
-                output_handle.create_dataset("slide_ids", shape=(total_rows,), dtype=str_dtype)
-                if has_slide_ids
-                else None
+            batch_context = _MergeBatchContext(
+                shard_handles=shard_handles,
+                shard_metadata=scan_result.shard_metadata,
+                destination=destination,
+                image_shape=image_shape,
+                mask_shape=mask_shape,
             )
 
             for start in range(0, total_rows, copy_batch_size):
                 end = min(start + copy_batch_size, total_rows)
-                batch_rows = row_references[start:end]
-                batch_read_rows = 0
-                batch_images = np.empty((len(batch_rows),) + image_shape, dtype=np.uint8)
-                batch_masks = np.empty((len(batch_rows),) + mask_shape, dtype=np.uint8)
-                batch_labels = np.empty(len(batch_rows), dtype=np.uint8)
-                batch_patient_ids = np.empty(len(batch_rows), dtype=np.int32)
-                batch_filenames = np.empty(len(batch_rows), dtype=object)
-                batch_source_image_paths = np.empty(len(batch_rows), dtype=object)
-                batch_source_mask_paths = np.empty(len(batch_rows), dtype=object)
-                batch_slide_ids = np.empty(len(batch_rows), dtype=object) if has_slide_ids else None
-
-                positions_by_shard: dict[int, list[int]] = {}
-                for position, row in enumerate(batch_rows):
-                    positions_by_shard.setdefault(row.shard_index, []).append(position)
-
-                for shard_index, positions in positions_by_shard.items():
-                    shard_handle = shard_handles[shard_index]
-                    source_indices = np.fromiter(
-                        (batch_rows[position].source_row_index for position in positions),
-                        dtype=np.int64,
-                        count=len(positions),
-                    )
-                    batch_read_rows += len(source_indices)
-                    sorted_indices, order = _sorted_indices(source_indices)
-                    ordered_positions = np.asarray(positions, dtype=np.int64)[order]
-
-                    shard_images = cast(Any, shard_handle["images"])
-                    shard_masks = cast(Any, shard_handle["masks"])
-                    shard_labels = cast(Any, shard_handle["labels"])
-                    shard_patient_ids = cast(Any, shard_handle["patient_ids"])
-                    shard_filenames = cast(Any, shard_handle["filenames"])
-                    batch_images[ordered_positions] = _read_sorted_rows(
-                        shard_images,
-                        sorted_indices,
-                        dtype=np.uint8,
-                    )
-                    batch_masks[ordered_positions] = _read_sorted_rows(
-                        shard_masks,
-                        sorted_indices,
-                        dtype=np.uint8,
-                    )
-                    batch_labels[ordered_positions] = _read_sorted_rows(
-                        shard_labels,
-                        sorted_indices,
-                        dtype=np.uint8,
-                    )
-                    batch_patient_ids[ordered_positions] = _read_sorted_rows(
-                        shard_patient_ids,
-                        sorted_indices,
-                        dtype=np.int32,
-                    )
-                    batch_filenames[ordered_positions] = [
-                        _normalize_hdf5_string(value)
-                        for value in _read_sorted_rows(
-                            shard_filenames, sorted_indices, dtype=object
-                        )
-                    ]
-
-                    shard_source_image_paths = shard_handle.get("source_image_paths")
-                    if shard_source_image_paths is not None:
-                        batch_source_image_paths[ordered_positions] = [
-                            _normalize_hdf5_string(value)
-                            for value in _read_sorted_rows(
-                                cast(Any, shard_source_image_paths),
-                                sorted_indices,
-                                dtype=object,
-                            )
-                        ]
-                    else:
-                        batch_source_image_paths[ordered_positions] = [
-                            _build_logical_hdf5_ref(
-                                shard_metadata[shard_index].path,
-                                "images",
-                                int(source_index),
-                            )
-                            for source_index in sorted_indices
-                        ]
-
-                    shard_source_mask_paths = shard_handle.get("source_mask_paths")
-                    if shard_source_mask_paths is not None:
-                        batch_source_mask_paths[ordered_positions] = [
-                            _normalize_hdf5_string(value)
-                            for value in _read_sorted_rows(
-                                cast(Any, shard_source_mask_paths),
-                                sorted_indices,
-                                dtype=object,
-                            )
-                        ]
-                    else:
-                        batch_source_mask_paths[ordered_positions] = [
-                            _build_logical_hdf5_ref(
-                                shard_metadata[shard_index].path,
-                                "masks",
-                                int(source_index),
-                            )
-                            for source_index in sorted_indices
-                        ]
-
-                    if batch_slide_ids is not None:
-                        shard_slide_ids = shard_handle.get("slide_ids")
-                        if shard_slide_ids is not None:
-                            batch_slide_ids[ordered_positions] = [
-                                _normalize_hdf5_string(value)
-                                for value in _read_sorted_rows(
-                                    cast(Any, shard_slide_ids),
-                                    sorted_indices,
-                                    dtype=object,
-                                )
-                            ]
-                        else:
-                            batch_slide_ids[ordered_positions] = ""
-
-                images[start:end] = batch_images
-                masks[start:end] = batch_masks
-                labels[start:end] = batch_labels
-                patient_ids[start:end] = batch_patient_ids
-                filenames[start:end] = batch_filenames.tolist()
-                source_image_paths[start:end] = batch_source_image_paths.tolist()
-                source_mask_paths[start:end] = batch_source_mask_paths.tolist()
-                if slide_ids is not None and batch_slide_ids is not None:
-                    slide_ids[start:end] = batch_slide_ids.tolist()
+                batch_read_rows = _copy_merge_batch(
+                    context=batch_context,
+                    batch_rows=row_references[start:end],
+                    start=start,
+                    end=end,
+                )
                 merge_reporter.log(
                     completed_units=end,
                     extra_parts=[

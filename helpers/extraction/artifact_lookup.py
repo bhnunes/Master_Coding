@@ -59,6 +59,22 @@ class GeoJsonLookup:
         return None
 
 
+@dataclass(frozen=True)
+class ProcessingSignatureConfig:
+    """Inputs and runtime settings that define one Stage 2 processing signature."""
+
+    image_path: Path
+    annotation_path: Path
+    artifacts_geojson_path: Path | None
+    window_size: int
+    stride: int
+    match_percentage: float
+    tissue_percentage: float
+    target_level: int
+    use_advanced_artifact_filtering: bool
+    hiseg_xml_coord_level: int
+
+
 def resolve_geojson_for_slide(
     geojson_dir: Path,
     image_path: Path,
@@ -72,35 +88,26 @@ def resolve_geojson_for_slide(
 
 
 def build_processing_signature(
-    *,
-    image_path: Path,
-    annotation_path: Path,
-    artifacts_geojson_path: Path | None,
-    window_size: int,
-    stride: int,
-    match_percentage: float,
-    tissue_percentage: float,
-    target_level: int,
-    use_advanced_artifact_filtering: bool,
-    hiseg_xml_coord_level: int,
+    config: ProcessingSignatureConfig,
 ) -> str:
     """Build a fail-closed signature for Stage 2 processing inputs and settings."""
 
     return hash_json_payload(
         {
-            "image": build_file_metadata_fingerprint(image_path),
-            "annotation": build_file_metadata_fingerprint(annotation_path),
+            "image": build_file_metadata_fingerprint(config.image_path),
+            "annotation": build_file_metadata_fingerprint(config.annotation_path),
             "artifacts_geojson": (
-                build_file_metadata_fingerprint(artifacts_geojson_path)
-                if artifacts_geojson_path is not None and artifacts_geojson_path.exists()
+                build_file_metadata_fingerprint(config.artifacts_geojson_path)
+                if config.artifacts_geojson_path is not None
+                and config.artifacts_geojson_path.exists()
                 else None
             ),
-            "window_size": int(window_size),
-            "stride": int(stride),
-            "match_percentage": float(match_percentage),
-            "tissue_percentage": float(tissue_percentage),
-            "target_level": int(target_level),
-            "use_advanced_artifact_filtering": bool(use_advanced_artifact_filtering),
-            "hiseg_xml_coord_level": int(hiseg_xml_coord_level),
+            "window_size": int(config.window_size),
+            "stride": int(config.stride),
+            "match_percentage": float(config.match_percentage),
+            "tissue_percentage": float(config.tissue_percentage),
+            "target_level": int(config.target_level),
+            "use_advanced_artifact_filtering": bool(config.use_advanced_artifact_filtering),
+            "hiseg_xml_coord_level": int(config.hiseg_xml_coord_level),
         }
     )

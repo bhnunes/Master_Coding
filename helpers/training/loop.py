@@ -3,7 +3,8 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Iterable, Sized
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 
 import torch
 from tqdm import tqdm
@@ -24,34 +25,319 @@ def _progress_file() -> Any:
 
 _TRAIN_PROGRESS_MIN_INTERVAL_SECONDS = 0.5
 _VALIDATION_PROGRESS_MIN_INTERVAL_SECONDS = 5.0
+_BATCH_WITH_ARTIFACT_COVARIATES = 3
+_MASK_BATCH_NDIM = 4
+_MASK_IMAGE_NDIM = 3
+_MODEL_OUTPUT_NDIM = 4
+_SINGLE_CHANNEL_COUNT = 1
+_BINARY_CLASS_COUNT = 2
+
+
+@dataclass(frozen=True)
+class TrainEpochConfig:
+    device: torch.device
+    current_epoch: int
+    architecture: str
+    accumulation_steps: int
+    amp_precision: str
+    use_artifact_aware_loss: bool = False
+
+
+@dataclass(frozen=True)
+class ValidationEpochConfig:
+    device: torch.device
+    architecture: str
+    amp_precision: str
+
+
+@dataclass(frozen=True)
+class TrainEpochRuntime:
+    loss_fn: Any
+    health: TrainingHealthTracker
+    gpu_normalizer: torch.nn.Module
+    gpu_downscale: torch.nn.Module
+
+
+@dataclass(frozen=True)
+class ValidationEpochRuntime:
+    loss_fn: Any
+    health: TrainingHealthTracker
+    gpu_normalizer: torch.nn.Module
+
+
+def _unpack_batch(
+    batch_data: Any,
+    *,
+    health: TrainingHealthTracker,
+    phase: str,
+) -> tuple[Any, Any, Any | None] | None:
+    try:
+        if len(batch_data) == _BATCH_WITH_ARTIFACT_COVARIATES:
+            images, masks, metadata = batch_data
+            return images, masks, metadata
+        images, masks = batch_data
+        return images, masks, None
+    except Exception:
+        _record_skip(health, phase, "unpack_failed")
+        return None
+
+
+def _record_skip(health: TrainingHealthTracker, phase: str, reason: str) -> None:
+    if phase == "train":
+        health.train_skip(reason)
+    else:
+        health.val_skip(reason)
+
+
+def _extract_model_output(
+    outputs_raw: Any,
+    *,
+    health: TrainingHealthTracker,
+    phase: str,
+) -> torch.Tensor | None:
+    if isinstance(outputs_raw, (tuple, list)):
+        if len(outputs_raw) == 0:
+            _record_skip(health, phase, "model_empty_tuple")
+            return None
+        outputs = outputs_raw[0]
+    else:
+        outputs = outputs_raw
+
+    if not isinstance(outputs, torch.Tensor):
+        _record_skip(health, phase, "model_output_not_tensor")
+        return None
+    return outputs
+
+
+def _normalize_masks(masks: torch.Tensor) -> torch.Tensor:
+    if masks.ndim == _MASK_BATCH_NDIM and masks.size(1) == _SINGLE_CHANNEL_COUNT:
+        return masks[:, 0, :, :]
+    if masks.ndim == _MASK_BATCH_NDIM and masks.size(-1) == _SINGLE_CHANNEL_COUNT:
+        return masks[..., 0]
+    return masks
+
+
+def _validate_segmentation_tensors(
+    outputs: torch.Tensor,
+    masks: torch.Tensor,
+    *,
+    health: TrainingHealthTracker,
+    phase: str,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    normalized_masks = _normalize_masks(masks)
+    if normalized_masks.ndim != _MASK_IMAGE_NDIM:
+        _record_skip(health, phase, "mask_bad_shape")
+        return None
+    if outputs.ndim != _MODEL_OUTPUT_NDIM:
+        _record_skip(health, phase, "bad_tensor_rank")
+        return None
+    if outputs.shape[-2:] != normalized_masks.shape[-2:]:
+        _record_skip(health, phase, "spatial_mismatch")
+        return None
+    if outputs.shape[1] != _BINARY_CLASS_COUNT:
+        _record_skip(health, phase, "channel_mismatch")
+        return None
+    return outputs, normalized_masks
+
+
+def _prepare_train_batch(
+    batch_data: Any,
+    *,
+    config: TrainEpochConfig,
+    runtime: TrainEpochRuntime,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] | None:
+    unpacked = _unpack_batch(batch_data, health=runtime.health, phase="train")
+    if unpacked is None:
+        return None
+    images, masks, artifact_covariates = unpacked
+    if images is None or masks is None:
+        runtime.health.train_skip("images_or_masks_none")
+        return None
+    if images.shape[0] == 0:
+        runtime.health.train_skip("batch_size_zero")
+        return None
+
+    images = images.to(config.device, non_blocking=True, memory_format=torch.channels_last)
+    masks = masks.to(config.device, non_blocking=True, dtype=torch.long)
+    if artifact_covariates is not None:
+        artifact_covariates = artifact_covariates.to(
+            config.device,
+            non_blocking=True,
+            dtype=torch.float32,
+        )
+    images = runtime.gpu_normalizer(images)
+    images = runtime.gpu_downscale(images)
+    return images, masks, artifact_covariates
+
+
+def _compute_train_loss(
+    model: torch.nn.Module,
+    images: torch.Tensor,
+    masks: torch.Tensor,
+    artifact_covariates: torch.Tensor | None,
+    *,
+    config: TrainEpochConfig,
+    runtime: TrainEpochRuntime,
+) -> torch.Tensor | None:
+    amp_dtype, _, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
+    with autocast_ctx(images, amp_dtype):
+        outputs = _extract_model_output(model(images), health=runtime.health, phase="train")
+        if outputs is None:
+            return None
+        validated = _validate_segmentation_tensors(
+            outputs,
+            masks,
+            health=runtime.health,
+            phase="train",
+        )
+        if validated is None:
+            return None
+        outputs, masks = validated
+        if config.use_artifact_aware_loss and artifact_covariates is not None:
+            return cast(
+                torch.Tensor,
+                runtime.loss_fn(outputs, masks, artifact_covariates=artifact_covariates),
+            )
+        return cast(torch.Tensor, runtime.loss_fn(outputs, masks))
+
+
+def _prepare_validation_batch(
+    batch_data: Any,
+    *,
+    config: ValidationEpochConfig,
+    runtime: ValidationEpochRuntime,
+) -> tuple[torch.Tensor, torch.Tensor, int] | None:
+    unpacked = _unpack_batch(batch_data, health=runtime.health, phase="val")
+    if unpacked is None:
+        return None
+    images, masks, _ = unpacked
+    if images is None or masks is None:
+        runtime.health.val_skip("images_or_masks_none")
+        return None
+    try:
+        batch_size = images.size(0)
+    except Exception:
+        runtime.health.val_skip("images_no_batch_dim")
+        return None
+    if batch_size == 0:
+        runtime.health.val_skip("batch_size_zero")
+        return None
+
+    images = images.to(config.device, non_blocking=True, memory_format=torch.channels_last)
+    images = runtime.gpu_normalizer(images)
+    masks = masks.to(config.device, non_blocking=True, dtype=torch.long)
+    return images, masks, batch_size
+
+
+def _compute_validation_outputs(
+    model: torch.nn.Module,
+    images: torch.Tensor,
+    masks: torch.Tensor,
+    *,
+    config: ValidationEpochConfig,
+    runtime: ValidationEpochRuntime,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+    amp_dtype, _, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
+    with autocast_ctx(images, amp_dtype):
+        outputs = _extract_model_output(model(images), health=runtime.health, phase="val")
+        if outputs is None:
+            return None
+        validated = _validate_segmentation_tensors(
+            outputs,
+            masks,
+            health=runtime.health,
+            phase="val",
+        )
+        if validated is None:
+            return None
+        outputs, masks = validated
+        loss = cast(torch.Tensor, runtime.loss_fn(outputs, masks))
+    return outputs, masks, loss
+
+
+def _backward_loss(loss: torch.Tensor, scaler: Any | None) -> None:
+    if scaler is not None:
+        scaler.scale(loss).backward()
+        return
+    torch.autograd.backward(loss)
+
+
+def _maybe_step_optimizer(
+    *,
+    optimizer: Any,
+    scaler: Any | None,
+    current_accumulation_steps: int,
+    accumulation_steps: int,
+) -> int:
+    if current_accumulation_steps % accumulation_steps != 0:
+        return current_accumulation_steps
+    if scaler is not None:
+        scaler.unscale_(optimizer)
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    return 0
+
+
+def _maybe_update_validation_postfix(
+    *,
+    pbar: Any,
+    batch_loss: float,
+    running_loss: float,
+    num_samples_processed: int,
+    last_postfix_update: float,
+) -> float:
+    now = time.monotonic()
+    if (
+        num_samples_processed > 0
+        and now - last_postfix_update >= _VALIDATION_PROGRESS_MIN_INTERVAL_SECONDS
+    ):
+        pbar.set_postfix(
+            loss=f"{batch_loss:.4f}",
+            avg_loss=f"{running_loss / num_samples_processed:.4f}",
+            refresh=False,
+        )
+        return now
+    return last_postfix_update
+
+
+def _finalize_validation_epoch(
+    *,
+    health: TrainingHealthTracker,
+    num_samples_processed: int,
+    running_loss: float,
+    tracker: AdvancedMetricTracker,
+) -> tuple[float, dict[str, float] | None]:
+    if num_samples_processed == 0:
+        health.val_skip("no_samples_processed")
+        return 0.0, None
+    epoch_loss = running_loss / num_samples_processed
+    return epoch_loss, tracker.compute_and_reset(health=health)
 
 
 def train_epoch(
     model: torch.nn.Module,
     optimizer: Any,
     dataloader: Iterable[Any],
-    device: torch.device,
-    current_epoch: int,
-    loss_fn: Any,
-    health: TrainingHealthTracker,
-    architecture: str,
-    accumulation_steps: int,
-    amp_precision: str,
-    gpu_normalizer: torch.nn.Module,
-    gpu_downscale: torch.nn.Module,
-    use_artifact_aware_loss: bool = False,
+    runtime: TrainEpochRuntime,
+    config: TrainEpochConfig,
 ) -> tuple[float, dict[str, str]]:
     """Run one training epoch and return average loss plus AMP mode description."""
 
     model.train()
     if hasattr(optimizer, "train"):
         optimizer.train()
-    if hasattr(loss_fn, "set_epoch"):
-        loss_fn.set_epoch(current_epoch)
-    if hasattr(loss_fn, "set_ohem_enabled"):
-        loss_fn.set_ohem_enabled(True)
+    if hasattr(runtime.loss_fn, "set_epoch"):
+        runtime.loss_fn.set_epoch(config.current_epoch)
+    if hasattr(runtime.loss_fn, "set_ohem_enabled"):
+        runtime.loss_fn.set_ohem_enabled(True)
 
-    amp_dtype, scaler, precision_log = setup_precision(architecture, amp_precision=amp_precision)
+    _, scaler, precision_log = setup_precision(
+        config.architecture,
+        amp_precision=config.amp_precision,
+    )
     tracker_loss = RunningWeightedMetric()
     optimizer.zero_grad(set_to_none=True)
     current_accumulation_steps = 0
@@ -60,7 +346,7 @@ def train_epoch(
     pbar = tqdm(
         enumerate(dataloader),
         total=total_batches,
-        desc=f"Train E{current_epoch + 1}",
+        desc=f"Train E{config.current_epoch + 1}",
         leave=False,
         mininterval=_TRAIN_PROGRESS_MIN_INTERVAL_SECONDS,
         dynamic_ncols=True,
@@ -70,94 +356,46 @@ def train_epoch(
 
     for _, batch_data in pbar:
         if batch_data is None:
-            health.train_skip("dataloader_none_batch")
+            runtime.health.train_skip("dataloader_none_batch")
             continue
-        try:
-            if len(batch_data) == 3:
-                images, masks, artifact_covariates = batch_data
-            else:
-                images, masks = batch_data
-                artifact_covariates = None
-        except Exception:
-            health.train_skip("unpack_failed")
+        prepared = _prepare_train_batch(
+            batch_data,
+            config=config,
+            runtime=runtime,
+        )
+        if prepared is None:
             continue
-        if images is None or masks is None:
-            health.train_skip("images_or_masks_none")
+        images, masks, artifact_covariates = prepared
+        loss = _compute_train_loss(
+            model,
+            images,
+            masks,
+            artifact_covariates,
+            config=config,
+            runtime=runtime,
+        )
+        if loss is None:
             continue
-        if images.shape[0] == 0:
-            health.train_skip("batch_size_zero")
-            continue
-
-        images = images.to(device, non_blocking=True, memory_format=torch.channels_last)
-        masks = masks.to(device, non_blocking=True, dtype=torch.long)
-        if artifact_covariates is not None:
-            artifact_covariates = artifact_covariates.to(
-                device, non_blocking=True, dtype=torch.float32
-            )
-        images = gpu_normalizer(images)
-        images = gpu_downscale(images)
-
-        if masks.ndim == 4 and masks.size(1) == 1:
-            masks = masks[:, 0, :, :]
-        elif masks.ndim == 4 and masks.size(-1) == 1:
-            masks = masks[..., 0]
-        if masks.ndim != 3:
-            health.train_skip("mask_bad_shape")
-            continue
-
-        with autocast_ctx(images, amp_dtype):
-            outputs_raw = model(images)
-            if isinstance(outputs_raw, (tuple, list)):
-                if len(outputs_raw) == 0:
-                    health.train_skip("model_empty_tuple")
-                    continue
-                outputs = outputs_raw[0]
-            else:
-                outputs = outputs_raw
-
-            if not isinstance(outputs, torch.Tensor):
-                health.train_skip("model_output_not_tensor")
-                continue
-            if masks.ndim != 3 or outputs.ndim != 4:
-                health.train_skip("bad_tensor_rank")
-                continue
-            if outputs.shape[-2:] != masks.shape[-2:]:
-                health.train_skip("spatial_mismatch")
-                continue
-            if outputs.shape[1] != 2:
-                health.train_skip("channel_mismatch")
-                continue
-
-            if use_artifact_aware_loss and artifact_covariates is not None:
-                loss = loss_fn(outputs, masks, artifact_covariates=artifact_covariates)
-            else:
-                loss = loss_fn(outputs, masks)
 
         if not torch.isfinite(loss):
-            health.train_naninf_loss()
-            health.train_skip("naninf_loss")
+            runtime.health.train_naninf_loss()
+            runtime.health.train_skip("naninf_loss")
             continue
 
-        loss = loss / accumulation_steps
-        if scaler is not None:
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
+        loss = loss / config.accumulation_steps
+        _backward_loss(loss, scaler)
 
-        real_loss = loss.item() * accumulation_steps
+        real_loss = loss.item() * config.accumulation_steps
         tracker_loss.update(real_loss * images.shape[0], images.shape[0])
         current_accumulation_steps += 1
 
-        if current_accumulation_steps % accumulation_steps == 0:
-            if scaler is not None:
-                scaler.unscale_(optimizer)
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                optimizer.step()
-
-            optimizer.zero_grad(set_to_none=True)
-            current_accumulation_steps = 0
+        current_accumulation_steps = _maybe_step_optimizer(
+            optimizer=optimizer,
+            scaler=scaler,
+            current_accumulation_steps=current_accumulation_steps,
+            accumulation_steps=config.accumulation_steps,
+        )
+        if current_accumulation_steps == 0:
             pbar.set_postfix(loss=f"{tracker_loss.get_average():.4f}")
 
     return tracker_loss.get_average(), precision_log
@@ -167,25 +405,20 @@ def validate_epoch(
     model: torch.nn.Module,
     optimizer: Any,
     dataloader: Iterable[Any],
-    device: torch.device,
-    loss_fn: Any,
-    health: TrainingHealthTracker,
-    architecture: str,
-    amp_precision: str,
-    gpu_normalizer: torch.nn.Module,
+    runtime: ValidationEpochRuntime,
+    config: ValidationEpochConfig,
 ) -> tuple[float, dict[str, float] | None]:
     """Run one validation epoch and return average loss plus metric bundle."""
 
     model.eval()
     if hasattr(optimizer, "eval"):
         optimizer.eval()
-    if hasattr(loss_fn, "set_ohem_enabled"):
-        loss_fn.set_ohem_enabled(False)
-    if hasattr(loss_fn, "set_epoch"):
-        loss_fn.set_epoch(None)
+    if hasattr(runtime.loss_fn, "set_ohem_enabled"):
+        runtime.loss_fn.set_ohem_enabled(False)
+    if hasattr(runtime.loss_fn, "set_epoch"):
+        runtime.loss_fn.set_epoch(None)
 
-    amp_dtype, _, _ = setup_precision(architecture, amp_precision=amp_precision)
-    tracker = AdvancedMetricTracker(device=device, metric_bins=2048)
+    tracker = AdvancedMetricTracker(device=config.device, metric_bins=2048)
     running_loss = 0.0
     num_samples_processed = 0
 
@@ -202,63 +435,30 @@ def validate_epoch(
     with torch.inference_mode():
         for batch_data in pbar:
             if batch_data is None:
-                health.val_skip("dataloader_none_batch")
+                runtime.health.val_skip("dataloader_none_batch")
                 continue
-            try:
-                if len(batch_data) == 3:
-                    images, masks, _ = batch_data
-                else:
-                    images, masks = batch_data
-            except Exception:
-                health.val_skip("unpack_failed")
+            prepared = _prepare_validation_batch(
+                batch_data,
+                config=config,
+                runtime=runtime,
+            )
+            if prepared is None:
                 continue
-            if images is None or masks is None:
-                health.val_skip("images_or_masks_none")
+            images, masks, batch_size = prepared
+            batch_outputs = _compute_validation_outputs(
+                model,
+                images,
+                masks,
+                config=config,
+                runtime=runtime,
+            )
+            if batch_outputs is None:
                 continue
-            try:
-                batch_size = images.size(0)
-            except Exception:
-                health.val_skip("images_no_batch_dim")
-                continue
-            if batch_size == 0:
-                health.val_skip("batch_size_zero")
-                continue
-
-            images = images.to(device, non_blocking=True, memory_format=torch.channels_last)
-            images = gpu_normalizer(images)
-            masks = masks.to(device, non_blocking=True, dtype=torch.long)
-
-            with autocast_ctx(images, amp_dtype):
-                outputs_raw = model(images)
-                if isinstance(outputs_raw, (tuple, list)):
-                    if len(outputs_raw) == 0:
-                        health.val_skip("model_empty_tuple")
-                        continue
-                    outputs = outputs_raw[0]
-                else:
-                    outputs = outputs_raw
-                if not isinstance(outputs, torch.Tensor):
-                    health.val_skip("model_output_not_tensor")
-                    continue
-                if masks.ndim == 4 and masks.size(1) == 1:
-                    masks = masks[:, 0, :, :]
-                elif masks.ndim == 4 and masks.size(-1) == 1:
-                    masks = masks[..., 0]
-                if masks.ndim != 3:
-                    health.val_skip("mask_bad_shape")
-                    continue
-                if outputs.ndim != 4 or outputs.shape[1] != 2:
-                    health.val_skip("channel_mismatch")
-                    continue
-                if outputs.shape[-2:] != masks.shape[-2:]:
-                    health.val_skip("spatial_mismatch")
-                    continue
-
-                loss = loss_fn(outputs, masks)
+            outputs, masks, loss = batch_outputs
 
             if not torch.isfinite(loss):
-                health.val_naninf_loss()
-                health.val_skip("naninf_loss")
+                runtime.health.val_naninf_loss()
+                runtime.health.val_skip("naninf_loss")
                 continue
 
             batch_loss = loss.item()
@@ -266,23 +466,20 @@ def validate_epoch(
             num_samples_processed += batch_size
             tracker.update(outputs, masks)
 
-            now = time.monotonic()
-            if (
-                num_samples_processed > 0
-                and now - last_postfix_update >= _VALIDATION_PROGRESS_MIN_INTERVAL_SECONDS
-            ):
-                pbar.set_postfix(
-                    loss=f"{batch_loss:.4f}",
-                    avg_loss=f"{running_loss / num_samples_processed:.4f}",
-                    refresh=False,
-                )
-                last_postfix_update = now
+            last_postfix_update = _maybe_update_validation_postfix(
+                pbar=pbar,
+                batch_loss=batch_loss,
+                running_loss=running_loss,
+                num_samples_processed=num_samples_processed,
+                last_postfix_update=last_postfix_update,
+            )
 
     try:
-        if num_samples_processed == 0:
-            health.val_skip("no_samples_processed")
-            return 0.0, None
-        epoch_loss = running_loss / num_samples_processed
-        return epoch_loss, tracker.compute_and_reset(health=health)
+        return _finalize_validation_epoch(
+            health=runtime.health,
+            num_samples_processed=num_samples_processed,
+            running_loss=running_loss,
+            tracker=tracker,
+        )
     finally:
         del tracker

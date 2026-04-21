@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import h5py
 import pytest
@@ -7,11 +8,100 @@ import torch
 
 from helpers.training.checkpointing import (
     EarlyStopping,
+    EarlyStoppingCheckpoint,
+    OHEMCheckpointSettings,
+    ResumeCheckpointRequest,
+    TrainingMetadataRequest,
+    TrainingProvenanceRequest,
     build_training_compatibility_signature,
     get_previous_metrics,
     load_checkpoint_for_resume,
     save_metadata,
 )
+
+BEST_SCORE = 0.8
+VAL_LOSS = 0.2
+VAL_MCC = 0.7
+VAL_AUROC = 0.9
+RESUME_EPOCH = 4
+RESUME_BEST_SCORE = 0.91
+EARLY_STOP_COUNTER = 2
+PARTIAL_RESUME_EPOCH = 3
+PARTIAL_RESUME_BEST_SCORE = 0.5
+
+
+def _ohem_settings(
+    *,
+    run_ohem: bool = False,
+    ohem_start_epoch: int = 2,
+    ohem_ratio: float = 0.25,
+    ohem_min_kept: int = 1024,
+) -> OHEMCheckpointSettings:
+    return OHEMCheckpointSettings(
+        run_ohem=run_ohem,
+        ohem_start_epoch=ohem_start_epoch,
+        ohem_ratio=ohem_ratio,
+        ohem_min_kept=ohem_min_kept,
+    )
+
+
+def _resume_request(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    early_stopping: EarlyStopping,
+    checkpoint_path: str | None,
+    *,
+    expected_compatibility_signature: str | None = None,
+) -> ResumeCheckpointRequest:
+    return ResumeCheckpointRequest(
+        model=model,
+        optimizer=optimizer,
+        early_stopping=early_stopping,
+        checkpoint_path=checkpoint_path,
+        device=torch.device("cpu"),
+        expected_compatibility_signature=expected_compatibility_signature,
+    )
+
+
+def _metadata_request(
+    tmp_path: Path,
+    checkpoint: dict[str, object],
+    dataset: str | Path,
+    validation_dataset: str | Path,
+    **overrides: object,
+) -> TrainingMetadataRequest:
+    payload: dict[str, object] = {
+        "best_val_score": 0.9,
+        "checkpoint": checkpoint,
+        "encoder": "resnet34",
+        "architecture": "UNET++",
+        "metadata_best_path": str(tmp_path / "best_model.pth"),
+        "val_loss": 0.2,
+        "val_mcc": 0.7,
+        "val_auroc": 0.8,
+        "metadata_dir": str(tmp_path),
+        "amp_log": {"precision": "fp32"},
+        "base_learning_rate": 1e-3,
+        "weight_decay": 1e-4,
+        "batch_size": 8,
+        "num_epochs": 10,
+        "workers": 2,
+        "seed": 7,
+        "dataset": str(dataset),
+        "validation_dataset": str(validation_dataset),
+        "patience": 3,
+        "optimizer_name": "AdamW",
+        "alpha_bce": 0.6,
+        "beta_dice_bg": 0.2,
+        "gamma_dice_fg": 0.8,
+        "execution_mode": None,
+        "use_artifact_aware_loss": False,
+        "master_manifest_path": None,
+        "resume_checkpoint": None,
+        "ohem": _ohem_settings(),
+    }
+    payload.update(overrides)
+    return TrainingMetadataRequest(**cast(dict[str, Any], payload))
 
 
 def test_early_stopping_saves_first_best_model(tmp_path: Path) -> None:
@@ -25,19 +115,21 @@ def test_early_stopping_saves_first_best_model(tmp_path: Path) -> None:
     )
 
     improved = early_stopping(
-        0.8,
-        model,
-        optimizer,
-        epoch=1,
-        val_loss=0.2,
-        val_auprc=0.8,
-        val_mcc_star=0.7,
-        val_auroc=0.9,
+        EarlyStoppingCheckpoint(
+            score=BEST_SCORE,
+            model=model,
+            optimizer=optimizer,
+            epoch=1,
+            val_loss=VAL_LOSS,
+            val_auprc=BEST_SCORE,
+            val_mcc_star=VAL_MCC,
+            val_auroc=VAL_AUROC,
+        )
     )
 
     assert improved is True
     assert checkpoint_path.exists()
-    assert early_stopping.best_score == 0.8
+    assert early_stopping.best_score == BEST_SCORE
     assert early_stopping._current_best_checkpoint_on_disk_path == str(checkpoint_path)
 
 
@@ -51,13 +143,46 @@ def test_early_stopping_triggers_after_patience_without_improvement(tmp_path: Pa
         output_best_model_path=str(checkpoint_path),
     )
 
-    early_stopping(0.8, model, optimizer, 1, 0.2, 0.8, 0.7, 0.9)
-    improved = early_stopping(0.8, model, optimizer, 2, 0.2, 0.8, 0.7, 0.9)
-    early_stopping(0.8, model, optimizer, 3, 0.2, 0.8, 0.7, 0.9)
+    early_stopping(
+        EarlyStoppingCheckpoint(
+            score=BEST_SCORE,
+            model=model,
+            optimizer=optimizer,
+            epoch=1,
+            val_loss=VAL_LOSS,
+            val_auprc=BEST_SCORE,
+            val_mcc_star=VAL_MCC,
+            val_auroc=VAL_AUROC,
+        )
+    )
+    improved = early_stopping(
+        EarlyStoppingCheckpoint(
+            score=BEST_SCORE,
+            model=model,
+            optimizer=optimizer,
+            epoch=2,
+            val_loss=VAL_LOSS,
+            val_auprc=BEST_SCORE,
+            val_mcc_star=VAL_MCC,
+            val_auroc=VAL_AUROC,
+        )
+    )
+    early_stopping(
+        EarlyStoppingCheckpoint(
+            score=BEST_SCORE,
+            model=model,
+            optimizer=optimizer,
+            epoch=3,
+            val_loss=VAL_LOSS,
+            val_auprc=BEST_SCORE,
+            val_mcc_star=VAL_MCC,
+            val_auroc=VAL_AUROC,
+        )
+    )
 
     assert improved is False
     assert early_stopping.early_stop is True
-    assert early_stopping.counter == 2
+    assert early_stopping.counter == EARLY_STOP_COUNTER
 
 
 def test_load_checkpoint_for_resume_restores_model_optimizer_and_score(tmp_path: Path) -> None:
@@ -66,10 +191,10 @@ def test_load_checkpoint_for_resume_restores_model_optimizer_and_score(tmp_path:
     checkpoint_path = tmp_path / "resume.pth"
     torch.save(
         {
-            "epoch": 4,
+            "epoch": RESUME_EPOCH,
             "model_state_dict": saved_model.state_dict(),
             "optimizer_state_dict": saved_optimizer.state_dict(),
-            "best_val_score": 0.91,
+            "best_val_score": RESUME_BEST_SCORE,
         },
         checkpoint_path,
     )
@@ -83,15 +208,11 @@ def test_load_checkpoint_for_resume_restores_model_optimizer_and_score(tmp_path:
     )
 
     start_epoch = load_checkpoint_for_resume(
-        model=model,
-        optimizer=optimizer,
-        early_stopping=early_stopping,
-        checkpoint_path=str(checkpoint_path),
-        device=torch.device("cpu"),
+        _resume_request(model, optimizer, early_stopping, str(checkpoint_path))
     )
 
-    assert start_epoch == 4
-    assert early_stopping.best_score == 0.91
+    assert start_epoch == RESUME_EPOCH
+    assert early_stopping.best_score == RESUME_BEST_SCORE
     assert early_stopping.counter == 0
     assert early_stopping._current_best_checkpoint_on_disk_path == str(checkpoint_path)
     for expected, restored in zip(saved_model.parameters(), model.parameters(), strict=True):
@@ -104,10 +225,10 @@ def test_load_checkpoint_for_resume_rejects_incompatible_provenance(tmp_path: Pa
     checkpoint_path = tmp_path / "resume.pth"
     torch.save(
         {
-            "epoch": 4,
+            "epoch": RESUME_EPOCH,
             "model_state_dict": saved_model.state_dict(),
             "optimizer_state_dict": saved_optimizer.state_dict(),
-            "best_val_score": 0.91,
+            "best_val_score": RESUME_BEST_SCORE,
         },
         checkpoint_path,
     )
@@ -141,26 +262,27 @@ def test_load_checkpoint_for_resume_rejects_incompatible_provenance(tmp_path: Pa
 
     with pytest.raises(ValueError, match="incompatible provenance"):
         load_checkpoint_for_resume(
-            model=model,
-            optimizer=optimizer,
-            early_stopping=early_stopping,
-            checkpoint_path=str(checkpoint_path),
-            device=torch.device("cpu"),
-            expected_compatibility_signature="current-lineage",
+            _resume_request(
+                model,
+                optimizer,
+                early_stopping,
+                str(checkpoint_path),
+                expected_compatibility_signature="current-lineage",
+            )
         )
 
 
 def test_get_previous_metrics_returns_checkpoint_metrics() -> None:
     checkpoint = {
-        "val_auprc": 0.8,
-        "val_mcc_star": 0.7,
-        "val_auroc": 0.9,
-        "val_loss": 0.2,
+        "val_auprc": BEST_SCORE,
+        "val_mcc_star": VAL_MCC,
+        "val_auroc": VAL_AUROC,
+        "val_loss": VAL_LOSS,
     }
 
     metrics = get_previous_metrics(checkpoint, None, None, None, None)
 
-    assert metrics == (0.8, 0.7, 0.9, 0.2)
+    assert metrics == (BEST_SCORE, VAL_MCC, VAL_AUROC, VAL_LOSS)
 
 
 def test_early_stopping_can_clear_missing_initial_checkpoint(tmp_path: Path) -> None:
@@ -180,7 +302,18 @@ def test_early_stopping_saves_original_module_state_dict(tmp_path: Path) -> None
     checkpoint_path = tmp_path / "best_model.pth"
     early_stopping = EarlyStopping(verbose=False, output_best_model_path=str(checkpoint_path))
 
-    early_stopping.save_checkpoint(0.2, wrapper, optimizer, 1, 0.8, 0.7, 0.8, 0.9)
+    early_stopping.save_checkpoint(
+        EarlyStoppingCheckpoint(
+            score=0.8,
+            model=wrapper,
+            optimizer=optimizer,
+            epoch=1,
+            val_loss=0.2,
+            val_auprc=0.8,
+            val_mcc_star=0.7,
+            val_auroc=0.9,
+        )
+    )
     saved = torch.load(checkpoint_path, map_location="cpu")
 
     assert saved["is_compiled"] is True
@@ -192,16 +325,10 @@ def test_load_checkpoint_for_resume_handles_empty_or_missing_paths(tmp_path: Pat
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     early_stopping = EarlyStopping(verbose=False, output_best_model_path=str(tmp_path / "best.pth"))
 
-    assert (
-        load_checkpoint_for_resume(model, optimizer, early_stopping, "", torch.device("cpu")) == 0
-    )
+    assert load_checkpoint_for_resume(_resume_request(model, optimizer, early_stopping, "")) == 0
     assert (
         load_checkpoint_for_resume(
-            model,
-            optimizer,
-            early_stopping,
-            str(tmp_path / "missing.pth"),
-            torch.device("cpu"),
+            _resume_request(model, optimizer, early_stopping, str(tmp_path / "missing.pth"))
         )
         == 0
     )
@@ -215,7 +342,7 @@ def test_load_checkpoint_for_resume_handles_missing_model_state_dict(tmp_path: P
     early_stopping = EarlyStopping(verbose=False, output_best_model_path=str(tmp_path / "best.pth"))
 
     start_epoch = load_checkpoint_for_resume(
-        model, optimizer, early_stopping, str(checkpoint_path), torch.device("cpu")
+        _resume_request(model, optimizer, early_stopping, str(checkpoint_path))
     )
 
     assert start_epoch == 0
@@ -230,10 +357,10 @@ def test_load_checkpoint_for_resume_ignores_optimizer_restore_errors(
     checkpoint_path = tmp_path / "resume.pth"
     torch.save(
         {
-            "epoch": 3,
+            "epoch": PARTIAL_RESUME_EPOCH,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": {"bad": "state"},
-            "best_val_score": 0.5,
+            "best_val_score": PARTIAL_RESUME_BEST_SCORE,
         },
         checkpoint_path,
     )
@@ -243,11 +370,11 @@ def test_load_checkpoint_for_resume_ignores_optimizer_restore_errors(
     early_stopping = EarlyStopping(verbose=False, output_best_model_path=str(tmp_path / "best.pth"))
 
     start_epoch = load_checkpoint_for_resume(
-        model, optimizer, early_stopping, str(checkpoint_path), torch.device("cpu")
+        _resume_request(model, optimizer, early_stopping, str(checkpoint_path))
     )
 
-    assert start_epoch == 3
-    assert early_stopping.best_score == 0.5
+    assert start_epoch == PARTIAL_RESUME_EPOCH
+    assert early_stopping.best_score == PARTIAL_RESUME_BEST_SCORE
 
 
 def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
@@ -257,30 +384,12 @@ def test_save_metadata_writes_json_file(tmp_path: Path) -> None:
     validation_path.write_bytes(b"validation-v1")
 
     save_metadata(
-        best_val_score=0.9,
-        checkpoint={"epoch": 5},
-        encoder="resnet34",
-        architecture="UNET++",
-        metadata_best_path=str(tmp_path / "best_model.pth"),
-        val_loss=0.2,
-        val_mcc=0.7,
-        val_auroc=0.8,
-        metadata_dir=str(tmp_path),
-        amp_log={"precision": "fp32"},
-        base_learning_rate=1e-3,
-        weight_decay=1e-4,
-        batch_size=8,
-        num_epochs=10,
-        workers=2,
-        seed=7,
-        dataset=str(dataset_path),
-        validation_dataset=str(validation_path),
-        patience=3,
-        optimizer_name="AdamW",
-        alpha_bce=0.6,
-        beta_dice_bg=0.2,
-        gamma_dice_fg=0.8,
-        run_ohem=False,
+        _metadata_request(
+            tmp_path=tmp_path,
+            checkpoint={"epoch": 5},
+            dataset=dataset_path,
+            validation_dataset=validation_path,
+        )
     )
 
     meta_path = tmp_path / "best_model_meta.json"
@@ -300,37 +409,17 @@ def test_save_metadata_records_reproducibility_fields(tmp_path: Path) -> None:
     master_manifest_path.write_bytes(b"manifest-v1")
 
     save_metadata(
-        best_val_score=0.9,
-        checkpoint={"epoch": 5},
-        encoder="resnet34",
-        architecture="UNET++",
-        metadata_best_path=str(tmp_path / "best_model.pth"),
-        val_loss=0.2,
-        val_mcc=0.7,
-        val_auroc=0.8,
-        metadata_dir=str(tmp_path),
-        amp_log={"precision": "fp32"},
-        base_learning_rate=1e-3,
-        weight_decay=1e-4,
-        batch_size=8,
-        num_epochs=10,
-        workers=2,
-        seed=7,
-        dataset=str(dataset_path),
-        validation_dataset=str(validation_path),
-        patience=3,
-        optimizer_name="AdamW",
-        alpha_bce=0.6,
-        beta_dice_bg=0.2,
-        gamma_dice_fg=0.8,
-        execution_mode="PAPER",
-        use_artifact_aware_loss=True,
-        master_manifest_path=master_manifest_path,
-        resume_checkpoint="resume.pth",
-        run_ohem=True,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        _metadata_request(
+            tmp_path=tmp_path,
+            checkpoint={"epoch": 5},
+            dataset=dataset_path,
+            validation_dataset=validation_path,
+            master_manifest_path=master_manifest_path,
+            resume_checkpoint="resume.pth",
+            execution_mode="PAPER",
+            use_artifact_aware_loss=True,
+            ohem=_ohem_settings(run_ohem=True),
+        )
     )
 
     payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
@@ -351,36 +440,16 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
     master_manifest_path.write_bytes(b"manifest-v1")
 
     save_metadata(
-        best_val_score=0.9,
-        checkpoint={"epoch": 5},
-        encoder="resnet34",
-        architecture="UNET++",
-        metadata_best_path=str(tmp_path / "best_model.pth"),
-        val_loss=0.2,
-        val_mcc=0.7,
-        val_auroc=0.8,
-        metadata_dir=str(tmp_path),
-        amp_log={"precision": "fp32"},
-        base_learning_rate=1e-3,
-        weight_decay=1e-4,
-        batch_size=8,
-        num_epochs=10,
-        workers=2,
-        seed=7,
-        dataset=str(dataset_path),
-        validation_dataset=str(validation_path),
-        patience=3,
-        optimizer_name="AdamW",
-        alpha_bce=0.6,
-        beta_dice_bg=0.2,
-        gamma_dice_fg=0.8,
-        execution_mode="PAPER",
-        master_manifest_path=master_manifest_path,
-        resume_checkpoint="resume.pth",
-        run_ohem=True,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        _metadata_request(
+            tmp_path=tmp_path,
+            checkpoint={"epoch": 5},
+            dataset=dataset_path,
+            validation_dataset=validation_path,
+            master_manifest_path=master_manifest_path,
+            resume_checkpoint="resume.pth",
+            execution_mode="PAPER",
+            ohem=_ohem_settings(run_ohem=True),
+        )
     )
 
     payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
@@ -411,30 +480,12 @@ def test_save_metadata_records_stage7_lineage_details_from_filtered_hdf5(tmp_pat
         pass
 
     save_metadata(
-        best_val_score=0.9,
-        checkpoint={"epoch": 5},
-        encoder="resnet34",
-        architecture="UNET++",
-        metadata_best_path=str(tmp_path / "best_model.pth"),
-        val_loss=0.2,
-        val_mcc=0.7,
-        val_auroc=0.8,
-        metadata_dir=str(tmp_path),
-        amp_log={"precision": "fp32"},
-        base_learning_rate=1e-3,
-        weight_decay=1e-4,
-        batch_size=8,
-        num_epochs=10,
-        workers=2,
-        seed=7,
-        dataset=str(dataset_path),
-        validation_dataset=str(validation_path),
-        patience=3,
-        optimizer_name="AdamW",
-        alpha_bce=0.6,
-        beta_dice_bg=0.2,
-        gamma_dice_fg=0.8,
-        run_ohem=False,
+        _metadata_request(
+            tmp_path=tmp_path,
+            checkpoint={"epoch": 5},
+            dataset=dataset_path,
+            validation_dataset=validation_path,
+        )
     )
 
     payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
@@ -458,22 +509,22 @@ def test_build_training_compatibility_signature_changes_with_validation_dataset(
     validation_b_path.write_bytes(b"validation-b")
 
     signature_a = build_training_compatibility_signature(
-        dataset=str(train_path),
-        validation_dataset=str(validation_a_path),
-        master_manifest_path=None,
-        run_ohem=False,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        TrainingProvenanceRequest(
+            dataset=str(train_path),
+            validation_dataset=str(validation_a_path),
+            master_manifest_path=None,
+            resume_checkpoint=None,
+            ohem=_ohem_settings(),
+        )
     )
     signature_b = build_training_compatibility_signature(
-        dataset=str(train_path),
-        validation_dataset=str(validation_b_path),
-        master_manifest_path=None,
-        run_ohem=False,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        TrainingProvenanceRequest(
+            dataset=str(train_path),
+            validation_dataset=str(validation_b_path),
+            master_manifest_path=None,
+            resume_checkpoint=None,
+            ohem=_ohem_settings(),
+        )
     )
 
     assert signature_a != signature_b
@@ -486,22 +537,22 @@ def test_build_training_compatibility_signature_changes_with_ohem_settings(tmp_p
     validation_path.write_bytes(b"validation-v1")
 
     signature_a = build_training_compatibility_signature(
-        dataset=str(train_path),
-        validation_dataset=str(validation_path),
-        master_manifest_path=None,
-        run_ohem=False,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        TrainingProvenanceRequest(
+            dataset=str(train_path),
+            validation_dataset=str(validation_path),
+            master_manifest_path=None,
+            resume_checkpoint=None,
+            ohem=_ohem_settings(run_ohem=False),
+        )
     )
     signature_b = build_training_compatibility_signature(
-        dataset=str(train_path),
-        validation_dataset=str(validation_path),
-        master_manifest_path=None,
-        run_ohem=True,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        TrainingProvenanceRequest(
+            dataset=str(train_path),
+            validation_dataset=str(validation_path),
+            master_manifest_path=None,
+            resume_checkpoint=None,
+            ohem=_ohem_settings(run_ohem=True),
+        )
     )
 
     assert signature_a != signature_b
@@ -509,27 +560,27 @@ def test_build_training_compatibility_signature_changes_with_ohem_settings(tmp_p
 
 def test_build_training_compatibility_signature_accepts_precomputed_provenance() -> None:
     signature = build_training_compatibility_signature(
-        dataset={
-            "path": "TRAIN_FILTERED_shards/sample_manifest.parquet",
-            "sha256": "train-sha",
-            "source_signature": "train-sig",
-            "selection_signature": "sel-sig",
-            "smart_sampling_enabled": True,
-            "smart_sampling_metadata": {"stage7_label_aware": True},
-        },
-        validation_dataset={
-            "path": "VALIDATION_shards/sample_manifest.parquet",
-            "sha256": "val-sha",
-            "source_signature": "val-sig",
-            "selection_signature": None,
-            "smart_sampling_enabled": False,
-            "smart_sampling_metadata": {},
-        },
-        master_manifest_path=None,
-        run_ohem=False,
-        ohem_start_epoch=2,
-        ohem_ratio=0.25,
-        ohem_min_kept=1024,
+        TrainingProvenanceRequest(
+            dataset={
+                "path": "TRAIN_FILTERED_shards/sample_manifest.parquet",
+                "sha256": "train-sha",
+                "source_signature": "train-sig",
+                "selection_signature": "sel-sig",
+                "smart_sampling_enabled": True,
+                "smart_sampling_metadata": {"stage7_label_aware": True},
+            },
+            validation_dataset={
+                "path": "VALIDATION_shards/sample_manifest.parquet",
+                "sha256": "val-sha",
+                "source_signature": "val-sig",
+                "selection_signature": None,
+                "smart_sampling_enabled": False,
+                "smart_sampling_metadata": {},
+            },
+            master_manifest_path=None,
+            resume_checkpoint=None,
+            ohem=_ohem_settings(),
+        )
     )
 
     assert isinstance(signature, str)

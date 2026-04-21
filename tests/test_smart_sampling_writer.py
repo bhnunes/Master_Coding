@@ -10,6 +10,8 @@ import pytest
 from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.writer import write_filtered_hdf5, write_filtered_shards
 
+SELECTED_STAGE4_ROWS = 3
+
 
 def _write_source_hdf5(path: Path, *, filename_dataset_name: str = "filenames") -> None:
     with h5py.File(path, "w") as handle:
@@ -113,7 +115,7 @@ def test_write_filtered_hdf5_propagates_upstream_lineage_attrs(tmp_path: Path) -
         assert handle.attrs["upstream_source_signature"] == "stage2-signature"
         assert handle.attrs["stage4_cleaning_manifest_path"] == "/tmp/accepted_manifest.csv"
         assert handle.attrs["stage4_cleaning_manifest_sha256"] == "abc123"
-        assert handle.attrs["stage4_cleaning_selected_rows"] == 3
+        assert handle.attrs["stage4_cleaning_selected_rows"] == SELECTED_STAGE4_ROWS
         assert bool(handle.attrs["stage7_label_aware"])
         assert handle.attrs["stage7_model_name"] == "owkin/phikon-v2"
         assert handle.attrs["stage7_holdout_mode"] == "within_patient_patch_holdout"

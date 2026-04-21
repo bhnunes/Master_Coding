@@ -15,6 +15,11 @@ from helpers.extraction import patch_engine
 from helpers.extraction.data_handlers import BaseHandler
 from helpers.extraction.profiling import create_phase_stats
 
+PATCH_SIDE = 4
+MIN_NONZERO_PIXELS = 4
+OVERLAP_RATIO = 0.25
+COORDINATE_COLUMNS = 2
+
 
 def test_check_tissue_percentage_robust_handles_empty_patch() -> None:
     assert patch_engine.check_tissue_percentage_robust(None, 0.1) is False
@@ -23,14 +28,14 @@ def test_check_tissue_percentage_robust_handles_empty_patch() -> None:
 
 def test_polygons_to_mask_fills_intersection_inside_patch() -> None:
     mask = patch_engine.polygons_to_mask(
-        mask_shape=(4, 4),
+        mask_shape=(PATCH_SIDE, PATCH_SIDE),
         polygons_level0=[[(1, 1), (3, 1), (3, 3), (1, 3)]],
         scale_factor=1.0,
         patch_coords=(0, 0),
     )
 
-    assert mask.shape == (4, 4)
-    assert np.count_nonzero(mask) >= 4
+    assert mask.shape == (PATCH_SIDE, PATCH_SIDE)
+    assert np.count_nonzero(mask) >= MIN_NONZERO_PIXELS
 
 
 def test_build_scaled_polygon_index_skips_invalid_entries() -> None:
@@ -96,12 +101,12 @@ def test_compute_artifact_coverages_from_index_returns_overlap_fraction() -> Non
         100.0,
     )
 
-    assert coverages["cov_fold"] == 0.25
+    assert coverages["cov_fold"] == OVERLAP_RATIO
     assert coverages["cov_penmarking"] == 0.0
 
 
 def test_polygons_to_mask_with_index_returns_empty_mask_without_tree() -> None:
-    mask = patch_engine.polygons_to_mask_with_index((4, 4), ([], None), (0, 0))
+    mask = patch_engine.polygons_to_mask_with_index((PATCH_SIDE, PATCH_SIDE), ([], None), (0, 0))
 
     assert np.count_nonzero(mask) == 0
 
@@ -112,9 +117,9 @@ def test_polygons_to_mask_with_index_fills_matching_polygon() -> None:
         scale_factor=1.0,
     )
 
-    mask = patch_engine.polygons_to_mask_with_index((4, 4), polygon_index, (0, 0))
+    mask = patch_engine.polygons_to_mask_with_index((PATCH_SIDE, PATCH_SIDE), polygon_index, (0, 0))
 
-    assert np.count_nonzero(mask) >= 4
+    assert np.count_nonzero(mask) >= MIN_NONZERO_PIXELS
 
 
 def test_clip_geometry_to_patch_coords_handles_multipolygon_result() -> None:
@@ -130,7 +135,7 @@ def test_clip_geometry_to_patch_coords_handles_multipolygon_result() -> None:
 
     assert len(clipped) >= 1
     assert all(coords.dtype == np.int32 for coords in clipped)
-    assert all(coords.shape[1] == 2 for coords in clipped)
+    assert all(coords.shape[1] == COORDINATE_COLUMNS for coords in clipped)
 
 
 def test_run_extraction_returns_zero_when_handler_finds_no_annotations(
@@ -189,7 +194,7 @@ def test_process_window_with_slide_skips_tissue_and_records_profile_stats(
             self, coords: tuple[int, int], level: int, size: tuple[int, int]
         ) -> Image.Image:
             del coords, level, size
-            return Image.new("RGB", (4, 4), color=(10, 20, 30))
+            return Image.new("RGB", (PATCH_SIDE, PATCH_SIDE), color=(10, 20, 30))
 
     monkeypatch.setattr(patch_engine, "check_tissue_percentage_robust", lambda patch, req: False)
     monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
@@ -199,7 +204,7 @@ def test_process_window_with_slide_skips_tissue_and_records_profile_stats(
     )
     patch_engine._WORKER_CONTEXT = {
         "profile_output_path": "/tmp/profile.json",
-        "window_size": 4,
+        "window_size": PATCH_SIDE,
         "use_artifact_filter": False,
         "target_level": 0,
         "tissue_percentage_req": 0.1,
@@ -286,9 +291,9 @@ def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverag
     assert result[0] == "SAVED_NOT_CANCER"
     assert result[1]["label"] == 0
     assert result[1]["slide_id"] == "slide-b"
-    assert result[1]["cov_fold"] == 0.25
-    assert result[1]["_image_array"].shape == (4, 4, 3)
-    assert result[1]["_mask_array"].shape == (4, 4)
+    assert result[1]["cov_fold"] == OVERLAP_RATIO
+    assert result[1]["_image_array"].shape == (PATCH_SIDE, PATCH_SIDE, 3)
+    assert result[1]["_mask_array"].shape == (PATCH_SIDE, PATCH_SIDE)
 
 
 def test_process_window_with_slide_builds_cancer_patch_with_nonzero_mask(

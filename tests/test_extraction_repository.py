@@ -4,7 +4,22 @@ from typing import Any
 
 import pytest
 
-from helpers.extraction.repository import ExtractionRepository
+from helpers.extraction.repository import ExtractionRepository, IngestionOptions
+
+
+def _ingestion_options(
+    source_folder: Path,
+    *,
+    activate_sanity_check: bool,
+    use_advanced_filtering: bool,
+    geojson_path: Path | None,
+) -> IngestionOptions:
+    return IngestionOptions(
+        source_folder=source_folder,
+        activate_sanity_check=activate_sanity_check,
+        use_advanced_filtering=use_advanced_filtering,
+        geojson_path=geojson_path,
+    )
 
 
 def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -> None:
@@ -23,10 +38,12 @@ def test_repository_ingests_cases_and_marks_geojson_mismatches(tmp_path: Path) -
     (geojson_dir / "case_a__abcdef123456.geojson").write_text("{}")
 
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=True,
-        use_advanced_filtering=True,
-        geojson_path=geojson_dir,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=True,
+            use_advanced_filtering=True,
+            geojson_path=geojson_dir,
+        )
     )
 
     with sqlite3.connect(tmp_path / "database.db") as connection:
@@ -86,18 +103,22 @@ def test_repository_marks_existing_case_stale_when_inputs_change(tmp_path: Path)
     annotation_path.write_text("annotation-v1")
 
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=False,
-        use_advanced_filtering=False,
-        geojson_path=None,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=False,
+            use_advanced_filtering=False,
+            geojson_path=None,
+        )
     )
 
     annotation_path.write_text("annotation-v2")
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=False,
-        use_advanced_filtering=False,
-        geojson_path=None,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=False,
+            use_advanced_filtering=False,
+            geojson_path=None,
+        )
     )
 
     with sqlite3.connect(tmp_path / "database.db") as connection:
@@ -131,10 +152,12 @@ def test_repository_reingestion_avoids_full_slide_hashing(
     annotation_path.write_text("annotation-v1")
 
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=False,
-        use_advanced_filtering=False,
-        geojson_path=None,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=False,
+            use_advanced_filtering=False,
+            geojson_path=None,
+        )
     )
 
     original_open = Path.open
@@ -147,10 +170,12 @@ def test_repository_reingestion_avoids_full_slide_hashing(
     monkeypatch.setattr(Path, "open", fail_if_raw_input_opened)
 
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=False,
-        use_advanced_filtering=False,
-        geojson_path=None,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=False,
+            use_advanced_filtering=False,
+            geojson_path=None,
+        )
     )
 
 
@@ -169,18 +194,22 @@ def test_repository_marks_existing_case_stale_when_slide_metadata_changes(tmp_pa
     annotation_path.write_text("annotation-v1")
 
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=False,
-        use_advanced_filtering=False,
-        geojson_path=None,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=False,
+            use_advanced_filtering=False,
+            geojson_path=None,
+        )
     )
 
     image_path.write_text("slide-v1-expanded")
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=False,
-        use_advanced_filtering=False,
-        geojson_path=None,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=False,
+            use_advanced_filtering=False,
+            geojson_path=None,
+        )
     )
 
     with sqlite3.connect(tmp_path / "database.db") as connection:
@@ -214,10 +243,12 @@ def test_repository_marks_only_ambiguous_geojson_slide_as_failed(tmp_path: Path)
     (geojson_dir / "case_b__123456abcdef.geojson").write_text("{}")
 
     repository.ingest_new_cases(
-        source_folder=source_folder,
-        activate_sanity_check=True,
-        use_advanced_filtering=True,
-        geojson_path=geojson_dir,
+        _ingestion_options(
+            source_folder,
+            activate_sanity_check=True,
+            use_advanced_filtering=True,
+            geojson_path=geojson_dir,
+        )
     )
 
     with sqlite3.connect(tmp_path / "database.db") as connection:

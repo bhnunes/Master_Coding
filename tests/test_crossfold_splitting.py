@@ -19,6 +19,12 @@ from helpers.crossfold.splitting import (
     validate_split_patient_counts,
 )
 
+VALIDATION_PATIENT_COUNT = 2
+SMALL_OPTUNA_TRIALS = 2
+DEFAULT_TEST_PATIENT_COUNT = 20
+DEFAULT_VALIDATION_PATIENT_COUNT = 20
+REMAINING_TRAIN_PATIENT_COUNT = 3
+
 
 def test_build_patient_table_profiles_patient_sample_counts() -> None:
     dataset = pd.DataFrame(
@@ -96,7 +102,7 @@ def test_allocate_patients_greedily_respects_capacities_and_assigns_remainder_to
     assert allocation["train_patients"] == [3, 4, 5]
     assert allocation["split_stats"]["TEST"]["patient_count"] == 1
     assert allocation["split_stats"]["VALIDATION"]["patient_count"] == 1
-    assert allocation["split_stats"]["TRAIN"]["patient_count"] == 3
+    assert allocation["split_stats"]["TRAIN"]["patient_count"] == REMAINING_TRAIN_PATIENT_COUNT
 
 
 def test_allocate_patients_greedily_uses_test_then_validation_then_train_tie_break() -> None:
@@ -140,7 +146,7 @@ def test_allocate_patients_greedily_fills_validation_quota_before_train() -> Non
     assert allocation["test_patients"] == [1]
     assert allocation["val_patients"] == [2, 3]
     assert allocation["train_patients"] == [4]
-    assert allocation["split_stats"]["VALIDATION"]["patient_count"] == 2
+    assert allocation["split_stats"]["VALIDATION"]["patient_count"] == VALIDATION_PATIENT_COUNT
 
 
 def test_order_patients_by_trial_weights_uses_trial_suggestions_and_patient_id_tie_break() -> None:
@@ -207,7 +213,7 @@ def test_optimize_patient_split_with_optuna_uses_best_trial_weights(
             self.best_value: float | None = None
 
         def optimize(self, objective, n_trials: int, callbacks) -> None:  # type: ignore[no-untyped-def]
-            assert n_trials == 2
+            assert n_trials == SMALL_OPTUNA_TRIALS
             assert len(callbacks) == 1
             for trial in self._trials:
                 value = float(objective(trial))
@@ -240,7 +246,7 @@ def test_optimize_patient_split_with_optuna_uses_best_trial_weights(
         test_patient_count=1,
         validation_patient_count=1,
         random_state=42,
-        optuna_trials=2,
+        optuna_trials=SMALL_OPTUNA_TRIALS,
     )
 
     assert result["best_value"] == pytest.approx(result["loss"])
@@ -403,15 +409,15 @@ def test_create_train_val_test_split_best_respects_exact_patient_capacities() ->
         objective=ObjectiveConfig(optuna_trials=3),
     )
 
-    assert len(split_data["test_patients"]) == 20
-    assert len(split_data["val_patients"]) == 20
-    assert len(split_data["train_patients"]) == 3
-    assert split_data["constraints"]["n_test"] == 20
-    assert split_data["constraints"]["n_val"] == 20
-    assert split_data["constraints"]["n_train"] == 3
-    assert split_data["train_df"]["patient_id"].nunique() == 3
-    assert split_data["val_df"]["patient_id"].nunique() == 20
-    assert split_data["test_df"]["patient_id"].nunique() == 20
+    assert len(split_data["test_patients"]) == DEFAULT_TEST_PATIENT_COUNT
+    assert len(split_data["val_patients"]) == DEFAULT_VALIDATION_PATIENT_COUNT
+    assert len(split_data["train_patients"]) == REMAINING_TRAIN_PATIENT_COUNT
+    assert split_data["constraints"]["n_test"] == DEFAULT_TEST_PATIENT_COUNT
+    assert split_data["constraints"]["n_val"] == DEFAULT_VALIDATION_PATIENT_COUNT
+    assert split_data["constraints"]["n_train"] == REMAINING_TRAIN_PATIENT_COUNT
+    assert split_data["train_df"]["patient_id"].nunique() == REMAINING_TRAIN_PATIENT_COUNT
+    assert split_data["val_df"]["patient_id"].nunique() == DEFAULT_VALIDATION_PATIENT_COUNT
+    assert split_data["test_df"]["patient_id"].nunique() == DEFAULT_TEST_PATIENT_COUNT
     assert set(split_data["train_patients"]).isdisjoint(split_data["val_patients"])
     assert set(split_data["train_patients"]).isdisjoint(split_data["test_patients"])
     assert set(split_data["val_patients"]).isdisjoint(split_data["test_patients"])

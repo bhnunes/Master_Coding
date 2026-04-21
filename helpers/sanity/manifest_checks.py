@@ -217,34 +217,17 @@ def check_stage4_cleaning_lineage(
     run_cfg: dict[str, Any] | None,
     base_dir: Path,
 ) -> CheckResult:
-    if not run_cfg:
-        return CheckResult(
-            "N/A", "run_config.json not found; skipping Stage 4.3 cleaning lineage check."
-        )
-    source_provenance = run_cfg.get("source_hdf5_provenance")
-    if not isinstance(source_provenance, dict):
-        return CheckResult(
-            "WARN",
-            (
-                "run_config.json missing source_hdf5_provenance; cannot verify "
-                "Stage 4.3 cleaning lineage."
-            ),
-        )
-    attrs = source_provenance.get("attrs")
-    if not isinstance(attrs, dict):
-        return CheckResult(
-            "WARN",
-            (
-                "run_config.json missing source_hdf5_provenance.attrs; cannot verify "
-                "Stage 4.3 cleaning lineage."
-            ),
-        )
+    attrs_result = _resolve_stage4_cleaning_attrs(run_cfg)
+    if isinstance(attrs_result, CheckResult):
+        return attrs_result
+    attrs = attrs_result
 
     expected_manifest_path = attrs.get("stage4_cleaning_manifest_path")
     expected_manifest_sha = attrs.get("stage4_cleaning_manifest_sha256")
     if expected_manifest_path is None and expected_manifest_sha is None:
         return CheckResult("PASS", "No Stage 4.3 cleaning lineage recorded in source provenance.")
-    if not expected_manifest_path or not expected_manifest_sha:
+    lineage_complete = bool(expected_manifest_path and expected_manifest_sha)
+    if not lineage_complete:
         return CheckResult(
             "FAIL",
             (
@@ -276,3 +259,28 @@ def check_stage4_cleaning_lineage(
         "PASS",
         "Stage 4.3 cleaning lineage matches run_config.json across split HDF5 artifacts.",
     )
+
+
+def _resolve_stage4_cleaning_attrs(run_cfg: dict[str, Any] | None) -> dict[str, Any] | CheckResult:
+    if not run_cfg:
+        return CheckResult(
+            "N/A",
+            "run_config.json not found; skipping Stage 4.3 cleaning lineage check.",
+        )
+
+    source_provenance = run_cfg.get("source_hdf5_provenance")
+    if not isinstance(source_provenance, dict):
+        return CheckResult(
+            "WARN",
+            "run_config.json missing source_hdf5_provenance; cannot verify "
+            "Stage 4.3 cleaning lineage.",
+        )
+
+    attrs = source_provenance.get("attrs")
+    if not isinstance(attrs, dict):
+        return CheckResult(
+            "WARN",
+            "run_config.json missing source_hdf5_provenance.attrs; cannot verify "
+            "Stage 4.3 cleaning lineage.",
+        )
+    return attrs

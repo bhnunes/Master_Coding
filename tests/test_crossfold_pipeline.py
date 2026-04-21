@@ -8,6 +8,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from helpers.crossfold.config import CrossfoldConfig, ObjectiveConfig, SplitConstraints
 from helpers.crossfold.pipeline import _persist_stage5_split_state, run_crossfold_pipeline
 
+OPTUNA_TRIALS = 25
+
 
 def test_run_crossfold_pipeline_executes_stage_flow(
     monkeypatch: MonkeyPatch, tmp_path: Path
@@ -122,18 +124,19 @@ def test_run_crossfold_pipeline_executes_stage_flow(
 
     assert summary.output_dir == tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
     assert summary.manifest_rows == 1
-    split_selection = cast(dict[str, Any], provenance_kwargs["extra"])["split_selection"]
+    provenance_config = cast(Any, provenance_kwargs["config"])
+    split_selection = cast(dict[str, Any], provenance_config.extra)["split_selection"]
     assert split_selection["method"] == "optuna_greedy_sample_ratio_stratified"
     assert split_selection["tie_break_priority"] == ["TEST", "VALIDATION", "TRAIN"]
     assert split_selection["global_cancer_ratio"] == 1.0
-    assert split_selection["optuna_trials"] == 25
+    assert split_selection["optuna_trials"] == OPTUNA_TRIALS
     assert split_selection["loss_metric"] == "sum_absolute_split_ratio_delta"
     assert split_selection["final_loss"] == 0.0
-    assert provenance_kwargs["source_hdf5_provenance"] is cached_provenance
+    assert provenance_config.source_hdf5_provenance is cached_provenance
     assert persist_kwargs["master_manifest_path"] == source_path
     assert persist_kwargs["normalization_method"] == "NOT_NORMALIZED"
     assert (
-        cast(dict[str, Any], provenance_kwargs["extra"])["verification"]
+        cast(dict[str, Any], provenance_config.extra)["verification"]
         == split_data["verification"]
     )
     assert calls == [
@@ -617,8 +620,7 @@ def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Pat
 
     with sqlite3.connect(master_manifest_path) as connection:
         stage_state_rows = connection.execute(
-            "SELECT split, normalization_method, normalization_artifact_id "
-            "FROM patch_stage_state"
+            "SELECT split, normalization_method, normalization_artifact_id FROM patch_stage_state"
         ).fetchall()
         artifact_rows = connection.execute(
             "SELECT method, state_path, template_path, fit_scope FROM normalization_artifacts"

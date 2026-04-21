@@ -4,6 +4,9 @@ import pytest
 
 from helpers.packaging.config import load_packaging_config
 
+DEFAULT_COPY_BATCH_SIZE = 256
+CUSTOM_COPY_BATCH_SIZE = 1024
+
 
 def test_load_packaging_config_reads_defaults(tmp_path: Path) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
@@ -15,7 +18,7 @@ def test_load_packaging_config_reads_defaults(tmp_path: Path) -> None:
     assert config.output_filename == "SOURCE_DATASET.h5"
     assert config.overwrite_outputs is False
     assert config.hdf5_compression is None
-    assert config.copy_batch_size == 256
+    assert config.copy_batch_size == DEFAULT_COPY_BATCH_SIZE
     assert config.log_path == Path("logs/packaging.log")
 
 
@@ -116,7 +119,7 @@ def test_load_packaging_config_parses_copy_batch_size(tmp_path: Path) -> None:
         }
     )
 
-    assert config.copy_batch_size == 1024
+    assert config.copy_batch_size == CUSTOM_COPY_BATCH_SIZE
 
 
 def test_load_packaging_config_rejects_invalid_copy_batch_size(tmp_path: Path) -> None:

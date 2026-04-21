@@ -7,6 +7,7 @@ import numpy as np
 import numpy.typing as npt
 
 _DEFAULT_GIST_EPS = 0.1
+MIN_PAIRWISE_CANDIDATE_SIZE = 2
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ class _GistSelector:
 
     def _candidate_sets(self) -> list[list[int]]:
         candidates = [self._greedy_independent_set(0.0)]
-        if self.k >= 2 and self.n >= 2:
+        if self.k >= MIN_PAIRWISE_CANDIDATE_SIZE and self.n >= MIN_PAIRWISE_CANDIDATE_SIZE:
             u, v = self._diametrical_pair()
             if u != v:
                 candidates.append([u, v])

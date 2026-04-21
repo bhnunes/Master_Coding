@@ -18,6 +18,13 @@ from helpers.training.master_manifest_queries import (
     load_validation_records,
 )
 
+PATCH_SIDE = 4
+RGB_CHANNELS = 3
+TRAIN_ROW_VALUE = 1
+MASK_CHANNEL_VALUE = 1
+TRAIN_RECORD_COUNT = 4
+NORMALIZED_ROW_VALUE = 2
+
 
 def _write_stage2_shard(
     shard_path: Path,
@@ -32,14 +39,20 @@ def _write_stage2_shard(
             "images",
             data=np.stack(
                 [
-                    np.full((4, 4, 3), row_index + 1, dtype=np.uint8)
+                    np.full(
+                        (PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS),
+                        row_index + TRAIN_ROW_VALUE,
+                        dtype=np.uint8,
+                    )
                     for row_index in range(len(labels))
                 ]
             ),
         )
         handle.create_dataset(
             "masks",
-            data=np.stack([np.full((4, 4), label, dtype=np.uint8) for label in labels]),
+            data=np.stack(
+                [np.full((PATCH_SIDE, PATCH_SIDE), label, dtype=np.uint8) for label in labels]
+            ),
         )
         handle.create_dataset("labels", data=np.asarray(labels, dtype=np.uint8))
         handle.create_dataset(
@@ -245,7 +258,7 @@ def test_master_manifest_query_helpers_filter_runtime_rows(
         ("1", 0),
         ("2", 1),
     ]
-    assert len(train_records) == 4
+    assert len(train_records) == TRAIN_RECORD_COUNT
     assert all(record.split == "TRAIN" for record in train_records)
     assert validation_records[0].source_hdf5_path == shard_paths[2]
     assert test_records[0].source_hdf5_path == shard_paths[3]
@@ -378,5 +391,5 @@ def test_canonical_dataset_applies_stain_normalizer_before_transform(
     image, _mask = dataset[0]
 
     assert normalizer.calls == ["p1_0.png"]
-    assert int(recording_transform.images[0][0, 0, 0]) == 2
-    assert int(image[0, 0, 0]) == 2
+    assert int(recording_transform.images[0][0, 0, 0]) == NORMALIZED_ROW_VALUE
+    assert int(image[0, 0, 0]) == NORMALIZED_ROW_VALUE

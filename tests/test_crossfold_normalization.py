@@ -12,6 +12,8 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold import normalization
 
+MEDIAN_RGB_VALUE = 50
+
 
 class _FakeNormalizer:
     def __init__(self) -> None:
@@ -111,7 +113,7 @@ def test_make_aggregate_target_uses_median_rgb(tmp_path: Path) -> None:
     target = normalization.make_aggregate_target([str(image_a), str(image_b)])
 
     assert target.shape == (2, 2, 3)
-    assert int(target[0, 0, 0]) == 50
+    assert int(target[0, 0, 0]) == MEDIAN_RGB_VALUE
 
 
 def test_fit_normalizer_on_train_set_falls_back_to_rereading_images(

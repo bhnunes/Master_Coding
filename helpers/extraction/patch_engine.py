@@ -7,6 +7,7 @@ import os
 import re
 import time
 import traceback
+from dataclasses import dataclass
 from itertools import islice
 from multiprocessing import Pool
 from pathlib import Path
@@ -50,6 +51,9 @@ KERNEL_OPEN = _build_morph_kernel((3, 3))  # For noise removal
 KERNEL_CLOSE = _build_morph_kernel((7, 7))  # For hole filling
 PATCH_AREA = WINDOW_SIZE * WINDOW_SIZE
 HALF_WINDOW = WINDOW_SIZE // 2
+MIN_TISSUE_COLOR_SPREAD = 10
+MIN_POLYGON_POINTS = 3
+PROFILED_RESULT_TUPLE_SIZE = 3
 ARTIFACT_CLASS_TO_COLUMN = {
     "Fold": "cov_fold",
     "PenMarking": "cov_penmarking",
@@ -69,6 +73,51 @@ WINDOW_PROFILE_PHASES = (
     "cancer_mask",
     "not_cancer_mask",
 )
+
+
+@dataclass(frozen=True)
+class _ExtractionPreparation:
+    slide_basename: str
+    annotations_cancer_level0: list[object]
+    annotations_not_cancer_level0: list[object]
+    artifact_polygons_by_class_level0: dict[str, list[object]]
+
+
+@dataclass(frozen=True)
+class _ScaledAnnotationRegion:
+    scale_factor: float
+    target_width: int
+    target_height: int
+    x_start: int
+    y_start: int
+    x_end: int
+    y_end: int
+
+
+@dataclass(frozen=True)
+class _ExtractionWorkerSetup:
+    worker_state: dict[str, object]
+    filtered_coords: list[tuple[int, int]]
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class _WindowDecision:
+    status: str
+    label: str | None
+    final_mask: np.ndarray | None
+
+
+@dataclass(frozen=True)
+class _WorkerSetupRequest:
+    path_Image: str
+    kwargs: dict[str, object]
+    slide: object
+    preparation: _ExtractionPreparation
+    region: _ScaledAnnotationRegion
+    filtered_coords: list[tuple[int, int]]
+    slide_phase_seconds: dict[str, float]
+    profile_output_path: object
 
 
 def build_patch_record(
@@ -142,7 +191,7 @@ def check_tissue_percentage_robust(patch_np, required_percentage):
         )
     ):
         color_spread = np.max(patch_np, axis=2) - np.min(patch_np, axis=2)
-        tissue_percentage = float(np.mean(color_spread > 10))
+        tissue_percentage = float(np.mean(color_spread > MIN_TISSUE_COLOR_SPREAD))
         return tissue_percentage >= required_percentage
     patch_hsv = cv2.cvtColor(patch_np, cv2.COLOR_RGB2HSV)
     _, tissue_mask = cv2.threshold(patch_hsv[:, :, 1], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -171,7 +220,7 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     )
     prep_win = prep(win_poly_l0)
     for poly_l0 in polygons_level0:
-        if len(poly_l0) < 3:
+        if len(poly_l0) < MIN_POLYGON_POINTS:
             continue
         try:
             anno_poly_l0 = Polygon(poly_l0)
@@ -221,7 +270,7 @@ def clip_geometry_to_patch_coords(geometry, *, patch_x, patch_y, mask_width, mas
                 np.round(np.clip(coords_raw[:, 1] - patch_y, 0, mask_height - 1)),
             )
         ).astype(np.int32)
-        if len(coords) >= 3:
+        if len(coords) >= MIN_POLYGON_POINTS:
             coords_list.append(coords)
     return coords_list
 
@@ -244,7 +293,7 @@ def compute_artifact_coverages_for_patch(
 
         scaled_polys_raw = []
         for polygon_points in polygons_l0:
-            if len(polygon_points) < 3:
+            if len(polygon_points) < MIN_POLYGON_POINTS:
                 continue
             try:
                 poly = Polygon(
@@ -283,7 +332,7 @@ def compute_artifact_coverages_for_patch(
 def build_scaled_polygon_index(polygons_level0, scale_factor):
     scaled_polygons = []
     for polygon_points in polygons_level0:
-        if len(polygon_points) < 3:
+        if len(polygon_points) < MIN_POLYGON_POINTS:
             continue
         try:
             poly = Polygon([(px / scale_factor, py / scale_factor) for px, py in polygon_points])
@@ -310,7 +359,7 @@ def build_artifact_geometry_index(artifact_polygons_by_class_level0, scale_facto
 
         scaled_polys_raw = []
         for polygon_points in polygons_l0:
-            if len(polygon_points) < 3:
+            if len(polygon_points) < MIN_POLYGON_POINTS:
                 continue
             try:
                 poly = Polygon(
@@ -456,16 +505,13 @@ def close_worker_resources():
     _WORKER_SLIDE_CACHE = None
 
 
-def _process_window_with_slide(slide, x, y):
-    context = _WORKER_CONTEXT
+def _window_profile_stats(context):
     profile_enabled = bool(context.get("profile_output_path"))
-    window_phase_stats = create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
-    x_int, y_int = int(x), int(y)
-    patch_coords = (x_int, y_int)
-    window_size = context["window_size"]
-    patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
-    prepared_patch_polygon = prep(patch_polygon)
+    return profile_enabled, create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
 
+
+def _window_masks(context, patch_coords, patch_polygon, prepared_patch_polygon, window_phase_stats):
+    window_size = context["window_size"]
     cancer_mask_started_at = time.perf_counter()
     cancer_mask = polygons_to_mask_with_index(
         (window_size, window_size),
@@ -476,7 +522,9 @@ def _process_window_with_slide(slide, x, y):
     )
     if window_phase_stats is not None:
         record_phase(
-            window_phase_stats, "cancer_mask", time.perf_counter() - cancer_mask_started_at
+            window_phase_stats,
+            "cancer_mask",
+            time.perf_counter() - cancer_mask_started_at,
         )
 
     non_cancer_mask_started_at = time.perf_counter()
@@ -493,31 +541,36 @@ def _process_window_with_slide(slide, x, y):
             "not_cancer_mask",
             time.perf_counter() - non_cancer_mask_started_at,
         )
+    return cancer_mask, non_cancer_mask
 
+
+def _decide_window_label(context, cancer_mask, non_cancer_mask):
+    window_size = context["window_size"]
     cancer_overlap = np.count_nonzero(cancer_mask) / PATCH_AREA
     non_cancer_overlap = np.count_nonzero(non_cancer_mask) / PATCH_AREA
-
-    patch_saved = False
-    label = ""
-    final_mask = np.zeros((window_size, window_size), dtype=np.uint8)
     if (cancer_overlap >= context["match_percentage_req"]) and (
         non_cancer_overlap < context["match_percentage_req"]
     ):
-        label = "CANCER"
-        final_mask, patch_saved = cancer_mask, True
-    elif (non_cancer_overlap >= context["match_percentage_req"]) and (
+        return _WindowDecision(status="SAVED_CANCER", label="CANCER", final_mask=cancer_mask)
+    if (non_cancer_overlap >= context["match_percentage_req"]) and (
         cancer_overlap < context["match_percentage_req"]
     ):
-        label = "NOT_CANCER"
-        final_mask, patch_saved = np.zeros((window_size, window_size), dtype=np.uint8), True
-
-    if not patch_saved:
-        return (
-            ("SKIPPED_OVERLAP", None, window_phase_stats)
-            if window_phase_stats is not None
-            else ("SKIPPED_OVERLAP", None)
+        return _WindowDecision(
+            status="SAVED_NOT_CANCER",
+            label="NOT_CANCER",
+            final_mask=np.zeros((window_size, window_size), dtype=np.uint8),
         )
+    return _WindowDecision(status="SKIPPED_OVERLAP", label=None, final_mask=None)
 
+
+def _window_result(status, payload, window_phase_stats):
+    if window_phase_stats is not None:
+        return status, payload, window_phase_stats
+    return status, payload
+
+
+def _read_window_patch(slide, context, patch_coords, x_int, y_int, window_phase_stats):
+    window_size = context["window_size"]
     read_started_at = time.perf_counter()
     preloaded_region = context.get("preloaded_region")
     if preloaded_region is not None:
@@ -530,23 +583,17 @@ def _process_window_with_slide(slide, x, y):
         assert slide is not None
         patch_np = np.asarray(
             slide.read_region(
-                patch_coords, context["target_level"], (window_size, window_size)
+                patch_coords,
+                context["target_level"],
+                (window_size, window_size),
             ).convert("RGB")
         )
     if window_phase_stats is not None:
         record_phase(window_phase_stats, "read_region", time.perf_counter() - read_started_at)
+    return patch_np
 
-    tissue_started_at = time.perf_counter()
-    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
-    if window_phase_stats is not None:
-        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
-    if not tissue_ok:
-        return (
-            ("SKIPPED_TISSUE", None, window_phase_stats)
-            if window_phase_stats is not None
-            else ("SKIPPED_TISSUE", None)
-        )
 
+def _compute_window_artifact_coverages(context, patch_polygon, window_phase_stats):
     artifact_coverages = get_zero_artifact_coverages()
     artifact_geometry_index = context.get("artifact_geometry_index")
     if context.get("use_artifact_filter") and artifact_geometry_index:
@@ -562,21 +609,76 @@ def _process_window_with_slide(slide, x, y):
                 "artifact_coverage",
                 time.perf_counter() - artifact_started_at,
             )
+    return artifact_coverages
 
-    file_basename = f"{label}_{context['filename_prefix']}_X_{x_int}_Y_{y_int}.png"
+
+def _build_saved_window_result(
+    context,
+    decision,
+    patch_np,
+    x_int,
+    y_int,
+    artifact_coverages,
+    window_phase_stats,
+):
+    file_basename = f"{decision.label}_{context['filename_prefix']}_X_{x_int}_Y_{y_int}.png"
     patch_record = build_patch_record(
         filename=file_basename,
-        label=label,
+        label=cast(str, decision.label),
         patient_id=context["patient"],
         slide_id=context["slide_id"],
         artifact_coverages=artifact_coverages,
         patch_np=patch_np,
-        final_mask=final_mask,
+        final_mask=cast(np.ndarray, decision.final_mask),
     )
-    return (
-        (f"SAVED_{label}", patch_record, window_phase_stats)
-        if window_phase_stats is not None
-        else (f"SAVED_{label}", patch_record)
+    return _window_result(decision.status, patch_record, window_phase_stats)
+
+
+def _process_window_with_slide(slide, x, y):
+    context = _WORKER_CONTEXT
+    _, window_phase_stats = _window_profile_stats(context)
+    x_int, y_int = int(x), int(y)
+    patch_coords = (x_int, y_int)
+    window_size = context["window_size"]
+    patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
+    prepared_patch_polygon = prep(patch_polygon)
+    cancer_mask, non_cancer_mask = _window_masks(
+        context,
+        patch_coords,
+        patch_polygon,
+        prepared_patch_polygon,
+        window_phase_stats,
+    )
+    decision = _decide_window_label(context, cancer_mask, non_cancer_mask)
+    if decision.label is None:
+        return _window_result(decision.status, None, window_phase_stats)
+
+    patch_np = _read_window_patch(slide, context, patch_coords, x_int, y_int, window_phase_stats)
+
+    tissue_started_at = time.perf_counter()
+    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
+    if not tissue_ok:
+        return (
+            ("SKIPPED_TISSUE", None, window_phase_stats)
+            if window_phase_stats is not None
+            else ("SKIPPED_TISSUE", None)
+        )
+
+    artifact_coverages = _compute_window_artifact_coverages(
+        context,
+        patch_polygon,
+        window_phase_stats,
+    )
+    return _build_saved_window_result(
+        context,
+        decision,
+        artifact_coverages=artifact_coverages,
+        patch_np=patch_np,
+        x_int=x_int,
+        y_int=y_int,
+        window_phase_stats=window_phase_stats,
     )
 
 
@@ -630,6 +732,311 @@ def iter_window_results_serial(filtered_coords, worker_state, slide):
         yield _process_window_with_slide(slide, x, y)
 
 
+def _load_artifact_polygons(kwargs, slide_basename):
+    artifact_polygons_by_class_level0 = {}
+    if not (kwargs.get("use_artifact_filter") and kwargs.get("path_artifacts_geojson")):
+        return artifact_polygons_by_class_level0
+    logging.info(f"Advanced artifact filtering is ACTIVE for {slide_basename}.")
+    try:
+        with open(kwargs["path_artifacts_geojson"]) as f:
+            artifact_data = json.load(f)
+        artifact_polygons_by_class_level0 = {cls: [] for cls in ARTIFACT_CLASS_TO_COLUMN}
+        for feature in artifact_data.get("features", []):
+            prop_cls = _artifact_feature_class_name(feature)
+            if prop_cls not in artifact_polygons_by_class_level0:
+                continue
+            _append_artifact_geometry(feature, artifact_polygons_by_class_level0[prop_cls])
+        for cls, polys in artifact_polygons_by_class_level0.items():
+            logging.info("  - Loaded %s artifact polygons for class '%s'.", len(polys), cls)
+    except FileNotFoundError:
+        logging.warning(
+            "Artifact GeoJSON file not found: %s. Filtering will be skipped for this slide.",
+            kwargs["path_artifacts_geojson"],
+        )
+    except Exception as error:
+        logging.error(
+            "Failed to parse artifact GeoJSON %s: %s. Filtering skipped.",
+            kwargs["path_artifacts_geojson"],
+            error,
+        )
+        return {}
+    return artifact_polygons_by_class_level0
+
+
+def _artifact_feature_class_name(feature):
+    properties = feature.get("properties", {})
+    if not properties:
+        return None
+    classification_obj = properties.get("classification")
+    if isinstance(classification_obj, dict):
+        return classification_obj.get("name")
+    if isinstance(classification_obj, str):
+        return classification_obj
+    return None
+
+
+def _append_artifact_geometry(feature, polygons):
+    geometry = feature.get("geometry", {})
+    geom_type = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if not geom_type or not coordinates:
+        return
+    if geom_type == "Polygon":
+        if coordinates:
+            polygons.append(coordinates[0])
+        return
+    if geom_type == "MultiPolygon":
+        for poly_coords in coordinates:
+            if poly_coords:
+                polygons.append(poly_coords[0])
+
+
+def _prepare_extraction(handler, path_Image, kwargs, slide, slide_phase_seconds):
+    slide_basename = os.path.basename(path_Image)
+    load_annotations_started_at = time.perf_counter()
+    annotation_data = handler.load_annotations(slide, **kwargs)
+    slide_phase_seconds["load_annotations"] = time.perf_counter() - load_annotations_started_at
+    annotations_cancer_level0 = annotation_data["cancer_polygons"]
+    annotations_not_cancer_level0 = annotation_data["not_cancer_polygons"]
+    load_artifacts_started_at = time.perf_counter()
+    artifact_polygons_by_class_level0 = _load_artifact_polygons(kwargs, slide_basename)
+    slide_phase_seconds["load_artifacts"] = time.perf_counter() - load_artifacts_started_at
+    return _ExtractionPreparation(
+        slide_basename=slide_basename,
+        annotations_cancer_level0=annotations_cancer_level0,
+        annotations_not_cancer_level0=annotations_not_cancer_level0,
+        artifact_polygons_by_class_level0=artifact_polygons_by_class_level0,
+    )
+
+
+def _scaled_annotation_region(slide, kwargs, all_polygons_level0):
+    scale_factor = slide.level_downsamples[kwargs["target_level"]]
+    target_width, target_height = slide.level_dimensions[kwargs["target_level"]]
+    scaled_polys_raw = []
+    for polygon_points in all_polygons_level0:
+        try:
+            poly = Polygon([(x / scale_factor, y / scale_factor) for x, y in polygon_points])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            scaled_polys_raw.append(poly)
+        except Exception:
+            continue
+    scaled_polys_flat = []
+    for geom in scaled_polys_raw:
+        if geom.geom_type == "Polygon":
+            scaled_polys_flat.append(geom)
+        elif geom.geom_type == "MultiPolygon":
+            scaled_polys_flat.extend(list(geom.geoms))
+    if not scaled_polys_flat:
+        return None
+    combined_annotations = MultiPolygon(scaled_polys_flat)
+    min_x, min_y, max_x, max_y = combined_annotations.bounds
+    return combined_annotations, _ScaledAnnotationRegion(
+        scale_factor=scale_factor,
+        target_width=target_width,
+        target_height=target_height,
+        x_start=max(0, int(min_x)),
+        y_start=max(0, int(min_y)),
+        x_end=min(int(max_x) + kwargs["window_size"], target_width),
+        y_end=min(int(max_y) + kwargs["window_size"], target_height),
+    )
+
+
+def _log_scan_region(region, target_level, combined_annotations):
+    min_x, min_y, max_x, max_y = combined_annotations.bounds
+    logging.info(
+        "Annotations bounding box (L%s): [(%s, %s), (%s, %s)]",
+        target_level,
+        int(min_x),
+        int(min_y),
+        int(max_x),
+        int(max_y),
+    )
+    logging.info(
+        "Optimized scan area: [(%s, %s), (%s, %s)]",
+        region.x_start,
+        region.y_start,
+        region.x_end,
+        region.y_end,
+    )
+
+
+def _candidate_coordinates(region, kwargs, combined_annotations):
+    x_coords = np.arange(region.x_start, region.x_end - kwargs["window_size"] + 1, kwargs["stride"])
+    y_coords = np.arange(region.y_start, region.y_end - kwargs["window_size"] + 1, kwargs["stride"])
+    center_x = x_coords + (kwargs["window_size"] // 2)
+    center_y = y_coords + (kwargs["window_size"] // 2)
+    center_grid_x, center_grid_y = np.meshgrid(center_x, center_y, indexing="ij")
+    contains_mask = shapely.contains_xy(
+        combined_annotations,
+        center_grid_x.ravel(),
+        center_grid_y.ravel(),
+    )
+    coord_grid = np.column_stack(
+        (
+            np.repeat(x_coords, len(y_coords)),
+            np.tile(y_coords, len(x_coords)),
+        )
+    )
+    return [
+        (int(x_coord), int(y_coord))
+        for (x_coord, y_coord), keep in zip(coord_grid, contains_mask, strict=False)
+        if keep
+    ]
+
+
+def _maybe_preload_scan_region(slide, region, kwargs, slide_phase_seconds):
+    preload_scan_area_max_bytes = int(kwargs.get("preload_scan_area_max_bytes", 0) or 0)
+    scan_width = region.x_end - region.x_start
+    scan_height = region.y_end - region.y_start
+    preload_scan_area_bytes = scan_width * scan_height * 3
+    if not preload_scan_area_max_bytes or preload_scan_area_bytes > preload_scan_area_max_bytes:
+        return None
+    preload_started_at = time.perf_counter()
+    preloaded_region = np.asarray(
+        slide.read_region(
+            (region.x_start, region.y_start),
+            kwargs["target_level"],
+            (scan_width, scan_height),
+        ).convert("RGB")
+    )
+    slide_phase_seconds["preload_scan_area"] = time.perf_counter() - preload_started_at
+    logging.info(
+        "Preloaded optimized scan area into memory: %sx%s pixels (%.2f MiB).",
+        scan_width,
+        scan_height,
+        preload_scan_area_bytes / (1024 * 1024),
+    )
+    return preloaded_region
+
+
+def _build_worker_setup(request):
+    build_indexes_started_at = time.perf_counter()
+    cancer_polygon_index = build_scaled_polygon_index(
+        request.preparation.annotations_cancer_level0,
+        request.region.scale_factor,
+    )
+    not_cancer_polygon_index = build_scaled_polygon_index(
+        request.preparation.annotations_not_cancer_level0,
+        request.region.scale_factor,
+    )
+    artifact_geometry_index = build_artifact_geometry_index(
+        request.preparation.artifact_polygons_by_class_level0,
+        request.region.scale_factor,
+    )
+    request.slide_phase_seconds["build_indexes"] = time.perf_counter() - build_indexes_started_at
+    preloaded_region = _maybe_preload_scan_region(
+        request.slide,
+        request.region,
+        request.kwargs,
+        request.slide_phase_seconds,
+    )
+    batch_size = max(
+        8,
+        min(
+            64,
+            len(request.filtered_coords) // max(1, request.kwargs["num_workers"] * 4) or 8,
+        ),
+    )
+    slide_id = os.path.splitext(os.path.basename(request.path_Image))[0]
+    return _ExtractionWorkerSetup(
+        filtered_coords=request.filtered_coords,
+        batch_size=batch_size,
+        worker_state={
+            "path_Image": request.path_Image,
+            "target_level": request.kwargs["target_level"],
+            "window_size": request.kwargs["window_size"],
+            "tissue_percentage_req": request.kwargs["tissue_percentage_req"],
+            "match_percentage_req": request.kwargs["match_percentage_req"],
+            "patient": request.kwargs["patient"],
+            "slide_id": slide_id,
+            "filename_prefix": build_patch_filename_prefix(
+                patient_id=request.kwargs["patient"],
+                slide_id=slide_id,
+            ),
+            "use_artifact_filter": request.kwargs.get("use_artifact_filter"),
+            "profile_output_path": request.profile_output_path,
+            "openslide_cache_bytes": request.kwargs.get("openslide_cache_bytes", 0),
+            "preloaded_region": preloaded_region,
+            "preloaded_region_x": request.region.x_start,
+            "preloaded_region_y": request.region.y_start,
+            "cancer_polygon_index": cancer_polygon_index,
+            "not_cancer_polygon_index": not_cancer_polygon_index,
+            "artifact_geometry_index": artifact_geometry_index,
+        },
+    )
+
+
+def _window_result_iterator(worker_setup, kwargs, slide):
+    preloaded_region = worker_setup.worker_state["preloaded_region"]
+    if preloaded_region is not None:
+        logging.info("Starting in-memory scan-area processing without per-patch slide reads...")
+        return iter_window_results_preloaded(
+            filtered_coords=worker_setup.filtered_coords,
+            worker_state=worker_setup.worker_state,
+        )
+    if kwargs["num_workers"] == 1:
+        logging.info("Starting in-process single-worker extraction without multiprocessing...")
+        return iter_window_results_serial(
+            filtered_coords=worker_setup.filtered_coords,
+            worker_state=worker_setup.worker_state,
+            slide=slide,
+        )
+    logging.info(
+        "Starting parallel processing with %s workers and batch size %s...",
+        kwargs["num_workers"],
+        worker_setup.batch_size,
+    )
+    return iter_window_results(
+        filtered_coords=worker_setup.filtered_coords,
+        num_workers=kwargs["num_workers"],
+        worker_state=worker_setup.worker_state,
+        batch_size=worker_setup.batch_size,
+    )
+
+
+def _collect_window_results(result_iterator, profile_enabled):
+    status_counts = {}
+    artifact_patch_records = []
+    errors = []
+    window_phase_stats = create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
+    for result in result_iterator:
+        status = result[0]
+        payload = result[1]
+        if (
+            profile_enabled
+            and len(result) == PROFILED_RESULT_TUPLE_SIZE
+            and window_phase_stats is not None
+        ):
+            profile_result = cast(tuple[str, object, dict[str, PhaseStats]], result)
+            merge_phase_stats(window_phase_stats, profile_result[2])
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if status == "ERROR":
+            errors.append(payload)
+        elif payload is not None:
+            artifact_patch_records.append(payload)
+    return status_counts, artifact_patch_records, errors, window_phase_stats
+
+
+def _raise_worker_errors(errors, slide_basename):
+    if not errors:
+        return
+    logging.error(
+        "Encountered %s errors during parallel processing for %s.",
+        len(errors),
+        slide_basename,
+    )
+    for i, error_traceback in enumerate(errors):
+        logging.error("--- Worker Error %s/%s ---\n%s", i + 1, len(errors), error_traceback)
+    first_handler = logging.getLogger().handlers[0]
+    log_filename = getattr(first_handler, "baseFilename", "patch_extraction.log")
+    error_summary = (
+        f"{len(errors)} worker process(es) failed. See '{log_filename}' "
+        "for detailed tracebacks."
+    )
+    raise Exception(error_summary)
+
+
 def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
     slide = None
     openslide_module = load_openslide_module()
@@ -653,285 +1060,62 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         _configure_slide_cache(openslide_module, slide, kwargs.get("openslide_cache_bytes", 0))
         slide_phase_seconds["open_slide"] = time.perf_counter() - open_slide_started_at
 
-        load_annotations_started_at = time.perf_counter()
-        annotation_data = handler.load_annotations(slide, **kwargs)
-        slide_phase_seconds["load_annotations"] = time.perf_counter() - load_annotations_started_at
-        annotations_cancer_level0 = annotation_data["cancer_polygons"]
-        annotations_not_cancer_level0 = annotation_data["not_cancer_polygons"]
-        all_polygons_level0 = annotations_cancer_level0 + annotations_not_cancer_level0
+        preparation = _prepare_extraction(handler, path_Image, kwargs, slide, slide_phase_seconds)
+        all_polygons_level0 = (
+            preparation.annotations_cancer_level0 + preparation.annotations_not_cancer_level0
+        )
 
         if not all_polygons_level0:
-            logging.warning("No valid annotations found by handler for slide %s", slide_basename)
+            logging.warning(
+                "No valid annotations found by handler for slide %s",
+                preparation.slide_basename,
+            )
             slide.close()
             slide = None
             return 0, 0, []
 
-        # --- NEW: ROBUST ARTIFACT PARSING BLOCK ---
-        artifact_polygons_by_class_level0 = {}
-        load_artifacts_started_at = time.perf_counter()
-        if kwargs.get("use_artifact_filter") and kwargs.get("path_artifacts_geojson"):
-            logging.info(f"Advanced artifact filtering is ACTIVE for {slide_basename}.")
-            try:
-                with open(kwargs["path_artifacts_geojson"]) as f:
-                    artifact_data = json.load(f)
-
-                for cls in ARTIFACT_CLASS_TO_COLUMN:
-                    artifact_polygons_by_class_level0[cls] = []
-
-                # Safely parse the GeoJSON features
-                for feature in artifact_data.get("features", []):
-                    properties = feature.get("properties", {})
-                    if not properties:
-                        continue
-
-                    classification_obj = properties.get("classification")
-                    if not classification_obj:
-                        continue
-
-                    # --- FIX IS HERE ---
-                    # Robustly get the class name whether it's a dict or a string
-                    prop_cls = None
-                    if isinstance(classification_obj, dict):
-                        prop_cls = classification_obj.get("name")
-                    elif isinstance(classification_obj, str):
-                        prop_cls = classification_obj
-                    # --- END FIX ---
-
-                    if prop_cls and prop_cls in artifact_polygons_by_class_level0:
-                        geometry = feature.get("geometry", {})
-                        geom_type = geometry.get("type")
-                        coordinates = geometry.get("coordinates")
-                        if not geom_type or not coordinates:
-                            continue
-
-                        # Handle both Polygon and MultiPolygon types
-                        if geom_type == "Polygon":
-                            if coordinates:
-                                artifact_polygons_by_class_level0[prop_cls].append(coordinates[0])
-                        elif geom_type == "MultiPolygon":
-                            for poly_coords in coordinates:
-                                if poly_coords:
-                                    artifact_polygons_by_class_level0[prop_cls].append(
-                                        poly_coords[0]
-                                    )
-
-                # Log a summary of what was found
-                for cls, polys in artifact_polygons_by_class_level0.items():
-                    logging.info("  - Loaded %s artifact polygons for class '%s'.", len(polys), cls)
-
-            except FileNotFoundError:
-                logging.warning(
-                    "Artifact GeoJSON file not found: %s. "
-                    "Filtering will be skipped for this slide.",
-                    kwargs["path_artifacts_geojson"],
-                )
-            except Exception as e:
-                logging.error(
-                    "Failed to parse artifact GeoJSON %s: %s. Filtering skipped.",
-                    kwargs["path_artifacts_geojson"],
-                    e,
-                )
-                artifact_polygons_by_class_level0 = {}
-        slide_phase_seconds["load_artifacts"] = time.perf_counter() - load_artifacts_started_at
-
-        scale_factor = slide.level_downsamples[kwargs["target_level"]]
-        target_width, target_height = slide.level_dimensions[kwargs["target_level"]]
-
-        scaled_polys_raw = []
-        for polygon_points in all_polygons_level0:
-            try:
-                poly = Polygon([(x / scale_factor, y / scale_factor) for x, y in polygon_points])
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                scaled_polys_raw.append(poly)
-            except Exception:
-                continue
-
-        scaled_polys_flat = []
-        for geom in scaled_polys_raw:
-            if geom.geom_type == "Polygon":
-                scaled_polys_flat.append(geom)
-            elif geom.geom_type == "MultiPolygon":
-                scaled_polys_flat.extend(list(geom.geoms))
-
-        if not scaled_polys_flat:
+        scaled_region_result = _scaled_annotation_region(slide, kwargs, all_polygons_level0)
+        if scaled_region_result is None:
             logging.warning("No valid annotation polygons after scaling for %s", slide_basename)
             slide.close()
             slide = None
             return 0, 0, []
-
-        combined_annotations = MultiPolygon(scaled_polys_flat)
-        min_x, min_y, max_x, max_y = combined_annotations.bounds
-        x_start = max(0, int(min_x))
-        y_start = max(0, int(min_y))
-        x_end = min(int(max_x) + kwargs["window_size"], target_width)
-        y_end = min(int(max_y) + kwargs["window_size"], target_height)
-
-        logging.info(
-            "Annotations bounding box (L%s): [(%s, %s), (%s, %s)]",
-            kwargs["target_level"],
-            int(min_x),
-            int(min_y),
-            int(max_x),
-            int(max_y),
-        )
-        logging.info(f"Optimized scan area: [({x_start}, {y_start}), ({x_end}, {y_end})]")
+        combined_annotations, region = scaled_region_result
+        _log_scan_region(region, kwargs["target_level"], combined_annotations)
 
         candidate_filter_started_at = time.perf_counter()
-        x_coords = np.arange(x_start, x_end - kwargs["window_size"] + 1, kwargs["stride"])
-        y_coords = np.arange(y_start, y_end - kwargs["window_size"] + 1, kwargs["stride"])
-        center_x = x_coords + (kwargs["window_size"] // 2)
-        center_y = y_coords + (kwargs["window_size"] // 2)
-        center_grid_x, center_grid_y = np.meshgrid(center_x, center_y, indexing="ij")
-        contains_mask = shapely.contains_xy(
-            combined_annotations,
-            center_grid_x.ravel(),
-            center_grid_y.ravel(),
-        )
-        coord_grid = np.column_stack(
-            (
-                np.repeat(x_coords, len(y_coords)),
-                np.tile(y_coords, len(x_coords)),
-            )
-        )
-        filtered_coords = [
-            (int(x_coord), int(y_coord))
-            for (x_coord, y_coord), keep in zip(coord_grid, contains_mask, strict=False)
-            if keep
-        ]
+        filtered_coords = _candidate_coordinates(region, kwargs, combined_annotations)
         slide_phase_seconds["candidate_filter"] = time.perf_counter() - candidate_filter_started_at
 
-        # The number of candidate windows will now be much more reasonable.
         logging.info(f"Found {len(filtered_coords)} candidate windows after optimization.")
 
         if not filtered_coords:
             slide.close()
             return 0, 0, []
 
-        build_indexes_started_at = time.perf_counter()
-        cancer_polygon_index = build_scaled_polygon_index(annotations_cancer_level0, scale_factor)
-        not_cancer_polygon_index = build_scaled_polygon_index(
-            annotations_not_cancer_level0, scale_factor
-        )
-        artifact_geometry_index = build_artifact_geometry_index(
-            artifact_polygons_by_class_level0,
-            scale_factor,
-        )
-        slide_phase_seconds["build_indexes"] = time.perf_counter() - build_indexes_started_at
-
-        batch_size = max(8, min(64, len(filtered_coords) // max(1, kwargs["num_workers"] * 4) or 8))
-        preload_scan_area_max_bytes = int(kwargs.get("preload_scan_area_max_bytes", 0) or 0)
-        scan_width = x_end - x_start
-        scan_height = y_end - y_start
-        preload_scan_area_bytes = scan_width * scan_height * 3
-        preloaded_region = None
-        if preload_scan_area_max_bytes and preload_scan_area_bytes <= preload_scan_area_max_bytes:
-            preload_started_at = time.perf_counter()
-            preloaded_region = np.asarray(
-                slide.read_region(
-                    (x_start, y_start),
-                    kwargs["target_level"],
-                    (scan_width, scan_height),
-                ).convert("RGB")
-            )
-            slide_phase_seconds["preload_scan_area"] = time.perf_counter() - preload_started_at
-            logging.info(
-                "Preloaded optimized scan area into memory: %sx%s pixels (%.2f MiB).",
-                scan_width,
-                scan_height,
-                preload_scan_area_bytes / (1024 * 1024),
-            )
-        worker_state = {
-            "path_Image": path_Image,
-            "target_level": kwargs["target_level"],
-            "window_size": kwargs["window_size"],
-            "tissue_percentage_req": kwargs["tissue_percentage_req"],
-            "match_percentage_req": kwargs["match_percentage_req"],
-            "patient": kwargs["patient"],
-            "slide_id": os.path.splitext(os.path.basename(path_Image))[0],
-            "filename_prefix": build_patch_filename_prefix(
-                patient_id=kwargs["patient"],
-                slide_id=os.path.splitext(os.path.basename(path_Image))[0],
-            ),
-            "use_artifact_filter": kwargs.get("use_artifact_filter"),
-            "profile_output_path": profile_output_path,
-            "openslide_cache_bytes": kwargs.get("openslide_cache_bytes", 0),
-            "preloaded_region": preloaded_region,
-            "preloaded_region_x": x_start,
-            "preloaded_region_y": y_start,
-            "cancer_polygon_index": cancer_polygon_index,
-            "not_cancer_polygon_index": not_cancer_polygon_index,
-            "artifact_geometry_index": artifact_geometry_index,
-        }
-
-        if preloaded_region is not None:
-            logging.info("Starting in-memory scan-area processing without per-patch slide reads...")
-        elif kwargs["num_workers"] == 1:
-            logging.info("Starting in-process single-worker extraction without multiprocessing...")
-        else:
-            logging.info(
-                "Starting parallel processing with %s workers and batch size %s...",
-                kwargs["num_workers"],
-                batch_size,
-            )
-        parallel_started_at = time.perf_counter()
-        status_counts = {}
-        artifact_patch_records = []
-        errors = []
-        window_phase_stats: dict[str, PhaseStats] | None = (
-            create_phase_stats(WINDOW_PROFILE_PHASES) if profile_enabled else None
-        )
-        result_iterator = (
-            iter_window_results_preloaded(
-                filtered_coords=filtered_coords, worker_state=worker_state
-            )
-            if preloaded_region is not None
-            else iter_window_results_serial(
-                filtered_coords=filtered_coords,
-                worker_state=worker_state,
+        worker_setup = _build_worker_setup(
+            _WorkerSetupRequest(
+                path_Image=path_Image,
+                kwargs=kwargs,
                 slide=slide,
-            )
-            if kwargs["num_workers"] == 1
-            else iter_window_results(
+                preparation=preparation,
+                region=region,
                 filtered_coords=filtered_coords,
-                num_workers=kwargs["num_workers"],
-                worker_state=worker_state,
-                batch_size=batch_size,
+                slide_phase_seconds=slide_phase_seconds,
+                profile_output_path=profile_output_path,
             )
         )
-        for result in result_iterator:
-            status = result[0]
-            payload = result[1]
-            if profile_enabled and len(result) == 3 and window_phase_stats is not None:
-                profile_result = cast(tuple[str, object, dict[str, PhaseStats]], result)
-                result_phase_stats = profile_result[2]
-                merge_phase_stats(window_phase_stats, result_phase_stats)
-
-            status_counts[status] = status_counts.get(status, 0) + 1
-            if status == "ERROR":
-                errors.append(payload)
-            elif payload is not None:
-                artifact_patch_records.append(payload)
+        parallel_started_at = time.perf_counter()
+        result_iterator = _window_result_iterator(worker_setup, kwargs, slide)
+        status_counts, artifact_patch_records, errors, window_phase_stats = _collect_window_results(
+            result_iterator,
+            profile_enabled,
+        )
         slide_phase_seconds["parallel_processing"] = time.perf_counter() - parallel_started_at
 
         cancer_count = status_counts.get("SAVED_CANCER", 0)
         not_cancer_count = status_counts.get("SAVED_NOT_CANCER", 0)
-        if errors:
-            logging.error(
-                "Encountered %s errors during parallel processing for %s.",
-                len(errors),
-                slide_basename,
-            )
-            for i, error_traceback in enumerate(errors):
-                logging.error("--- Worker Error %s/%s ---\n%s", i + 1, len(errors), error_traceback)
-
-            first_handler = logging.getLogger().handlers[0]
-            log_filename = getattr(first_handler, "baseFilename", "patch_extraction.log")
-            error_summary = (
-                f"{len(errors)} worker process(es) failed. See '{log_filename}' "
-                "for detailed tracebacks."
-            )
-            raise Exception(error_summary)
+        _raise_worker_errors(errors, slide_basename)
 
         if profile_enabled and window_phase_stats is not None:
             profile_summary = build_profile_summary(

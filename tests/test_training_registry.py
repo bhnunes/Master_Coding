@@ -13,6 +13,12 @@ from helpers.training.registry import (
     validate_architecture_encoder_pair,
 )
 
+REGISTRY_LEARNING_RATE = 0.123
+REGISTRY_WEIGHT_DECAY = 0.456
+REGISTRY_ALPHA_BCE = 0.1
+REGISTRY_BETA_DICE_BG = 0.2
+REGISTRY_GAMMA_DICE_FG = 0.3
+
 
 def test_get_model_registry_path_returns_default_when_override_missing(
     monkeypatch: pytest.MonkeyPatch,
@@ -134,13 +140,13 @@ def test_load_training_model_registry_normalizes_keys_and_values(
         json.dumps(
             {
                 "fpn": {
-                    "lr": 0.123,
-                    "wd": 0.456,
+                    "lr": REGISTRY_LEARNING_RATE,
+                    "wd": REGISTRY_WEIGHT_DECAY,
                     "encoders": ["resnet34"],
                     "loss": {
-                        "alpha_bce": 0.1,
-                        "beta_dice_bg": 0.2,
-                        "gamma_dice_fg": 0.3,
+                        "alpha_bce": REGISTRY_ALPHA_BCE,
+                        "beta_dice_bg": REGISTRY_BETA_DICE_BG,
+                        "gamma_dice_fg": REGISTRY_GAMMA_DICE_FG,
                     },
                 }
             }
@@ -151,12 +157,12 @@ def test_load_training_model_registry_normalizes_keys_and_values(
 
     registry = load_training_model_registry()
 
-    assert registry["FPN"].lr == 0.123
-    assert registry["FPN"].wd == 0.456
+    assert registry["FPN"].lr == REGISTRY_LEARNING_RATE
+    assert registry["FPN"].wd == REGISTRY_WEIGHT_DECAY
     assert registry["FPN"].encoders == ("resnet34",)
-    assert registry["FPN"].loss.alpha_bce == 0.1
-    assert registry["FPN"].loss.beta_dice_bg == 0.2
-    assert registry["FPN"].loss.gamma_dice_fg == 0.3
+    assert registry["FPN"].loss.alpha_bce == REGISTRY_ALPHA_BCE
+    assert registry["FPN"].loss.beta_dice_bg == REGISTRY_BETA_DICE_BG
+    assert registry["FPN"].loss.gamma_dice_fg == REGISTRY_GAMMA_DICE_FG
 
 
 def test_get_training_model_registry_entry_returns_normalized_entry(
@@ -167,13 +173,13 @@ def test_get_training_model_registry_entry_returns_normalized_entry(
         json.dumps(
             {
                 "fpn": {
-                    "lr": 0.123,
-                    "wd": 0.456,
+                    "lr": REGISTRY_LEARNING_RATE,
+                    "wd": REGISTRY_WEIGHT_DECAY,
                     "encoders": ["resnet34"],
                     "loss": {
-                        "alpha_bce": 0.1,
-                        "beta_dice_bg": 0.2,
-                        "gamma_dice_fg": 0.3,
+                        "alpha_bce": REGISTRY_ALPHA_BCE,
+                        "beta_dice_bg": REGISTRY_BETA_DICE_BG,
+                        "gamma_dice_fg": REGISTRY_GAMMA_DICE_FG,
                     },
                 }
             }
@@ -184,8 +190,8 @@ def test_get_training_model_registry_entry_returns_normalized_entry(
 
     entry = get_training_model_registry_entry("FPN")
 
-    assert entry.lr == 0.123
-    assert entry.loss.gamma_dice_fg == 0.3
+    assert entry.lr == REGISTRY_LEARNING_RATE
+    assert entry.loss.gamma_dice_fg == REGISTRY_GAMMA_DICE_FG
 
 
 def test_validate_architecture_encoder_pair_rejects_unapproved_encoder() -> None:
