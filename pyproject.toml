@@ -37,7 +37,7 @@ dependencies = [
     "orjson",
     "transformers==5.5.0",
     "xformers",
-    "mmdc",
+    "mermaid-py",
     "setuptools<82",
 ]
 
@@ -66,7 +66,6 @@ torchvision = { index = "pytorch-cu126" }
 torchaudio = { index = "pytorch-cu126" }
 segmentation-models-pytorch = { git = "https://github.com/qubvel/segmentation_models.pytorch" }
 torch-staintools = { git = "https://github.com/CielAl/torch-staintools.git" }
-mmdc = { git = "https://github.com/MohammadRaziei/mmdc.git" }
 
 # --- Tool Configuration ---
 [tool.ruff]
@@ -78,7 +77,23 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# Added "C90" (McCabe complexity) and "PLR" (Pylint Refactor checks)
+select = ["E", "F", "I", "UP", "B", "C90", "PLR"]
+
+
+[tool.ruff.lint.mccabe]
+# Flags functions with a cyclomatic complexity higher than this. 
+# 10 is a strict, healthy standard.
+max-complexity = 10 
+
+[tool.ruff.lint.pylint]
+# God-file and God-class prevention limits
+max-args = 7               # Too many arguments (PLR0913)
+max-branches = 12          # Too many branches (PLR0912)
+max-returns = 6            # Too many return statements (PLR0911)
+max-statements = 50        # Too many statements in a function (PLR0915)
+max-public-methods = 20    # Too many methods in a class (PLR0904)
+
 
 [tool.mypy]
 python_version = "3.12"

@@ -17,7 +17,7 @@ def test_configure_stage_logger_passes_through_custom_arguments(
 ) -> None:
     configure_logger = Mock()
 
-    import helpers.logging_utils as logging_utils
+    from helpers import logging_utils
 
     monkeypatch.setattr(logging_utils, "configure_logger", configure_logger)
     log_path = tmp_path / "stage.log"

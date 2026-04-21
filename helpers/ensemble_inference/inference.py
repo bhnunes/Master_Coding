@@ -9,8 +9,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn.functional as functional
 from torch import nn
+from torch.nn import functional
 from torch.utils.data import DataLoader
 
 from helpers.ensemble_inference.metrics import (

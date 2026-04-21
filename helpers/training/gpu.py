@@ -5,8 +5,8 @@ from collections.abc import Callable, Sequence
 from typing import cast
 
 import torch
-import torch.nn.functional as functional
 from torch import nn
+from torch.nn import functional
 
 
 class GPUNormalizer(nn.Module):

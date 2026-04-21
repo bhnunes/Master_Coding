@@ -255,6 +255,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/16/50/478cdda782c8c9c3fb5da3cc72dd7f331f031e7f1363a893cdd6ca0f8de0/charset_normalizer-3.4.6-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:695f5c2823691a25f17bc5d5ffe79fa90972cc34b002ac6c843bb8a1720e950d", size = 203751, upload-time = "2026-03-15T18:51:06.858Z" },
     { url = "https://files.pythonhosted.org/packages/75/fc/cc2fcac943939c8e4d8791abfa139f685e5150cae9f94b60f12520feaa9b/charset_normalizer-3.4.6-cp312-cp312-musllinux_1_2_s390x.whl", hash = "sha256:231d4da14bcd9301310faf492051bee27df11f2bc7549bc0bb41fef11b82daa2", size = 216563, upload-time = "2026-03-15T18:51:08.564Z" },
     { url = "https://files.pythonhosted.org/packages/a8/b7/a4add1d9a5f68f3d037261aecca83abdb0ab15960a3591d340e829b37298/charset_normalizer-3.4.6-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:a056d1ad2633548ca18ffa2f85c202cfb48b68615129143915b8dc72a806a923", size = 209265, upload-time = "2026-03-15T18:51:10.312Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/18/c094561b5d64a24277707698e54b7f67bd17a4f857bbfbb1072bba07c8bf/charset_normalizer-3.4.6-cp312-cp312-win32.whl", hash = "sha256:c2274ca724536f173122f36c98ce188fd24ce3dad886ec2b7af859518ce008a4", size = 144229, upload-time = "2026-03-15T18:51:11.694Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/20/0567efb3a8fd481b8f34f739ebddc098ed062a59fed41a8d193a61939e8f/charset_normalizer-3.4.6-cp312-cp312-win_amd64.whl", hash = "sha256:c8ae56368f8cc97c7e40a7ee18e1cedaf8e780cd8bc5ed5ac8b81f238614facb", size = 154277, upload-time = "2026-03-15T18:51:13.004Z" },
+    { url = "https://files.pythonhosted.org/packages/15/57/28d79b44b51933119e21f65479d0864a8d5893e494cf5daab15df0247c17/charset_normalizer-3.4.6-cp312-cp312-win_arm64.whl", hash = "sha256:899d28f422116b08be5118ef350c292b36fc15ec2daeb9ea987c89281c7bb5c4", size = 142817, upload-time = "2026-03-15T18:51:14.408Z" },
     { url = "https://files.pythonhosted.org/packages/2a/68/687187c7e26cb24ccbd88e5069f5ef00eba804d36dde11d99aad0838ab45/charset_normalizer-3.4.6-py3-none-any.whl", hash = "sha256:947cf925bc916d90adba35a64c82aace04fa39b46b52d4630ece166655905a69", size = 61455, upload-time = "2026-03-15T18:53:23.833Z" },
 ]
 
@@ -815,7 +818,7 @@ dependencies = [
     { name = "h5py" },
     { name = "joblib" },
     { name = "matplotlib" },
-    { name = "mmdc" },
+    { name = "mermaid-py" },
     { name = "numba" },
     { name = "numpy" },
     { name = "opencv-contrib-python" },
@@ -867,7 +870,7 @@ requires-dist = [
     { name = "h5py" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "matplotlib" },
-    { name = "mmdc", git = "https://github.com/MohammadRaziei/mmdc.git" },
+    { name = "mermaid-py" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "opencv-contrib-python", specifier = "==4.9.0.80" },
@@ -948,11 +951,15 @@ wheels = [
 ]
 
 [[package]]
-name = "mmdc"
-version = "0.4.1"
-source = { git = "https://github.com/MohammadRaziei/mmdc.git#7ede3d0b8e3a516f89ce822ef2f74f97f562c928" }
+name = "mermaid-py"
+version = "0.8.4"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "phasma" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/97/323ccdcda694b246272193798bd866e0cbd209c09e578d313bb6837f2d6a/mermaid_py-0.8.4.tar.gz", hash = "sha256:4676246ad32c4e9206d60af569f68ba7eab81e425d071fba01355b1cc6bba8f5", size = 35278, upload-time = "2026-03-09T16:42:11.839Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/5f/acdf24a2f830e8f5f539623473c609f5472e2f687b1cbf6fd62e2964af91/mermaid_py-0.8.4-py3-none-any.whl", hash = "sha256:6e025c93c1ea7ce333aa60711e79ed166884376122516e3c52cf072e48d70791", size = 32690, upload-time = "2026-03-09T16:42:10.621Z" },
 ]
 
 [[package]]
@@ -1334,17 +1341,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fa/36/e27608899f9b8d4dff0617b2d9ab17ca5608956ca44461ac14ac48b44015/pathspec-1.0.4.tar.gz", hash = "sha256:0210e2ae8a21a9137c0d470578cb0e595af87edaa6ebf12ff176f14a02e0e645", size = 131200, upload-time = "2026-01-27T03:59:46.938Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/3c/2c197d226f9ea224a9ab8d197933f9da0ae0aac5b6e0f884e2b8d9c8e9f7/pathspec-1.0.4-py3-none-any.whl", hash = "sha256:fb6ae2fd4e7c921a165808a552060e722767cfa526f99ca5156ed2ce45a5c723", size = 55206, upload-time = "2026-01-27T03:59:45.137Z" },
-]
-
-[[package]]
-name = "phasma"
-version = "0.5.0"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/f2/c6f39c7a3b2ddcd6fea71c8158a27480a498de7e85d0165d44fb15087062/phasma-0.5.0-py3-none-macosx_10_9_universal2.whl", hash = "sha256:d209e9c2720fbc9ea1e07bd0ae67d1b90075a88886a7438121a084d07bda56c7", size = 17231073, upload-time = "2025-12-30T11:11:19.659Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/46/d01f3b175a7bdf6cdfcc6b688aca00d4b77a545ab8ac00b29d696e5a915c/phasma-0.5.0-py3-none-manylinux_2_17_i686.whl", hash = "sha256:cd3772db3bc52ac8478fc23b82ea7636c1889b76f2394ceb03bdc1efac01e348", size = 27270663, upload-time = "2025-12-30T11:11:22.305Z" },
-    { url = "https://files.pythonhosted.org/packages/87/76/24065a7ab6e771575a74e071dfe39a17a9447ab8cd2e0b92ea31eeb60b70/phasma-0.5.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:768365d8035f48f574b6496924aaa33ee8b52d2862ccfae8255d7e37d4ceb340", size = 26241614, upload-time = "2025-12-30T11:11:25.332Z" },
-    { url = "https://files.pythonhosted.org/packages/3b/04/809333d3ad0676c982fa016df88e94d3830bf1413b07de679ae74930c9fa/phasma-0.5.0-py3-none-win_amd64.whl", hash = "sha256:99dc29b11d55b9574772c5a7c0feb407704e8e20f2f534791c3c125a5dda4cd9", size = 18220978, upload-time = "2025-12-30T11:11:28.088Z" },
 ]
 
 [[package]]

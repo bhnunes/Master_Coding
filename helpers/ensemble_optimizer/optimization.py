@@ -14,9 +14,9 @@ import numpy as np
 import numpy.typing as npt
 import optuna
 import torch
-import torch.nn.functional as functional
 from sklearn.metrics import average_precision_score
 from torch import nn
+from torch.nn import functional
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 

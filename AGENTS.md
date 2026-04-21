@@ -177,6 +177,9 @@ Agent guide for coding agents working in this repository.
 - Treat `.env`, credentials files, databases, HDF5 outputs, manifests, logs, checkpoints, and Aim repos as sensitive or generated.
 - Do not delete datasets, logs, or outputs unless explicitly requested.
 - Never use destructive git commands such as `git reset --hard` or `git checkout --` unless explicitly requested.
+- Mermaid diagrams can be authored as `.mermaid` sources under `/workspace/MERMAID/` and rendered to SVG in the same folder.
+- Preferred Mermaid render flow: generate the diagram source with `mermaid-py` when appropriate, then render with `npx -y @mermaid-js/mermaid-cli -i /workspace/MERMAID/<name>.mermaid -o /workspace/MERMAID/<name>.svg -p /workspace/MERMAID/puppeteer-config.json`.
+- Treat `/workspace/MERMAID/*.svg` as generated artifacts unless the task explicitly says otherwise.
 
 ## Validation Checklist
 - Relevant tests were added or updated.

@@ -7,14 +7,17 @@ ARG OPENSLIDE_VERSION=4.0.0
 ENV DEBIAN_FRONTEND=noninteractive
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+ENV NO_UPDATE_NOTIFIER=true
 
-RUN apt-get update && apt-get install -y \
+# Pre-install curl and certificates to set up the NodeSource repository
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y \
+    nodejs \
     python3-pip \
     python3-dev \
     git \
     openssh-client \
-    ca-certificates \
-    curl \
     bash \
     build-essential \
     meson \
@@ -34,6 +37,18 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     libgeos-dev \
     texlive-latex-extra \
+    # Chromium/Puppeteer dependencies required for mermaid rendering in headless Linux
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/openslide-src

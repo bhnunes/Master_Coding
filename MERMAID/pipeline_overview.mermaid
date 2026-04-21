@@ -1,0 +1,81 @@
+graph TD
+    raw_data[Raw inputs<br/>WSIs + annotations + .env]
+
+    subgraph P1[Phase 1: Artifact Detection - optional]
+        p1[1_artifact_detection.py<br/>Detect slide artifacts]
+        p1_out[Artifact GeoJSON + SQLite tracking]
+        p1 --> p1_out
+    end
+
+    subgraph P2[Phase 2: Patch Extraction]
+        p2[2_database_manager.py<br/>Extract patches from WSIs]
+        p2_out[Canonical patient HDF5 shards<br/>+ master_manifest.sqlite]
+    end
+
+    subgraph P3[Phase 3: Annotation Cleaning - optional]
+        p31[3_1_optimization_sampling.py<br/>Build review sample]
+        review[Human review<br/>APPROVED / REJECTED]
+        p32[3_2_tune_graph_method.py<br/>Tune graph cleaning]
+        p33[3_3_cleaner_script.py<br/>Apply cleaning state]
+        p3_out[Updated accepted / rejected row state<br/>in master_manifest.sqlite + sidecars]
+        p31 --> review --> p32 --> p33 --> p3_out
+    end
+
+    subgraph P4[Phase 4: Crossfold Dataset Preparation]
+        p4[4_crossfold.py<br/>Assign TRAIN / VALIDATION / TEST<br/>and fit normalization on TRAIN]
+        p4_out[manifest.csv + split_stats.csv + run_config.json<br/>+ split / normalization state in SQLite]
+        p4 --> p4_out
+    end
+
+    subgraph P5[Phase 5: Sanity Checks]
+        p5[5_sanity_checks.py<br/>Validate provenance and scientific integrity]
+        p5_out[PASS / WARN / FAIL report]
+        p5 --> p5_out
+    end
+
+    subgraph P6[Phase 6: Smart Sampling - optional]
+        p6[6_smart_sampler.py<br/>Select informative TRAIN rows]
+        p6_out[Selection sidecars<br/>+ sampling state in SQLite]
+        p6 --> p6_out
+    end
+
+    subgraph P7[Phase 7: LR Finder]
+        p7[7_lr_finder.py<br/>Screen approved architectures / encoders]
+        p7_out[LR reports + CSV / JSON sidecars]
+        p7 --> p7_out
+    end
+
+    subgraph P8[Phase 8: Training]
+        p8[8_training_ensemble.py<br/>Train one approved model per run]
+        p8_out[Checkpoints + metrics + reports]
+        p8 --> p8_out
+    end
+
+    subgraph P9[Phase 9: Ensemble Optimization]
+        p9[9_optimizer_ensemble.py<br/>Optimize ensemble recipe on VALIDATION]
+        p9_out[Declarative ensemble recipe JSON]
+        p9 --> p9_out
+    end
+
+    subgraph P10[Phase 10: Inference]
+        p10[10_inference_ensemble.py<br/>Run TEST inference and reporting]
+        p10_out[Predictions + metrics + JSON / CSV / LaTeX outputs]
+        p10 --> p10_out
+    end
+
+    raw_data --> p2
+    raw_data -. optional artifact pass .-> p1
+    p1_out -. artifact metadata .-> p2
+
+    p2_out --> p31
+    p2_out --> p4
+    p3_out --> p4
+    p4_out --> p5
+    p4_out --> p6
+    p4_out --> p7
+    p6_out --> p8
+    p4_out --> p8
+    p7_out --> p8
+    p8_out --> p9
+    p9_out --> p10
+    p2_out --> p10
