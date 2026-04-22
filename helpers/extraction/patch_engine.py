@@ -73,6 +73,8 @@ WINDOW_PROFILE_PHASES = (
     "cancer_mask",
     "not_cancer_mask",
 )
+MAX_PRECOMPUTED_MASK_BYTES = 256 * 1024 * 1024
+MAX_PRECOMPUTED_TISSUE_RGB_BYTES = 128 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -174,9 +176,15 @@ def build_patch_filename_prefix(*, patient_id: object, slide_id: object) -> str:
 
 
 def check_tissue_percentage_robust(patch_np, required_percentage):
-    # This function is generic and correct. Unchanged.
     if patch_np is None or patch_np.size == 0:
         return False
+    tissue_fraction = np.count_nonzero(_build_tissue_binary_mask(patch_np)) / PATCH_AREA
+    return tissue_fraction >= required_percentage
+
+
+def _build_tissue_binary_mask(image_rgb):
+    if image_rgb is None or image_rgb.size == 0:
+        return np.zeros((0, 0), dtype=np.uint8)
     if not all(
         hasattr(cv2, attribute)
         for attribute in (
@@ -190,17 +198,15 @@ def check_tissue_percentage_robust(patch_np, required_percentage):
             "MORPH_CLOSE",
         )
     ):
-        color_spread = np.max(patch_np, axis=2) - np.min(patch_np, axis=2)
-        tissue_percentage = float(np.mean(color_spread > MIN_TISSUE_COLOR_SPREAD))
-        return tissue_percentage >= required_percentage
-    patch_hsv = cv2.cvtColor(patch_np, cv2.COLOR_RGB2HSV)
+        color_spread = np.max(image_rgb, axis=2) - np.min(image_rgb, axis=2)
+        return (color_spread > MIN_TISSUE_COLOR_SPREAD).astype(np.uint8)
+    patch_hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
     _, tissue_mask = cv2.threshold(patch_hsv[:, :, 1], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     # Morphological operations for refinement
     tissue_mask = cv2.morphologyEx(tissue_mask, cv2.MORPH_OPEN, KERNEL_OPEN)
     tissue_mask = cv2.morphologyEx(tissue_mask, cv2.MORPH_CLOSE, KERNEL_CLOSE)
-
-    return (np.count_nonzero(tissue_mask) / PATCH_AREA) >= required_percentage
+    return tissue_mask
 
 
 def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
@@ -393,6 +399,129 @@ def build_artifact_geometry_index(artifact_polygons_by_class_level0, scale_facto
     return artifact_geometries
 
 
+def _region_mask_shape(region):
+    return (region.y_end - region.y_start, region.x_end - region.x_start)
+
+
+def _build_region_mask(polygons_level0, scale_factor, region):
+    mask_shape = _region_mask_shape(region)
+    if mask_shape[0] <= 0 or mask_shape[1] <= 0:
+        return np.zeros((0, 0), dtype=np.uint8)
+    mask = np.zeros(mask_shape, dtype=np.uint8)
+    region_width = mask_shape[1]
+    region_height = mask_shape[0]
+    for polygon_points in polygons_level0:
+        if len(polygon_points) < MIN_POLYGON_POINTS:
+            continue
+        try:
+            polygon = Polygon([(px / scale_factor, py / scale_factor) for px, py in polygon_points])
+            if not polygon.is_valid:
+                polygon = polygon.buffer(0)
+            if polygon.is_empty:
+                continue
+            coords_list = clip_geometry_to_patch_coords(
+                polygon,
+                patch_x=region.x_start,
+                patch_y=region.y_start,
+                mask_width=region_width,
+                mask_height=region_height,
+            )
+        except (Exception, shapely.errors.TopologicalError):
+            continue
+        if coords_list:
+            cv2.fillPoly(mask, coords_list, (1,))
+    return mask
+
+
+def _estimated_region_mask_bytes(region, artifact_polygons_by_class_level0, use_artifact_filter):
+    region_height, region_width = _region_mask_shape(region)
+    mask_count = 2
+    if use_artifact_filter:
+        mask_count += sum(
+            1
+            for artifact_class in ARTIFACT_CLASS_TO_COLUMN
+            if artifact_polygons_by_class_level0.get(artifact_class)
+        )
+    return region_height * region_width * mask_count
+
+
+def _build_precomputed_region_masks(preparation, region, use_artifact_filter):
+    estimated_bytes = _estimated_region_mask_bytes(
+        region,
+        preparation.artifact_polygons_by_class_level0,
+        use_artifact_filter,
+    )
+    if estimated_bytes > MAX_PRECOMPUTED_MASK_BYTES:
+        logging.info(
+            "Skipping precomputed scan-region masks: estimated footprint %.2f MiB "
+            "exceeds limit %.2f MiB.",
+            estimated_bytes / (1024 * 1024),
+            MAX_PRECOMPUTED_MASK_BYTES / (1024 * 1024),
+        )
+        return None, None
+
+    label_masks = {
+        "cancer": _build_region_mask(
+            preparation.annotations_cancer_level0,
+            region.scale_factor,
+            region,
+        ),
+        "not_cancer": _build_region_mask(
+            preparation.annotations_not_cancer_level0,
+            region.scale_factor,
+            region,
+        ),
+    }
+    artifact_masks = {}
+    if use_artifact_filter:
+        for artifact_class, column_name in ARTIFACT_CLASS_TO_COLUMN.items():
+            polygons_l0 = preparation.artifact_polygons_by_class_level0.get(artifact_class, [])
+            if not polygons_l0:
+                continue
+            artifact_masks[column_name] = _build_region_mask(
+                polygons_l0,
+                region.scale_factor,
+                region,
+            )
+    return label_masks, artifact_masks
+
+
+def _slice_region_mask(mask, *, region_x_start, region_y_start, x_int, y_int, window_size):
+    x_start = x_int - region_x_start
+    y_start = y_int - region_y_start
+    return np.ascontiguousarray(
+        mask[y_start : y_start + window_size, x_start : x_start + window_size]
+    )
+
+
+def _build_tissue_region_mask(preloaded_region, region, slide, kwargs, slide_phase_seconds):
+    tissue_source = preloaded_region
+    scan_width = region.x_end - region.x_start
+    scan_height = region.y_end - region.y_start
+    scan_area_rgb_bytes = scan_width * scan_height * 3
+    if tissue_source is None:
+        if scan_area_rgb_bytes > MAX_PRECOMPUTED_TISSUE_RGB_BYTES:
+            logging.info(
+                "Skipping precomputed tissue mask: scan area %.2f MiB exceeds limit %.2f MiB.",
+                scan_area_rgb_bytes / (1024 * 1024),
+                MAX_PRECOMPUTED_TISSUE_RGB_BYTES / (1024 * 1024),
+            )
+            return None
+        tissue_read_started_at = time.perf_counter()
+        tissue_source = np.asarray(
+            slide.read_region(
+                (region.x_start, region.y_start),
+                kwargs["target_level"],
+                (scan_width, scan_height),
+            ).convert("RGB")
+        )
+        slide_phase_seconds["precompute_tissue_read"] = time.perf_counter() - tissue_read_started_at
+    tissue_mask_started_at = time.perf_counter()
+    tissue_mask = _build_tissue_binary_mask(tissue_source)
+    slide_phase_seconds["build_tissue_mask"] = time.perf_counter() - tissue_mask_started_at
+    return np.asarray(tissue_mask > 0, dtype=np.uint8)
+
+
 def prepare_artifact_geometry_index(artifact_geometry_index):
     prepared_index = {}
     for column_name, artifact_geometry in artifact_geometry_index.items():
@@ -512,6 +641,42 @@ def _window_profile_stats(context):
 
 def _window_masks(context, patch_coords, patch_polygon, prepared_patch_polygon, window_phase_stats):
     window_size = context["window_size"]
+    label_region_masks = context.get("label_region_masks")
+    if label_region_masks is not None:
+        x_int, y_int = patch_coords
+        cancer_mask_started_at = time.perf_counter()
+        cancer_mask = _slice_region_mask(
+            label_region_masks["cancer"],
+            region_x_start=context["region_x_start"],
+            region_y_start=context["region_y_start"],
+            x_int=x_int,
+            y_int=y_int,
+            window_size=window_size,
+        )
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats,
+                "cancer_mask",
+                time.perf_counter() - cancer_mask_started_at,
+            )
+
+        non_cancer_mask_started_at = time.perf_counter()
+        non_cancer_mask = _slice_region_mask(
+            label_region_masks["not_cancer"],
+            region_x_start=context["region_x_start"],
+            region_y_start=context["region_y_start"],
+            x_int=x_int,
+            y_int=y_int,
+            window_size=window_size,
+        )
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats,
+                "not_cancer_mask",
+                time.perf_counter() - non_cancer_mask_started_at,
+            )
+        return cancer_mask, non_cancer_mask
+
     cancer_mask_started_at = time.perf_counter()
     cancer_mask = polygons_to_mask_with_index(
         (window_size, window_size),
@@ -595,6 +760,27 @@ def _read_window_patch(slide, context, patch_coords, x_int, y_int, window_phase_
 
 def _compute_window_artifact_coverages(context, patch_polygon, window_phase_stats):
     artifact_coverages = get_zero_artifact_coverages()
+    artifact_region_masks = context.get("artifact_region_masks")
+    if context.get("use_artifact_filter") and artifact_region_masks:
+        artifact_started_at = time.perf_counter()
+        for column_name, mask in artifact_region_masks.items():
+            patch_mask = _slice_region_mask(
+                mask,
+                region_x_start=context["region_x_start"],
+                region_y_start=context["region_y_start"],
+                x_int=int(patch_polygon.bounds[0]),
+                y_int=int(patch_polygon.bounds[1]),
+                window_size=context["window_size"],
+            )
+            artifact_coverages[column_name] = float(np.count_nonzero(patch_mask) / PATCH_AREA)
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats,
+                "artifact_coverage",
+                time.perf_counter() - artifact_started_at,
+            )
+        return artifact_coverages
+
     artifact_geometry_index = context.get("artifact_geometry_index")
     if context.get("use_artifact_filter") and artifact_geometry_index:
         artifact_started_at = time.perf_counter()
@@ -610,6 +796,44 @@ def _compute_window_artifact_coverages(context, patch_polygon, window_phase_stat
                 time.perf_counter() - artifact_started_at,
             )
     return artifact_coverages
+
+
+def _window_has_sufficient_tissue(
+    context,
+    *,
+    slide,
+    patch_coords,
+    x_int,
+    y_int,
+    window_phase_stats,
+):
+    tissue_started_at = time.perf_counter()
+    tissue_region_mask = context.get("tissue_region_mask")
+    if tissue_region_mask is not None:
+        tissue_patch = _slice_region_mask(
+            tissue_region_mask,
+            region_x_start=context["region_x_start"],
+            region_y_start=context["region_y_start"],
+            x_int=x_int,
+            y_int=y_int,
+            window_size=context["window_size"],
+        )
+        tissue_ok = (
+            np.count_nonzero(tissue_patch) / PATCH_AREA
+        ) >= context["tissue_percentage_req"]
+        if window_phase_stats is not None:
+            record_phase(
+                window_phase_stats,
+                "tissue_check",
+                time.perf_counter() - tissue_started_at,
+            )
+        return tissue_ok, None
+
+    patch_np = _read_window_patch(slide, context, patch_coords, x_int, y_int, window_phase_stats)
+    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
+    if window_phase_stats is not None:
+        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
+    return tissue_ok, patch_np
 
 
 def _build_saved_window_result(
@@ -653,17 +877,29 @@ def _process_window_with_slide(slide, x, y):
     if decision.label is None:
         return _window_result(decision.status, None, window_phase_stats)
 
-    patch_np = _read_window_patch(slide, context, patch_coords, x_int, y_int, window_phase_stats)
-
-    tissue_started_at = time.perf_counter()
-    tissue_ok = check_tissue_percentage_robust(patch_np, context["tissue_percentage_req"])
-    if window_phase_stats is not None:
-        record_phase(window_phase_stats, "tissue_check", time.perf_counter() - tissue_started_at)
+    tissue_ok, patch_np = _window_has_sufficient_tissue(
+        context,
+        slide=slide,
+        patch_coords=patch_coords,
+        x_int=x_int,
+        y_int=y_int,
+        window_phase_stats=window_phase_stats,
+    )
     if not tissue_ok:
         return (
             ("SKIPPED_TISSUE", None, window_phase_stats)
             if window_phase_stats is not None
             else ("SKIPPED_TISSUE", None)
+        )
+
+    if patch_np is None:
+        patch_np = _read_window_patch(
+            slide,
+            context,
+            patch_coords,
+            x_int,
+            y_int,
+            window_phase_stats,
         )
 
     artifact_coverages = _compute_window_artifact_coverages(
@@ -912,22 +1148,46 @@ def _maybe_preload_scan_region(slide, region, kwargs, slide_phase_seconds):
 
 def _build_worker_setup(request):
     build_indexes_started_at = time.perf_counter()
-    cancer_polygon_index = build_scaled_polygon_index(
-        request.preparation.annotations_cancer_level0,
-        request.region.scale_factor,
+    label_region_masks, artifact_region_masks = _build_precomputed_region_masks(
+        request.preparation,
+        request.region,
+        bool(request.kwargs.get("use_artifact_filter")),
     )
-    not_cancer_polygon_index = build_scaled_polygon_index(
-        request.preparation.annotations_not_cancer_level0,
-        request.region.scale_factor,
+    cancer_polygon_index = (
+        ([], None)
+        if label_region_masks is not None
+        else build_scaled_polygon_index(
+            request.preparation.annotations_cancer_level0,
+            request.region.scale_factor,
+        )
     )
-    artifact_geometry_index = build_artifact_geometry_index(
-        request.preparation.artifact_polygons_by_class_level0,
-        request.region.scale_factor,
+    not_cancer_polygon_index = (
+        ([], None)
+        if label_region_masks is not None
+        else build_scaled_polygon_index(
+            request.preparation.annotations_not_cancer_level0,
+            request.region.scale_factor,
+        )
+    )
+    artifact_geometry_index = (
+        {}
+        if artifact_region_masks is not None
+        else build_artifact_geometry_index(
+            request.preparation.artifact_polygons_by_class_level0,
+            request.region.scale_factor,
+        )
     )
     request.slide_phase_seconds["build_indexes"] = time.perf_counter() - build_indexes_started_at
     preloaded_region = _maybe_preload_scan_region(
         request.slide,
         request.region,
+        request.kwargs,
+        request.slide_phase_seconds,
+    )
+    tissue_region_mask = _build_tissue_region_mask(
+        preloaded_region,
+        request.region,
+        request.slide,
         request.kwargs,
         request.slide_phase_seconds,
     )
@@ -960,6 +1220,11 @@ def _build_worker_setup(request):
             "preloaded_region": preloaded_region,
             "preloaded_region_x": request.region.x_start,
             "preloaded_region_y": request.region.y_start,
+            "tissue_region_mask": tissue_region_mask,
+            "region_x_start": request.region.x_start,
+            "region_y_start": request.region.y_start,
+            "label_region_masks": label_region_masks,
+            "artifact_region_masks": artifact_region_masks,
             "cancer_polygon_index": cancer_polygon_index,
             "not_cancer_polygon_index": not_cancer_polygon_index,
             "artifact_geometry_index": artifact_geometry_index,
@@ -1048,6 +1313,8 @@ def run_extraction(handler: BaseHandler, path_Image: str, **kwargs):
         "candidate_filter": 0.0,
         "build_indexes": 0.0,
         "preload_scan_area": 0.0,
+        "precompute_tissue_read": 0.0,
+        "build_tissue_mask": 0.0,
         "parallel_processing": 0.0,
     }
     profile_output_path = kwargs.get("profile_output_path")

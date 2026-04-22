@@ -34,6 +34,15 @@ class TissueOutputPaths:
 
 
 @dataclass(frozen=True)
+class TissueDetectionOutputs:
+    tissue_mask_path: Path
+    tissue_mask_colored_path: Path
+    tissue_overlay_path: Path
+    thumbnail_path: Path
+    tissue_mask_array: Any
+
+
+@dataclass(frozen=True)
 class HorizontalTileAppend:
     temp_image: Any
     temp_image_class_map: Any
@@ -107,6 +116,46 @@ def _tile_range(tile_count: int, overhang: int) -> range:
     return range(tile_count + (1 if overhang > 0 else 0))
 
 
+def _predict_tissue_tile_batch(
+    *,
+    thumbnail_image: Image.Image,
+    tile_y: int,
+    grid: TileGrid,
+    preprocessing_fn: Any,
+    tissue_model: Any,
+    device: str,
+    colors: list[list[int]],
+) -> tuple[list[Any], list[Any]]:
+    import numpy as np
+    import torch
+
+    from helpers.wsi.tis_detect_helper_fx import get_preprocessing, make_class_map
+
+    tile_images = [
+        _crop_tile(thumbnail_image, tile_x, tile_y, grid)
+        for tile_x in _tile_range(grid.tiles_x, grid.overhang_x)
+    ]
+    image_batch = np.stack(
+        [
+            get_preprocessing(tile_image, preprocessing_fn)  # type: ignore[no-untyped-call]
+            for tile_image in tile_images
+        ],
+        axis=0,
+    )
+    x_tensor = torch.from_numpy(image_batch).to(device)
+    predictions = cast(Any, tissue_model).predict(x_tensor)
+    predictions_batch = predictions.cpu().numpy()
+
+    row_masks: list[Any] = []
+    row_class_masks: list[Any] = []
+    for tile_predictions in predictions_batch:
+        mask = np.argmax(tile_predictions, axis=0).astype("int8")
+        class_mask = make_class_map(mask, colors)  # type: ignore[no-untyped-call]
+        row_masks.append(mask)
+        row_class_masks.append(class_mask)
+    return row_masks, row_class_masks
+
+
 class ArtifactProcessor:
     """Process a single slide into a GeoJSON artifact map."""
 
@@ -125,12 +174,10 @@ class ArtifactProcessor:
         tissue_outputs = self._run_tissue_detection(slide_path, output_dir)
         self._run_qc_processing(slide_path, geojson_output_path, tissue_outputs)
 
-    def _run_tissue_detection(self, slide_path: Path, output_dir: Path) -> dict[str, Path]:
+    def _run_tissue_detection(self, slide_path: Path, output_dir: Path) -> TissueDetectionOutputs:
         import cv2
         import numpy as np
         import torch
-
-        from helpers.wsi.tis_detect_helper_fx import get_preprocessing, make_class_map
 
         models = self.model_loader.load()
         openslide_module = load_openslide_module()
@@ -160,20 +207,15 @@ class ArtifactProcessor:
         row_class_masks: list[Any] = []
         with torch.inference_mode():
             for tile_y in _tile_range(grid.tiles_y, grid.overhang_y):
-                current_row_masks: list[Any] = []
-                current_row_class_masks: list[Any] = []
-                for tile_x in _tile_range(grid.tiles_x, grid.overhang_x):
-                    image_work = _crop_tile(thumbnail_image, tile_x, tile_y, grid)
-                    image_pre = get_preprocessing(  # type: ignore[no-untyped-call]
-                        image_work, models.preprocessing_fn
-                    )
-                    x_tensor = torch.from_numpy(image_pre).to(self.config.device).unsqueeze(0)
-                    predictions = cast(Any, models.tissue_model).predict(x_tensor)
-                    predictions = predictions.squeeze().cpu().numpy()
-                    mask = np.argmax(predictions, axis=0).astype("int8")
-                    class_mask = make_class_map(mask, colors)  # type: ignore[no-untyped-call]
-                    current_row_masks.append(mask)
-                    current_row_class_masks.append(class_mask)
+                current_row_masks, current_row_class_masks = _predict_tissue_tile_batch(
+                    thumbnail_image=thumbnail_image,
+                    tile_y=tile_y,
+                    grid=grid,
+                    preprocessing_fn=models.preprocessing_fn,
+                    tissue_model=models.tissue_model,
+                    device=self.config.device,
+                    colors=colors,
+                )
                 stitched_row_mask, stitched_row_class_mask = _combine_horizontal_tiles(
                     current_row_masks,
                     current_row_class_masks,
@@ -207,18 +249,19 @@ class ArtifactProcessor:
         )
         Image.fromarray(overlay).save(output_paths.tissue_overlay_path)
 
-        return {
-            "tissue_mask_path": output_paths.tissue_mask_path,
-            "tissue_mask_colored_path": output_paths.tissue_mask_colored_path,
-            "tissue_overlay_path": output_paths.tissue_overlay_path,
-            "thumbnail_path": output_paths.thumbnail_path,
-        }
+        return TissueDetectionOutputs(
+            tissue_mask_path=output_paths.tissue_mask_path,
+            tissue_mask_colored_path=output_paths.tissue_mask_colored_path,
+            tissue_overlay_path=output_paths.tissue_overlay_path,
+            thumbnail_path=output_paths.thumbnail_path,
+            tissue_mask_array=end_image,
+        )
 
     def _run_qc_processing(
         self,
         slide_path: Path,
         geojson_output_path: Path,
-        tissue_outputs: dict[str, Path],
+        tissue_outputs: TissueDetectionOutputs,
     ) -> None:
         import cv2
         import numpy as np
@@ -237,12 +280,12 @@ class ArtifactProcessor:
             self.config.model_patch_size,
             self.config.mpp_model,
         )
-        tissue_detection_map = Image.open(tissue_outputs["tissue_mask_path"])
+        tissue_detection_map = Image.fromarray(tissue_outputs.tissue_mask_array)
         if tissue_detection_map.mode != "RGB":
-            tissue_detection_map = tissue_detection_map.convert("RGB")  # type: ignore[assignment]
+            tissue_detection_map = tissue_detection_map.convert("RGB")
         target_width = max(1, int(width_l0 * mpp / self.config.mpp_model))
         target_height = max(1, int(height_l0 * mpp / self.config.mpp_model))
-        tissue_detection_map = tissue_detection_map.resize(  # type: ignore[assignment]
+        tissue_detection_map = tissue_detection_map.resize(
             (target_width, target_height), Image.Resampling.LANCZOS
         )
         tissue_detection_map_mpp = np.array(tissue_detection_map.convert("L"))

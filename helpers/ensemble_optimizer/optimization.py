@@ -32,6 +32,8 @@ from helpers.training.utils import clear_gpu
 
 LOGGER = logging.getLogger(__name__)
 _PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+_MAX_OPTIMIZATION_CACHE_BYTES = 512 * 1024 * 1024
+_WEIGHT_SKIP_THRESHOLD = 1e-4
 
 
 def _progress_file() -> Any:
@@ -167,6 +169,10 @@ class OptimizationPreparation:
     semantic_indices: list[int]
     spatial_indices: list[int]
     optimization_truth: npt.NDArray[np.uint8]
+    optimization_semantic_cache: dict[str, npt.NDArray[np.uint16]] | None
+    optimization_spatial_cache: dict[str, npt.NDArray[np.uint16]] | None
+    optimization_truth_cache: dict[str, npt.NDArray[np.uint8]] | None
+    optimization_gt_density_by_patient: dict[str, float] | None
     height: int
     width: int
 
@@ -190,6 +196,26 @@ class CacheModelPredictionConfig:
     patient_ids: list[str]
     progress_bar: tqdm[Any]
     cache_dir: Path
+
+
+@dataclass(frozen=True)
+class _OptimizationCacheBuildInput:
+    prediction_memmaps: list[np.memmap[Any, Any]]
+    optimization_idx: npt.NDArray[np.int64]
+    optimization_local_map: dict[str, slice]
+    optimization_patients: list[str]
+    semantic_indices: list[int]
+    spatial_indices: list[int]
+    optimization_truth: npt.NDArray[np.uint8]
+    height: int
+    width: int
+
+
+@dataclass(frozen=True)
+class _OptimizationSubsetCachePayload:
+    prediction_u16: npt.NDArray[np.uint16]
+    truth_u8: npt.NDArray[np.uint8]
+    patient_ids: tuple[str, ...]
 
 
 def get_stream_type(architecture: str, config: EnsembleOptimizerConfig) -> str:
@@ -571,6 +597,234 @@ def _build_patient_map(patient_ids: list[str]) -> dict[str, list[int]]:
     return patient_map
 
 
+def _build_optimization_caches_from_model_subset_payloads(
+    models: list[nn.Module],
+    *,
+    optimization_patients: list[str],
+    semantic_indices: list[int],
+    spatial_indices: list[int],
+) -> tuple[
+    dict[str, npt.NDArray[np.uint16]] | None,
+    dict[str, npt.NDArray[np.uint16]] | None,
+    dict[str, npt.NDArray[np.uint8]] | None,
+    dict[str, float] | None,
+]:
+    required_indices = sorted(set(semantic_indices + spatial_indices))
+    if not required_indices:
+        return None, None, None, None
+
+    payloads_by_index: dict[int, _OptimizationSubsetCachePayload] = {}
+    shared_patient_ids: tuple[str, ...] | None = None
+    shared_truth: npt.NDArray[np.uint8] | None = None
+    for model_index in required_indices:
+        raw_payload = getattr(models[model_index], "_optimization_subset_cache", None)
+        if raw_payload is None:
+            return None, None, None, None
+        payload = cast(_OptimizationSubsetCachePayload, raw_payload)
+        if shared_patient_ids is None:
+            shared_patient_ids = payload.patient_ids
+            shared_truth = payload.truth_u8
+        elif payload.patient_ids != shared_patient_ids or not np.array_equal(
+            payload.truth_u8,
+            cast(npt.NDArray[np.uint8], shared_truth),
+        ):
+            return None, None, None, None
+        payloads_by_index[model_index] = payload
+
+    assert shared_patient_ids is not None
+    assert shared_truth is not None
+    if set(shared_patient_ids) != set(optimization_patients):
+        return None, None, None, None
+
+    patient_map = _build_patient_map(list(shared_patient_ids))
+    semantic_cache: dict[str, npt.NDArray[np.uint16]] = {}
+    spatial_cache: dict[str, npt.NDArray[np.uint16]] = {}
+    truth_cache: dict[str, npt.NDArray[np.uint8]] = {}
+    gt_density_by_patient: dict[str, float] = {}
+    for patient_id in optimization_patients:
+        patient_indices = np.asarray(patient_map[patient_id], dtype=np.int64)
+        patient_truth = np.asarray(shared_truth[patient_indices], dtype=np.uint8)
+        truth_cache[patient_id] = patient_truth
+        gt_density_by_patient[patient_id] = (
+            float(np.mean(patient_truth)) if patient_truth.size else 0.0
+        )
+        semantic_cache[patient_id] = np.stack(
+            [
+                np.asarray(
+                    payloads_by_index[model_index].prediction_u16[patient_indices],
+                    dtype=np.uint16,
+                )
+                for model_index in semantic_indices
+            ],
+            axis=0,
+        )
+        spatial_cache[patient_id] = np.stack(
+            [
+                np.asarray(
+                    payloads_by_index[model_index].prediction_u16[patient_indices],
+                    dtype=np.uint16,
+                )
+                for model_index in spatial_indices
+            ],
+            axis=0,
+        )
+    return semantic_cache, spatial_cache, truth_cache, gt_density_by_patient
+
+
+def _estimate_optimization_cache_bytes(
+    *,
+    optimization_idx: npt.NDArray[np.int64],
+    semantic_model_count: int,
+    spatial_model_count: int,
+    height: int,
+    width: int,
+) -> int:
+    sample_count = len(optimization_idx)
+    prediction_bytes = sample_count * height * width * 2
+    truth_bytes = sample_count * height * width
+    return prediction_bytes * (semantic_model_count + spatial_model_count) + truth_bytes
+
+
+def _stack_prediction_rows(
+    prediction_memmaps: list[np.memmap[Any, Any]],
+    *,
+    model_indices: list[int],
+    global_indices: npt.NDArray[np.int64],
+    height: int,
+    width: int,
+) -> npt.NDArray[np.uint16]:
+    if not model_indices:
+        return np.zeros((0, len(global_indices), height, width), dtype=np.uint16)
+    return np.stack(
+        [
+            np.asarray(prediction_memmaps[model_index][global_indices], dtype=np.uint16)
+            for model_index in model_indices
+        ],
+        axis=0,
+    )
+
+
+def _build_optimization_patient_caches(
+    request: _OptimizationCacheBuildInput,
+) -> tuple[
+    dict[str, npt.NDArray[np.uint16]] | None,
+    dict[str, npt.NDArray[np.uint16]] | None,
+    dict[str, npt.NDArray[np.uint8]] | None,
+    dict[str, float] | None,
+]:
+    estimated_bytes = _estimate_optimization_cache_bytes(
+        optimization_idx=request.optimization_idx,
+        semantic_model_count=len(request.semantic_indices),
+        spatial_model_count=len(request.spatial_indices),
+        height=request.height,
+        width=request.width,
+    )
+    if estimated_bytes > _MAX_OPTIMIZATION_CACHE_BYTES:
+        LOGGER.info(
+            "Skipping optimization patient cache: estimated footprint %.2f MiB "
+            "exceeds limit %.2f MiB.",
+            estimated_bytes / (1024 * 1024),
+            _MAX_OPTIMIZATION_CACHE_BYTES / (1024 * 1024),
+        )
+        return None, None, None, None
+
+    semantic_cache: dict[str, npt.NDArray[np.uint16]] = {}
+    spatial_cache: dict[str, npt.NDArray[np.uint16]] = {}
+    truth_cache: dict[str, npt.NDArray[np.uint8]] = {}
+    gt_density_by_patient: dict[str, float] = {}
+    for patient_id in request.optimization_patients:
+        local_slice = request.optimization_local_map[patient_id]
+        patient_global_indices = request.optimization_idx[local_slice]
+        patient_truth = np.asarray(request.optimization_truth[local_slice], dtype=np.uint8)
+        truth_cache[patient_id] = patient_truth
+        gt_density_by_patient[patient_id] = (
+            float(np.mean(patient_truth)) if patient_truth.size else 0.0
+        )
+        semantic_cache[patient_id] = _stack_prediction_rows(
+            request.prediction_memmaps,
+            model_indices=request.semantic_indices,
+            global_indices=patient_global_indices,
+            height=request.height,
+            width=request.width,
+        )
+        spatial_cache[patient_id] = _stack_prediction_rows(
+            request.prediction_memmaps,
+            model_indices=request.spatial_indices,
+            global_indices=patient_global_indices,
+            height=request.height,
+            width=request.width,
+        )
+    return semantic_cache, spatial_cache, truth_cache, gt_density_by_patient
+
+
+def _weighted_ensemble_from_stacked_u16(
+    stacked_values: npt.NDArray[np.uint16], weights: list[float]
+) -> npt.NDArray[np.float32]:
+    if stacked_values.shape[0] == 0:
+        return cast(
+            npt.NDArray[np.float32],
+            np.zeros(stacked_values.shape[1:], dtype=np.float32),
+        )
+    effective_weights = np.asarray(weights, dtype=np.float32)
+    effective_weights[effective_weights <= _WEIGHT_SKIP_THRESHOLD] = 0.0
+    if not np.any(effective_weights):
+        return cast(
+            npt.NDArray[np.float32],
+            np.zeros(stacked_values.shape[1:], dtype=np.float32),
+        )
+    scaled = stacked_values.astype(np.float32) * (effective_weights[:, None, None, None] / 65535.0)
+    return cast(npt.NDArray[np.float32], np.sum(scaled, axis=0, dtype=np.float32))
+
+
+def _optimization_patient_semantic_prediction(
+    prepared: OptimizationPreparation,
+    *,
+    patient_id: str,
+    weights: list[float],
+) -> npt.NDArray[np.float32]:
+    if prepared.optimization_semantic_cache is not None:
+        return _weighted_ensemble_from_stacked_u16(
+            prepared.optimization_semantic_cache[patient_id],
+            weights,
+        )
+    local_slice = prepared.optimization_local_map[patient_id]
+    global_indices = prepared.optimization_idx[local_slice]
+    patient_u16 = [
+        prepared.prediction_memmaps[index][global_indices] for index in prepared.semantic_indices
+    ]
+    return _weighted_ensemble_from_u16_cache(patient_u16, weights)
+
+
+def _optimization_patient_spatial_prediction(
+    prepared: OptimizationPreparation,
+    *,
+    patient_id: str,
+    weights: list[float],
+) -> npt.NDArray[np.float32]:
+    if prepared.optimization_spatial_cache is not None:
+        return _weighted_ensemble_from_stacked_u16(
+            prepared.optimization_spatial_cache[patient_id],
+            weights,
+        )
+    local_slice = prepared.optimization_local_map[patient_id]
+    global_indices = prepared.optimization_idx[local_slice]
+    patient_u16 = [
+        prepared.prediction_memmaps[index][global_indices] for index in prepared.spatial_indices
+    ]
+    return _weighted_ensemble_from_u16_cache(patient_u16, weights)
+
+
+def _optimization_patient_truth(
+    prepared: OptimizationPreparation,
+    *,
+    patient_id: str,
+) -> npt.NDArray[np.uint8]:
+    if prepared.optimization_truth_cache is not None:
+        return prepared.optimization_truth_cache[patient_id]
+    local_slice = prepared.optimization_local_map[patient_id]
+    return np.asarray(prepared.optimization_truth[local_slice], dtype=np.uint8)
+
+
 def _resolve_stream_indices(
     config: EnsembleOptimizerConfig,
     models: list[nn.Module],
@@ -635,6 +889,43 @@ def _prepare_optimization(
         for path in prediction_paths
     ]
     semantic_indices, spatial_indices = _resolve_stream_indices(config, models)
+    optimization_truth = truth_memmap[optimization_idx].astype(np.uint8)
+    reuse_payload = _build_optimization_caches_from_model_subset_payloads(
+        models,
+        optimization_patients=optimization_patients,
+        semantic_indices=semantic_indices,
+        spatial_indices=spatial_indices,
+    )
+    if reuse_payload[0] is not None:
+        (
+            optimization_semantic_cache,
+            optimization_spatial_cache,
+            optimization_truth_cache,
+            optimization_gt_density_by_patient,
+        ) = reuse_payload
+        LOGGER.info(
+            "Reused optimization-subset predictions from model ranking for %s patients.",
+            len(optimization_patients),
+        )
+    else:
+        (
+            optimization_semantic_cache,
+            optimization_spatial_cache,
+            optimization_truth_cache,
+            optimization_gt_density_by_patient,
+        ) = _build_optimization_patient_caches(
+            _OptimizationCacheBuildInput(
+                prediction_memmaps=prediction_memmaps,
+                optimization_idx=optimization_idx,
+                optimization_local_map=optimization_local_map,
+                optimization_patients=optimization_patients,
+                semantic_indices=semantic_indices,
+                spatial_indices=spatial_indices,
+                optimization_truth=optimization_truth,
+                height=height,
+                width=width,
+            )
+        )
     LOGGER.info(
         "Prediction cache ready: %s samples across %s patients.",
         total_samples,
@@ -660,7 +951,11 @@ def _prepare_optimization(
         optimization_patients=optimization_patients,
         semantic_indices=semantic_indices,
         spatial_indices=spatial_indices,
-        optimization_truth=truth_memmap[optimization_idx].astype(np.uint8),
+        optimization_truth=optimization_truth,
+        optimization_semantic_cache=optimization_semantic_cache,
+        optimization_spatial_cache=optimization_spatial_cache,
+        optimization_truth_cache=optimization_truth_cache,
+        optimization_gt_density_by_patient=optimization_gt_density_by_patient,
         height=height,
         width=width,
     )
@@ -680,13 +975,11 @@ def _semantic_objective(
     roi_positive_recalls: list[float] = []
     empty_rois = 0
     for patient_id in prepared.optimization_patients:
-        local_slice = prepared.optimization_local_map[patient_id]
-        global_indices = prepared.optimization_idx[local_slice]
-        patient_u16 = [
-            prepared.prediction_memmaps[index][global_indices]
-            for index in prepared.semantic_indices
-        ]
-        patient_ensemble = _weighted_ensemble_from_u16_cache(patient_u16, weights)
+        patient_ensemble = _optimization_patient_semantic_prediction(
+            prepared,
+            patient_id=patient_id,
+            weights=weights,
+        )
         roi_mask = (
             generate_roi_batch(
                 torch.from_numpy(patient_ensemble),
@@ -696,7 +989,7 @@ def _semantic_objective(
             .numpy()
             .astype(np.uint8)
         )
-        patient_truth = prepared.optimization_truth[local_slice]
+        patient_truth = _optimization_patient_truth(prepared, patient_id=patient_id)
         roi_area_fractions.append(float(np.mean(roi_mask)))
         if np.sum(roi_mask) == 0:
             empty_rois += 1
@@ -711,10 +1004,17 @@ def _semantic_objective(
         raise optuna.exceptions.TrialPruned(f"Trivial Empty: {empty_rate:.2f}")
     if mean_positive_recall < config.roi_min_pos_recall:
         raise optuna.exceptions.TrialPruned(f"Misses Positives: {mean_positive_recall:.2f}")
-    gt_densities = [
-        float(np.mean(prepared.optimization_truth[prepared.optimization_local_map[patient_id]]))
-        for patient_id in prepared.optimization_patients
-    ]
+    gt_densities = (
+        [
+            prepared.optimization_gt_density_by_patient[patient_id]
+            for patient_id in prepared.optimization_patients
+        ]
+        if prepared.optimization_gt_density_by_patient is not None
+        else [
+            float(np.mean(prepared.optimization_truth[prepared.optimization_local_map[patient_id]]))
+            for patient_id in prepared.optimization_patients
+        ]
+    )
     mean_gt_density = float(np.mean(gt_densities)) if gt_densities else 0.0
     dynamic_max_median = max(config.roi_max_median, mean_gt_density + 0.15)
     if median_area > dynamic_max_median:
@@ -776,6 +1076,21 @@ def _build_fixed_roi_mask(
     fixed_roi_mask = np.zeros(
         (len(prepared.optimization_idx), prepared.height, prepared.width), dtype=np.uint8
     )
+    if prepared.optimization_semantic_cache is not None:
+        for patient_id in prepared.optimization_patients:
+            local_slice = prepared.optimization_local_map[patient_id]
+            patient_prediction = _optimization_patient_semantic_prediction(
+                prepared,
+                patient_id=patient_id,
+                weights=best_semantic_weights,
+            )
+            patient_roi = generate_roi_batch(
+                torch.from_numpy(patient_prediction),
+                config.roi_context_scale,
+                best_roi_threshold,
+            )
+            fixed_roi_mask[local_slice] = patient_roi.numpy().astype(np.uint8)
+        return fixed_roi_mask
     chunk_size = 2048
     roi_chunk_count = max(1, int(np.ceil(len(prepared.optimization_idx) / chunk_size)))
     LOGGER.info("Building fixed ROI mask over %s chunk(s).", roi_chunk_count)
@@ -823,17 +1138,17 @@ def _spatial_objective(
     negative_fp_total = 0.0
     evaluated_negative_patients = 0
     for patient_id in prepared.optimization_patients:
+        patient_truth = _optimization_patient_truth(prepared, patient_id=patient_id)
         local_slice = prepared.optimization_local_map[patient_id]
-        patient_truth = prepared.optimization_truth[local_slice]
         patient_roi = fixed_roi_mask[local_slice]
         is_positive_patient = bool(np.sum(patient_truth) > 0)
         if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
             continue
-        global_indices = prepared.optimization_idx[local_slice]
-        patient_u16 = [
-            prepared.prediction_memmaps[index][global_indices] for index in prepared.spatial_indices
-        ]
-        patient_prediction = _weighted_ensemble_from_u16_cache(patient_u16, weights)
+        patient_prediction = _optimization_patient_spatial_prediction(
+            prepared,
+            patient_id=patient_id,
+            weights=weights,
+        )
         if is_positive_patient:
             positive_auprc_total += compute_patient_auprc_in_roi(
                 patient_truth.ravel(),

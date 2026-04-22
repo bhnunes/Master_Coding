@@ -34,6 +34,19 @@ def _logical_hdf5_ref(output_path: Path, dataset_name: str, row_index: int) -> s
     return f"{output_path}::{dataset_name}[{row_index}]"
 
 
+def _require_matching_shape(
+    *,
+    name: str,
+    value: npt.NDArray[np.uint8],
+    expected_shape: tuple[int, ...],
+) -> None:
+    if value.shape != expected_shape:
+        raise ValueError(
+            f"Stage 2 HDF5 writing requires consistent {name} shapes; "
+            f"expected {expected_shape}, got {value.shape}."
+        )
+
+
 def write_slide_patch_dataset_hdf5(
     *,
     output_path: Path,
@@ -45,87 +58,65 @@ def write_slide_patch_dataset_hdf5(
             output_path.unlink()
         return None
 
-    resolved_rows: list[dict[str, Any]] = []
-    for record in records:
-        image_array, mask_array = _resolve_patch_arrays(record)
-        resolved_rows.append(
-            {
-                "record": record,
-                "image": image_array,
-                "mask": mask_array,
-            }
-        )
+    first_image, first_mask = _resolve_patch_arrays(records[0])
+    row_count = len(records)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     str_dtype = h5py.string_dtype(encoding="utf-8")
-    images_data = np.stack(
-        [cast(npt.NDArray[np.uint8], row["image"]) for row in resolved_rows],
-        axis=0,
-    )
-    masks_data = np.stack(
-        [cast(npt.NDArray[np.uint8], row["mask"]) for row in resolved_rows],
-        axis=0,
-    )
-    labels_data = np.fromiter(
-        (int(row["record"]["label"]) for row in resolved_rows),
-        dtype=np.uint8,
-        count=len(resolved_rows),
-    )
-    patient_ids_data = np.fromiter(
-        (int(row["record"]["patient_id"]) for row in resolved_rows),
-        dtype=np.int32,
-        count=len(resolved_rows),
-    )
-    filenames_data = np.asarray(
-        [str(row["record"]["filename"]) for row in resolved_rows],
-        dtype=object,
-    )
-    slide_ids_data = np.asarray(
-        [str(row["record"]["slide_id"]) for row in resolved_rows],
-        dtype=object,
-    )
-    source_image_paths_data = np.asarray(
-        [_logical_hdf5_ref(output_path, "images", index) for index in range(len(resolved_rows))],
-        dtype=object,
-    )
-    source_mask_paths_data = np.asarray(
-        [_logical_hdf5_ref(output_path, "masks", index) for index in range(len(resolved_rows))],
-        dtype=object,
-    )
 
     with h5py.File(output_path, "w") as handle:
-        handle.create_dataset(
+        images_dataset = handle.create_dataset(
             "images",
-            data=images_data,
+            shape=(row_count, *first_image.shape),
+            dtype=np.uint8,
             compression=compression,
             chunks=True,
         )
-        handle.create_dataset(
+        masks_dataset = handle.create_dataset(
             "masks",
-            data=masks_data,
+            shape=(row_count, *first_mask.shape),
+            dtype=np.uint8,
             compression=compression,
             chunks=True,
         )
-        handle.create_dataset("labels", data=labels_data)
-        handle.create_dataset("patient_ids", data=patient_ids_data)
-        handle.create_dataset("filenames", data=filenames_data, dtype=str_dtype)
-        handle.create_dataset("slide_ids", data=slide_ids_data, dtype=str_dtype)
-        handle.create_dataset("source_image_paths", data=source_image_paths_data, dtype=str_dtype)
-        handle.create_dataset("source_mask_paths", data=source_mask_paths_data, dtype=str_dtype)
+        labels_dataset = handle.create_dataset("labels", shape=(row_count,), dtype=np.uint8)
+        patient_ids_dataset = handle.create_dataset(
+            "patient_ids", shape=(row_count,), dtype=np.int32
+        )
+        filenames_dataset = handle.create_dataset("filenames", shape=(row_count,), dtype=str_dtype)
+        slide_ids_dataset = handle.create_dataset("slide_ids", shape=(row_count,), dtype=str_dtype)
+        source_image_paths_dataset = handle.create_dataset(
+            "source_image_paths", shape=(row_count,), dtype=str_dtype
+        )
+        source_mask_paths_dataset = handle.create_dataset(
+            "source_mask_paths", shape=(row_count,), dtype=str_dtype
+        )
         signature_rows: list[dict[str, Any]] = []
 
-        for index, row in enumerate(resolved_rows):
-            record = row["record"]
-            image = cast(npt.NDArray[np.uint8], row["image"])
-            mask = cast(npt.NDArray[np.uint8], row["mask"])
+        for index, record in enumerate(records):
+            image, mask = _resolve_patch_arrays(record)
+            _require_matching_shape(name="image", value=image, expected_shape=first_image.shape)
+            _require_matching_shape(name="mask", value=mask, expected_shape=first_mask.shape)
+            source_image_path = _logical_hdf5_ref(output_path, "images", index)
+            source_mask_path = _logical_hdf5_ref(output_path, "masks", index)
+
+            images_dataset[index] = image
+            masks_dataset[index] = mask
+            labels_dataset[index] = int(record["label"])
+            patient_ids_dataset[index] = int(record["patient_id"])
+            filenames_dataset[index] = str(record["filename"])
+            slide_ids_dataset[index] = str(record["slide_id"])
+            source_image_paths_dataset[index] = source_image_path
+            source_mask_paths_dataset[index] = source_mask_path
+
             signature_rows.append(
                 {
                     "filename": str(record["filename"]),
                     "label": int(record["label"]),
                     "patient_id": int(record["patient_id"]),
                     "slide_id": str(record["slide_id"]),
-                    "source_image_path": source_image_paths_data[index],
-                    "source_mask_path": source_mask_paths_data[index],
+                    "source_image_path": source_image_path,
+                    "source_mask_path": source_mask_path,
                     "image_sha256": hashlib.sha256(image.tobytes()).hexdigest(),
                     "mask_sha256": hashlib.sha256(mask.tobytes()).hexdigest(),
                 }

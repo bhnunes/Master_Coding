@@ -343,3 +343,66 @@ def test_write_split_hdf5_reads_rows_from_multiple_stage2_sources(tmp_path: Path
         assert handle["labels"][:].tolist() == [0, 1]
         assert int(handle["images"][1, 0, 0, 0]) == MULTI_SOURCE_PIXEL_VALUE
         assert handle.attrs["source_hdf5_sha256"] == "sqlite-sha"
+
+
+def test_write_split_hdf5_reuses_open_source_handles_across_batches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((3, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((3, 4, 4), dtype=np.uint8))
+        handle.create_dataset("labels", data=np.array([0, 1, 0], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([10, 20, 30], dtype=np.int32))
+        handle.create_dataset(
+            "filenames",
+            data=np.array([b"A.png", b"B.png", b"C.png"]),
+        )
+
+    split_df = pd.DataFrame(
+        [
+            {
+                "label": 0,
+                "patient_id": 10,
+                "filename": "A.png",
+                "source_row_index": 0,
+            },
+            {
+                "label": 1,
+                "patient_id": 20,
+                "filename": "B.png",
+                "source_row_index": 1,
+            },
+            {
+                "label": 0,
+                "patient_id": 30,
+                "filename": "C.png",
+                "source_row_index": 2,
+            },
+        ]
+    )
+
+    real_h5_file = h5py.File
+    opened_paths: list[str] = []
+
+    def recording_file(path: str | Path, *args: Any, **kwargs: Any) -> h5py.File:
+        opened_paths.append(str(path))
+        return real_h5_file(path, *args, **kwargs)
+
+    monkeypatch.setattr("helpers.crossfold.io.h5py.File", recording_file)
+
+    write_split_hdf5(
+        SplitHDF5WriteConfig(
+            split_df=split_df,
+            source_hdf5_path=source_path,
+            output_path=tmp_path / "TRAIN.h5",
+            normalizer=None,
+            normalization_method="NOT_NORMALIZED",
+            source_hdf5_provenance={"path": str(source_path), "sha256": "cached", "attrs": {}},
+            copy_batch_size=1,
+            overwrite=True,
+        )
+    )
+
+    assert opened_paths.count(str(source_path)) == 1

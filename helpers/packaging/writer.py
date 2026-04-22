@@ -40,16 +40,6 @@ class _ShardMetadata:
 
 
 @dataclass(frozen=True)
-class _MergeRowReference:
-    shard_index: int
-    source_row_index: int
-    label: int
-    patient_id: int
-    filename: str
-    slide_id: str | None
-
-
-@dataclass(frozen=True)
 class _FilterCopyPlan:
     canonical_source_signature: str
     source_signature: str
@@ -84,7 +74,12 @@ class _FilterDestinationDatasets:
 @dataclass(frozen=True)
 class _MergeScanResult:
     shard_metadata: list[_ShardMetadata]
-    row_references: list[_MergeRowReference]
+    shard_indices: npt.NDArray[np.int32]
+    source_row_indices: npt.NDArray[np.int64]
+    labels: npt.NDArray[np.uint8]
+    patient_ids: npt.NDArray[np.int32]
+    filenames: list[str]
+    slide_ids: list[str | None] | None
 
 
 @dataclass(frozen=True)
@@ -106,6 +101,7 @@ class _MergeBatchContext:
     destination: _MergeDestinationDatasets
     image_shape: tuple[int, ...]
     mask_shape: tuple[int, ...]
+    scan_result: _MergeScanResult
 
 
 def _format_duration(seconds: float) -> str:
@@ -754,11 +750,18 @@ def _shard_source_signature(handle: h5py.File, shard_path: Path) -> str:
     return hash_file_sha256(shard_path)
 
 
-def _build_merge_row_references(
+def _build_merge_row_columns(
     *,
     shard_index: int,
     handle: h5py.File,
-) -> list[_MergeRowReference]:
+) -> tuple[
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int64],
+    npt.NDArray[np.uint8],
+    npt.NDArray[np.int32],
+    list[str],
+    list[str | None] | None,
+]:
     labels = np.asarray(cast(Any, handle["labels"])[:], dtype=np.uint8)
     patient_ids = np.asarray(cast(Any, handle["patient_ids"])[:], dtype=np.int32)
     filenames = np.asarray(cast(Any, handle["filenames"])[:], dtype=object)
@@ -768,24 +771,26 @@ def _build_merge_row_references(
         if slide_ids_dataset is not None
         else None
     )
-
-    return [
-        _MergeRowReference(
-            shard_index=shard_index,
-            source_row_index=index,
-            label=int(labels[index]),
-            patient_id=int(patient_ids[index]),
-            filename=_normalize_hdf5_string(filenames[index]),
-            slide_id=_normalize_hdf5_string(slide_ids[index]) if slide_ids is not None else None,
-        )
-        for index in range(len(filenames))
-    ]
+    row_count = len(filenames)
+    return (
+        np.full(row_count, shard_index, dtype=np.int32),
+        np.arange(row_count, dtype=np.int64),
+        labels,
+        patient_ids,
+        [_normalize_hdf5_string(value) for value in filenames.tolist()],
+        (
+            [_normalize_hdf5_string(value) for value in slide_ids.tolist()]
+            if slide_ids is not None
+            else None
+        ),
+    )
 
 
 def _merge_signature(
     *,
     shard_metadata: list[_ShardMetadata],
-    row_references: list[_MergeRowReference],
+    scan_result: _MergeScanResult,
+    ordered_positions: list[int],
 ) -> str:
     payload: dict[str, Any] = {
         "shards": [
@@ -798,14 +803,18 @@ def _merge_signature(
         ],
         "rows": [
             {
-                "filename": row.filename,
-                "label": row.label,
-                "patient_id": row.patient_id,
-                "slide_id": row.slide_id,
-                "source_hdf5_path": str(shard_metadata[row.shard_index].path),
-                "source_row_index": row.source_row_index,
+                "filename": scan_result.filenames[position],
+                "label": int(scan_result.labels[position]),
+                "patient_id": int(scan_result.patient_ids[position]),
+                "slide_id": (
+                    scan_result.slide_ids[position] if scan_result.slide_ids is not None else None
+                ),
+                "source_hdf5_path": str(
+                    shard_metadata[int(scan_result.shard_indices[position])].path
+                ),
+                "source_row_index": int(scan_result.source_row_indices[position]),
             }
-            for row in row_references
+            for position in ordered_positions
         ],
     }
     return _signature_hexdigest(payload)
@@ -818,7 +827,13 @@ def _scan_merge_inputs(
     reporter: _ProgressReporter,
 ) -> _MergeScanResult:
     shard_metadata: list[_ShardMetadata] = []
-    row_references: list[_MergeRowReference] = []
+    shard_index_arrays: list[npt.NDArray[np.int32]] = []
+    source_row_index_arrays: list[npt.NDArray[np.int64]] = []
+    label_arrays: list[npt.NDArray[np.uint8]] = []
+    patient_id_arrays: list[npt.NDArray[np.int32]] = []
+    filenames: list[str] = []
+    slide_ids: list[str | None] | None = []
+    rows_discovered = 0
     for shard_index, (shard_path, handle) in enumerate(
         zip(shard_paths, shard_handles, strict=True), start=1
     ):
@@ -831,18 +846,52 @@ def _scan_merge_inputs(
                 source_signature=_shard_source_signature(handle, shard_path),
             )
         )
-        row_references.extend(
-            _build_merge_row_references(shard_index=shard_index - 1, handle=handle)
-        )
+        (
+            shard_indices,
+            source_row_indices,
+            labels,
+            patient_ids,
+            shard_filenames,
+            shard_slide_ids,
+        ) = _build_merge_row_columns(shard_index=shard_index - 1, handle=handle)
+        shard_index_arrays.append(shard_indices)
+        source_row_index_arrays.append(source_row_indices)
+        label_arrays.append(labels)
+        patient_id_arrays.append(patient_ids)
+        filenames.extend(shard_filenames)
+        if slide_ids is not None:
+            if shard_slide_ids is None:
+                slide_ids.extend([None] * len(shard_filenames))
+            else:
+                slide_ids.extend(shard_slide_ids)
+        rows_discovered += len(shard_filenames)
         reporter.log(
             completed_units=shard_index,
             extra_parts=[
                 f"last_shard={shard_path.name}",
-                f"rows_discovered={len(row_references)}",
+                f"rows_discovered={rows_discovered}",
                 f"remaining_shards={len(shard_paths) - shard_index}",
             ],
         )
-    return _MergeScanResult(shard_metadata=shard_metadata, row_references=row_references)
+    return _MergeScanResult(
+        shard_metadata=shard_metadata,
+        shard_indices=(
+            np.concatenate(shard_index_arrays)
+            if shard_index_arrays
+            else np.empty(0, dtype=np.int32)
+        ),
+        source_row_indices=(
+            np.concatenate(source_row_index_arrays)
+            if source_row_index_arrays
+            else np.empty(0, dtype=np.int64)
+        ),
+        labels=np.concatenate(label_arrays) if label_arrays else np.empty(0, dtype=np.uint8),
+        patient_ids=(
+            np.concatenate(patient_id_arrays) if patient_id_arrays else np.empty(0, dtype=np.int32)
+        ),
+        filenames=filenames,
+        slide_ids=slide_ids,
+    )
 
 
 def _create_merge_destination_datasets(
@@ -883,10 +932,14 @@ def _create_merge_destination_datasets(
     )
 
 
-def _positions_by_shard(batch_rows: list[_MergeRowReference]) -> dict[int, list[int]]:
+def _positions_by_shard(
+    scan_result: _MergeScanResult,
+    batch_positions: list[int],
+) -> dict[int, list[int]]:
     positions_by_shard: dict[int, list[int]] = {}
-    for position, row in enumerate(batch_rows):
-        positions_by_shard.setdefault(row.shard_index, []).append(position)
+    for output_offset, row_position in enumerate(batch_positions):
+        shard_index = int(scan_result.shard_indices[row_position])
+        positions_by_shard.setdefault(shard_index, []).append(output_offset)
     return positions_by_shard
 
 
@@ -913,28 +966,31 @@ def _read_merge_reference_rows(
 def _copy_merge_batch(
     *,
     context: _MergeBatchContext,
-    batch_rows: list[_MergeRowReference],
+    batch_positions: list[int],
     start: int,
     end: int,
 ) -> int:
     batch_read_rows = 0
-    batch_images = np.empty((len(batch_rows),) + context.image_shape, dtype=np.uint8)
-    batch_masks = np.empty((len(batch_rows),) + context.mask_shape, dtype=np.uint8)
-    batch_labels = np.empty(len(batch_rows), dtype=np.uint8)
-    batch_patient_ids = np.empty(len(batch_rows), dtype=np.int32)
-    batch_filenames = np.empty(len(batch_rows), dtype=object)
-    batch_source_image_paths = np.empty(len(batch_rows), dtype=object)
-    batch_source_mask_paths = np.empty(len(batch_rows), dtype=object)
+    batch_images = np.empty((len(batch_positions),) + context.image_shape, dtype=np.uint8)
+    batch_masks = np.empty((len(batch_positions),) + context.mask_shape, dtype=np.uint8)
+    batch_labels = np.empty(len(batch_positions), dtype=np.uint8)
+    batch_patient_ids = np.empty(len(batch_positions), dtype=np.int32)
+    batch_filenames = np.empty(len(batch_positions), dtype=object)
+    batch_source_image_paths = np.empty(len(batch_positions), dtype=object)
+    batch_source_mask_paths = np.empty(len(batch_positions), dtype=object)
     batch_slide_ids = (
-        np.empty(len(batch_rows), dtype=object)
+        np.empty(len(batch_positions), dtype=object)
         if context.destination.slide_ids is not None
         else None
     )
 
-    for shard_index, positions in _positions_by_shard(batch_rows).items():
+    for shard_index, positions in _positions_by_shard(context.scan_result, batch_positions).items():
         shard_handle = context.shard_handles[shard_index]
         source_indices = np.fromiter(
-            (batch_rows[position].source_row_index for position in positions),
+            (
+                int(context.scan_result.source_row_indices[batch_positions[position]])
+                for position in positions
+            ),
             dtype=np.int64,
             count=len(positions),
         )
@@ -962,11 +1018,10 @@ def _copy_merge_batch(
             sorted_indices,
             dtype=np.int32,
         )
-        batch_filenames[ordered_positions] = _normalize_string_rows(
-            cast(Any, shard_handle["filenames"]),
-            sorted_indices,
-            np.arange(len(sorted_indices), dtype=np.int64),
-        )
+        batch_filenames[ordered_positions] = [
+            context.scan_result.filenames[batch_positions[position]]
+            for position in ordered_positions.tolist()
+        ]
         batch_source_image_paths[ordered_positions] = _read_merge_reference_rows(
             shard_handle=shard_handle,
             shard_path=context.shard_metadata[shard_index].path,
@@ -981,16 +1036,15 @@ def _copy_merge_batch(
         )
 
         if batch_slide_ids is not None:
-            shard_slide_ids = shard_handle.get("slide_ids")
-            batch_slide_ids[ordered_positions] = (
-                _normalize_string_rows(
-                    cast(Any, shard_slide_ids),
-                    sorted_indices,
-                    np.arange(len(sorted_indices), dtype=np.int64),
+            batch_slide_ids[ordered_positions] = [
+                (
+                    context.scan_result.slide_ids[batch_positions[position]]
+                    if context.scan_result.slide_ids is not None
+                    else ""
                 )
-                if shard_slide_ids is not None
-                else ""
-            )
+                or ""
+                for position in ordered_positions.tolist()
+            ]
 
     context.destination.images[start:end] = batch_images
     context.destination.masks[start:end] = batch_masks
@@ -1033,22 +1087,30 @@ def merge_source_hdf5_shards(
             reporter=shard_scan_reporter,
         )
 
-        row_references = scan_result.row_references
-        row_references.sort(key=lambda row: (row.patient_id, row.filename))
+        ordered_positions = sorted(
+            range(len(scan_result.filenames)),
+            key=lambda position: (
+                scan_result.patient_ids[position],
+                scan_result.filenames[position],
+            ),
+        )
         source_signature = _merge_signature(
             shard_metadata=scan_result.shard_metadata,
-            row_references=row_references,
+            scan_result=scan_result,
+            ordered_positions=ordered_positions,
         )
         if output_path.exists() and not overwrite:
             return _validate_existing_hdf5(output_path, source_signature)
 
-        total_rows = len(row_references)
+        total_rows = len(ordered_positions)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         first_images = cast(Any, shard_handles[0]["images"])
         first_masks = cast(Any, shard_handles[0]["masks"])
         image_shape = tuple(first_images.shape[1:])
         mask_shape = tuple(first_masks.shape[1:])
-        has_slide_ids = any(row.slide_id is not None for row in row_references)
+        has_slide_ids = scan_result.slide_ids is not None and any(
+            slide_id is not None for slide_id in scan_result.slide_ids
+        )
         dataset_kwargs = _dataset_kwargs(compression)
         merge_reporter = _ProgressReporter("Merge progress", total_rows, "rows")
         merge_reporter.log_start(
@@ -1071,13 +1133,14 @@ def merge_source_hdf5_shards(
                 destination=destination,
                 image_shape=image_shape,
                 mask_shape=mask_shape,
+                scan_result=scan_result,
             )
 
             for start in range(0, total_rows, copy_batch_size):
                 end = min(start + copy_batch_size, total_rows)
                 batch_read_rows = _copy_merge_batch(
                     context=batch_context,
-                    batch_rows=row_references[start:end],
+                    batch_positions=ordered_positions[start:end],
                     start=start,
                     end=end,
                 )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,6 +32,15 @@ class SplitHDF5WriteConfig:
     hdf5_compression: str = "NONE"
     copy_batch_size: int = 256
     overwrite: bool = False
+
+
+@dataclass(frozen=True)
+class _OrderedSplitInputs:
+    source_paths: npt.NDArray[np.str_]
+    source_row_indices: npt.NDArray[np.int64]
+    labels: npt.NDArray[np.uint8]
+    patient_ids: npt.NDArray[np.int32]
+    filenames: npt.NDArray[np.object_]
 
 
 def _build_hdf5_split_signature(
@@ -124,6 +134,57 @@ def _resolve_source_paths(batch_df: pd.DataFrame, fallback_source_hdf5_path: Pat
     return pd.Series([str(fallback_source_hdf5_path)] * len(batch_df), index=batch_df.index)
 
 
+def _prepare_ordered_split_inputs(
+    split_df: pd.DataFrame,
+    fallback_source_hdf5_path: Path,
+) -> _OrderedSplitInputs:
+    ordered_split_df = split_df.reset_index(drop=True)
+    return _OrderedSplitInputs(
+        source_paths=_resolve_source_paths(ordered_split_df, fallback_source_hdf5_path).to_numpy(
+            dtype=str
+        ),
+        source_row_indices=ordered_split_df["source_row_index"].to_numpy(dtype=np.int64),
+        labels=ordered_split_df["label"].to_numpy(dtype=np.uint8),
+        patient_ids=ordered_split_df["patient_id"].to_numpy(dtype=np.int32),
+        filenames=ordered_split_df["filename"].astype(str).to_numpy(dtype=object),
+    )
+
+
+def _copy_split_batch_from_handles(
+    *,
+    source_handles: dict[str, h5py.File],
+    ordered_inputs: _OrderedSplitInputs,
+    batch_start: int,
+    batch_stop: int,
+    first_image_shape: tuple[int, ...],
+    first_mask_shape: tuple[int, ...],
+    normalizer: NormalizerProtocol | None,
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
+    batch_source_paths = ordered_inputs.source_paths[batch_start:batch_stop]
+    batch_source_indices = ordered_inputs.source_row_indices[batch_start:batch_stop]
+    image_batch = np.empty((len(batch_source_indices),) + first_image_shape, dtype=np.uint8)
+    mask_batch = np.empty((len(batch_source_indices),) + first_mask_shape, dtype=np.uint8)
+    positions_by_source: dict[str, list[int]] = {}
+    for output_offset, source_path in enumerate(batch_source_paths.tolist()):
+        positions_by_source.setdefault(str(source_path), []).append(output_offset)
+    for source_path, group_positions in positions_by_source.items():
+        source_indices = sorted(
+            int(batch_source_indices[position]) for position in group_positions
+        )
+        source_handle = source_handles[source_path]
+        images_by_index = _load_rows_by_source_index(source_handle["images"], source_indices)
+        masks_by_index = _load_rows_by_source_index(source_handle["masks"], source_indices)
+
+        for output_offset in group_positions:
+            source_index = int(batch_source_indices[output_offset])
+            image_batch[output_offset] = _normalize_image_array(
+                images_by_index[source_index],
+                normalizer,
+            )
+            mask_batch[output_offset] = masks_by_index[source_index]
+    return image_batch, mask_batch
+
+
 def write_split_hdf5(config: SplitHDF5WriteConfig) -> Path:
     if config.split_df.empty:
         raise ValueError(
@@ -144,6 +205,7 @@ def write_split_hdf5(config: SplitHDF5WriteConfig) -> Path:
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
     str_dtype = h5py.string_dtype(encoding="utf-8")
     ordered_split_df = config.split_df.reset_index(drop=True)
+    ordered_inputs = _prepare_ordered_split_inputs(ordered_split_df, config.source_hdf5_path)
     resolved_compression = _resolve_hdf5_compression(config.hdf5_compression)
     reporter = ProgressReporter(
         "Stage 5 split write",
@@ -156,7 +218,12 @@ def write_split_hdf5(config: SplitHDF5WriteConfig) -> Path:
         f"| batch_size={config.copy_batch_size}"
     )
 
-    with h5py.File(config.output_path, "w") as dest_handle:
+    unique_source_paths = list(dict.fromkeys(ordered_inputs.source_paths.tolist()))
+    with ExitStack() as stack, h5py.File(config.output_path, "w") as dest_handle:
+        source_handles = {
+            source_path: stack.enter_context(h5py.File(Path(source_path), "r"))
+            for source_path in unique_source_paths
+        }
         dest_handle.attrs["source_signature"] = source_signature
         dest_handle.attrs["source_hdf5_sha256"] = resolved_source_hdf5_provenance["sha256"]
         for attr_name in (
@@ -169,13 +236,11 @@ def write_split_hdf5(config: SplitHDF5WriteConfig) -> Path:
             if attr_value is not None:
                 dest_handle.attrs[attr_name] = attr_value
 
-        first_source_path = Path(
-            str(ordered_split_df.iloc[0].get("source_hdf5_path", config.source_hdf5_path))
-        )
-        first_index = int(ordered_split_df.iloc[0]["source_row_index"])
-        with h5py.File(first_source_path, "r") as first_source_handle:
-            first_image = np.asarray(first_source_handle["images"][first_index])
-            first_mask = np.asarray(first_source_handle["masks"][first_index])
+        first_source_path = ordered_inputs.source_paths[0]
+        first_index = int(ordered_inputs.source_row_indices[0])
+        first_source_handle = source_handles[str(first_source_path)]
+        first_image = np.asarray(first_source_handle["images"][first_index])
+        first_mask = np.asarray(first_source_handle["masks"][first_index])
         images = dest_handle.create_dataset(
             "images",
             shape=(len(ordered_split_df),) + first_image.shape,
@@ -200,37 +265,21 @@ def write_split_hdf5(config: SplitHDF5WriteConfig) -> Path:
 
         for batch_start in range(0, len(ordered_split_df), config.copy_batch_size):
             batch_stop = min(batch_start + config.copy_batch_size, len(ordered_split_df))
-            batch_df = ordered_split_df.iloc[batch_start:batch_stop].reset_index(drop=True)
-            image_batch = np.empty((len(batch_df),) + first_image.shape, dtype=np.uint8)
-            mask_batch = np.empty((len(batch_df),) + first_mask.shape, dtype=np.uint8)
-            grouped_source_paths = _resolve_source_paths(batch_df, config.source_hdf5_path)
-            for source_group_path, group_df in batch_df.groupby(grouped_source_paths, sort=False):
-                group_positions = group_df.index.tolist()
-                source_indices = sorted(group_df["source_row_index"].astype(int).tolist())
-                with h5py.File(Path(str(source_group_path)), "r") as source_handle:
-                    images_by_index = _load_rows_by_source_index(
-                        source_handle["images"],
-                        source_indices,
-                    )
-                    masks_by_index = _load_rows_by_source_index(
-                        source_handle["masks"],
-                        source_indices,
-                    )
-
-                for output_offset in group_positions:
-                    row = batch_df.iloc[output_offset]
-                    source_index = int(row["source_row_index"])
-                    image_batch[output_offset] = _normalize_image_array(
-                        images_by_index[source_index],
-                        config.normalizer,
-                    )
-                    mask_batch[output_offset] = masks_by_index[source_index]
+            image_batch, mask_batch = _copy_split_batch_from_handles(
+                source_handles=source_handles,
+                ordered_inputs=ordered_inputs,
+                batch_start=batch_start,
+                batch_stop=batch_stop,
+                first_image_shape=first_image.shape,
+                first_mask_shape=first_mask.shape,
+                normalizer=config.normalizer,
+            )
 
             images[batch_start:batch_stop] = image_batch
             masks[batch_start:batch_stop] = mask_batch
-            labels[batch_start:batch_stop] = batch_df["label"].to_numpy(dtype=np.uint8)
-            patient_ids[batch_start:batch_stop] = batch_df["patient_id"].to_numpy(dtype=np.int32)
-            filenames[batch_start:batch_stop] = batch_df["filename"].astype(str).to_numpy()
+            labels[batch_start:batch_stop] = ordered_inputs.labels[batch_start:batch_stop]
+            patient_ids[batch_start:batch_stop] = ordered_inputs.patient_ids[batch_start:batch_stop]
+            filenames[batch_start:batch_stop] = ordered_inputs.filenames[batch_start:batch_stop]
             reporter.log(
                 completed_units=batch_stop,
                 extra_parts=[f"remaining={len(ordered_split_df) - batch_stop} rows"],

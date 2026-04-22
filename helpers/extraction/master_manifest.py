@@ -30,6 +30,12 @@ class Stage2SlideRows:
     stage2_status: str
 
 
+@dataclass(frozen=True)
+class _ManifestPatchKey:
+    source_hdf5_path: str
+    source_row_index: int
+
+
 def _logical_hdf5_ref(output_path: Path, dataset_name: str, row_index: int) -> str:
     return f"{output_path}::{dataset_name}[{row_index}]"
 
@@ -159,27 +165,47 @@ class MasterManifest:
         )
 
         with self._connect() as connection:
-            existing_patch_ids = [
-                int(row["patch_id"])
-                for row in connection.execute(
-                    "SELECT patch_id FROM patches WHERE source_hdf5_path = ? "
-                    "ORDER BY source_row_index ASC",
-                    (str(payload.source_hdf5_path),),
-                ).fetchall()
-            ]
-            if existing_patch_ids:
-                connection.executemany(
-                    "DELETE FROM patch_stage_state WHERE patch_id = ?",
-                    [(patch_id,) for patch_id in existing_patch_ids],
-                )
             connection.execute(
                 "DELETE FROM patches WHERE source_hdf5_path = ?",
                 (str(payload.source_hdf5_path),),
             )
 
+            patch_rows: list[tuple[object, ...]] = []
             for source_row_index, record in enumerate(payload.records):
                 artifact_coverages = self._artifact_coverages(record)
-                cursor = connection.execute(
+                patch_rows.append(
+                    (
+                        str(payload.source_hdf5_path),
+                        source_row_index,
+                        str(record["filename"]),
+                        _coerce_int(record.get("patient_id"), field_name="patient_id"),
+                        _coerce_int(record.get("label"), field_name="label"),
+                        str(record.get("slide_id") or payload.source_hdf5_path.stem),
+                        source_signature,
+                        _logical_hdf5_ref(payload.source_hdf5_path, "images", source_row_index),
+                        _logical_hdf5_ref(payload.source_hdf5_path, "masks", source_row_index),
+                        str(payload.source_slide_path),
+                        str(payload.annotation_path)
+                        if payload.annotation_path is not None
+                        else None,
+                        (
+                            str(payload.artifacts_geojson_path)
+                            if payload.artifacts_geojson_path is not None
+                            else None
+                        ),
+                        payload.stage2_case_record_id,
+                        payload.stage2_processing_signature,
+                        payload.stage2_status,
+                        artifact_coverages["cov_fold"],
+                        artifact_coverages["cov_penmarking"],
+                        artifact_coverages["cov_oof"],
+                        artifact_coverages["cov_darkspot_foreign"],
+                        artifact_coverages["cov_edge_airbubble"],
+                    )
+                )
+
+            if patch_rows:
+                connection.executemany(
                     """
                     INSERT INTO patches (
                         source_hdf5_path,
@@ -204,48 +230,25 @@ class MasterManifest:
                         cov_edge_airbubble
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        str(payload.source_hdf5_path),
-                        source_row_index,
-                        str(record["filename"]),
-                        _coerce_int(record.get("patient_id"), field_name="patient_id"),
-                        _coerce_int(record.get("label"), field_name="label"),
-                        str(record.get("slide_id") or payload.source_hdf5_path.stem),
-                        source_signature,
-                        _logical_hdf5_ref(payload.source_hdf5_path, "images", source_row_index),
-                        _logical_hdf5_ref(payload.source_hdf5_path, "masks", source_row_index),
-                        str(payload.source_slide_path),
-                        (
-                            str(payload.annotation_path)
-                            if payload.annotation_path is not None
-                            else None
-                        ),
-                        (
-                            str(payload.artifacts_geojson_path)
-                            if payload.artifacts_geojson_path is not None
-                            else None
-                        ),
-                        payload.stage2_case_record_id,
-                        payload.stage2_processing_signature,
-                        payload.stage2_status,
-                        artifact_coverages["cov_fold"],
-                        artifact_coverages["cov_penmarking"],
-                        artifact_coverages["cov_oof"],
-                        artifact_coverages["cov_darkspot_foreign"],
-                        artifact_coverages["cov_edge_airbubble"],
-                    ),
+                    patch_rows,
                 )
-                if cursor.lastrowid is None:
-                    raise ValueError("Stage 2 master manifest insert did not return a patch_id.")
-                patch_id = int(cursor.lastrowid)
-                connection.execute(
-                    """
-                    INSERT INTO patch_stage_state (
-                        patch_id,
-                        last_updated_stage_name
-                    ) VALUES (?, ?)
-                    """,
-                    (patch_id, STAGE2_STAGE_NAME),
+                patch_ids = [
+                    int(row["patch_id"])
+                    for row in connection.execute(
+                        "SELECT patch_id FROM patches WHERE source_hdf5_path = ? "
+                        "ORDER BY source_row_index ASC",
+                        (str(payload.source_hdf5_path),),
+                    ).fetchall()
+                ]
+                if len(patch_ids) != len(patch_rows):
+                    raise ValueError(
+                        "Stage 2 master manifest insert did not produce the expected patch rows."
+                    )
+                connection.executemany(
+                    "INSERT INTO patch_stage_state ("
+                    "patch_id, last_updated_stage_name"
+                    ") VALUES (?, ?)",
+                    [(patch_id, STAGE2_STAGE_NAME) for patch_id in patch_ids],
                 )
             connection.commit()
 
@@ -258,42 +261,37 @@ class MasterManifest:
 
         self.initialize()
         with self._connect() as connection:
-            for decision in decisions:
-                source_hdf5_path = str(decision["source_hdf5_path"])
-                source_row_index = _coerce_int(
-                    decision.get("source_row_index"),
-                    field_name="source_row_index",
-                )
-                patch_row = connection.execute(
-                    "SELECT patch_id, filename, patient_id, slide_id, source_signature "
-                    "FROM patches WHERE source_hdf5_path = ? AND source_row_index = ?",
-                    (source_hdf5_path, source_row_index),
-                ).fetchone()
-                if patch_row is None:
-                    raise ValueError(
-                        "Stage 3.3 decision targets a missing canonical Stage 2 row: "
-                        f"({source_hdf5_path}, {source_row_index})"
-                    )
+            patch_rows = self._fetch_patch_rows_for_updates(
+                connection,
+                rows=decisions,
+                selected_columns=("filename", "patient_id", "slide_id", "source_signature"),
+                missing_message=("Stage 3.3 decision targets a missing canonical Stage 2 row"),
+            )
+            updates: list[tuple[object, ...]] = []
+            for decision, patch_row in zip(decisions, patch_rows, strict=True):
                 self._validate_stage4_decision_provenance(patch_row=patch_row, decision=decision)
                 decision_text = str(decision["decision"])
-                connection.execute(
-                    """
-                    UPDATE patch_stage_state
-                    SET cleaning_decision = ?,
-                        contamination_rate = ?,
-                        is_stage4_accepted = ?,
-                        last_updated_stage_name = ?,
-                        last_updated_at = CURRENT_TIMESTAMP
-                    WHERE patch_id = ?
-                    """,
+                updates.append(
                     (
                         decision_text,
                         _coerce_float_or_none(decision.get("contamination_rate")),
                         1 if decision_text.lower() == "accepted" else 0,
                         STAGE4_CLEANING_STAGE_NAME,
                         int(patch_row["patch_id"]),
-                    ),
+                    )
                 )
+            connection.executemany(
+                """
+                UPDATE patch_stage_state
+                SET cleaning_decision = ?,
+                    contamination_rate = ?,
+                    is_stage4_accepted = ?,
+                    last_updated_stage_name = ?,
+                    last_updated_at = CURRENT_TIMESTAMP
+                WHERE patch_id = ?
+                """,
+                updates,
+            )
             connection.commit()
 
     def create_run(
@@ -401,44 +399,41 @@ class MasterManifest:
 
         self.initialize()
         with self._connect() as connection:
-            for assignment in assignments:
-                source_hdf5_path = str(assignment["source_hdf5_path"])
-                source_row_index = _coerce_int(
-                    assignment.get("source_row_index"),
-                    field_name="source_row_index",
-                )
-                patch_row = connection.execute(
-                    "SELECT patch_id, filename, patient_id, label FROM patches "
-                    "WHERE source_hdf5_path = ? AND source_row_index = ?",
-                    (source_hdf5_path, source_row_index),
-                ).fetchone()
-                if patch_row is None:
-                    raise ValueError(
-                        "Stage 5 split assignment targets a missing canonical Stage 2 row: "
-                        f"({source_hdf5_path}, {source_row_index})"
-                    )
+            patch_rows = self._fetch_patch_rows_for_updates(
+                connection,
+                rows=assignments,
+                selected_columns=("filename", "patient_id", "label"),
+                missing_message=(
+                    "Stage 5 split assignment targets a missing canonical Stage 2 row"
+                ),
+            )
+            updates: list[tuple[object, ...]] = []
+            for assignment, patch_row in zip(assignments, patch_rows, strict=True):
                 self._validate_stage5_assignment_provenance(
                     patch_row=patch_row,
                     assignment=assignment,
                 )
-                connection.execute(
-                    """
-                    UPDATE patch_stage_state
-                    SET split = ?,
-                        normalization_method = ?,
-                        normalization_artifact_id = ?,
-                        last_updated_stage_name = ?,
-                        last_updated_at = CURRENT_TIMESTAMP
-                    WHERE patch_id = ?
-                    """,
+                updates.append(
                     (
                         str(assignment["split"]),
                         normalization_method,
                         normalization_artifact_id,
                         STAGE5_STAGE_NAME,
                         int(patch_row["patch_id"]),
-                    ),
+                    )
                 )
+            connection.executemany(
+                """
+                UPDATE patch_stage_state
+                SET split = ?,
+                    normalization_method = ?,
+                    normalization_artifact_id = ?,
+                    last_updated_stage_name = ?,
+                    last_updated_at = CURRENT_TIMESTAMP
+                WHERE patch_id = ?
+                """,
+                updates,
+            )
             connection.commit()
 
     def update_stage7_sampling_decisions(
@@ -450,43 +445,102 @@ class MasterManifest:
 
         self.initialize()
         with self._connect() as connection:
-            for decision in decisions:
-                source_hdf5_path = str(decision["source_hdf5_path"])
-                source_row_index = _coerce_int(
-                    decision.get("source_row_index"),
-                    field_name="source_row_index",
-                )
-                patch_row = connection.execute(
-                    "SELECT patch_id, filename, patient_id, label FROM patches "
-                    "WHERE source_hdf5_path = ? AND source_row_index = ?",
-                    (source_hdf5_path, source_row_index),
-                ).fetchone()
-                if patch_row is None:
-                    raise ValueError(
-                        "Stage 7.2 sampling decision targets a missing canonical Stage 2 row: "
-                        f"({source_hdf5_path}, {source_row_index})"
-                    )
+            patch_rows = self._fetch_patch_rows_for_updates(
+                connection,
+                rows=decisions,
+                selected_columns=("filename", "patient_id", "label"),
+                missing_message=(
+                    "Stage 7.2 sampling decision targets a missing canonical Stage 2 row"
+                ),
+            )
+            updates: list[tuple[object, ...]] = []
+            for decision, patch_row in zip(decisions, patch_rows, strict=True):
                 self._validate_stage5_assignment_provenance(
                     patch_row=patch_row,
                     assignment=decision,
                 )
-                connection.execute(
-                    """
-                    UPDATE patch_stage_state
-                    SET sampling_decision = ?,
-                        is_stage7_selected = ?,
-                        last_updated_stage_name = ?,
-                        last_updated_at = CURRENT_TIMESTAMP
-                    WHERE patch_id = ?
-                    """,
+                updates.append(
                     (
                         str(decision["sampling_decision"]),
                         1 if bool(decision["is_stage7_selected"]) else 0,
                         STAGE7_STAGE_NAME,
                         int(patch_row["patch_id"]),
-                    ),
+                    )
                 )
+            connection.executemany(
+                """
+                UPDATE patch_stage_state
+                SET sampling_decision = ?,
+                    is_stage7_selected = ?,
+                    last_updated_stage_name = ?,
+                    last_updated_at = CURRENT_TIMESTAMP
+                WHERE patch_id = ?
+                """,
+                updates,
+            )
             connection.commit()
+
+    def _fetch_patch_rows_for_updates(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        rows: Sequence[Mapping[str, object]],
+        selected_columns: Sequence[str],
+        missing_message: str,
+    ) -> list[sqlite3.Row]:
+        if not rows:
+            return []
+
+        ordered_keys = [
+            _ManifestPatchKey(
+                source_hdf5_path=str(row["source_hdf5_path"]),
+                source_row_index=_coerce_int(
+                    row.get("source_row_index"),
+                    field_name="source_row_index",
+                ),
+            )
+            for row in rows
+        ]
+        select_columns_sql = ", ".join(f"p.{column}" for column in ("patch_id", *selected_columns))
+        connection.execute(
+            "CREATE TEMP TABLE temp_manifest_patch_keys ("
+            "input_order INTEGER PRIMARY KEY, "
+            "source_hdf5_path TEXT NOT NULL, "
+            "source_row_index INTEGER NOT NULL"
+            ")"
+        )
+        try:
+            connection.executemany(
+                "INSERT INTO temp_manifest_patch_keys ("
+                "input_order, source_hdf5_path, source_row_index"
+                ") "
+                "VALUES (?, ?, ?)",
+                [
+                    (input_order, key.source_hdf5_path, key.source_row_index)
+                    for input_order, key in enumerate(ordered_keys)
+                ],
+            )
+            patch_rows = connection.execute(
+                f"""
+                SELECT {select_columns_sql}
+                FROM temp_manifest_patch_keys AS keys
+                LEFT JOIN patches AS p
+                    ON p.source_hdf5_path = keys.source_hdf5_path
+                   AND p.source_row_index = keys.source_row_index
+                ORDER BY keys.input_order ASC
+                """
+            ).fetchall()
+        finally:
+            connection.execute("DROP TABLE temp_manifest_patch_keys")
+
+        if len(patch_rows) != len(ordered_keys):
+            raise ValueError("Master manifest patch lookup returned an unexpected row count.")
+        for key, patch_row in zip(ordered_keys, patch_rows, strict=True):
+            if patch_row["patch_id"] is None:
+                raise ValueError(
+                    f"{missing_message}: ({key.source_hdf5_path}, {key.source_row_index})"
+                )
+        return patch_rows
 
     def _validate_stage4_decision_provenance(
         self,

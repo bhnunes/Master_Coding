@@ -53,10 +53,7 @@ def test_repository_requeues_processed_member_when_signature_changes(tmp_path: P
     assert refreshed.zip_member_path == "nested/case_1.svs"
     assert refreshed.geojson_processed is False
     assert refreshed.status == "PENDING"
-    assert (
-        refreshed.comments
-        == "Zip member content changed; artifact GeoJSON must be regenerated."
-    )
+    assert refreshed.comments == "Zip member content changed; artifact GeoJSON must be regenerated."
     assert refreshed.error_type == "STALE_INPUT"
     assert refreshed.geojson_path is None
     assert refreshed.processing_time_seconds is None
@@ -198,6 +195,26 @@ def test_repository_sync_members_keeps_existing_row_when_signature_is_unchanged(
     assert records[0].geojson_path == "/tmp/case_1.geojson"
     assert records[0].processing_time_seconds == SUCCESS_PROCESSING_TIME_SECONDS
     assert records[0].member_signature == "sig-a"
+
+
+def test_repository_sync_members_coalesces_duplicate_inputs_using_last_signature(
+    tmp_path: Path,
+) -> None:
+    repository = ArtifactRepository(tmp_path / "artifact_detection.db")
+    repository.initialize()
+
+    repository.sync_members(
+        [
+            ("nested/case_1.svs", "sig-a"),
+            ("nested/case_1.svs", "sig-b"),
+            ("nested/case_1.svs", "sig-c"),
+        ]
+    )
+
+    records = repository.list_all()
+    assert len(records) == 1
+    assert records[0].zip_member_path == "nested/case_1.svs"
+    assert records[0].member_signature == "sig-c"
 
 
 def test_repository_mark_processing_sets_status_without_removing_pending_state(

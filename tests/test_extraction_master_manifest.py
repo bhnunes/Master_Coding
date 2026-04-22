@@ -203,3 +203,132 @@ def test_master_manifest_removes_stale_rows_for_rewritten_stage2_shard(tmp_path:
         ).fetchall()
 
     assert rows == [("new.png", 0, "second")]
+
+
+def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path) -> None:
+    records = [
+        {
+            "filename": "a.png",
+            "label": 1,
+            "patient_id": "2001",
+            "slide_id": "slide_c",
+            "_image_array": np.full((4, 4, 3), 20, dtype=np.uint8),
+            "_mask_array": np.ones((4, 4), dtype=np.uint8),
+        },
+        {
+            "filename": "b.png",
+            "label": 0,
+            "patient_id": "2002",
+            "slide_id": "slide_d",
+            "_image_array": np.full((4, 4, 3), 40, dtype=np.uint8),
+            "_mask_array": np.zeros((4, 4), dtype=np.uint8),
+        },
+    ]
+    shard_path = _write_stage2_shard(tmp_path, name="batched_updates", records=records)
+    manifest = MasterManifest(tmp_path / "master_manifest.sqlite")
+
+    manifest.replace_stage2_slide_rows(
+        Stage2SlideRows(
+            source_hdf5_path=shard_path,
+            records=records,
+            source_slide_path=tmp_path / "slides" / "batched_updates.svs",
+            annotation_path=None,
+            artifacts_geojson_path=None,
+            stage2_case_record_id=23,
+            stage2_processing_signature="stage2-batch",
+            stage2_status="COMPLETED",
+        )
+    )
+
+    with h5py.File(shard_path, "r") as handle:
+        source_signature = str(handle.attrs["source_signature"])
+
+    manifest.update_stage4_cleaning_decisions(
+        decisions=[
+            {
+                "source_hdf5_path": str(shard_path),
+                "source_row_index": 0,
+                "filename": "a.png",
+                "patient_id": 2001,
+                "slide_id": "slide_c",
+                "source_hdf5_sha256": source_signature,
+                "decision": "accepted",
+                "contamination_rate": 0.1,
+            },
+            {
+                "source_hdf5_path": str(shard_path),
+                "source_row_index": 1,
+                "filename": "b.png",
+                "patient_id": 2002,
+                "slide_id": "slide_d",
+                "source_hdf5_sha256": source_signature,
+                "decision": "rejected",
+                "contamination_rate": 0.8,
+            },
+        ]
+    )
+    manifest.update_stage5_split_assignments(
+        assignments=[
+            {
+                "source_hdf5_path": str(shard_path),
+                "source_row_index": 0,
+                "filename": "a.png",
+                "patient_id": 2001,
+                "label": 1,
+                "split": "TRAIN",
+            },
+            {
+                "source_hdf5_path": str(shard_path),
+                "source_row_index": 1,
+                "filename": "b.png",
+                "patient_id": 2002,
+                "label": 0,
+                "split": "VALIDATION",
+            },
+        ],
+        normalization_method="NOT_NORMALIZED",
+        normalization_artifact_id=None,
+    )
+    manifest.update_stage7_sampling_decisions(
+        decisions=[
+            {
+                "source_hdf5_path": str(shard_path),
+                "source_row_index": 0,
+                "filename": "a.png",
+                "patient_id": 2001,
+                "label": 1,
+                "sampling_decision": "protected_kept",
+                "is_stage7_selected": True,
+            },
+            {
+                "source_hdf5_path": str(shard_path),
+                "source_row_index": 1,
+                "filename": "b.png",
+                "patient_id": 2002,
+                "label": 0,
+                "sampling_decision": "rejected_reducible",
+                "is_stage7_selected": False,
+            },
+        ]
+    )
+
+    with sqlite3.connect(tmp_path / "master_manifest.sqlite") as connection:
+        rows = connection.execute(
+            "SELECT cleaning_decision, contamination_rate, split, normalization_method, "
+            "sampling_decision, is_stage4_accepted, is_stage7_selected, last_updated_stage_name "
+            "FROM patch_stage_state ORDER BY patch_id ASC"
+        ).fetchall()
+
+    assert rows == [
+        ("accepted", 0.1, "TRAIN", "NOT_NORMALIZED", "protected_kept", 1, 1, "STAGE7_2"),
+        (
+            "rejected",
+            0.8,
+            "VALIDATION",
+            "NOT_NORMALIZED",
+            "rejected_reducible",
+            0,
+            0,
+            "STAGE7_2",
+        ),
+    ]

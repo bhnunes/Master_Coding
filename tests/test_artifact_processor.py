@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import types
 from pathlib import Path
 from unittest.mock import Mock
@@ -15,12 +16,14 @@ from helpers.artifact.processor import (
     ArtifactProcessor,
     HorizontalTileAppend,
     TileGrid,
+    TissueDetectionOutputs,
     VerticalTileAppend,
     _append_horizontal_tile,
     _append_vertical_tile,
     _combine_horizontal_tiles,
     _combine_vertical_tiles,
     _crop_tile,
+    _predict_tissue_tile_batch,
 )
 
 
@@ -43,7 +46,15 @@ def _build_config(tmp_path: Path) -> ArtifactDetectionConfig:
 
 def test_process_slide_creates_output_dir_and_calls_internal_steps(tmp_path: Path) -> None:
     processor = ArtifactProcessor(_build_config(tmp_path), model_loader=Mock())
-    run_tissue = Mock(return_value={"tissue_mask_path": tmp_path / "mask.png"})
+    run_tissue = Mock(
+        return_value=TissueDetectionOutputs(
+            tissue_mask_path=tmp_path / "mask.png",
+            tissue_mask_colored_path=tmp_path / "mask_colored.png",
+            tissue_overlay_path=tmp_path / "overlay.png",
+            thumbnail_path=tmp_path / "thumb.jpg",
+            tissue_mask_array=np.zeros((4, 4), dtype=np.uint8),
+        )
+    )
     run_qc = Mock()
     processor._run_tissue_detection = run_tissue  # type: ignore[method-assign]
     processor._run_qc_processing = run_qc  # type: ignore[method-assign]
@@ -59,7 +70,7 @@ def test_process_slide_creates_output_dir_and_calls_internal_steps(tmp_path: Pat
     run_qc.assert_called_once_with(
         slide_path,
         geojson_path,
-        {"tissue_mask_path": tmp_path / "mask.png"},
+        run_tissue.return_value,
     )
 
 
@@ -174,6 +185,74 @@ def test_combine_tile_helpers_join_rows_and_columns_once() -> None:
     assert combined_class.shape == (5, 5, 3)
 
 
+def test_predict_tissue_tile_batch_stacks_row_tiles_into_one_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_tile_count = 3
+    thumbnail_image = Image.new("RGB", (5, 2), color=(10, 20, 30))
+    grid = TileGrid(
+        tiles_x=2,
+        tiles_y=0,
+        patch_size=2,
+        width=5,
+        height=2,
+        overhang_x=1,
+        overhang_y=0,
+    )
+    predict_inputs: list[tuple[int, ...]] = []
+
+    class FakeTensor:
+        def __init__(self, array: npt.NDArray[np.float32]) -> None:
+            self.array = array
+
+        def to(self, device: str) -> FakeTensor:
+            del device
+            return self
+
+        def cpu(self) -> FakeTensor:
+            return self
+
+        def numpy(self) -> npt.NDArray[np.float32]:
+            return self.array
+
+    def fake_predict(tensor: FakeTensor) -> FakeTensor:
+        predict_inputs.append(tensor.array.shape)
+        batch_size = tensor.array.shape[0]
+        predictions = np.zeros((batch_size, 2, 2, 2), dtype=np.float32)
+        predictions[:, 1, :, :] = 1.0
+        return FakeTensor(predictions)
+
+    monkeypatch.setattr(
+        "helpers.wsi.tis_detect_helper_fx.get_preprocessing",
+        lambda image, fn: np.zeros((2, 2, 3), dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        "helpers.wsi.tis_detect_helper_fx.make_class_map",
+        lambda mask, colors: np.dstack([mask, mask, mask]).astype(np.uint8),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(from_numpy=lambda array: FakeTensor(array)),
+    )
+
+    row_masks, row_class_masks = _predict_tissue_tile_batch(
+        thumbnail_image=thumbnail_image,
+        tile_y=0,
+        grid=grid,
+        preprocessing_fn=lambda image: image,
+        tissue_model=types.SimpleNamespace(predict=fake_predict),
+        device="cpu",
+        colors=[[50, 50, 250], [128, 128, 128]],
+    )
+
+    assert predict_inputs == [(expected_tile_count, 2, 2, 3)]
+    assert len(row_masks) == expected_tile_count
+    assert len(row_class_masks) == expected_tile_count
+    assert all(mask.shape == (2, 2) for mask in row_masks)
+    assert all(class_mask.shape == (2, 2, 3) for class_mask in row_class_masks)
+
+
 def test_run_qc_processing_writes_outputs_and_geojson(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,9 +261,6 @@ def test_run_qc_processing_writes_outputs_and_geojson(
     model_loader.load.return_value = types.SimpleNamespace(qc_model="qc-model")
     processor = ArtifactProcessor(config, model_loader=model_loader)
     slide = types.SimpleNamespace()
-    tissue_mask_path = tmp_path / "artifact_output" / "tis_det_mask" / "slide_MASK.png"
-    tissue_mask_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(np.zeros((4, 4), dtype=np.uint8)).save(tissue_mask_path)
     geojson_path = tmp_path / "geojson" / "slide.geojson"
     slide_process_calls: list[object] = []
     imwrite_calls: list[Path] = []
@@ -227,7 +303,19 @@ def test_run_qc_processing_writes_outputs_and_geojson(
     processor._run_qc_processing(
         tmp_path / "slide.svs",
         geojson_path,
-        {"tissue_mask_path": tissue_mask_path},
+        TissueDetectionOutputs(
+            tissue_mask_path=tmp_path / "artifact_output" / "tis_det_mask" / "slide_MASK.png",
+            tissue_mask_colored_path=tmp_path
+            / "artifact_output"
+            / "tis_det_mask_col"
+            / "slide_MASK_COL.png",
+            tissue_overlay_path=tmp_path
+            / "artifact_output"
+            / "tis_det_overlay"
+            / "slide_OVERLAY.jpg",
+            thumbnail_path=tmp_path / "artifact_output" / "tis_det_thumbnail" / "slide.jpg",
+            tissue_mask_array=np.zeros((4, 4), dtype=np.uint8),
+        ),
     )
 
     assert model_loader.load.call_count == 1
@@ -254,10 +342,8 @@ def test_run_tissue_detection_raises_when_stitching_returns_no_output(
         preprocessing_fn=lambda array: array,
         tissue_model=types.SimpleNamespace(
             predict=lambda tensor: types.SimpleNamespace(
-                squeeze=lambda: types.SimpleNamespace(
-                    cpu=lambda: types.SimpleNamespace(
-                        numpy=lambda: np.zeros((2, 2, 2), dtype=np.float32)
-                    )
+                cpu=lambda: types.SimpleNamespace(
+                    numpy=lambda: np.zeros((tensor.array.shape[0], 2, 2, 2), dtype=np.float32)
                 )
             )
         ),
@@ -277,10 +363,6 @@ def test_run_tissue_detection_raises_when_stitching_returns_no_output(
 
         def to(self, device: str) -> FakeTensor:
             del device
-            return self
-
-        def unsqueeze(self, axis: int) -> FakeTensor:
-            del axis
             return self
 
     fake_slide = types.SimpleNamespace(
@@ -304,21 +386,23 @@ def test_run_tissue_detection_raises_when_stitching_returns_no_output(
     monkeypatch.setattr(
         "helpers.artifact.processor._combine_vertical_tiles", lambda *args, **kwargs: (None, None)
     )
-    monkeypatch.setattr(
-        "sys.modules",
-        {
-            **__import__("sys").modules,
-            "cv2": types.SimpleNamespace(
-                IMWRITE_JPEG_QUALITY=95,
-                imencode=lambda ext, image, params: (True, image),
-                imdecode=lambda image, flag: image,
-                addWeighted=lambda a, b, c, d, e: np.zeros((4, 4, 3), dtype=np.uint8),
-            ),
-            "torch": types.SimpleNamespace(
-                inference_mode=lambda: FakeInferenceMode(),
-                from_numpy=lambda array: FakeTensor(array),
-            ),
-        },
+    monkeypatch.setitem(
+        sys.modules,
+        "cv2",
+        types.SimpleNamespace(
+            IMWRITE_JPEG_QUALITY=95,
+            imencode=lambda ext, image, params: (True, image),
+            imdecode=lambda image, flag: image,
+            addWeighted=lambda a, b, c, d, e: np.zeros((4, 4, 3), dtype=np.uint8),
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            inference_mode=lambda: FakeInferenceMode(),
+            from_numpy=lambda array: FakeTensor(array),
+        ),
     )
 
     with pytest.raises(RuntimeError, match="No tissue detection output"):

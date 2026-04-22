@@ -26,6 +26,16 @@ def test_check_tissue_percentage_robust_handles_empty_patch() -> None:
     assert patch_engine.check_tissue_percentage_robust(np.array([]), 0.1) is False
 
 
+def test_build_tissue_binary_mask_returns_nonempty_mask_for_colored_patch() -> None:
+    patch = np.zeros((PATCH_SIDE, PATCH_SIDE, 3), dtype=np.uint8)
+    patch[:, :, 0] = 255
+
+    tissue_mask = patch_engine._build_tissue_binary_mask(patch)
+
+    assert tissue_mask.shape == (PATCH_SIDE, PATCH_SIDE)
+    assert tissue_mask.dtype == np.uint8
+
+
 def test_polygons_to_mask_fills_intersection_inside_patch() -> None:
     mask = patch_engine.polygons_to_mask(
         mask_shape=(PATCH_SIDE, PATCH_SIDE),
@@ -120,6 +130,38 @@ def test_polygons_to_mask_with_index_fills_matching_polygon() -> None:
     mask = patch_engine.polygons_to_mask_with_index((PATCH_SIDE, PATCH_SIDE), polygon_index, (0, 0))
 
     assert np.count_nonzero(mask) >= MIN_NONZERO_PIXELS
+
+
+def test_build_precomputed_region_masks_creates_scan_region_masks() -> None:
+    preparation = patch_engine._ExtractionPreparation(
+        slide_basename="slide.svs",
+        annotations_cancer_level0=[[(0, 0), (4, 0), (4, 4), (0, 4)]],
+        annotations_not_cancer_level0=[[(4, 0), (8, 0), (8, 4), (4, 4)]],
+        artifact_polygons_by_class_level0={"Fold": [[(0, 0), (4, 0), (4, 4), (0, 4)]]},
+    )
+    region = patch_engine._ScaledAnnotationRegion(
+        scale_factor=1.0,
+        target_width=8,
+        target_height=4,
+        x_start=0,
+        y_start=0,
+        x_end=8,
+        y_end=4,
+    )
+
+    label_masks, artifact_masks = patch_engine._build_precomputed_region_masks(
+        preparation,
+        region,
+        use_artifact_filter=True,
+    )
+
+    assert label_masks is not None
+    assert artifact_masks is not None
+    assert label_masks["cancer"].shape == (4, 8)
+    assert label_masks["not_cancer"].shape == (4, 8)
+    assert np.count_nonzero(label_masks["cancer"][:, :4]) > 0
+    assert np.count_nonzero(label_masks["not_cancer"][:, 4:]) > 0
+    assert np.count_nonzero(artifact_masks["cov_fold"]) > 0
 
 
 def test_clip_geometry_to_patch_coords_handles_multipolygon_result() -> None:
@@ -230,6 +272,102 @@ def test_process_window_with_slide_skips_tissue_and_records_profile_stats(
     assert result[2]["read_region"].calls == 1
 
 
+def test_process_window_with_slide_uses_precomputed_label_masks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSlide:
+        def read_region(
+            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+        ) -> Image.Image:
+            del coords, level, size
+            return Image.new("RGB", (PATCH_SIDE, PATCH_SIDE), color=(10, 20, 30))
+
+    label_region_masks = {
+        "cancer": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        "not_cancer": np.zeros((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+    }
+    patch_engine._WORKER_CONTEXT = {
+        "profile_output_path": "/tmp/profile.json",
+        "window_size": PATCH_SIDE,
+        "use_artifact_filter": False,
+        "target_level": 0,
+        "tissue_percentage_req": 0.1,
+        "match_percentage_req": 0.1,
+        "region_x_start": 0,
+        "region_y_start": 0,
+        "label_region_masks": label_region_masks,
+        "cancer_polygon_index": ([], None),
+        "not_cancer_polygon_index": ([], None),
+        "path_cancer_folder": "/tmp/CANCER",
+        "path_cancer_mask_folder": "/tmp/CANCER_MASK",
+        "path_not_cancer_folder": "/tmp/NOT_CANCER",
+        "path_not_cancer_mask_folder": "/tmp/NOT_CANCER_MASK",
+        "patient": "patient-1",
+        "slide_id": "slide-a",
+        "filename_prefix": patch_engine.build_patch_filename_prefix(
+            patient_id="patient-1",
+            slide_id="slide-a",
+        ),
+    }
+
+    monkeypatch.setattr(
+        patch_engine,
+        "polygons_to_mask_with_index",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("per-window polygon rasterization should be bypassed")
+        ),
+    )
+    monkeypatch.setattr(patch_engine, "check_tissue_percentage_robust", lambda patch, req: True)
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
+
+    result = cast(
+        tuple[str, dict[str, Any], dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 0, 0),
+    )
+
+    assert result[0] == "SAVED_CANCER"
+    assert result[1]["label"] == 1
+    assert np.count_nonzero(result[1]["_mask_array"]) == PATCH_SIDE * PATCH_SIDE
+
+
+def test_process_window_with_slide_skips_tissue_before_reading_slide_when_tissue_mask_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSlide:
+        def read_region(
+            self, _coords: tuple[int, int], _level: int, _size: tuple[int, int]
+        ) -> Image.Image:
+            raise AssertionError("read_region should not be called when tissue mask rejects window")
+
+    patch_engine._WORKER_CONTEXT = {
+        "profile_output_path": "/tmp/profile.json",
+        "window_size": PATCH_SIDE,
+        "use_artifact_filter": False,
+        "target_level": 0,
+        "tissue_percentage_req": 0.1,
+        "match_percentage_req": 0.1,
+        "region_x_start": 0,
+        "region_y_start": 0,
+        "label_region_masks": {
+            "cancer": np.zeros((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+            "not_cancer": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        },
+        "tissue_region_mask": np.zeros((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        "cancer_polygon_index": ([], None),
+        "not_cancer_polygon_index": ([], None),
+    }
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
+
+    result = cast(
+        tuple[str, object | None, dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 0, 0),
+    )
+
+    assert result[0] == "SKIPPED_TISSUE"
+    assert result[1] is None
+    assert result[2]["read_region"].calls == 0
+
+
 def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverages(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -294,6 +432,68 @@ def test_process_window_with_slide_builds_not_cancer_patch_with_artifact_coverag
     assert result[1]["cov_fold"] == OVERLAP_RATIO
     assert result[1]["_image_array"].shape == (PATCH_SIDE, PATCH_SIDE, 3)
     assert result[1]["_mask_array"].shape == (PATCH_SIDE, PATCH_SIDE)
+
+
+def test_process_window_with_slide_uses_precomputed_artifact_masks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeSlide:
+        def read_region(
+            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+        ) -> Image.Image:
+            del coords, level, size
+            return Image.new("RGB", (PATCH_SIDE, PATCH_SIDE), color=(10, 20, 30))
+
+    patch_engine._WORKER_CONTEXT = {
+        "profile_output_path": "/tmp/profile.json",
+        "window_size": PATCH_SIDE,
+        "use_artifact_filter": True,
+        "target_level": 0,
+        "tissue_percentage_req": 0.1,
+        "match_percentage_req": 0.01,
+        "region_x_start": 0,
+        "region_y_start": 0,
+        "label_region_masks": {
+            "cancer": np.zeros((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+            "not_cancer": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        },
+        "artifact_region_masks": {
+            "cov_fold": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        },
+        "cancer_polygon_index": ([], None),
+        "not_cancer_polygon_index": ([], None),
+        "artifact_geometry_index": {"dummy": object()},
+        "path_cancer_folder": str(tmp_path / "CANCER"),
+        "path_cancer_mask_folder": str(tmp_path / "CANCER_MASK"),
+        "path_not_cancer_folder": str(tmp_path / "NOT_CANCER"),
+        "path_not_cancer_mask_folder": str(tmp_path / "NOT_CANCER_MASK"),
+        "patient": "patient-2",
+        "slide_id": "slide-b",
+        "filename_prefix": patch_engine.build_patch_filename_prefix(
+            patient_id="patient-2",
+            slide_id="slide-b",
+        ),
+    }
+    for folder in ["CANCER", "CANCER_MASK", "NOT_CANCER", "NOT_CANCER_MASK"]:
+        (tmp_path / folder).mkdir()
+
+    monkeypatch.setattr(patch_engine, "check_tissue_percentage_robust", lambda patch, req: True)
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", 16)
+    monkeypatch.setattr(
+        patch_engine,
+        "compute_artifact_coverages_from_index",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("geometry-based artifact coverage should be bypassed")
+        ),
+    )
+
+    result = cast(
+        tuple[str, dict[str, Any], dict[str, Any]],
+        patch_engine._process_window_with_slide(FakeSlide(), 0, 0),
+    )
+
+    assert result[0] == "SAVED_NOT_CANCER"
+    assert result[1]["cov_fold"] == 1.0
 
 
 def test_process_window_with_slide_builds_cancer_patch_with_nonzero_mask(
@@ -539,6 +739,8 @@ def test_run_extraction_parses_artifact_geojson_and_writes_profile_summary(
         "load_openslide_module",
         lambda: type("OS", (), {"OpenSlide": lambda self, path: slide})(),
     )
+    monkeypatch.setattr(patch_engine, "MAX_PRECOMPUTED_MASK_BYTES", 0)
+    monkeypatch.setattr(patch_engine, "MAX_PRECOMPUTED_TISSUE_RGB_BYTES", 0)
     monkeypatch.setattr(patch_engine, "HALF_WINDOW", 1)
     monkeypatch.setattr(
         patch_engine,
@@ -607,6 +809,55 @@ def test_run_extraction_parses_artifact_geojson_and_writes_profile_summary(
     assert slide.closed is True
 
 
+def test_build_worker_setup_prefers_precomputed_masks_for_small_regions(tmp_path: Path) -> None:
+    class FakeSlide:
+        def read_region(
+            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+        ) -> Image.Image:
+            del coords, level, size
+            return Image.new("RGB", (4, 4), color=(10, 20, 30))
+
+    request = patch_engine._WorkerSetupRequest(
+        path_Image="/tmp/slide.svs",
+        kwargs={
+            "target_level": 0,
+            "window_size": 4,
+            "tissue_percentage_req": 0.1,
+            "match_percentage_req": 0.1,
+            "patient": "p1",
+            "num_workers": 1,
+            "use_artifact_filter": True,
+        },
+        slide=FakeSlide(),
+        preparation=patch_engine._ExtractionPreparation(
+            slide_basename="slide.svs",
+            annotations_cancer_level0=[[(0, 0), (4, 0), (4, 4), (0, 4)]],
+            annotations_not_cancer_level0=[],
+            artifact_polygons_by_class_level0={"Fold": [[(0, 0), (4, 0), (4, 4), (0, 4)]]},
+        ),
+        region=patch_engine._ScaledAnnotationRegion(
+            scale_factor=1.0,
+            target_width=4,
+            target_height=4,
+            x_start=0,
+            y_start=0,
+            x_end=4,
+            y_end=4,
+        ),
+        filtered_coords=[(0, 0)],
+        slide_phase_seconds={},
+        profile_output_path=tmp_path / "profile.json",
+    )
+
+    worker_setup = patch_engine._build_worker_setup(request)
+
+    assert worker_setup.worker_state["label_region_masks"] is not None
+    assert worker_setup.worker_state["artifact_region_masks"] is not None
+    assert worker_setup.worker_state["tissue_region_mask"] is not None
+    assert worker_setup.worker_state["cancer_polygon_index"] == ([], None)
+    assert worker_setup.worker_state["artifact_geometry_index"] == {}
+
+
 def test_run_extraction_raises_when_workers_report_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeSlide:
         level_downsamples = [1.0]
@@ -631,6 +882,7 @@ def test_run_extraction_raises_when_workers_report_errors(monkeypatch: pytest.Mo
         "load_openslide_module",
         lambda: type("OS", (), {"OpenSlide": lambda self, path: FakeSlide()})(),
     )
+    monkeypatch.setattr(patch_engine, "MAX_PRECOMPUTED_TISSUE_RGB_BYTES", 0)
     monkeypatch.setattr(patch_engine, "HALF_WINDOW", 1)
     monkeypatch.setattr(
         patch_engine,

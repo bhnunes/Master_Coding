@@ -56,53 +56,80 @@ class ArtifactRepository:
         """Insert new slide members into the repository without duplication."""
 
         with self._connect() as connection:
-            for entry in members:
-                if isinstance(entry, tuple):
-                    member_name, member_signature = entry
-                else:
-                    member_name = entry
-                    member_signature = entry
+            normalized_members = self._normalize_member_entries(members)
+            if not normalized_members:
+                connection.commit()
+                return
 
-                existing = connection.execute(
-                    "SELECT ID, Member_Signature FROM artifact_detection WHERE Zip_Member_Path = ?",
-                    (member_name,),
-                ).fetchone()
+            existing_by_member = {
+                str(row["Zip_Member_Path"]): row
+                for row in connection.execute(
+                    "SELECT ID, Zip_Member_Path, Member_Signature FROM artifact_detection"
+                ).fetchall()
+            }
+
+            pending_inserts: list[tuple[str, str, str]] = []
+            pending_updates: list[tuple[str, str, int]] = []
+            for member_name, member_signature in normalized_members:
+                existing = existing_by_member.get(member_name)
                 if existing is None:
-                    connection.execute(
-                        """
-                        INSERT INTO artifact_detection (
-                            Image_Name,
-                            Zip_Member_Path,
-                            Member_Signature
-                        )
-                        VALUES (?, ?, ?)
-                        """,
-                        (member_name, member_name, member_signature),
-                    )
+                    pending_inserts.append((member_name, member_name, member_signature))
                     continue
 
                 previous_signature = str(existing["Member_Signature"] or "")
-                if previous_signature != str(member_signature):
-                    connection.execute(
-                        """
-                        UPDATE artifact_detection
-                        SET Member_Signature = ?,
-                            GeoJSON_Processed = 0,
-                            GeoJSON_Path = NULL,
-                            Status = 'PENDING',
-                            Error_Type = 'STALE_INPUT',
-                            Comments = ?,
-                            Processing_Time_Seconds = NULL,
-                            LastUpdate = CURRENT_TIMESTAMP
-                        WHERE ID = ?
-                        """,
+                if previous_signature != member_signature:
+                    pending_updates.append(
                         (
                             member_signature,
                             "Zip member content changed; artifact GeoJSON must be regenerated.",
                             int(existing["ID"]),
-                        ),
+                        )
                     )
+
+            if pending_inserts:
+                connection.executemany(
+                    """
+                    INSERT INTO artifact_detection (
+                        Image_Name,
+                        Zip_Member_Path,
+                        Member_Signature
+                    )
+                    VALUES (?, ?, ?)
+                    """,
+                    pending_inserts,
+                )
+            if pending_updates:
+                connection.executemany(
+                    """
+                    UPDATE artifact_detection
+                    SET Member_Signature = ?,
+                        GeoJSON_Processed = 0,
+                        GeoJSON_Path = NULL,
+                        Status = 'PENDING',
+                        Error_Type = 'STALE_INPUT',
+                        Comments = ?,
+                        Processing_Time_Seconds = NULL,
+                        LastUpdate = CURRENT_TIMESTAMP
+                    WHERE ID = ?
+                    """,
+                    pending_updates,
+                )
             connection.commit()
+
+    def _normalize_member_entries(
+        self, members: list[str] | list[tuple[str, str]]
+    ) -> list[tuple[str, str]]:
+        normalized_by_name: dict[str, str] = {}
+        for entry in members:
+            member_name, member_signature = self._normalize_member_entry(entry)
+            normalized_by_name[member_name] = member_signature
+        return list(normalized_by_name.items())
+
+    def _normalize_member_entry(self, entry: str | tuple[str, str]) -> tuple[str, str]:
+        if isinstance(entry, tuple):
+            member_name, member_signature = entry
+            return member_name, str(member_signature)
+        return entry, entry
 
     def _ensure_column(
         self, connection: sqlite3.Connection, column_name: str, column_sql: str

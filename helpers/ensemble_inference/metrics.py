@@ -16,6 +16,10 @@ CONFIDENCE_INTERVAL_PERCENTILES = [2.5, 97.5]
 
 @dataclass(frozen=True)
 class _PerPatientMetricSummary:
+    tp: np.ndarray[Any, Any]
+    fp: np.ndarray[Any, Any]
+    fn: np.ndarray[Any, Any]
+    tn: np.ndarray[Any, Any]
     per_patient_scores: dict[str, np.ndarray[Any, Any]]
     dice_pos_only: np.ndarray[Any, Any]
     neg_clean: np.ndarray[Any, Any]
@@ -94,6 +98,10 @@ def _summarize_per_patient_metrics(
     metric_keys: list[str],
 ) -> _PerPatientMetricSummary:
     n_patients = len(unique_patient_ids)
+    tp = np.zeros(n_patients, dtype=np.float64)
+    fp = np.zeros(n_patients, dtype=np.float64)
+    fn = np.zeros(n_patients, dtype=np.float64)
+    tn = np.zeros(n_patients, dtype=np.float64)
     per_patient_scores = {key: np.zeros(n_patients, dtype=np.float64) for key in metric_keys}
     dice_pos_only = np.full(n_patients, np.nan, dtype=np.float64)
     neg_clean = np.full(n_patients, np.nan, dtype=np.float64)
@@ -106,6 +114,10 @@ def _summarize_per_patient_metrics(
         fp_patient = float(sum(item["fp"] for item in patient_stats))
         fn_patient = float(sum(item["fn"] for item in patient_stats))
         tn_patient = float(sum(item["tn"] for item in patient_stats))
+        tp[index] = tp_patient
+        fp[index] = fp_patient
+        fn[index] = fn_patient
+        tn[index] = tn_patient
         patient_metrics = calculate_metrics(tp_patient, fp_patient, fn_patient, tn_patient)
         for key in metric_keys:
             per_patient_scores[key][index] = patient_metrics[key]
@@ -117,6 +129,10 @@ def _summarize_per_patient_metrics(
             n_neg_patients += 1
 
     return _PerPatientMetricSummary(
+        tp=tp,
+        fp=fp,
+        fn=fn,
+        tn=tn,
         per_patient_scores=per_patient_scores,
         dice_pos_only=dice_pos_only,
         neg_clean=neg_clean,
@@ -127,14 +143,12 @@ def _summarize_per_patient_metrics(
 
 def _bootstrap_metric_intervals(
     *,
-    stats_by_patient: dict[str, list[dict[str, int]]],
-    unique_patient_ids: list[str],
     metric_keys: list[str],
     per_patient_summary: _PerPatientMetricSummary,
     n_bootstrap_samples: int,
     seed: int,
 ) -> tuple[dict[str, Any], dict[str, Any], list[float], list[float]]:
-    n_patients = len(unique_patient_ids)
+    n_patients = len(per_patient_summary.tp)
     rng = np.random.default_rng(seed)
     boot_micro = {key: np.zeros(n_bootstrap_samples, dtype=np.float64) for key in metric_keys}
     boot_macro = {key: np.zeros(n_bootstrap_samples, dtype=np.float64) for key in metric_keys}
@@ -142,18 +156,16 @@ def _bootstrap_metric_intervals(
     boot_neg_clean = np.zeros(n_bootstrap_samples, dtype=np.float64)
 
     for index in range(n_bootstrap_samples):
-        resampled_pids = rng.choice(unique_patient_ids, size=n_patients, replace=True)
-        resampled_stats = [stat for pid in resampled_pids for stat in stats_by_patient[pid]]
+        sampled_indices = rng.choice(n_patients, size=n_patients, replace=True)
         metrics = calculate_metrics(
-            tp=sum(item["tp"] for item in resampled_stats),
-            fp=sum(item["fp"] for item in resampled_stats),
-            fn=sum(item["fn"] for item in resampled_stats),
-            tn=sum(item["tn"] for item in resampled_stats),
+            tp=float(np.sum(per_patient_summary.tp[sampled_indices])),
+            fp=float(np.sum(per_patient_summary.fp[sampled_indices])),
+            fn=float(np.sum(per_patient_summary.fn[sampled_indices])),
+            tn=float(np.sum(per_patient_summary.tn[sampled_indices])),
         )
         for key in metric_keys:
             boot_micro[key][index] = metrics[key]
 
-        sampled_indices = rng.choice(n_patients, size=n_patients, replace=True)
         for key in metric_keys:
             boot_macro[key][index] = np.nanmean(
                 per_patient_summary.per_patient_scores[key][sampled_indices]
@@ -245,8 +257,6 @@ def summarize_patient_metrics(
             boot_dice_ci,
             boot_neg_ci,
         ) = _bootstrap_metric_intervals(
-            stats_by_patient=stats_by_patient,
-            unique_patient_ids=unique_patient_ids,
             metric_keys=metric_keys,
             per_patient_summary=per_patient_summary,
             n_bootstrap_samples=n_bootstrap_samples,

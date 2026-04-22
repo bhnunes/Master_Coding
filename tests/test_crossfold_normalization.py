@@ -246,6 +246,77 @@ def test_fit_normalizer_on_train_set_supports_hdf5_backed_template_rows(
     assert np.array_equal(fake_normalizer.fitted_target, np.full((2, 2, 3), 37, dtype=np.uint8))
 
 
+def test_fit_normalizer_on_train_set_fallback_uses_indexed_hdf5_rows(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_normalizer = _FakeNormalizer()
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    train_df = pd.DataFrame(
+        [
+            {
+                "patient_id": 1,
+                "image_path": f"{source_path}::images[0]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 0,
+            },
+            {
+                "patient_id": 1,
+                "image_path": f"{source_path}::images[1]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 1,
+            },
+            {
+                "patient_id": 2,
+                "image_path": f"{source_path}::images[2]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 2,
+            },
+        ]
+    )
+    entropy_calls: list[tuple[str, int, str]] = []
+
+    def fake_entropy(row: tuple[str, int, str]) -> tuple[str, float]:
+        entropy_calls.append(row)
+        return (
+            row[2],
+            {
+                f"{source_path}::images[0]": 0.1,
+                f"{source_path}::images[1]": 0.9,
+                f"{source_path}::images[2]": 0.4,
+            }[row[2]],
+        )
+
+    monkeypatch.setattr(
+        normalization,
+        "calculate_image_entropy_from_hdf5_row",
+        fake_entropy,
+    )
+    monkeypatch.setattr(
+        normalization,
+        "load_stain_normalizer_backend",
+        lambda: _FakeStainModule(fake_normalizer),
+    )
+    monkeypatch.setattr(
+        normalization,
+        "_load_rgb_images_from_hdf5_rows",
+        lambda rows: [np.zeros((2, 2, 3), dtype=np.uint8)],
+    )
+
+    _, template_paths = normalization.fit_normalizer_on_train_set(
+        train_df,
+        "MACENKO",
+        entropy_df=None,
+    )
+
+    assert template_paths == [f"{source_path}::images[1]", f"{source_path}::images[2]"]
+    assert entropy_calls == [
+        (str(source_path), 0, f"{source_path}::images[0]"),
+        (str(source_path), 1, f"{source_path}::images[1]"),
+        (str(source_path), 2, f"{source_path}::images[2]"),
+    ]
+
+
 def test_save_normalizer_stats_exports_hdf5_template_images(tmp_path: Path) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
     with h5py.File(source_path, "w") as handle:

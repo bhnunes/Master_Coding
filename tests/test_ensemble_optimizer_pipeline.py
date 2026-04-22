@@ -140,10 +140,10 @@ def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout
         validation_layout: ValidationDatasetLayout,
         optimization_patients: set[str],
         device: Any,
-    ) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str]]:
+    ) -> tuple[list[SelectedModelMetadata], dict[str, float], dict[str, str], dict[str, Any]]:
         del config, validation_layout, device
         observed["optimization_patients"] = optimization_patients
-        return selected_models, {"a_meta.json": 0.9, "b_meta.json": 0.8}, {}
+        return selected_models, {"a_meta.json": 0.9, "b_meta.json": 0.8}, {}, {}
 
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline._select_models_from_optimization_subset",
@@ -277,6 +277,7 @@ def test_execute_pipeline_logs_phase_summaries(
         lambda config, validation_h5_path, optimization_patients, device: (
             selected_models,
             {"a_meta.json": 0.9, "b_meta.json": 0.8},
+            {},
             {},
         ),
     )
@@ -422,6 +423,7 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
         lambda config, validation_h5_path, optimization_patients, device: (
             selected_models,
             {"a_meta.json": 0.9, "b_meta.json": 0.8},
+            {},
             {},
         ),
     )

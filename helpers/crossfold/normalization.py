@@ -95,11 +95,25 @@ def _can_use_hdf5_rows(frame: pd.DataFrame) -> bool:
     return {"source_hdf5_path", "source_row_index"}.issubset(frame.columns)
 
 
+def _row_has_hdf5_columns(row: pd.Series) -> bool:
+    return {"source_hdf5_path", "source_row_index"}.issubset(row.index)
+
+
 def _parse_hdf5_image_ref(template_ref: str) -> tuple[Path, int] | None:
     if "::images[" not in template_ref or not template_ref.endswith("]"):
         return None
     source_hdf5_path, row_index_text = template_ref.split("::images[", maxsplit=1)
     return Path(source_hdf5_path), int(row_index_text[:-1])
+
+
+def _build_image_path_lookup(train_df: pd.DataFrame) -> dict[str, pd.Series]:
+    if train_df.empty:
+        return {}
+    deduplicated = train_df.drop_duplicates(subset=["image_path"], keep="first")
+    return {
+        str(image_path): row
+        for image_path, row in deduplicated.set_index("image_path", drop=False).iterrows()
+    }
 
 
 def _export_hdf5_template_image(template_ref: str, destination: Path) -> None:
@@ -136,14 +150,14 @@ def fit_normalizer_on_train_set(
     else:
         logging.warning("entropy_df not provided; selecting templates by rereading images (slow).")
         patient_files = train_df.groupby("patient_id")["image_path"].apply(list).to_dict()
+        image_path_lookup = _build_image_path_lookup(train_df)
         template_paths = []
         for files in patient_files.values():
             best_path: str | None = None
             best_entropy = -1.0
             for image_path in files:
-                matched_rows = train_df.loc[train_df["image_path"] == image_path]
-                if _can_use_hdf5_rows(matched_rows):
-                    row = matched_rows.iloc[0]
+                row = image_path_lookup.get(image_path)
+                if row is not None and _row_has_hdf5_columns(row):
                     _, entropy = calculate_image_entropy_from_hdf5_row(
                         (str(row["source_hdf5_path"]), int(row["source_row_index"]), image_path)
                     )

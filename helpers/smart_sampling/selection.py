@@ -729,6 +729,13 @@ def _select_diverse_samples_adaptive(
             plateau_evaluation_mode="holdout_unavailable",
         )
 
+    selection_order_positions = _selection_order_positions(global_indices, selection_order)
+    target_embeddings = embeddings if evaluation_embeddings is None else evaluation_embeddings
+    current_min_distances = _prefix_coverage_distances(
+        embeddings,
+        selection_order_positions[:min_keep],
+        target_embeddings=target_embeddings,
+    )
     retention_history: list[tuple[int, float]] = []
     previous_score: float | None = None
     previous_count: int | None = None
@@ -737,11 +744,10 @@ def _select_diverse_samples_adaptive(
     best_count = max_keep
 
     while selected_count <= max_keep:
-        score = _coverage_score(
-            embeddings,
-            selection_order[:selected_count],
-            global_indices,
-            evaluation_embeddings=evaluation_embeddings,
+        score = (
+            float(np.mean(current_min_distances))
+            if len(current_min_distances)
+            else float("inf")
         )
         retention_history.append((selected_count, score))
         if previous_score is not None:
@@ -771,7 +777,14 @@ def _select_diverse_samples_adaptive(
         if selected_count == max_keep:
             best_count = max_keep
             break
-        selected_count = min(max_keep, selected_count + keep_step)
+        next_count = min(max_keep, selected_count + keep_step)
+        current_min_distances = _update_prefix_coverage_distances(
+            embeddings,
+            current_min_distances,
+            selection_order_positions[selected_count:next_count],
+            target_embeddings=target_embeddings,
+        )
+        selected_count = next_count
 
     return SelectionDecision(
         selected_indices=selection_order[:best_count],
@@ -834,6 +847,53 @@ def _coverage_score(
         axis=2,
     )
     return float(np.mean(np.min(distances, axis=1)))
+
+
+def _selection_order_positions(
+    global_indices: npt.NDArray[np.int64],
+    selection_order: npt.NDArray[np.int64],
+) -> npt.NDArray[np.int64]:
+    positions_by_index = {
+        int(index): position for position, index in enumerate(global_indices.tolist())
+    }
+    return np.asarray(
+        [positions_by_index[int(index)] for index in selection_order.tolist()],
+        dtype=np.int64,
+    )
+
+
+def _prefix_coverage_distances(
+    embeddings: npt.NDArray[np.float32],
+    selected_positions: npt.NDArray[np.int64],
+    *,
+    target_embeddings: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    if len(selected_positions) == 0:
+        return np.full(len(target_embeddings), np.inf, dtype=np.float32)
+    selected_embeddings = embeddings[selected_positions]
+    distances = np.linalg.norm(
+        target_embeddings[:, None, :] - selected_embeddings[None, :, :],
+        axis=2,
+    )
+    return np.asarray(np.min(distances, axis=1), dtype=np.float32)
+
+
+def _update_prefix_coverage_distances(
+    embeddings: npt.NDArray[np.float32],
+    current_min_distances: npt.NDArray[np.float32],
+    added_positions: npt.NDArray[np.int64],
+    *,
+    target_embeddings: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    if len(added_positions) == 0:
+        return current_min_distances
+    added_embeddings = embeddings[added_positions]
+    added_distances = np.linalg.norm(
+        target_embeddings[:, None, :] - added_embeddings[None, :, :],
+        axis=2,
+    )
+    added_min_distances = np.asarray(np.min(added_distances, axis=1), dtype=np.float32)
+    return np.minimum(current_min_distances, added_min_distances)
 
 
 def _compute_adaptive_m_target(

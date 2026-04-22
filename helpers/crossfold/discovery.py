@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
 import h5py
@@ -68,40 +69,47 @@ def _build_logical_hdf5_ref(source_path: Path, dataset_name: str, row_index: int
     return f"{source_path}::{dataset_name}[{row_index}]"
 
 
+def _decode_string_array(values: Sequence[object]) -> list[str]:
+    return [_decode_string(value) for value in values]
+
+
 def _load_hdf5_patch_dataset(source_path: Path) -> pd.DataFrame:
     logging.info("Loading Stage 5 source rows from HDF5 %s", source_path)
-    rows: list[dict[str, object]] = []
     with h5py.File(source_path, "r") as handle:
-        filenames = handle["filenames"]
-        labels = handle["labels"]
-        patient_ids = handle["patient_ids"]
+        filenames = _decode_string_array(handle["filenames"][:])
+        labels = handle["labels"][:]
+        patient_ids = handle["patient_ids"][:]
         source_image_paths = handle.get("source_image_paths")
         source_mask_paths = handle.get("source_mask_paths")
-        for index in range(len(filenames)):
-            image_ref = (
-                _decode_string(source_image_paths[index])
-                if source_image_paths is not None
-                else _build_logical_hdf5_ref(source_path, "images", index)
-            )
-            mask_ref = (
-                _decode_string(source_mask_paths[index])
-                if source_mask_paths is not None
-                else _build_logical_hdf5_ref(source_path, "masks", index)
-            )
-            rows.append(
-                {
-                    "patient_id": int(patient_ids[index]),
-                    "image_path": image_ref,
-                    "mask_path": mask_ref,
-                    "label": int(labels[index]),
-                    "filename": _decode_string(filenames[index]),
-                    "source_row_index": index,
-                    "source_hdf5_path": str(source_path),
-                }
-            )
-    if not rows:
-        raise ValueError(f"No rows found in source HDF5 dataset: {source_path}")
-    dataset = pd.DataFrame(rows)
+        row_count = len(filenames)
+        if row_count == 0:
+            raise ValueError(f"No rows found in source HDF5 dataset: {source_path}")
+        source_row_index = list(range(row_count))
+        image_paths = (
+            _decode_string_array(source_image_paths[:])
+            if source_image_paths is not None
+            else [
+                _build_logical_hdf5_ref(source_path, "images", index) for index in source_row_index
+            ]
+        )
+        mask_paths = (
+            _decode_string_array(source_mask_paths[:])
+            if source_mask_paths is not None
+            else [
+                _build_logical_hdf5_ref(source_path, "masks", index) for index in source_row_index
+            ]
+        )
+    dataset = pd.DataFrame(
+        {
+            "patient_id": patient_ids.astype(int),
+            "image_path": image_paths,
+            "mask_path": mask_paths,
+            "label": labels.astype(int),
+            "filename": filenames,
+            "source_row_index": source_row_index,
+            "source_hdf5_path": [str(source_path)] * row_count,
+        }
+    )
     logging.info(
         "Loaded %s HDF5 rows from %s patients.",
         len(dataset),

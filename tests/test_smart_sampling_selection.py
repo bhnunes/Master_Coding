@@ -9,6 +9,10 @@ import numpy as np
 import pytest
 
 from helpers.smart_sampling.selection import (
+    _coverage_score,
+    _prefix_coverage_distances,
+    _selection_order_positions,
+    _update_prefix_coverage_distances,
     compute_k,
     select_diverse_samples,
     select_diverse_samples_gist,
@@ -162,6 +166,49 @@ def test_select_diverse_samples_stops_when_coverage_improvement_plateaus() -> No
     assert len(decision.selected_indices) < PARTIAL_SELECTION_LIMIT
     assert len(decision.retention_history) >= RETENTION_HISTORY_MIN_LENGTH
     assert decision.plateau_evaluation_mode == "within_patient_patch_holdout"
+
+
+def test_incremental_prefix_coverage_matches_exact_score() -> None:
+    embeddings = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    global_indices = np.array([10, 11, 12, 13], dtype=np.int64)
+    selection_order = np.array([10, 12, 13, 11], dtype=np.int64)
+    evaluation_embeddings = np.array([[0.2, 0.2], [0.8, 0.9]], dtype=np.float32)
+
+    selection_positions = _selection_order_positions(global_indices, selection_order)
+    current = _prefix_coverage_distances(
+        embeddings,
+        selection_positions[:2],
+        target_embeddings=evaluation_embeddings,
+    )
+    exact_two = _coverage_score(
+        embeddings,
+        selection_order[:2],
+        global_indices,
+        evaluation_embeddings=evaluation_embeddings,
+    )
+    updated = _update_prefix_coverage_distances(
+        embeddings,
+        current,
+        selection_positions[2:4],
+        target_embeddings=evaluation_embeddings,
+    )
+    exact_four = _coverage_score(
+        embeddings,
+        selection_order[:4],
+        global_indices,
+        evaluation_embeddings=evaluation_embeddings,
+    )
+
+    assert float(np.mean(current)) == pytest.approx(exact_two)
+    assert float(np.mean(updated)) == pytest.approx(exact_four)
 
 
 def test_select_patient_samples_reuses_cached_embeddings_for_overlapping_subsets(
