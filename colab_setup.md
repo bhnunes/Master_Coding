@@ -82,8 +82,8 @@ The same environment can be used for the rest of the repository scripts:
 
 ```bash
 !uv run --python 3.12 python 2_database_manager.py
-!uv run --python 3.12 python 5_crossfold.py
-!uv run --python 3.12 python 6_sanity_checks.py
+!uv run --python 3.12 python 4_crossfold.py
+!uv run --python 3.12 python 5_sanity_checks.py
 ```
 
 ## 7. What `setup_colab.sh` installs

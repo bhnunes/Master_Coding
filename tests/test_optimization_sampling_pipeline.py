@@ -32,6 +32,7 @@ SHARED_SLIDE_MASTER_POOL_SIZE = 120
 HDF5_SOURCE_POPULATION = 1100
 RGBA_CHANNELS = 3
 PATCH_SIDE = 4
+SEED = 42
 
 
 def _pipeline_config(
@@ -52,6 +53,7 @@ def _pipeline_config(
         overlay_color=(0, 0, 255),
         overlay_thickness=2,
         overlay_alpha=1.0,
+        seed=SEED,
         num_processes=2,
         rng=rng,
         overlay_runner=overlay_runner,
@@ -179,6 +181,28 @@ def test_discover_hdf5_image_mask_pairs_reads_canonical_dataset(tmp_path: Path) 
     assert list(pairs) == ["PATIENT_7_PATCH_001"]
     assert pairs["PATIENT_7_PATCH_001"].output_name == "PATIENT_7_PATCH_001.png"
     assert str(pairs["PATIENT_7_PATCH_001"].image_path).endswith("::images[0]")
+
+
+def test_discover_hdf5_image_mask_pairs_rejects_duplicate_stems(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET_DUPES.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset(
+            "images",
+            data=np.zeros((2, PATCH_SIDE, PATCH_SIDE, RGBA_CHANNELS), dtype=np.uint8),
+        )
+        handle.create_dataset(
+            "masks",
+            data=np.zeros((2, PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        )
+        handle.create_dataset("labels", data=np.array([1, 0], dtype=np.uint8))
+        handle.create_dataset("patient_ids", data=np.array([7, 8], dtype=np.int32))
+        handle.create_dataset(
+            "filenames",
+            data=np.array([b"case_1.png", b"case_1.tiff"], dtype="S10"),
+        )
+
+    with pytest.raises(ValueError, match="Duplicate filename stem 'case_1'"):
+        discover_hdf5_image_mask_pairs(source_path)
 
 
 def test_run_optimization_sampling_creates_manual_review_folders(tmp_path: Path) -> None:

@@ -254,7 +254,7 @@ class MasterManifest:
         *,
         decisions: Sequence[Mapping[str, object]],
     ) -> None:
-        """Persist Stage 4.3 accepted/rejected row state onto existing patch rows."""
+        """Persist Stage 3.3 accepted/rejected row state onto existing patch rows."""
 
         self.initialize()
         with self._connect() as connection:
@@ -271,7 +271,7 @@ class MasterManifest:
                 ).fetchone()
                 if patch_row is None:
                     raise ValueError(
-                        "Stage 4.3 decision targets a missing canonical Stage 2 row: "
+                        "Stage 3.3 decision targets a missing canonical Stage 2 row: "
                         f"({source_hdf5_path}, {source_row_index})"
                     )
                 self._validate_stage4_decision_provenance(patch_row=patch_row, decision=decision)
@@ -497,7 +497,7 @@ class MasterManifest:
         expected_filename = _coerce_str_or_none(decision.get("filename"))
         if expected_filename is not None and expected_filename != str(patch_row["filename"]):
             raise ValueError(
-                "Stage 4.3 decision filename does not match the canonical Stage 2 row: "
+                "Stage 3.3 decision filename does not match the canonical Stage 2 row: "
                 f"expected {patch_row['filename']!r}, got {expected_filename!r}."
             )
 
@@ -507,7 +507,7 @@ class MasterManifest:
             field_name="patient_id",
         ) != int(patch_row["patient_id"]):
             raise ValueError(
-                "Stage 4.3 decision patient_id does not match the canonical Stage 2 row: "
+                "Stage 3.3 decision patient_id does not match the canonical Stage 2 row: "
                 f"expected {patch_row['patient_id']!r}, got {expected_patient_id!r}."
             )
 
@@ -515,7 +515,7 @@ class MasterManifest:
         actual_slide_id = _coerce_str_or_none(patch_row["slide_id"])
         if expected_slide_id is not None and expected_slide_id != actual_slide_id:
             raise ValueError(
-                "Stage 4.3 decision slide_id does not match the canonical Stage 2 row: "
+                "Stage 3.3 decision slide_id does not match the canonical Stage 2 row: "
                 f"expected {actual_slide_id!r}, got {expected_slide_id!r}."
             )
 
@@ -526,7 +526,7 @@ class MasterManifest:
             and expected_source_signature != actual_source_signature
         ):
             raise ValueError(
-                "Stage 4.3 decision source_signature does not match the canonical Stage 2 row: "
+                "Stage 3.3 decision source_signature does not match the canonical Stage 2 row: "
                 f"expected {actual_source_signature!r}, got {expected_source_signature!r}."
             )
 

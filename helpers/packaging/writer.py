@@ -401,12 +401,12 @@ def _load_accepted_manifest_rows(
         if not row_source_sha256:
             raise ValueError(
                 "Accepted manifest row is missing source_hdf5_sha256. "
-                "Regenerate accepted_manifest.csv from Stage 4.3 for the current source HDF5."
+                "Regenerate accepted_manifest.csv from Stage 3.3 for the current source HDF5."
             )
         if row_source_sha256 != source_signature:
             raise ValueError(
                 "Accepted manifest row does not match the current source HDF5 source_signature. "
-                "Regenerate accepted_manifest.csv from Stage 4.3 for the current canonical "
+                "Regenerate accepted_manifest.csv from Stage 3.3 for the current canonical "
                 "source HDF5 before packaging."
             )
         source_row_index = int(row["source_row_index"])

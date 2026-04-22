@@ -131,7 +131,7 @@ def _load_sqlite_patch_dataset(source_path: Path) -> pd.DataFrame:
             connection,
         )
     if dataset.empty:
-        raise ValueError(f"No accepted Stage 4.3 rows found in master manifest: {source_path}")
+        raise ValueError(f"No accepted Stage 3.3 rows found in master manifest: {source_path}")
     logging.info(
         "Loaded %s SQLite-backed rows from %s patients.",
         len(dataset),

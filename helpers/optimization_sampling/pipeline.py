@@ -21,7 +21,7 @@ OverlayRunner = Callable[[Sequence[OverlayTask], int], list[bool]]
 
 @dataclass(frozen=True)
 class OptimizationSamplingSummary:
-    """Execution summary for Stage 4 optimization sampling."""
+    """Execution summary for Stage 3.1 optimization sampling."""
 
     total_population: int
     required_sample_size: int
@@ -47,17 +47,19 @@ class OptimizationSamplingConfig:
     overlay_thickness: int
     overlay_alpha: float
     num_processes: int
+    seed: int
     logger: logging.Logger | None = None
     rng: random.Random | None = None
     overlay_runner: OverlayRunner = generate_overlay_images
 
 
 def run_optimization_sampling(config: OptimizationSamplingConfig) -> OptimizationSamplingSummary:
-    """Run the current Stage 4 optimization sampling workflow."""
+    """Run the current Stage 3.1 optimization sampling workflow."""
 
     active_logger = config.logger or logging.getLogger("optimization_sampling")
     active_logger.info("--- Experiment Setup Initiated: On-the-Fly Generation ---")
     active_logger.info("Scanning for candidates in HDF5 source: %s", config.source_hdf5_path)
+    active_rng = config.rng or random.Random(config.seed)
     pairs = discover_hdf5_image_mask_pairs(config.source_hdf5_path)
     selection = select_sample_stems(
         list(pairs),
@@ -66,7 +68,7 @@ def run_optimization_sampling(config: OptimizationSamplingConfig) -> Optimizatio
         confidence_level=config.confidence_level,
         margin_of_error=config.margin_of_error,
         proportion=config.proportion,
-        rng=config.rng,
+        rng=active_rng,
     )
     active_logger.info(
         "Identified %s valid image-mask pairs for image-level sampling.",
@@ -119,7 +121,7 @@ def run_optimization_sampling(config: OptimizationSamplingConfig) -> Optimizatio
     )
     if success_count < len(tasks):
         active_logger.warning(
-            "%s images failed to process. Check the Stage 4 log for details.",
+            "%s images failed to process. Check the Stage 3.1 log for details.",
             len(tasks) - success_count,
         )
 
@@ -141,7 +143,7 @@ def run_optimization_sampling(config: OptimizationSamplingConfig) -> Optimizatio
 
 
 def build_next_steps_message(summary: OptimizationSamplingSummary) -> str:
-    """Build the operator instructions shown after Stage 4 setup completes."""
+    """Build the operator instructions shown after Stage 3.1 setup completes."""
 
     approved_target = math.ceil(0.7 * summary.required_sample_size)
     rejected_target = math.ceil(0.3 * summary.required_sample_size)
@@ -149,7 +151,7 @@ def build_next_steps_message(summary: OptimizationSamplingSummary) -> str:
         "\n\n--- Setup Complete! (Efficient Method) ---\n"
         "Overlays for the pilot and master pools were generated on-the-fly.\n"
         "NO intermediate 'overlays' folder was created, saving significant disk space.\n"
-        "\nA detailed log has been saved to the Stage 4 log file.\n"
+        "\nA detailed log has been saved to the Stage 3.1 log file.\n"
         "\nYour next steps are:\n"
         f"1. Go to the '{summary.pilot_folder.name}' folder. Move the "
         f"{summary.pilot_sample_size} generated overlays into the 'APPROVED' "

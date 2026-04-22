@@ -13,6 +13,8 @@ OVERLAY_COLOR = (1, 2, 3)
 OVERLAY_THICKNESS = 4
 OVERLAY_ALPHA = 0.5
 NUM_PROCESSES = 3
+SEED = 987
+DEFAULT_SEED = 42
 
 
 def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: Path) -> None:
@@ -34,6 +36,7 @@ def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: 
             "OPTIMIZATION_SAMPLING_OVERLAY_COLOR_R": "3",
             "OPTIMIZATION_SAMPLING_OVERLAY_THICKNESS": "4",
             "OPTIMIZATION_SAMPLING_OVERLAY_ALPHA": "0.5",
+            "OPTIMIZATION_SAMPLING_SEED": "987",
             "OPTIMIZATION_SAMPLING_NUM_PROCESSES": "3",
         }
     )
@@ -50,6 +53,7 @@ def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: 
     assert config.overlay_color == OVERLAY_COLOR
     assert config.overlay_thickness == OVERLAY_THICKNESS
     assert config.overlay_alpha == OVERLAY_ALPHA
+    assert config.seed == SEED
     assert config.num_processes == NUM_PROCESSES
 
 
@@ -70,3 +74,4 @@ def test_load_optimization_sampling_config_uses_hdf5_source(tmp_path: Path) -> N
     )
 
     assert config.source_hdf5_path == source_path
+    assert config.seed == DEFAULT_SEED

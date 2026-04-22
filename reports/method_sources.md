@@ -1,6 +1,8 @@
 # Method Sources
 
 This file maps major manuscript sections in `reports/main.tex` to repository sources inspected during drafting.
+The repo now uses current script names (`3_1`, `4_crossfold`, `8_training_ensemble`, etc.),
+so stage labels here follow the current codebase naming used in orchestration entrypoints.
 
 ## Pipeline overview
 
@@ -8,16 +10,18 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `AGENTS.md`
 - `1_artifact_detection.py`
 - `2_database_manager.py`
-- `4_1_optimization_sampling.py`
-- `4_2_tune_graph_method.py`
-- `4_3_cleaner_script.py`
-- `5_crossfold.py`
-- `6_sanity_checks.py`
-- `7_smart_sampler.py`
-- `8_lr_finder.py`
-- `9_training_ensemble.py`
-- `10_optimizer_ensemble.py`
-- `11_inference_ensemble.py`
+- `3_1_optimization_sampling.py`
+- `3_2_tune_graph_method.py`
+- `3_3_cleaner_script.py`
+- `4_crossfold.py`
+- `5_sanity_checks.py`
+- `6_smart_sampler.py`
+- `7_lr_finder.py`
+- `8_training_ensemble.py`
+- `9_optimizer_ensemble.py`
+- `10_inference_ensemble.py`
+- `helpers/runtime_platform.py`
+- `helpers/logging_utils.py`
 
 ## Stage 1 artifact detection
 
@@ -40,33 +44,33 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/extraction/patch_engine.py`
 - `.env_example`
 
-## Stages 4.1--4.3 cleaning workflow
+## Stages 3.1--3.3 cleaning workflow
 
-- `4_1_optimization_sampling.py`
+- `3_1_optimization_sampling.py`
 - `helpers/optimization_sampling/config.py`
 - `helpers/optimization_sampling/sampling.py`
 - `helpers/optimization_sampling/overlay.py`
 - `helpers/optimization_sampling/pipeline.py`
-- `4_2_tune_graph_method.py`
+- `3_2_tune_graph_method.py`
 - `helpers/graph/tuning_config.py`
 - `helpers/graph/tuning_pipeline.py`
 - `helpers/graph/contamination.py`
 - `helpers/graph/parameter_store.py`
-- `4_3_cleaner_script.py`
+- `3_3_cleaner_script.py`
 - `helpers/graph/cleaning_config.py`
 - `helpers/graph/cleaning_pipeline.py`
 - `.env_example`
 
-## Stage 3 packaging helpers
+## Stage 3 canonical source packaging helpers
 
 - `helpers/packaging/config.py`
 - `helpers/packaging/pipeline.py`
 - `helpers/packaging/writer.py`
 - `.env_example`
 
-## Stage 5 crossfold and normalization
+## Stage 4 crossfold and normalization
 
-- `5_crossfold.py`
+- `4_crossfold.py`
 - `helpers/crossfold/config.py`
 - `helpers/crossfold/discovery.py`
 - `helpers/crossfold/entropy.py`
@@ -77,7 +81,7 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/crossfold/splitting.py`
 - `.env_example`
 
-## Stage 6 sanity checks
+## Stage 5 sanity checks
 
 - `7_sanity_checks.py`
 - `helpers/sanity/config.py`
@@ -89,7 +93,7 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/sanity/reporting.py`
 - `helpers/sanity/semantic_checks.py`
 
-## Stage 7 smart sampling
+## Stage 6 smart sampling
 
 - `7_smart_sampler.py`
 - `helpers/smart_sampling/config.py`
@@ -100,9 +104,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/smart_sampling/writer.py`
 - `helpers/smart_sampling/pipeline.py`
 
-## Stage 8 learning-rate screening
+## Stage 7 learning-rate screening
 
-- `8_lr_finder.py`
+- `7_lr_finder.py`
 - `helpers/lr_finder/config.py`
 - `helpers/lr_finder/data.py`
 - `helpers/lr_finder/search_space.py`
@@ -112,9 +116,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/lr_finder/pipeline.py`
 - `training_model_registry.json`
 
-## Stage 9 training
+## Stage 8 training
 
-- `9_training_ensemble.py`
+- `8_training_ensemble.py`
 - `helpers/training/config.py`
 - `helpers/training/data.py`
 - `helpers/training/models.py`
@@ -127,9 +131,9 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/training/gpu.py`
 - `training_model_registry.json`
 
-## Stages 10--11 ensemble optimization and inference
+## Stages 9--10 ensemble optimization and inference
 
-- `10_optimizer_ensemble.py`
+- `9_optimizer_ensemble.py`
 - `helpers/ensemble_optimizer/config.py`
 - `helpers/ensemble_optimizer/data.py`
 - `helpers/ensemble_optimizer/metadata.py`
@@ -138,7 +142,7 @@ This file maps major manuscript sections in `reports/main.tex` to repository sou
 - `helpers/ensemble_optimizer/pipeline.py`
 - `helpers/ensemble_optimizer/reporting.py`
 - `helpers/ensemble_optimizer/splitting.py`
-- `11_inference_ensemble.py`
+- `10_inference_ensemble.py`
 - `helpers/ensemble_inference/config.py`
 - `helpers/ensemble_inference/data.py`
 - `helpers/ensemble_inference/inference.py`

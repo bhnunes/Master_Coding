@@ -412,7 +412,7 @@ def test_build_graph_cleaning_parameter_artifact_maps_summary_to_artifact() -> N
         training_pairs=8,
         test_pairs=2,
         random_state=42,
-        generated_by="4_2_tune_graph_method.py",
+        generated_by="3_2_tune_graph_method.py",
     )
 
 

@@ -65,7 +65,7 @@ def _string_with_default(
 
 @dataclass(frozen=True)
 class GraphTuningConfig:
-    """Runtime configuration for `4_2_tune_graph_method.py`."""
+    """Runtime configuration for `3_2_tune_graph_method.py`."""
 
     source_hdf5_path: Path
     review_base_dir: Path
@@ -92,7 +92,7 @@ def load_graph_tuning_config(
     *,
     system_name: str | None = None,
 ) -> GraphTuningConfig:
-    """Load and validate Stage 4.2 graph tuning configuration."""
+    """Load and validate Stage 3.2 graph tuning configuration."""
 
     values = env if env is not None else os.environ
     source_hdf5_path = _required_path(

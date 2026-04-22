@@ -53,7 +53,7 @@ def _string_with_default(
 
 @dataclass(frozen=True)
 class GraphCleaningConfig:
-    """Runtime configuration for `4_3_cleaner_script.py`."""
+    """Runtime configuration for `3_3_cleaner_script.py`."""
 
     source_hdf5_path: Path
     output_base_dir: Path
@@ -75,7 +75,7 @@ def load_graph_cleaning_config(
     *,
     system_name: str | None = None,
 ) -> GraphCleaningConfig:
-    """Load and validate Stage 4.3 graph cleaning configuration."""
+    """Load and validate Stage 3.3 graph cleaning configuration."""
 
     values = env if env is not None else os.environ
     source_hdf5_path = _required_path(

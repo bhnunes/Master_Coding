@@ -225,13 +225,13 @@ def check_stage4_cleaning_lineage(
     expected_manifest_path = attrs.get("stage4_cleaning_manifest_path")
     expected_manifest_sha = attrs.get("stage4_cleaning_manifest_sha256")
     if expected_manifest_path is None and expected_manifest_sha is None:
-        return CheckResult("PASS", "No Stage 4.3 cleaning lineage recorded in source provenance.")
+        return CheckResult("PASS", "No Stage 3.3 cleaning lineage recorded in source provenance.")
     lineage_complete = bool(expected_manifest_path and expected_manifest_sha)
     if not lineage_complete:
         return CheckResult(
             "FAIL",
             (
-                "Stage 4.3 cleaning lineage is incomplete in run_config.json; "
+                "Stage 3.3 cleaning lineage is incomplete in run_config.json; "
                 "expected both manifest path and sha256."
             ),
         )
@@ -252,12 +252,12 @@ def check_stage4_cleaning_lineage(
     if mismatches:
         return CheckResult(
             "FAIL",
-            "Split HDF5 artifacts do not match Stage 4.3 cleaning lineage from run_config.json: "
+            "Split HDF5 artifacts do not match Stage 3.3 cleaning lineage from run_config.json: "
             f"{mismatches[:10]}",
         )
     return CheckResult(
         "PASS",
-        "Stage 4.3 cleaning lineage matches run_config.json across split HDF5 artifacts.",
+        "Stage 3.3 cleaning lineage matches run_config.json across split HDF5 artifacts.",
     )
 
 
@@ -265,7 +265,7 @@ def _resolve_stage4_cleaning_attrs(run_cfg: dict[str, Any] | None) -> dict[str, 
     if not run_cfg:
         return CheckResult(
             "N/A",
-            "run_config.json not found; skipping Stage 4.3 cleaning lineage check.",
+            "run_config.json not found; skipping Stage 3.3 cleaning lineage check.",
         )
 
     source_provenance = run_cfg.get("source_hdf5_provenance")
@@ -273,7 +273,7 @@ def _resolve_stage4_cleaning_attrs(run_cfg: dict[str, Any] | None) -> dict[str, 
         return CheckResult(
             "WARN",
             "run_config.json missing source_hdf5_provenance; cannot verify "
-            "Stage 4.3 cleaning lineage.",
+            "Stage 3.3 cleaning lineage.",
         )
 
     attrs = source_provenance.get("attrs")
@@ -281,6 +281,6 @@ def _resolve_stage4_cleaning_attrs(run_cfg: dict[str, Any] | None) -> dict[str, 
         return CheckResult(
             "WARN",
             "run_config.json missing source_hdf5_provenance.attrs; cannot verify "
-            "Stage 4.3 cleaning lineage.",
+            "Stage 3.3 cleaning lineage.",
         )
     return attrs

@@ -16,7 +16,7 @@ from helpers.logging_utils import LoggerSettings, configure_stage_logger
 
 
 def main() -> None:
-    """Run Stage 4.3 graph-based cleaning from `.env` configuration."""
+    """Run Stage 3.3 graph-based cleaning from `.env` configuration."""
 
     load_dotenv(override=True)
     config = load_graph_cleaning_config(os.environ)

@@ -9,7 +9,7 @@ from helpers.graph.contamination import GraphContaminationParameters
 
 @dataclass(frozen=True)
 class GraphCleaningParameterArtifact:
-    """Portable Stage 4 parameter artifact shared by tuning and cleaning."""
+    """Portable parameter artifact shared by graph tuning and cleaning."""
 
     graph_params: GraphContaminationParameters
     tau: float

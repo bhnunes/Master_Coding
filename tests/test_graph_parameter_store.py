@@ -27,7 +27,7 @@ def test_save_and_load_graph_cleaning_parameter_artifact_round_trip(tmp_path: Pa
         training_pairs=329,
         test_pairs=83,
         random_state=42,
-        generated_by="4_2_tune_graph_method.py",
+        generated_by="3_2_tune_graph_method.py",
     )
     output_path = tmp_path / "graph_cleaning_params.json"
 

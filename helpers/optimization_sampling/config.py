@@ -65,7 +65,7 @@ def _string_with_default(
 
 @dataclass(frozen=True)
 class OptimizationSamplingConfig:
-    """Runtime configuration for `4_1_optimization_sampling.py`."""
+    """Runtime configuration for `3_1_optimization_sampling.py`."""
 
     source_hdf5_path: Path
     output_base: Path
@@ -79,6 +79,7 @@ class OptimizationSamplingConfig:
     overlay_color: tuple[int, int, int]
     overlay_thickness: int
     overlay_alpha: float
+    seed: int
     num_processes: int
 
     @property
@@ -91,7 +92,7 @@ def load_optimization_sampling_config(
     *,
     system_name: str | None = None,
 ) -> OptimizationSamplingConfig:
-    """Load and validate Stage 4 optimization sampling configuration."""
+    """Load and validate Stage 3.1 optimization sampling configuration."""
 
     values = env if env is not None else os.environ
     source_hdf5_path = _required_path(
@@ -176,6 +177,11 @@ def load_optimization_sampling_config(
             values.get("OPTIMIZATION_SAMPLING_OVERLAY_ALPHA"),
             "OPTIMIZATION_SAMPLING_OVERLAY_ALPHA",
             default=1.0,
+        ),
+        seed=_parse_int(
+            values.get("OPTIMIZATION_SAMPLING_SEED"),
+            "OPTIMIZATION_SAMPLING_SEED",
+            default=42,
         ),
         num_processes=num_processes,
     )

@@ -67,7 +67,7 @@ class GraphTuningResult:
 
 @dataclass(frozen=True)
 class GraphTuningSummary:
-    """Execution summary for Stage 4.2 graph tuning."""
+    """Execution summary for Stage 3.2 graph tuning."""
 
     total_labeled_pairs: int
     training_pairs: int
@@ -219,7 +219,7 @@ def evaluate_on_test_set(
 
 
 def run_graph_tuning_pipeline(config: GraphTuningPipelineConfig) -> GraphTuningSummary:
-    """Run Stage 4.2 graph tuning and return the best recommended parameters."""
+    """Run Stage 3.2 graph tuning and return the best recommended parameters."""
 
     started_at = time.time()
     config.logger.info("--- Hyperparameter Tuning with Bayesian Optimization ---")
@@ -339,7 +339,7 @@ def build_graph_cleaning_parameter_artifact(
     *,
     random_state: int,
 ) -> GraphCleaningParameterArtifact:
-    """Build the Stage 4 handoff artifact used by `4_3_cleaner_script.py`."""
+    """Build the Stage 3.2→3.3 handoff artifact used by `3_3_cleaner_script.py`."""
 
     return GraphCleaningParameterArtifact(
         graph_params=summary.best_params,
@@ -349,7 +349,7 @@ def build_graph_cleaning_parameter_artifact(
         training_pairs=summary.training_pairs,
         test_pairs=summary.test_pairs,
         random_state=random_state,
-        generated_by="4_2_tune_graph_method.py",
+        generated_by="3_2_tune_graph_method.py",
     )
 
 

@@ -9,7 +9,7 @@ __all__ = ["configure_stage_logger", "configure_optimization_sampling_logger"]
 
 
 def configure_optimization_sampling_logger(log_path: Path) -> logging.Logger:
-    """Configure and return the Stage 4 logger."""
+    """Configure and return the Stage 3.1 logger."""
 
     return configure_stage_logger(
         "optimization_sampling",

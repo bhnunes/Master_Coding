@@ -33,7 +33,7 @@ _HDF5_SCORING_BATCH_SIZE = 512
 
 @dataclass(frozen=True)
 class GraphCleaningSummary:
-    """Execution summary for Stage 4.3 graph cleaning."""
+    """Execution summary for Stage 3.3 graph cleaning."""
 
     total_images: int
     accepted: int
@@ -82,10 +82,10 @@ class GraphCleaningPipelineConfig:
 
 
 def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCleaningSummary:
-    """Run Stage 4.3 filtering and write accepted/rejected manifests."""
+    """Run Stage 3.3 filtering and write accepted/rejected manifests."""
 
     started_at = time.time()
-    config.logger.info("--- Starting Stage 4.3 HDF5-backed filtering process ---")
+    config.logger.info("--- Starting Stage 3.3 HDF5-backed filtering process ---")
     config.logger.info("Using optimal parameters: %s | tau=%.2f", config.graph_params, config.tau)
     config.logger.info("Distributing work across %s CPU cores.", config.num_workers)
 

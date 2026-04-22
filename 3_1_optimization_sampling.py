@@ -14,7 +14,7 @@ from helpers.optimization_sampling.pipeline import (
 
 
 def main() -> None:
-    """Run Stage 4 optimization sampling from `.env` configuration."""
+    """Run Stage 3.1 optimization sampling from `.env` configuration."""
 
     load_dotenv(override=True)
     config = load_optimization_sampling_config(os.environ)
@@ -31,6 +31,7 @@ def main() -> None:
             overlay_color=config.overlay_color,
             overlay_thickness=config.overlay_thickness,
             overlay_alpha=config.overlay_alpha,
+            seed=config.seed,
             num_processes=config.num_processes,
             logger=logger,
         )

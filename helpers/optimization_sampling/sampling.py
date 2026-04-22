@@ -36,7 +36,7 @@ class OverlayTask:
 
 @dataclass(frozen=True)
 class SampleSelection:
-    """Selected Stage 4 image-level samples and derived statistics."""
+    """Selected Stage 3.1 image-level samples and derived statistics."""
 
     total_population: int
     required_sample_size: int
@@ -68,6 +68,7 @@ def discover_hdf5_image_mask_pairs(source_hdf5_path: Path) -> dict[str, ImageMas
         raise FileNotFoundError(f"HDF5 source does not exist: {source_hdf5_path}")
 
     pairs: dict[str, ImageMaskPair] = {}
+    seen_stems: set[str] = set()
     with h5py.File(source_hdf5_path, "r") as handle:
         filenames = cast(h5py.Dataset, handle["filenames"])
         filename_values = filenames[:]
@@ -78,12 +79,18 @@ def discover_hdf5_image_mask_pairs(source_hdf5_path: Path) -> dict[str, ImageMas
                 else str(filename_value)
             )
             stem = Path(filename).stem
+            if stem in seen_stems:
+                raise ValueError(
+                    f"Duplicate filename stem '{stem}' found at row {index} in {source_hdf5_path}. "
+                    "Stems must be unique for Stage 3.1 sampling."
+                )
             pairs[stem] = ImageMaskPair(
                 stem=stem,
                 image_path=f"{source_hdf5_path}::images[{index}]",
                 mask_path=f"{source_hdf5_path}::masks[{index}]",
                 output_name=filename,
             )
+            seen_stems.add(stem)
     if not pairs:
         raise ValueError(f"No rows found in HDF5 source: {source_hdf5_path}")
     return pairs
