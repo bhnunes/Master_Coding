@@ -51,7 +51,8 @@ dev = [
     "scalene>=1.5.0",
     "py-spy>=0.3.14",
     "snakeviz>=2.2.0",
-    "pytest-cov==7.0.0"
+    "pytest-cov==7.0.0",
+    "mutmut>=3.5.0",
 ]
 
 # --- UV Magic: Fetching CUDA 12.6 specifically ---
@@ -103,3 +104,40 @@ exclude = "^scripts/(aim_ui|app_ia_medica_v3)\\.py$"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mutmut]
+paths_to_mutate = [
+    "helpers/artifact/config.py",
+    "helpers/artifact/logging.py",
+    "helpers/artifact/paths.py",
+    "helpers/artifact/repository.py",
+    "helpers/artifact/zip.py",
+    "helpers/extraction/artifact_lookup.py",
+    "helpers/extraction/data_handlers.py",
+    "helpers/logging_utils.py",
+    "helpers/optimization_sampling/logging.py",
+    "helpers/packaging/config.py",
+    "helpers/runtime_platform.py",
+    "helpers/sanity/config.py",
+    "helpers/sanity/reporting.py",
+]
+also_copy = ["helpers"]
+tests_dir = []
+mutate_only_covered_lines = true
+max_stack_depth = 8
+pytest_add_cli_args = ["-q", "--maxfail=1"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_artifact_config.py",
+    "tests/test_artifact_logging.py",
+    "tests/test_artifact_paths.py",
+    "tests/test_artifact_repository.py",
+    "tests/test_artifact_zip.py",
+    "tests/test_extraction_artifact_lookup.py",
+    "tests/test_extraction_data_handlers.py",
+    "tests/test_logging_utils.py",
+    "tests/test_optimization_sampling_logging.py",
+    "tests/test_packaging_config.py",
+    "tests/test_runtime_platform.py",
+    "tests/test_sanity_config.py",
+    "tests/test_sanity_reporting.py",
+]

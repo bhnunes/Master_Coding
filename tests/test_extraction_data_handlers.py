@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 
+from helpers.extraction import data_handlers
 from helpers.extraction.data_handlers import (
     BaseHandler,
     JSON_Handler,
@@ -52,6 +53,26 @@ class FakeSlide:
         }
         self.level_dimensions = [(1000, 800)]
         self.level_downsamples = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+
+
+def test_data_handlers_namespace_smoke_path(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "annotations.json"
+    annotation_path.write_text(
+        json.dumps({"cancer_polygons": [], "not_cancer_polygons": []}),
+        encoding="utf-8",
+    )
+
+    handler = data_handlers.JSON_Handler()
+
+    assert data_handlers._require_annotation_path({"annotation_path": str(annotation_path)}) == str(
+        annotation_path
+    )
+    assert data_handlers._required_float("1.5") == EXPECTED_FLOAT_VALUE
+    assert data_handlers._node_text(None) is None
+    assert handler.load_annotations(None, annotation_path=str(annotation_path)) == {
+        "cancer_polygons": [],
+        "not_cancer_polygons": [],
+    }
 
 
 def test_to_coord_list_handles_empty_polygon() -> None:
