@@ -1,0 +1,14 @@
+flowchart LR
+    manifest[(master_manifest.sqlite<br/>VALIDATION row selection + normalization refs)]
+    shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
+    phase4_outputs[Input<br/>Normalization artifacts + run config]
+    checkpoints[Input<br/>Phase 8 checkpoints + metrics]
+    p9[Phase 9<br/>9_optimizer_ensemble.py<br/>Optimize ensemble recipe]
+    recipe[Output<br/>Declarative ensemble recipe JSON]
+
+    manifest -. read VALIDATION rows .-> p9
+    shards -. load validation pixels .-> p9
+    phase4_outputs --> p9
+    checkpoints --> p9
+    p9 --> recipe
+    p9 -. read only .-> manifest

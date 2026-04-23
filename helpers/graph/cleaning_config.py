@@ -55,9 +55,8 @@ def _string_with_default(
 class GraphCleaningConfig:
     """Runtime configuration for `3_3_cleaner_script.py`."""
 
-    source_hdf5_path: Path
-    output_base_dir: Path
     master_manifest_path: Path
+    output_base_dir: Path
     log_folder: Path
     log_file_name: str
     params_path: Path
@@ -78,32 +77,29 @@ def load_graph_cleaning_config(
     """Load and validate Stage 3.3 graph cleaning configuration."""
 
     values = env if env is not None else os.environ
-    source_hdf5_path = _required_path(
+    master_manifest_path = _required_path(
         values,
-        "GRAPH_CLEANING_SOURCE_HDF5_PATH",
+        "GRAPH_CLEANING_MASTER_MANIFEST_PATH",
         system_name=system_name,
     )
+    if not master_manifest_path.is_file():
+        raise ValueError(
+            "GRAPH_CLEANING_MASTER_MANIFEST_PATH must point to the Stage 2 "
+            f"master_manifest.sqlite file, got: {master_manifest_path}"
+        )
     params_path = _required_path(
         values,
         "GRAPH_CLEANING_PARAMS_PATH",
         system_name=system_name,
     )
     artifact = load_graph_cleaning_parameter_artifact(params_path)
-    master_manifest_path = resolve_env_path(
-        values.get("GRAPH_CLEANING_MASTER_MANIFEST_PATH"),
-        "GRAPH_CLEANING_MASTER_MANIFEST_PATH",
-        system_name=system_name,
-    )
-    if master_manifest_path is None:
-        master_manifest_path = source_hdf5_path.parents[2] / "master_manifest.sqlite"
     return GraphCleaningConfig(
-        source_hdf5_path=source_hdf5_path,
+        master_manifest_path=master_manifest_path,
         output_base_dir=_required_path(
             values,
             "GRAPH_CLEANING_OUTPUT_BASE_DIR",
             system_name=system_name,
         ),
-        master_manifest_path=master_manifest_path,
         log_folder=resolve_log_folder(
             values,
             system_name=system_name,

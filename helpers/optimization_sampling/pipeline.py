@@ -11,7 +11,7 @@ from helpers.optimization_sampling.overlay import generate_overlay_images
 from helpers.optimization_sampling.sampling import (
     OverlayTask,
     build_overlay_tasks,
-    discover_hdf5_image_mask_pairs,
+    discover_manifest_image_mask_pairs,
     ensure_manual_labeling_directories,
     select_sample_stems,
 )
@@ -36,7 +36,7 @@ class OptimizationSamplingSummary:
 
 @dataclass(frozen=True)
 class OptimizationSamplingConfig:
-    source_hdf5_path: Path
+    master_manifest_path: Path
     output_base: Path
     confidence_level: float
     margin_of_error: float
@@ -58,9 +58,12 @@ def run_optimization_sampling(config: OptimizationSamplingConfig) -> Optimizatio
 
     active_logger = config.logger or logging.getLogger("optimization_sampling")
     active_logger.info("--- Experiment Setup Initiated: On-the-Fly Generation ---")
-    active_logger.info("Scanning for candidates in HDF5 source: %s", config.source_hdf5_path)
+    active_logger.info(
+        "Resolving Stage 3.1 candidates from Stage 2 master manifest: %s",
+        config.master_manifest_path,
+    )
     active_rng = config.rng or random.Random(config.seed)
-    pairs = discover_hdf5_image_mask_pairs(config.source_hdf5_path)
+    pairs = discover_manifest_image_mask_pairs(config.master_manifest_path)
     selection = select_sample_stems(
         list(pairs),
         pilot_sample_size=config.pilot_sample_size,
@@ -71,7 +74,7 @@ def run_optimization_sampling(config: OptimizationSamplingConfig) -> Optimizatio
         rng=active_rng,
     )
     active_logger.info(
-        "Identified %s valid image-mask pairs for image-level sampling.",
+        "Identified %s canonical cancer image-mask pairs for image-level sampling.",
         selection.total_population,
     )
     active_logger.info("--- Experiment Parameters ---")

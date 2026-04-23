@@ -1,0 +1,12 @@
+flowchart LR
+    manifest[(master_manifest.sqlite<br/>Canonical rows + split state)]
+    phase4_outputs[Input<br/>Phase 4 TRAIN context + sidecars]
+    embeddings[Optional input<br/>Feature / heuristic inputs]
+    p6[Phase 6<br/>6_smart_sampler.py<br/>Select informative TRAIN rows]
+    sidecars[Output<br/>Sampling sidecars / reports]
+
+    manifest -. read TRAIN candidate rows .-> p6
+    phase4_outputs --> p6
+    embeddings -. optional .-> p6
+    p6 --> sidecars
+    p6 -. updates sampling state .-> manifest

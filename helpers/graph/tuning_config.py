@@ -67,7 +67,7 @@ def _string_with_default(
 class GraphTuningConfig:
     """Runtime configuration for `3_2_tune_graph_method.py`."""
 
-    source_hdf5_path: Path
+    master_manifest_path: Path
     review_base_dir: Path
     log_folder: Path
     log_file_name: str
@@ -95,13 +95,18 @@ def load_graph_tuning_config(
     """Load and validate Stage 3.2 graph tuning configuration."""
 
     values = env if env is not None else os.environ
-    source_hdf5_path = _required_path(
+    master_manifest_path = _required_path(
         values,
-        "GRAPH_TUNING_SOURCE_HDF5_PATH",
+        "GRAPH_TUNING_MASTER_MANIFEST_PATH",
         system_name=system_name,
     )
+    if not master_manifest_path.is_file():
+        raise ValueError(
+            "GRAPH_TUNING_MASTER_MANIFEST_PATH must point to the Stage 2 "
+            f"master_manifest.sqlite file, got: {master_manifest_path}"
+        )
     return GraphTuningConfig(
-        source_hdf5_path=source_hdf5_path,
+        master_manifest_path=master_manifest_path,
         review_base_dir=_required_path(values, "GRAPH_TUNING_BASE_DIR", system_name=system_name),
         log_folder=resolve_log_folder(
             values,

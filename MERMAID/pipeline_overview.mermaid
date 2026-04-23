@@ -1,5 +1,6 @@
 graph TD
     raw_data[Raw inputs<br/>WSIs + annotations + .env]
+    manifest[(master_manifest.sqlite<br/>canonical row registry + row state)]
 
     subgraph P1[Phase 1: Artifact Detection - optional]
         p1[1_artifact_detection.py<br/>Detect slide artifacts]
@@ -13,11 +14,11 @@ graph TD
     end
 
     subgraph P3[Phase 3: Annotation Cleaning - optional]
-        p31[3_1_optimization_sampling.py<br/>Build review sample]
+        p31[3_1_optimization_sampling.py<br/>Sample cancer rows from<br/>master_manifest.sqlite]
         review[Human review<br/>APPROVED / REJECTED]
-        p32[3_2_tune_graph_method.py<br/>Tune graph cleaning]
-        p33[3_3_cleaner_script.py<br/>Apply cleaning state]
-        p3_out[Updated accepted / rejected row state<br/>in master_manifest.sqlite + sidecars]
+        p32[3_2_tune_graph_method.py<br/>Tune graph cleaning from reviewed<br/>manifest-resolved cancer rows]
+        p33[3_3_cleaner_script.py<br/>Apply cleaning to cancer rows only<br/>from master_manifest.sqlite]
+        p3_out[Updated patch_stage_state in<br/>master_manifest.sqlite + decision sidecars<br/>Stage 2 HDF5 shards remain read-only]
         p31 --> review --> p32 --> p33 --> p3_out
     end
 
@@ -66,6 +67,7 @@ graph TD
     raw_data --> p2
     raw_data -. optional artifact pass .-> p1
     p1_out -. artifact metadata .-> p2
+    p2 -. writes canonical rows .-> manifest
 
     p2_out --> p31
     p2_out --> p4
@@ -79,3 +81,15 @@ graph TD
     p8_out --> p9
     p9_out --> p10
     p2_out --> p10
+
+    manifest -. sample cancer rows .-> p31
+    p33 -. updates cleaning state .-> manifest
+    manifest -. read cleaning + split state .-> p4
+    p4 -. updates split + normalization state .-> manifest
+    manifest -. validate provenance/state .-> p5
+    manifest -. read TRAIN candidate rows .-> p6
+    p6 -. updates sampling state .-> manifest
+    manifest -. read selected rows + normalization refs .-> p7
+    manifest -. read selected rows + normalization refs .-> p8
+    manifest -. read VALIDATION rows + normalization refs .-> p9
+    manifest -. read TEST rows + normalization refs .-> p10

@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
+from helpers.extraction.master_manifest import MasterManifest, Stage2SlideRows
 from helpers.graph.contamination import GraphContaminationParameters
 from helpers.graph.parameter_store import GraphCleaningParameterArtifact
 from helpers.graph.tuning_pipeline import (
@@ -35,14 +36,14 @@ BEST_GRAPH_K = 386.0
 
 def _pipeline_config(
     *,
-    source_hdf5_path: Path,
+    master_manifest_path: Path,
     review_base_dir: Path,
     logger_name: str,
     scorer: Any,
     optimizer: Any,
 ) -> GraphTuningPipelineConfig:
     return GraphTuningPipelineConfig(
-        source_hdf5_path=source_hdf5_path,
+        master_manifest_path=master_manifest_path,
         review_base_dir=review_base_dir,
         test_set_size=0.5,
         n_splits_inner_cv=2,
@@ -58,6 +59,70 @@ def _pipeline_config(
         optimizer=optimizer,
         progress_factory=lambda iterable, **_: iterable,
     )
+
+
+def _write_graph_tuning_shard(
+    shard_path: Path,
+    filenames: list[str],
+    patient_ids: list[int],
+    labels: list[int] | None = None,
+) -> None:
+    with h5py.File(shard_path, "w") as handle:
+        row_count = len(filenames)
+        handle.create_dataset("images", data=np.zeros((row_count, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((row_count, 4, 4), dtype=np.uint8))
+        handle.create_dataset(
+            "labels",
+            data=np.array(labels if labels is not None else ([1] * row_count), dtype=np.uint8),
+        )
+        handle.create_dataset("patient_ids", data=np.array(patient_ids, dtype=np.int32))
+        handle.create_dataset(
+            "filenames",
+            data=np.array([f"{name}.png".encode() for name in filenames]),
+        )
+        handle.attrs["source_signature"] = f"signature-{shard_path.stem}"
+
+
+def _write_manifest_for_shard(
+    *,
+    master_manifest_path: Path,
+    shard_path: Path,
+    filenames: list[str],
+    patient_ids: list[int],
+    labels: list[int] | None = None,
+) -> None:
+    resolved_labels = labels if labels is not None else ([1] * len(filenames))
+    MasterManifest(master_manifest_path).replace_stage2_slide_rows(
+        Stage2SlideRows(
+            source_hdf5_path=shard_path,
+            records=[
+                {
+                    "filename": f"{filename}.png",
+                    "patient_id": patient_id,
+                    "label": label,
+                }
+                for filename, patient_id, label in zip(
+                    filenames,
+                    patient_ids,
+                    resolved_labels,
+                    strict=True,
+                )
+            ],
+            source_slide_path=shard_path.with_suffix(".svs"),
+            annotation_path=None,
+            artifacts_geojson_path=None,
+            stage2_case_record_id=1,
+            stage2_processing_signature="stage2-test",
+            stage2_status="completed",
+        )
+    )
+
+
+def _resolve_shard_name(ref: Path | str, names_by_shard: dict[str, list[str]]) -> str:
+    ref_text = str(ref)
+    row_index = int(ref_text.rsplit("[", maxsplit=1)[1][:-1])
+    shard_name = Path(ref_text.split("::", maxsplit=1)[0]).name
+    return names_by_shard[shard_name][row_index]
 
 
 def test_collect_review_labels_reads_approved_and_rejected_files(tmp_path: Path) -> None:
@@ -82,18 +147,21 @@ def test_collect_review_labels_rejects_empty_review_folders(tmp_path: Path) -> N
 
 
 def test_resolve_labeled_source_records_keeps_only_pairs_present_in_source(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
-        handle.create_dataset("filenames", data=np.array([b"case_a.png"]))
+    source_path = tmp_path / "PATCHES" / "HDF5_SHARDS"
+    source_path.mkdir(parents=True)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_graph_tuning_shard(source_path / "patient_1.h5", ["case_a"], [1])
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "patient_1.h5",
+        filenames=["case_a"],
+        patient_ids=[1],
+    )
 
     logger = logging.getLogger("test_graph_tuning")
     records = resolve_labeled_source_records(
         labels_by_stem={"case_a": "Approved", "case_b": "Rejected"},
-        source_hdf5_path=source_path,
+        master_manifest_path=master_manifest_path,
         logger=logger,
     )
 
@@ -102,23 +170,56 @@ def test_resolve_labeled_source_records_keeps_only_pairs_present_in_source(tmp_p
     ]
 
 
-def test_resolve_labeled_source_records_supports_hdf5_source(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.array([1], dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.array([7], dtype=np.int32))
-        handle.create_dataset("filenames", data=np.array([b"CANCER_PATIENT_7_PATCH_001.png"]))
+def test_resolve_labeled_source_records_supports_master_manifest(tmp_path: Path) -> None:
+    source_path = tmp_path / "PATCHES" / "HDF5_SHARDS"
+    source_path.mkdir(parents=True)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_graph_tuning_shard(source_path / "patient_7.h5", ["CANCER_PATIENT_7_PATCH_001"], [7])
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "patient_7.h5",
+        filenames=["CANCER_PATIENT_7_PATCH_001"],
+        patient_ids=[7],
+    )
 
     records = resolve_labeled_source_records(
         labels_by_stem={"CANCER_PATIENT_7_PATCH_001": "Approved"},
-        source_hdf5_path=source_path,
+        master_manifest_path=master_manifest_path,
         logger=logging.getLogger("test_graph_tuning"),
     )
 
     assert len(records) == RESOLVED_RECORD_COUNT
     assert str(records[0].pair.image_path).endswith("::images[0]")
+
+
+def test_resolve_labeled_source_records_skips_reviewed_non_cancer_rows(tmp_path: Path) -> None:
+    source_path = tmp_path / "PATCHES" / "HDF5_SHARDS"
+    source_path.mkdir(parents=True)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_graph_tuning_shard(
+        source_path / "patient_7.h5",
+        ["CANCER_PATIENT_7_PATCH_001", "NOT_CANCER_PATIENT_7_PATCH_002"],
+        [7, 7],
+        labels=[1, 0],
+    )
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "patient_7.h5",
+        filenames=["CANCER_PATIENT_7_PATCH_001", "NOT_CANCER_PATIENT_7_PATCH_002"],
+        patient_ids=[7, 7],
+        labels=[1, 0],
+    )
+
+    records = resolve_labeled_source_records(
+        labels_by_stem={
+            "CANCER_PATIENT_7_PATCH_001": "Approved",
+            "NOT_CANCER_PATIENT_7_PATCH_002": "Rejected",
+        },
+        master_manifest_path=master_manifest_path,
+        logger=logging.getLogger("test_graph_tuning"),
+    )
+
+    assert [record.pair.stem for record in records] == ["CANCER_PATIENT_7_PATCH_001"]
 
 
 def test_infer_group_id_from_stem_extracts_patient_from_legacy_and_new_patterns() -> None:
@@ -139,7 +240,9 @@ def test_select_best_contamination_threshold_optimizes_rejected_f1() -> None:
 def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
     tmp_path: Path,
 ) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
+    source_path = tmp_path / "PATCHES" / "HDF5_SHARDS"
+    source_path.mkdir(parents=True)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
     review_dir = tmp_path / "review"
     approved_dir = review_dir / "APPROVED"
     rejected_dir = review_dir / "REJECTED"
@@ -156,14 +259,28 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
         "r3_PATIENT_7",
         "r4_PATIENT_8",
     )
-    with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((8, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((8, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.ones((8,), dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.arange(1, 9, dtype=np.int32))
-        handle.create_dataset(
-            "filenames", data=np.array([f"{name}.png".encode() for name in source_names])
-        )
+    _write_graph_tuning_shard(
+        source_path / "batch_a.h5",
+        list(source_names[:4]),
+        [1, 2, 5, 6],
+    )
+    _write_graph_tuning_shard(
+        source_path / "batch_b.h5",
+        list(source_names[4:]),
+        [3, 4, 7, 8],
+    )
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "batch_a.h5",
+        filenames=list(source_names[:4]),
+        patient_ids=[1, 2, 5, 6],
+    )
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "batch_b.h5",
+        filenames=list(source_names[4:]),
+        patient_ids=[3, 4, 7, 8],
+    )
     for name in ("a1_PATIENT_1", "a2_PATIENT_2", "a3_PATIENT_5", "a4_PATIENT_6"):
         (approved_dir / f"{name}.png").write_bytes(b"overlay")
     for name in ("r1_PATIENT_3", "r2_PATIENT_4", "r3_PATIENT_7", "r4_PATIENT_8"):
@@ -179,13 +296,16 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
         "r3_PATIENT_7": 0.82,
         "r4_PATIENT_8": 0.88,
     }
+    names_by_shard = {
+        "batch_a.h5": list(source_names[:4]),
+        "batch_b.h5": list(source_names[4:]),
+    }
 
     def fake_scorer(
         image_path: Path | str, mask_path: Path | str, params: GraphContaminationParameters
     ) -> float | None:
         del mask_path, params
-        row_index = int(str(image_path).rsplit("[", maxsplit=1)[1][:-1])
-        return score_map[source_names[row_index]]
+        return score_map[_resolve_shard_name(image_path, names_by_shard)]
 
     def fake_optimizer(*, objective: object, search_space: list[object]) -> GraphTuningResult:
         del objective, search_space
@@ -201,7 +321,7 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
 
     summary = run_graph_tuning_pipeline(
         _pipeline_config(
-            source_hdf5_path=source_path,
+            master_manifest_path=master_manifest_path,
             review_base_dir=review_dir,
             logger_name="test_graph_pipeline",
             scorer=fake_scorer,
@@ -215,8 +335,10 @@ def test_run_graph_tuning_pipeline_uses_optimizer_result_and_returns_summary(
     assert summary.best_cross_validated_f1 == 1.0
 
 
-def test_run_graph_tuning_pipeline_accepts_hdf5_source(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
+def test_run_graph_tuning_pipeline_accepts_master_manifest(tmp_path: Path) -> None:
+    source_path = tmp_path / "PATCHES" / "HDF5_SHARDS"
+    source_path.mkdir(parents=True)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
     review_dir = tmp_path / "review"
     approved_dir = review_dir / "APPROVED"
     rejected_dir = review_dir / "REJECTED"
@@ -233,14 +355,20 @@ def test_run_graph_tuning_pipeline_accepts_hdf5_source(tmp_path: Path) -> None:
         "r3_PATIENT_7",
         "r4_PATIENT_8",
     ]
-    with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.zeros((8, 4, 4, 3), dtype=np.uint8))
-        handle.create_dataset("masks", data=np.zeros((8, 4, 4), dtype=np.uint8))
-        handle.create_dataset("labels", data=np.ones((8,), dtype=np.uint8))
-        handle.create_dataset("patient_ids", data=np.arange(1, 9, dtype=np.int32))
-        handle.create_dataset(
-            "filenames", data=np.array([f"{name}.png".encode() for name in names])
-        )
+    _write_graph_tuning_shard(source_path / "batch_a.h5", names[:4], [1, 2, 5, 6])
+    _write_graph_tuning_shard(source_path / "batch_b.h5", names[4:], [3, 4, 7, 8])
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "batch_a.h5",
+        filenames=names[:4],
+        patient_ids=[1, 2, 5, 6],
+    )
+    _write_manifest_for_shard(
+        master_manifest_path=master_manifest_path,
+        shard_path=source_path / "batch_b.h5",
+        filenames=names[4:],
+        patient_ids=[3, 4, 7, 8],
+    )
 
     for name in names[:4]:
         (approved_dir / f"{name}.png").write_bytes(b"overlay")
@@ -251,14 +379,16 @@ def test_run_graph_tuning_pipeline_accepts_hdf5_source(tmp_path: Path) -> None:
         name: value
         for name, value in zip(names, [0.1, 0.2, 0.12, 0.18, 0.8, 0.9, 0.82, 0.88], strict=True)
     }
+    names_by_shard = {
+        "batch_a.h5": names[:4],
+        "batch_b.h5": names[4:],
+    }
 
     def fake_scorer(
         image_path: Path | str, mask_path: Path | str, params: GraphContaminationParameters
     ) -> float | None:
         del mask_path, params
-        ref = str(image_path)
-        row_index = int(ref.rsplit("[", maxsplit=1)[1][:-1])
-        return score_map[names[row_index]]
+        return score_map[_resolve_shard_name(image_path, names_by_shard)]
 
     def fake_optimizer(*, objective: object, search_space: list[object]) -> GraphTuningResult:
         del objective, search_space
@@ -274,7 +404,7 @@ def test_run_graph_tuning_pipeline_accepts_hdf5_source(tmp_path: Path) -> None:
 
     summary = run_graph_tuning_pipeline(
         _pipeline_config(
-            source_hdf5_path=source_path,
+            master_manifest_path=master_manifest_path,
             review_base_dir=review_dir,
             logger_name="test_graph_pipeline_hdf5",
             scorer=fake_scorer,
@@ -422,7 +552,11 @@ def _make_record(stem: str, label: str) -> LabeledSourceRecord:
 
     return LabeledSourceRecord(
         pair=ImageMaskPair(
-            stem=stem, image_path=image_path, mask_path=mask_path, output_name=f"{stem}.png"
+            stem=stem,
+            label=1,
+            image_path=image_path,
+            mask_path=mask_path,
+            output_name=f"{stem}.png",
         ),
         label=label,
         group_id=infer_group_id_from_stem(stem),

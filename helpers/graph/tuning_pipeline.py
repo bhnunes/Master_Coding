@@ -25,7 +25,7 @@ from helpers.graph.contamination import (
 from helpers.graph.parameter_store import GraphCleaningParameterArtifact
 from helpers.optimization_sampling.sampling import (
     ImageMaskPair,
-    discover_hdf5_image_mask_pairs,
+    discover_manifest_image_mask_pairs,
 )
 
 APPROVED_LABEL = "Approved"
@@ -79,7 +79,7 @@ class GraphTuningSummary:
 
 @dataclass(frozen=True)
 class GraphTuningPipelineConfig:
-    source_hdf5_path: Path
+    master_manifest_path: Path
     review_base_dir: Path
     test_set_size: float
     n_splits_inner_cv: int
@@ -114,12 +114,12 @@ def collect_review_labels(review_base_dir: Path) -> dict[str, str]:
 def resolve_labeled_source_records(
     *,
     labels_by_stem: dict[str, str],
-    source_hdf5_path: Path,
+    master_manifest_path: Path,
     logger: logging.Logger,
 ) -> list[LabeledSourceRecord]:
     """Resolve review labels to existing source image/mask pairs."""
 
-    source_pairs = discover_hdf5_image_mask_pairs(source_hdf5_path)
+    source_pairs = discover_manifest_image_mask_pairs(master_manifest_path)
     records: list[LabeledSourceRecord] = []
     missing_files = False
     for stem, label in labels_by_stem.items():
@@ -227,7 +227,7 @@ def run_graph_tuning_pipeline(config: GraphTuningPipelineConfig) -> GraphTuningS
     config.logger.info("Performing pre-flight check on all source file paths...")
     records = resolve_labeled_source_records(
         labels_by_stem=labels_by_stem,
-        source_hdf5_path=config.source_hdf5_path,
+        master_manifest_path=config.master_manifest_path,
         logger=config.logger,
     )
     preloaded_sources = _preload_record_sources(

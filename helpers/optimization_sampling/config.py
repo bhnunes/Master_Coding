@@ -67,7 +67,7 @@ def _string_with_default(
 class OptimizationSamplingConfig:
     """Runtime configuration for `3_1_optimization_sampling.py`."""
 
-    source_hdf5_path: Path
+    master_manifest_path: Path
     output_base: Path
     log_folder: Path
     log_file_name: str
@@ -95,11 +95,16 @@ def load_optimization_sampling_config(
     """Load and validate Stage 3.1 optimization sampling configuration."""
 
     values = env if env is not None else os.environ
-    source_hdf5_path = _required_path(
+    master_manifest_path = _required_path(
         values,
-        "OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH",
+        "OPTIMIZATION_SAMPLING_MASTER_MANIFEST_PATH",
         system_name=system_name,
     )
+    if not master_manifest_path.is_file():
+        raise ValueError(
+            "OPTIMIZATION_SAMPLING_MASTER_MANIFEST_PATH must point to the Stage 2 "
+            f"master_manifest.sqlite file, got: {master_manifest_path}"
+        )
     num_processes = max(
         1,
         _parse_int(
@@ -110,7 +115,7 @@ def load_optimization_sampling_config(
     )
 
     return OptimizationSamplingConfig(
-        source_hdf5_path=source_hdf5_path,
+        master_manifest_path=master_manifest_path,
         output_base=_required_path(
             values,
             "OPTIMIZATION_SAMPLING_OUTPUT_BASE",

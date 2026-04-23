@@ -9,11 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-import h5py
 import numpy as np
 import numpy.typing as npt
 
-from helpers.extraction.master_manifest import MasterManifest
+from helpers.extraction.master_manifest import ManifestPatchRecord, MasterManifest
 from helpers.graph.contamination import (
     GraphContaminationParameters,
     calculate_roi_contamination,
@@ -70,22 +69,21 @@ class CleaningDecisionRecord:
 
 @dataclass(frozen=True)
 class GraphCleaningPipelineConfig:
-    source_hdf5_path: Path
+    master_manifest_path: Path
     output_base_dir: Path
     graph_params: GraphContaminationParameters
     tau: float
     num_workers: int
     logger: logging.Logger
-    master_manifest_path: Path | None = None
     scorer: Scorer = calculate_roi_contamination
     progress_factory: ProgressFactory | None = None
 
 
 def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCleaningSummary:
-    """Run Stage 3.3 filtering and write accepted/rejected manifests."""
+    """Run Stage 3.3 filtering without mutating canonical Stage 2 shard contents."""
 
     started_at = time.time()
-    config.logger.info("--- Starting Stage 3.3 HDF5-backed filtering process ---")
+    config.logger.info("--- Starting Stage 3.3 manifest-driven filtering process ---")
     config.logger.info("Using optimal parameters: %s | tau=%.2f", config.graph_params, config.tau)
     config.logger.info("Distributing work across %s CPU cores.", config.num_workers)
 
@@ -94,8 +92,13 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
     config.logger.info(
         "Accepted/rejected manifests will be written under: %s", config.output_base_dir
     )
+    config.logger.info(
+        "Canonical Stage 3.3 output is persisted to patch_stage_state in '%s'; "
+        "Stage 2 HDF5 shards are treated as read-only pixel sources.",
+        config.master_manifest_path,
+    )
 
-    candidates = _list_hdf5_candidates(config.source_hdf5_path, config.logger)
+    candidates = _list_manifest_candidates(config.master_manifest_path, config.logger)
 
     if not candidates:
         return GraphCleaningSummary(
@@ -116,10 +119,9 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
         scorer=config.scorer,
         progress_factory=config.progress_factory,
     )
-    if config.master_manifest_path is not None:
-        MasterManifest(config.master_manifest_path).update_stage4_cleaning_decisions(
-            decisions=[record.__dict__ for record in decisions]
-        )
+    MasterManifest(config.master_manifest_path).update_stage4_cleaning_decisions(
+        decisions=[record.__dict__ for record in decisions]
+    )
     _write_decision_manifest(accepted_manifest_path, decisions, ACCEPTED)
     _write_decision_manifest(rejected_manifest_path, decisions, REJECTED)
     result_counts = Counter(record.decision for record in decisions)
@@ -154,65 +156,50 @@ def build_cleaning_message(summary: GraphCleaningSummary) -> str:
         f"Accepted: {summary.accepted}\n"
         f"Rejected: {summary.rejected}\n"
         f"Skipped: {summary.skipped}\n"
+        "Canonical output: patch_stage_state in master_manifest.sqlite\n"
+        "Stage 2 shard files were not rewritten\n"
         f"Accepted manifest: {summary.accepted_manifest_path}\n"
         f"Rejected manifest: {summary.rejected_manifest_path}"
     )
 
 
-def _list_hdf5_candidates(
-    source_hdf5_path: Path,
+def _list_manifest_candidates(
+    master_manifest_path: Path,
     logger: logging.Logger,
 ) -> list[SourceCandidateRecord]:
-    if not source_hdf5_path.is_file():
-        logger.error("The source HDF5 dataset '%s' does not exist.", source_hdf5_path)
+    try:
+        records = MasterManifest(master_manifest_path).list_stage2_patch_records()
+    except FileNotFoundError:
+        logger.error("The Stage 2 master manifest '%s' does not exist.", master_manifest_path)
         return []
-    with h5py.File(source_hdf5_path, "r") as handle:
-        filenames = cast(Any, handle["filenames"])
-        if len(filenames) == 0:
-            logger.error("No rows found in the source HDF5 dataset: '%s'.", source_hdf5_path)
-            return []
-
-        source_signature = handle.attrs.get("source_signature")
-        source_hdf5_sha256 = (
-            source_signature.decode("utf-8")
-            if isinstance(source_signature, bytes)
-            else str(source_signature)
-            if source_signature is not None
-            else hash_file_sha256(source_hdf5_path)
-        )
-        patient_ids = cast(Any, handle["patient_ids"])
-        filename_values = filenames[:]
-        patient_id_values = patient_ids[:]
-        slide_values = cast(Any, handle["slide_ids"])[:] if "slide_ids" in handle else None
 
     candidates: list[SourceCandidateRecord] = []
-    source_hdf5_path_text = str(source_hdf5_path)
-    for index, filename_value in enumerate(filename_values):
-        filename = (
-            filename_value.decode("utf-8")
-            if isinstance(filename_value, bytes)
-            else str(filename_value)
+    if not records:
+        logger.warning(
+            "No canonical Stage 2 rows found in master manifest: '%s'.",
+            master_manifest_path,
         )
-        slide_value = slide_values[index] if slide_values is not None else None
-        candidates.append(
-            SourceCandidateRecord(
-                filename=filename,
-                image_path=f"{source_hdf5_path_text}::images[{index}]",
-                mask_path=f"{source_hdf5_path_text}::masks[{index}]",
-                patient_id=str(int(patient_id_values[index])),
-                slide_id=(
-                    slide_value.decode("utf-8")
-                    if isinstance(slide_value, bytes)
-                    else str(slide_value)
-                )
-                if slide_value is not None
-                else None,
-                source_hdf5_path=source_hdf5_path_text,
-                source_hdf5_sha256=source_hdf5_sha256,
-                source_row_index=index,
-            )
-        )
+        return []
+
+    for record in records:
+        if record.label != 1:
+            continue
+        candidates.append(_candidate_from_manifest_record(record))
     return candidates
+
+
+def _candidate_from_manifest_record(record: ManifestPatchRecord) -> SourceCandidateRecord:
+    source_hdf5_sha256 = record.source_signature or hash_file_sha256(record.source_hdf5_path)
+    return SourceCandidateRecord(
+        filename=record.filename,
+        image_path=record.source_image_path,
+        mask_path=record.source_mask_path,
+        patient_id=str(record.patient_id),
+        slide_id=record.slide_id,
+        source_hdf5_path=str(record.source_hdf5_path),
+        source_hdf5_sha256=source_hdf5_sha256,
+        source_row_index=record.source_row_index,
+    )
 
 
 def _process_hdf5_candidates(
@@ -252,37 +239,22 @@ def _process_hdf5_candidates_batched(
     tau: float,
     progress_factory: ProgressFactory | None,
 ) -> list[CleaningDecisionRecord]:
-    iterable: Iterable[int] = range(len(candidates))
-    if progress_factory is not None:
-        iterable = cast(Iterable[int], progress_factory(list(iterable)))
-
     decisions: list[CleaningDecisionRecord] = []
-    active_batch_start = -1
-    active_batch_candidates: Sequence[SourceCandidateRecord] = ()
-    active_images: npt.NDArray[np.uint8] | None = None
-    active_masks: npt.NDArray[np.uint8] | None = None
+    batches = list(_iter_hdf5_candidate_batches(candidates))
+    iterable: Iterable[Sequence[SourceCandidateRecord]] = batches
+    if progress_factory is not None:
+        iterable = cast(Iterable[Sequence[SourceCandidateRecord]], progress_factory(batches))
 
-    for candidate_index in iterable:
-        batch_start = (candidate_index // _HDF5_SCORING_BATCH_SIZE) * _HDF5_SCORING_BATCH_SIZE
-        if batch_start != active_batch_start:
-            active_batch_start = batch_start
-            active_batch_candidates = candidates[
-                batch_start : batch_start + _HDF5_SCORING_BATCH_SIZE
-            ]
-            active_images, active_masks = _load_hdf5_candidate_batch(active_batch_candidates)
-
-        assert active_images is not None
-        assert active_masks is not None
-
-        batch_offset = candidate_index - active_batch_start
-        candidate = candidates[candidate_index]
-        contamination_rate = calculate_roi_contamination_from_arrays(
-            active_images[batch_offset],
-            active_masks[batch_offset],
-            graph_params,
-            base_name=candidate.filename,
-        )
-        decisions.append(_build_decision_record(candidate, contamination_rate, tau))
+    for batch_candidates in iterable:
+        active_images, active_masks = _load_hdf5_candidate_batch(batch_candidates)
+        for batch_offset, candidate in enumerate(batch_candidates):
+            contamination_rate = calculate_roi_contamination_from_arrays(
+                active_images[batch_offset],
+                active_masks[batch_offset],
+                graph_params,
+                base_name=candidate.filename,
+            )
+            decisions.append(_build_decision_record(candidate, contamination_rate, tau))
 
     return decisions
 
@@ -291,19 +263,40 @@ def _can_batch_hdf5_candidates(candidates: Sequence[SourceCandidateRecord]) -> b
     if not candidates:
         return False
 
-    source_hdf5_path = candidates[0].source_hdf5_path
-    first_row_index = candidates[0].source_row_index
-    if source_hdf5_path is None or first_row_index is None:
-        return False
-
-    expected_row_index = first_row_index
+    current_path: str | None = None
+    expected_row_index: int | None = None
     for candidate in candidates:
-        if candidate.source_hdf5_path != source_hdf5_path:
+        if candidate.source_hdf5_path is None or candidate.source_row_index is None:
             return False
+        if candidate.source_hdf5_path != current_path:
+            current_path = candidate.source_hdf5_path
+            expected_row_index = candidate.source_row_index
         if candidate.source_row_index != expected_row_index:
             return False
+        assert expected_row_index is not None
         expected_row_index += 1
     return True
+
+
+def _iter_hdf5_candidate_batches(
+    candidates: Sequence[SourceCandidateRecord],
+) -> list[Sequence[SourceCandidateRecord]]:
+    batches: list[Sequence[SourceCandidateRecord]] = []
+    batch_start = 0
+    while batch_start < len(candidates):
+        first_candidate = candidates[batch_start]
+        assert first_candidate.source_hdf5_path is not None
+        batch_end = min(batch_start + _HDF5_SCORING_BATCH_SIZE, len(candidates))
+        while (
+            batch_end < len(candidates)
+            and candidates[batch_end].source_hdf5_path != first_candidate.source_hdf5_path
+        ):
+            batch_end -= 1
+        if batch_end == batch_start:
+            batch_end = batch_start + 1
+        batches.append(candidates[batch_start:batch_end])
+        batch_start = batch_end
+    return batches
 
 
 def _load_hdf5_candidate_batch(

@@ -36,6 +36,21 @@ class _ManifestPatchKey:
     source_row_index: int
 
 
+@dataclass(frozen=True)
+class ManifestPatchRecord:
+    """Canonical Stage 2 patch identity resolved from the master manifest."""
+
+    filename: str
+    label: int
+    patient_id: int
+    slide_id: str | None
+    source_hdf5_path: Path
+    source_signature: str | None
+    source_row_index: int
+    source_image_path: str
+    source_mask_path: str
+
+
 def _logical_hdf5_ref(output_path: Path, dataset_name: str, row_index: int) -> str:
     return f"{output_path}::{dataset_name}[{row_index}]"
 
@@ -251,6 +266,49 @@ class MasterManifest:
                     [(patch_id, STAGE2_STAGE_NAME) for patch_id in patch_ids],
                 )
             connection.commit()
+
+    def list_stage2_patch_records(self) -> list[ManifestPatchRecord]:
+        """Return canonical Stage 2 patch identities in stable shard/row order."""
+
+        if not self.database_path.is_file():
+            raise FileNotFoundError(
+                f"Stage 3 requires an existing master manifest: {self.database_path}"
+            )
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT filename,
+                       label,
+                       patient_id,
+                       slide_id,
+                       source_hdf5_path,
+                       source_signature,
+                       source_row_index,
+                       source_image_path,
+                       source_mask_path
+                FROM patches
+                ORDER BY source_hdf5_path ASC, source_row_index ASC
+                """
+            ).fetchall()
+
+        return [
+            ManifestPatchRecord(
+                filename=str(row["filename"]),
+                label=_coerce_int(row["label"], field_name="label"),
+                patient_id=_coerce_int(row["patient_id"], field_name="patient_id"),
+                slide_id=_coerce_str_or_none(row["slide_id"]),
+                source_hdf5_path=Path(str(row["source_hdf5_path"])),
+                source_signature=_coerce_str_or_none(row["source_signature"]),
+                source_row_index=_coerce_int(
+                    row["source_row_index"],
+                    field_name="source_row_index",
+                ),
+                source_image_path=str(row["source_image_path"]),
+                source_mask_path=str(row["source_mask_path"]),
+            )
+            for row in rows
+        ]
 
     def update_stage4_cleaning_decisions(
         self,

@@ -1,0 +1,16 @@
+flowchart LR
+    manifest[(master_manifest.sqlite<br/>TEST row selection + normalization refs)]
+    shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
+    phase4_outputs[Input<br/>Normalization artifacts + run config]
+    checkpoints[Input<br/>Phase 8 checkpoints]
+    recipe[Input<br/>Phase 9 ensemble recipe JSON]
+    p10[Phase 10<br/>10_inference_ensemble.py<br/>Run TEST inference + reporting]
+    outputs[Output<br/>Predictions + metrics + JSON / CSV / LaTeX reports]
+
+    manifest -. read TEST rows .-> p10
+    shards -. load test pixels .-> p10
+    phase4_outputs --> p10
+    checkpoints --> p10
+    recipe --> p10
+    p10 --> outputs
+    p10 -. read only .-> manifest

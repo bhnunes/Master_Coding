@@ -33,7 +33,7 @@ def main() -> None:
     )
     summary = run_graph_tuning_pipeline(
         GraphTuningPipelineConfig(
-            source_hdf5_path=config.source_hdf5_path,
+            master_manifest_path=config.master_manifest_path,
             review_base_dir=config.review_base_dir,
             test_set_size=config.test_set_size,
             n_splits_inner_cv=config.n_splits_inner_cv,

@@ -5,9 +5,8 @@ import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
-import h5py
+from helpers.extraction.master_manifest import MasterManifest
 
 SUPPORTED_CONFIDENCE_LEVELS: dict[float, float] = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
 
@@ -17,6 +16,7 @@ class ImageMaskPair:
     """A matched image and mask pair keyed by shared stem."""
 
     stem: str
+    label: int
     image_path: Path | str
     mask_path: Path | str
     output_name: str
@@ -61,38 +61,36 @@ def calculate_cochran_sample_size(
     return math.ceil((z_score**2 * proportion * (1 - proportion)) / (margin_of_error**2))
 
 
-def discover_hdf5_image_mask_pairs(source_hdf5_path: Path) -> dict[str, ImageMaskPair]:
-    """Discover image/mask pairs from a canonical HDF5 dataset."""
+def discover_manifest_image_mask_pairs(master_manifest_path: Path) -> dict[str, ImageMaskPair]:
+    """Discover canonical cancer image/mask pairs from the Stage 2 master manifest."""
 
-    if not source_hdf5_path.is_file():
-        raise FileNotFoundError(f"HDF5 source does not exist: {source_hdf5_path}")
+    records = MasterManifest(master_manifest_path).list_stage2_patch_records()
+    if not records:
+        raise ValueError(f"No Stage 2 rows found in master manifest: {master_manifest_path}")
 
     pairs: dict[str, ImageMaskPair] = {}
-    seen_stems: set[str] = set()
-    with h5py.File(source_hdf5_path, "r") as handle:
-        filenames = cast(h5py.Dataset, handle["filenames"])
-        filename_values = filenames[:]
-        for index, filename_value in enumerate(filename_values):
-            filename = (
-                filename_value.decode("utf-8")
-                if isinstance(filename_value, bytes)
-                else str(filename_value)
+    for record in records:
+        if record.label != 1:
+            continue
+        stem = Path(record.filename).stem
+        if stem in pairs:
+            raise ValueError(
+                "Duplicate filename stem "
+                f"'{stem}' found at row {record.source_row_index} in {record.source_hdf5_path}. "
+                "Stems must be unique across canonical Stage 2 manifest rows for Stage 3.1 "
+                "sampling."
             )
-            stem = Path(filename).stem
-            if stem in seen_stems:
-                raise ValueError(
-                    f"Duplicate filename stem '{stem}' found at row {index} in {source_hdf5_path}. "
-                    "Stems must be unique for Stage 3.1 sampling."
-                )
-            pairs[stem] = ImageMaskPair(
-                stem=stem,
-                image_path=f"{source_hdf5_path}::images[{index}]",
-                mask_path=f"{source_hdf5_path}::masks[{index}]",
-                output_name=filename,
-            )
-            seen_stems.add(stem)
+        pairs[stem] = ImageMaskPair(
+            stem=stem,
+            label=record.label,
+            image_path=record.source_image_path,
+            mask_path=record.source_mask_path,
+            output_name=record.filename,
+        )
+
     if not pairs:
-        raise ValueError(f"No rows found in HDF5 source: {source_hdf5_path}")
+        raise ValueError(f"No cancer Stage 2 rows found in master manifest: {master_manifest_path}")
+
     return pairs
 
 

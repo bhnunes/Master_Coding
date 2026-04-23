@@ -16,11 +16,11 @@ EROSION_RANGE = (1, 8)
 
 
 def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    source_path.write_bytes(b"placeholder")
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
     config = load_graph_tuning_config(
         {
-            "GRAPH_TUNING_SOURCE_HDF5_PATH": str(source_path),
+            "GRAPH_TUNING_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "GRAPH_TUNING_BASE_DIR": str(tmp_path / "review"),
             "GRAPH_TUNING_LOG_FOLDER": str(tmp_path / "logs"),
             "GRAPH_TUNING_LOG_FILE": "graph.log",
@@ -40,7 +40,7 @@ def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> 
         }
     )
 
-    assert config.source_hdf5_path == source_path
+    assert config.master_manifest_path == master_manifest_path
     assert config.review_base_dir == tmp_path / "review"
     assert config.log_folder == tmp_path / "logs"
     assert config.log_file_name == "graph.log"
@@ -55,20 +55,33 @@ def test_load_graph_tuning_config_reads_expected_environment(tmp_path: Path) -> 
     assert config.erosion_range == EROSION_RANGE
 
 
-def test_load_graph_tuning_config_requires_hdf5_source() -> None:
-    with pytest.raises(ValueError, match="GRAPH_TUNING_SOURCE_HDF5_PATH"):
+def test_load_graph_tuning_config_requires_master_manifest() -> None:
+    with pytest.raises(ValueError, match="GRAPH_TUNING_MASTER_MANIFEST_PATH"):
         load_graph_tuning_config({})
 
 
-def test_load_graph_tuning_config_allows_hdf5_source_without_png_dirs(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    source_path.write_bytes(b"placeholder")
+def test_load_graph_tuning_config_requires_master_manifest_file(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "PATCHES"
+    master_manifest_path.mkdir()
+
+    with pytest.raises(ValueError, match="must point to the Stage 2 master_manifest.sqlite file"):
+        load_graph_tuning_config(
+            {
+                "GRAPH_TUNING_MASTER_MANIFEST_PATH": str(master_manifest_path),
+                "GRAPH_TUNING_BASE_DIR": str(tmp_path / "review"),
+            }
+        )
+
+
+def test_load_graph_tuning_config_accepts_master_manifest_file(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     config = load_graph_tuning_config(
         {
-            "GRAPH_TUNING_SOURCE_HDF5_PATH": str(source_path),
+            "GRAPH_TUNING_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "GRAPH_TUNING_BASE_DIR": str(tmp_path / "review"),
         }
     )
 
-    assert config.source_hdf5_path == source_path
+    assert config.master_manifest_path == master_manifest_path

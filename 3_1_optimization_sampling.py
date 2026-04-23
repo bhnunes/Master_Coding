@@ -21,7 +21,7 @@ def main() -> None:
     logger = configure_optimization_sampling_logger(config.log_path)
     summary = run_optimization_sampling(
         OptimizationSamplingConfig(
-            source_hdf5_path=config.source_hdf5_path,
+            master_manifest_path=config.master_manifest_path,
             output_base=config.output_base,
             confidence_level=config.confidence_level,
             margin_of_error=config.margin_of_error,

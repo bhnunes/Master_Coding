@@ -18,11 +18,11 @@ DEFAULT_SEED = 42
 
 
 def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    source_path.write_bytes(b"placeholder")
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
     config = load_optimization_sampling_config(
         {
-            "OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH": str(source_path),
+            "OPTIMIZATION_SAMPLING_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "OPTIMIZATION_SAMPLING_OUTPUT_BASE": str(tmp_path / "output"),
             "OPTIMIZATION_SAMPLING_LOG_FOLDER": str(tmp_path / "logs"),
             "OPTIMIZATION_SAMPLING_LOG_FILE": "stage4.log",
@@ -41,7 +41,7 @@ def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: 
         }
     )
 
-    assert config.source_hdf5_path == source_path
+    assert config.master_manifest_path == master_manifest_path
     assert config.output_base == tmp_path / "output"
     assert config.log_folder == tmp_path / "logs"
     assert config.log_file_name == "stage4.log"
@@ -58,20 +58,33 @@ def test_load_optimization_sampling_config_reads_expected_environment(tmp_path: 
 
 
 def test_load_optimization_sampling_config_requires_source_and_output_paths() -> None:
-    with pytest.raises(ValueError, match="OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH"):
+    with pytest.raises(ValueError, match="OPTIMIZATION_SAMPLING_MASTER_MANIFEST_PATH"):
         load_optimization_sampling_config({})
 
 
-def test_load_optimization_sampling_config_uses_hdf5_source(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    source_path.write_bytes(b"placeholder")
+def test_load_optimization_sampling_config_requires_master_manifest_file(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "PATCHES"
+    master_manifest_path.mkdir()
+
+    with pytest.raises(ValueError, match="must point to the Stage 2 master_manifest.sqlite file"):
+        load_optimization_sampling_config(
+            {
+                "OPTIMIZATION_SAMPLING_MASTER_MANIFEST_PATH": str(master_manifest_path),
+                "OPTIMIZATION_SAMPLING_OUTPUT_BASE": str(tmp_path / "output"),
+            }
+        )
+
+
+def test_load_optimization_sampling_config_uses_master_manifest_file(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
 
     config = load_optimization_sampling_config(
         {
-            "OPTIMIZATION_SAMPLING_SOURCE_HDF5_PATH": str(source_path),
+            "OPTIMIZATION_SAMPLING_MASTER_MANIFEST_PATH": str(master_manifest_path),
             "OPTIMIZATION_SAMPLING_OUTPUT_BASE": str(tmp_path / "output"),
         }
     )
 
-    assert config.source_hdf5_path == source_path
+    assert config.master_manifest_path == master_manifest_path
     assert config.seed == DEFAULT_SEED

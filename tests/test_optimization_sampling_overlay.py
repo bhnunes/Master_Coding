@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import pytest
 
+from helpers import optimization_sampling as optimization_sampling_pkg
 from helpers.optimization_sampling.overlay import (
     _close_worker_hdf5_handles,
     _overlay_task_order_key,
@@ -21,7 +22,9 @@ from helpers.optimization_sampling.overlay import (
 )
 from helpers.optimization_sampling.sampling import OverlayTask
 
+overlay_module = optimization_sampling_pkg.overlay
 NUM_PROCESSES = 3
+EXPECTED_SHARD_HANDLE_COUNT = 2
 
 
 def test_to_grayscale_mask_uses_alpha_channel_for_rgba() -> None:
@@ -127,6 +130,75 @@ def test_overlay_mask_edges_reads_hdf5_image_and_mask_sources(tmp_path: Path) ->
     overlay = cv2.imread(str(output_path), cv2.IMREAD_COLOR)
     assert overlay is not None
     assert int(overlay[:, :, 2].sum()) > 0
+
+
+def test_overlay_mask_edges_reads_rows_from_multiple_hdf5_shards(tmp_path: Path) -> None:
+    shard_a = tmp_path / "HDF5_SHARDS" / "patient_1.h5"
+    shard_b = tmp_path / "HDF5_SHARDS" / "patient_2.h5"
+    shard_a.parent.mkdir()
+    output_a = tmp_path / "output" / "overlay_a.png"
+    output_b = tmp_path / "output" / "overlay_b.png"
+
+    for shard_path, bright_channel in ((shard_a, 0), (shard_b, 1)):
+        with h5py.File(shard_path, "w") as handle:
+            image = np.zeros((1, 6, 6, 3), dtype=np.uint8)
+            image[0, 2:4, 2:4, bright_channel] = 255
+            mask = np.zeros((1, 6, 6), dtype=np.uint8)
+            mask[0, 2:4, 2:4] = 1
+            handle.create_dataset("images", data=image)
+            handle.create_dataset("masks", data=mask)
+
+    assert overlay_mask_edges(
+        f"{shard_a}::images[0]",
+        f"{shard_a}::masks[0]",
+        output_a,
+        alpha=0.5,
+    )
+    assert overlay_mask_edges(
+        f"{shard_b}::images[0]",
+        f"{shard_b}::masks[0]",
+        output_b,
+        alpha=0.5,
+    )
+
+    assert output_a.exists()
+    assert output_b.exists()
+    assert len(overlay_module._WORKER_HDF5_HANDLES) == EXPECTED_SHARD_HANDLE_COUNT
+
+    _close_worker_hdf5_handles()
+
+
+def test_overlay_task_order_key_groups_rows_by_shard_then_row(tmp_path: Path) -> None:
+    shard_a = tmp_path / "HDF5_SHARDS" / "patient_1.h5"
+    shard_b = tmp_path / "HDF5_SHARDS" / "patient_2.h5"
+    task_b = OverlayTask(
+        image_path=f"{shard_b}::images[0]",
+        mask_path=f"{shard_b}::masks[0]",
+        output_path=tmp_path / "b.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+    task_a_late = OverlayTask(
+        image_path=f"{shard_a}::images[5]",
+        mask_path=f"{shard_a}::masks[5]",
+        output_path=tmp_path / "a_late.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+    task_a_early = OverlayTask(
+        image_path=f"{shard_a}::images[1]",
+        mask_path=f"{shard_a}::masks[1]",
+        output_path=tmp_path / "a_early.png",
+        color=(1, 2, 3),
+        thickness=1,
+        alpha=1.0,
+    )
+
+    ordered = sorted([task_b, task_a_late, task_a_early], key=_overlay_task_order_key)
+
+    assert ordered == [task_a_early, task_a_late, task_b]
 
 
 def test_generate_overlay_images_returns_empty_list_for_no_tasks() -> None:

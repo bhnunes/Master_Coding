@@ -1,0 +1,16 @@
+flowchart LR
+    manifest[(master_manifest.sqlite<br/>Split + normalization + sampling state)]
+    shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
+    phase4_outputs[Input<br/>Normalization artifacts + run config]
+    phase6_outputs[Optional input<br/>Sampling sidecars]
+    phase7_outputs[Input<br/>Approved LR / architecture reports]
+    p8[Phase 8<br/>8_training_ensemble.py<br/>Train approved runs]
+    outputs[Output<br/>Checkpoints + metrics + training reports]
+
+    manifest -. read training / validation rows .-> p8
+    shards -. load train/validation pixels .-> p8
+    phase4_outputs --> p8
+    phase6_outputs -. optional .-> p8
+    phase7_outputs --> p8
+    p8 --> outputs
+    p8 -. read only .-> manifest
