@@ -71,6 +71,7 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.ohem_ratio == OHEM_RATIO
     assert config.ohem_min_kept == OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is True
+    assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.log_path == Path("logs/training_ensemble.log")
 
 
@@ -96,8 +97,25 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.ohem_ratio == DEFAULT_OHEM_RATIO
     assert config.ohem_min_kept == DEFAULT_OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is False
+    assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.master_manifest_path == tmp_path / "dataset" / "master_manifest.sqlite"
     assert config.log_path == Path("logs/training_ensemble.log")
+
+
+def test_load_training_ensemble_config_reads_shared_runtime_normalization_method(
+    tmp_path: Path,
+) -> None:
+    config = load_training_ensemble_config(
+        {
+            "TRAINING_MASTER_MANIFEST_PATH": str(tmp_path / "dataset" / "master_manifest.sqlite"),
+            "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
+            "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
+            "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
+            "RUNTIME_NORMALIZATION_METHOD": "macenko",
+        }
+    )
+
+    assert config.runtime_normalization_method == "MACENKO"
 
 
 def test_load_training_ensemble_config_rejects_invalid_execution_mode(tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifes
 OPTUNA_TRIALS = 25
 
 
-def test_run_crossfold_pipeline_executes_stage_flow(
+def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     source_path = tmp_path / "master_manifest.sqlite"
@@ -68,6 +68,8 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     split_kwargs: dict[str, object] = {}
     provenance_kwargs: dict[str, object] = {}
     persist_kwargs: dict[str, object] = {}
+    template_selection_calls: list[dict[str, object]] = []
+    normalization_artifact_calls: list[dict[str, object]] = []
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
     def record(name: str, return_value: object | None = None) -> object | None:
@@ -95,6 +97,64 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         lambda **kwargs: record("manifest", manifest_df),
     )
     monkeypatch.setattr(
+        "helpers.crossfold.pipeline.compute_all_patch_entropies",
+        lambda **kwargs: record(
+            "entropy",
+            pd.DataFrame({"image_path": dataset["image_path"].tolist(), "entropy": [0.9]}),
+        ),
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.select_template_rows_from_entropy",
+        lambda train_df, entropy_df: record(
+            "template_rows",
+            train_df.assign(entropy=entropy_df["entropy"].iloc[0]),
+        ),
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.build_aggregate_target_from_template_rows",
+        lambda selected_rows: record("aggregate_target", object()),
+    )
+
+    def fake_save_template_selection_artifacts(
+        output_dir: Path, **kwargs: object
+    ) -> dict[str, int]:
+        template_selection_calls.append({"output_dir": output_dir, **kwargs})
+        return cast(dict[str, int], record("template_artifacts", {"template_count": 1}))
+
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.save_template_selection_artifacts",
+        fake_save_template_selection_artifacts,
+    )
+
+    def fake_generate_all_normalization_artifacts(
+        output_dir: Path, **kwargs: object
+    ) -> list[dict[str, object]]:
+        normalization_artifact_calls.append({"output_dir": output_dir, **kwargs})
+        return cast(
+            list[dict[str, object]],
+            record(
+                "normalization_artifacts",
+                [
+                    {
+                        "method": "REINHARD",
+                        "state_path": (
+                            output_dir
+                            / "runtime_normalization_artifacts"
+                            / "reinhard"
+                            / "normalization_stats.json"
+                        ),
+                        "template_path": output_dir / "template_selection",
+                        "fit_scope": "TRAIN",
+                    }
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.generate_all_normalization_artifacts",
+        fake_generate_all_normalization_artifacts,
+    )
+    monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
         lambda **kwargs: (provenance_kwargs.update(kwargs), record("provenance")),
     )
@@ -105,7 +165,6 @@ def test_run_crossfold_pipeline_executes_stage_flow(
 
     summary = run_crossfold_pipeline(
         CrossfoldConfig(
-            normalization_method="NOT_NORMALIZED",
             source_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
@@ -123,7 +182,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         )
     )
 
-    assert summary.output_dir == tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
+    assert summary.output_dir == tmp_path / "STAGE4_SPLITS" / "split_seed_42"
     assert summary.manifest_rows == 1
     provenance_config = cast(Any, provenance_kwargs["config"])
     split_selection = cast(dict[str, Any], provenance_config.extra)["split_selection"]
@@ -135,7 +194,22 @@ def test_run_crossfold_pipeline_executes_stage_flow(
     assert split_selection["final_loss"] == 0.0
     assert provenance_config.source_hdf5_provenance is cached_provenance
     assert persist_kwargs["master_manifest_path"] == source_path
-    assert persist_kwargs["normalization_method"] == "NOT_NORMALIZED"
+    assert cast(dict[str, Any], provenance_config.extra)["template_selection"] == {
+        "template_count": 1
+    }
+    assert cast(dict[str, Any], provenance_config.extra)["normalization_artifacts"] == [
+        {
+            "method": "REINHARD",
+            "state_path": "runtime_normalization_artifacts/reinhard/normalization_stats.json",
+            "template_path": "template_selection",
+            "fit_scope": "TRAIN",
+        }
+    ]
+    assert len(template_selection_calls) == 1
+    assert len(normalization_artifact_calls) == 1
+    assert calls.count("split") == 1
+    assert calls.count("entropy") == 1
+    assert calls.count("template_rows") == 1
     assert (
         cast(dict[str, Any], provenance_config.extra)["verification"]
         == split_data["verification"]
@@ -145,12 +219,17 @@ def test_run_crossfold_pipeline_executes_stage_flow(
         "load",
         "split",
         "manifest",
+        "entropy",
+        "template_rows",
+        "aggregate_target",
+        "template_artifacts",
+        "normalization_artifacts",
         "provenance",
         "persist",
     ]
 
 
-def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
+def test_run_crossfold_pipeline_computes_entropy_once_for_train_split(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     source_path = tmp_path / "master_manifest.sqlite"
@@ -218,7 +297,9 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
     }
     manifest_df = pd.DataFrame([{"relative_hdf5_path": "TRAIN.h5", "hdf5_row_index": 0}])
     entropy_inputs: list[pd.DataFrame] = []
-    fit_calls: list[dict[str, object]] = []
+    template_rows_inputs: list[dict[str, object]] = []
+    template_artifact_calls: list[dict[str, object]] = []
+    normalization_artifact_calls: list[dict[str, object]] = []
     persist_kwargs: dict[str, object] = {}
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
@@ -236,12 +317,12 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
     )
 
     def fake_compute_all_patch_entropies(**kwargs: object) -> pd.DataFrame:
-        entropy_frame = cast(pd.DataFrame, kwargs["df"])
-        entropy_inputs.append(entropy_frame.copy())
+        source_df = cast(pd.DataFrame, kwargs["df"])
+        entropy_inputs.append(source_df.copy())
         return pd.DataFrame(
             {
-                "image_path": entropy_frame["image_path"].tolist(),
-                "entropy": [0.9] * len(entropy_frame),
+                "image_path": source_df["image_path"].tolist(),
+                "entropy": [0.9] * len(source_df),
             }
         )
 
@@ -250,27 +331,42 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
         fake_compute_all_patch_entropies,
     )
 
-    def fake_fit_normalizer_on_train_set(
-        train_df: pd.DataFrame,
-        method_name: str,
-        entropy_df: pd.DataFrame | None = None,
-    ) -> tuple[object, list[str]]:
-        fit_calls.append(
+    def fake_select_template_rows_from_entropy(
+        train_df: pd.DataFrame, entropy_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        template_rows_inputs.append(
             {
                 "train_df": train_df.copy(),
-                "method_name": method_name,
-                "entropy_df": None if entropy_df is None else entropy_df.copy(),
+                "entropy_df": entropy_df.copy(),
             }
         )
-        return object(), ["/src/train_1.png"]
+        return train_df.assign(entropy=entropy_df["entropy"].to_numpy())
 
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.fit_normalizer_on_train_set",
-        fake_fit_normalizer_on_train_set,
+        "helpers.crossfold.pipeline.select_template_rows_from_entropy",
+        fake_select_template_rows_from_entropy,
     )
     monkeypatch.setattr(
-        "helpers.crossfold.pipeline.save_normalizer_stats",
-        lambda normalizer, method_name, output_dir, template_paths: None,
+        "helpers.crossfold.pipeline.build_aggregate_target_from_template_rows",
+        lambda selected_rows: selected_rows,
+    )
+
+    def fake_save_template_artifacts(output_dir: Path, **kwargs: object) -> dict[str, int]:
+        template_artifact_calls.append({"output_dir": output_dir, **kwargs})
+        return {"template_count": len(cast(pd.DataFrame, kwargs["selected_rows"]))}
+
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.save_template_selection_artifacts",
+        fake_save_template_artifacts,
+    )
+
+    def fake_generate_normalization_artifacts(output_dir: Path, **kwargs: object) -> list[object]:
+        normalization_artifact_calls.append({"output_dir": output_dir, **kwargs})
+        return []
+
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.generate_all_normalization_artifacts",
+        fake_generate_normalization_artifacts,
     )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
@@ -287,7 +383,6 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
 
     run_crossfold_pipeline(
         CrossfoldConfig(
-            normalization_method="REINHARD",
             source_path=source_path,
             overwrite_output_dir=True,
             random_state=42,
@@ -307,23 +402,24 @@ def test_run_crossfold_pipeline_computes_entropy_only_for_train_split(
 
     assert len(entropy_inputs) == 1
     assert entropy_inputs[0]["image_path"].tolist() == ["/src/train_1.png"]
-    assert len(fit_calls) == 1
-    assert cast(pd.DataFrame, fit_calls[0]["train_df"])["image_path"].tolist() == [
+    assert len(template_rows_inputs) == 1
+    assert cast(pd.DataFrame, template_rows_inputs[0]["train_df"])["image_path"].tolist() == [
         "/src/train_1.png"
     ]
-    assert cast(pd.DataFrame, fit_calls[0]["entropy_df"])["image_path"].tolist() == [
+    assert cast(pd.DataFrame, template_rows_inputs[0]["entropy_df"])["image_path"].tolist() == [
         "/src/train_1.png"
     ]
+    assert len(template_artifact_calls) == 1
+    assert len(normalization_artifact_calls) == 1
     split_frames = cast(dict[str, pd.DataFrame], persist_kwargs["split_frames"])
     assert split_frames["TRAIN"]["image_path"].tolist() == ["/src/train_1.png"]
     assert split_frames["VALIDATION"]["image_path"].tolist() == ["/src/val_1.png"]
     assert split_frames["TEST"]["image_path"].tolist() == ["/src/test_1.png"]
-    assert persist_kwargs["normalization_method"] == "REINHARD"
 
 
 def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Path) -> None:
     master_manifest_path = tmp_path / "master_manifest.sqlite"
-    output_dir = tmp_path / "NOT_NORMALIZED" / "NOT_NORMALIZED_seed_42"
+    output_dir = tmp_path / "STAGE4_SPLITS" / "split_seed_42"
     output_dir.mkdir(parents=True)
     (output_dir / "run_config.json").write_text("{}", encoding="utf-8")
 
@@ -463,20 +559,24 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
     _persist_stage5_split_state(
         master_manifest_path=master_manifest_path,
         split_frames=split_frames,
-        normalization_method="NOT_NORMALIZED",
         output_dir=output_dir,
+        normalization_artifacts=[],
     )
 
     with sqlite3.connect(master_manifest_path) as connection:
         updated_rows = connection.execute(
-            "SELECT split, normalization_method, normalization_artifact_id, "
+            "SELECT split, stage4_split_bundle_id, normalization_method, "
+            "normalization_artifact_id, "
             "last_updated_stage_name FROM patch_stage_state ORDER BY patch_id ASC"
         ).fetchall()
         run_rows = connection.execute("SELECT stage_name, config_path FROM runs").fetchall()
+        split_bundle_rows = connection.execute(
+            "SELECT run_id, output_dir_path FROM stage4_split_bundles"
+        ).fetchall()
 
     assert updated_rows == [
-        ("TRAIN", "NOT_NORMALIZED", None, "STAGE4"),
-        ("VALIDATION", "NOT_NORMALIZED", None, "STAGE4"),
+        ("TRAIN", 1, None, None, "STAGE4"),
+        ("VALIDATION", 1, None, None, "STAGE4"),
     ]
     assert run_rows == [
         (
@@ -487,16 +587,37 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
             ),
         )
     ]
+    assert split_bundle_rows == [
+        (1, to_manifest_path_ref(output_dir, manifest_path=master_manifest_path))
+    ]
 
 
-def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Path) -> None:
+def test_persist_stage5_split_state_records_all_normalization_artifacts(tmp_path: Path) -> None:
     master_manifest_path = tmp_path / "master_manifest.sqlite"
-    output_dir = tmp_path / "REINHARD" / "REINHARD_seed_42"
-    templates_dir = output_dir / "normalization_templates"
+    output_dir = tmp_path / "STAGE4_SPLITS" / "split_seed_42"
     output_dir.mkdir(parents=True)
-    templates_dir.mkdir()
     (output_dir / "run_config.json").write_text("{}", encoding="utf-8")
-    (output_dir / "normalization_stats.json").write_text('{"method": "REINHARD"}', encoding="utf-8")
+    template_dir = output_dir / "template_selection"
+    template_dir.mkdir()
+    artifact_methods = ("REINHARD", "RUIFROK", "MACENKO", "VAHADANE")
+    normalization_artifacts = []
+    for method in artifact_methods:
+        state_path = (
+            output_dir
+            / "runtime_normalization_artifacts"
+            / method.lower()
+            / "normalization_stats.json"
+        )
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(f'{{"method": "{method}"}}', encoding="utf-8")
+        normalization_artifacts.append(
+            {
+                "method": method,
+                "state_path": state_path,
+                "template_path": template_dir,
+                "fit_scope": "TRAIN",
+            }
+        )
 
     with sqlite3.connect(master_manifest_path) as connection:
         connection.executescript(
@@ -629,27 +750,43 @@ def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Pat
                 ]
             ),
         },
-        normalization_method="REINHARD",
         output_dir=output_dir,
+        normalization_artifacts=normalization_artifacts,
     )
 
     with sqlite3.connect(master_manifest_path) as connection:
         stage_state_rows = connection.execute(
-            "SELECT split, normalization_method, normalization_artifact_id FROM patch_stage_state"
+            "SELECT split, stage4_split_bundle_id, normalization_method, normalization_artifact_id "
+            "FROM patch_stage_state"
         ).fetchall()
         artifact_rows = connection.execute(
             "SELECT method, state_path, template_path, fit_scope FROM normalization_artifacts"
         ).fetchall()
+        split_bundle_rows = connection.execute(
+            "SELECT run_id, output_dir_path FROM stage4_split_bundles"
+        ).fetchall()
+        bundle_artifact_rows = connection.execute(
+            "SELECT stage4_split_bundle_id, normalization_artifact_id "
+            "FROM stage4_split_bundle_artifacts"
+        ).fetchall()
 
-    assert stage_state_rows == [("TRAIN", "REINHARD", 1)]
+    assert stage_state_rows == [("TRAIN", 1, None, None)]
     assert artifact_rows == [
         (
-            "REINHARD",
+            method,
             to_manifest_path_ref(
-                output_dir / "normalization_stats.json",
+                output_dir
+                / "runtime_normalization_artifacts"
+                / method.lower()
+                / "normalization_stats.json",
                 manifest_path=master_manifest_path,
             ),
-            to_manifest_path_ref(templates_dir, manifest_path=master_manifest_path),
+            to_manifest_path_ref(template_dir, manifest_path=master_manifest_path),
             "TRAIN",
         )
+        for method in artifact_methods
     ]
+    assert split_bundle_rows == [
+        (1, to_manifest_path_ref(output_dir, manifest_path=master_manifest_path))
+    ]
+    assert bundle_artifact_rows == [(1, 1), (1, 2), (1, 3), (1, 4)]

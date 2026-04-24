@@ -75,6 +75,30 @@ def test_fit_normalizer_on_train_set_uses_highest_entropy_image_per_patient(
     assert fake_normalizer.fitted_target == "aggregate-target"
 
 
+def test_select_template_rows_from_entropy_picks_one_highest_entropy_row_per_patient() -> None:
+    train_df = pd.DataFrame(
+        [
+            {"patient_id": 1, "image_path": "p1_low.png"},
+            {"patient_id": 1, "image_path": "p1_high.png"},
+            {"patient_id": 2, "image_path": "p2_only.png"},
+        ]
+    )
+    entropy_df = pd.DataFrame(
+        [
+            {"image_path": "p1_low.png", "entropy": 0.1},
+            {"image_path": "p1_high.png", "entropy": 0.9},
+            {"image_path": "p2_only.png", "entropy": 0.4},
+        ]
+    )
+
+    selected_rows = normalization.select_template_rows_from_entropy(train_df, entropy_df)
+
+    assert selected_rows[["patient_id", "image_path", "entropy"]].to_dict("records") == [
+        {"patient_id": 1, "image_path": "p1_high.png", "entropy": 0.9},
+        {"patient_id": 2, "image_path": "p2_only.png", "entropy": 0.4},
+    ]
+
+
 def _record_target(selected_targets: list[list[str]], image_paths: list[str]) -> str:
     selected_targets.append(list(image_paths))
     return "aggregate-target"
@@ -102,6 +126,33 @@ def test_save_normalizer_stats_writes_json_and_template_copies(tmp_path: Path) -
 
     assert (tmp_path / "normalization_stats.json").is_file()
     assert (tmp_path / "normalization_templates" / "template_000_template.png").is_file()
+
+
+def test_save_template_selection_artifacts_writes_shared_sidecars(tmp_path: Path) -> None:
+    template_file = tmp_path / "template.png"
+    cv2.imwrite(str(template_file), np.full((2, 2, 3), 33, dtype=np.uint8))
+    train_df = pd.DataFrame([{"patient_id": 1, "image_path": str(template_file)}])
+    entropy_df = pd.DataFrame([{"image_path": str(template_file), "entropy": 0.7}])
+    selected_rows = pd.DataFrame(
+        [{"patient_id": 1, "image_path": str(template_file), "entropy": 0.7}]
+    )
+
+    metadata = normalization.save_template_selection_artifacts(
+        tmp_path,
+        train_df=train_df,
+        entropy_df=entropy_df,
+        selected_rows=selected_rows,
+        aggregate_target_rgb=np.full((2, 2, 3), 44, dtype=np.uint8),
+        save_entropy_cache_csv=True,
+    )
+
+    assert metadata["selection_method"] == "highest_entropy_per_train_patient"
+    assert metadata["template_count"] == 1
+    assert (tmp_path / "entropy_cache.csv").is_file()
+    assert (tmp_path / "patient_entropy_median.csv").is_file()
+    assert (tmp_path / "aggregate_target.png").is_file()
+    assert (tmp_path / "template_selection.json").is_file()
+    assert (tmp_path / "template_selection" / "template_000_template.png").is_file()
 
 
 def test_make_aggregate_target_uses_median_rgb(tmp_path: Path) -> None:

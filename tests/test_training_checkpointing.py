@@ -463,6 +463,77 @@ def test_save_metadata_writes_fail_closed_provenance_payload(tmp_path: Path) -> 
     assert provenance["ohem"]["enabled"] is True
 
 
+def test_save_metadata_records_runtime_normalization_lineage_from_manifest_payloads(
+    tmp_path: Path,
+) -> None:
+    dataset_provenance = {
+        "path": "/tmp/TRAIN",
+        "sha256": "train-sha",
+        "source_signature": "train-source-sig",
+        "selection_signature": "sel-sig",
+        "smart_sampling_enabled": True,
+        "smart_sampling_metadata": {},
+        "attrs": {
+            "stage4_split_bundle_id": 7,
+            "runtime_normalization_method": "reinhard",
+            "normalization_method": "reinhard",
+            "normalization_artifact_id": 13,
+        },
+    }
+    validation_provenance = {
+        "path": "/tmp/VALIDATION",
+        "sha256": "val-sha",
+        "source_signature": "val-source-sig",
+        "selection_signature": None,
+        "smart_sampling_enabled": False,
+        "smart_sampling_metadata": {},
+        "attrs": {
+            "stage4_split_bundle_id": 7,
+            "runtime_normalization_method": "reinhard",
+            "normalization_method": "reinhard",
+            "normalization_artifact_id": 13,
+        },
+    }
+
+    request = _metadata_request(
+        tmp_path=tmp_path,
+        checkpoint={"epoch": 5},
+        dataset=tmp_path / "unused_train.h5",
+        validation_dataset=tmp_path / "unused_val.h5",
+    )
+    request = TrainingMetadataRequest(
+        **{
+            **request.__dict__,
+            "dataset": dataset_provenance,
+            "validation_dataset": validation_provenance,
+        }
+    )
+
+    save_metadata(request)
+
+    payload = json.loads((tmp_path / "best_model_meta.json").read_text(encoding="utf-8"))
+    dataset_attrs = cast(dict[str, object], dataset_provenance["attrs"])
+    assert (
+        payload["provenance"]["split_lineage"]["stage4_split_bundle_id"]
+        == dataset_attrs["stage4_split_bundle_id"]
+    )
+    assert payload["provenance"]["normalization_lineage"] == {
+        "dataset_sha256": "train-sha",
+        "stage4_split_bundle_id": 7,
+        "runtime_normalization_method": "reinhard",
+        "normalization_method": "reinhard",
+        "normalization_artifact_id": 13,
+    }
+    assert payload["provenance"]["validation_lineage"] == {
+        "dataset_sha256": "val-sha",
+        "source_signature": "val-source-sig",
+        "stage4_split_bundle_id": 7,
+        "runtime_normalization_method": "reinhard",
+        "normalization_method": "reinhard",
+        "normalization_artifact_id": 13,
+    }
+
+
 def test_save_metadata_records_stage7_lineage_details_from_filtered_hdf5(tmp_path: Path) -> None:
     dataset_path = tmp_path / "TRAIN_FILTERED.h5"
     validation_path = tmp_path / "VALIDATION.h5"

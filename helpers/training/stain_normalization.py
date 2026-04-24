@@ -69,16 +69,21 @@ def build_split_stain_normalizer(
     master_manifest_path: Path,
     records: Sequence[CanonicalRowRecord],
     *,
+    runtime_normalization_method: str = "NOT_NORMALIZED",
     device: torch.device | str | None = None,
 ) -> ImageStainNormalizer | None:
     """Build one shared split-level stain normalizer from Stage 5 metadata."""
 
-    method, normalization_artifact_id = _resolve_split_normalization_metadata(records)
+    method, normalization_artifact_id = resolve_runtime_normalization_selection(
+        master_manifest_path,
+        records,
+        runtime_normalization_method=runtime_normalization_method,
+    )
     if method == "none":
         return None
     if normalization_artifact_id is None:
         raise ValueError(
-            "Normalized runtime rows are missing normalization_artifact_id in "
+            "Normalized runtime selection is missing normalization_artifact_id in "
             "master_manifest.sqlite."
         )
 
@@ -86,37 +91,77 @@ def build_split_stain_normalizer(
     artifact_method = normalize_runtime_method_name(artifact.method)
     if artifact_method != method:
         raise ValueError(
-            "Normalization artifact method does not match split metadata: "
-            f"rows={method}, artifact={artifact_method}"
+            "Normalization artifact method does not match runtime selection: "
+            f"selected={method}, artifact={artifact_method}"
         )
     state = _load_normalization_state_json(artifact)
     runtime_device = torch.device(device) if device is not None else torch.device("cpu")
     return _build_runtime_normalizer(method=method, state=state, device=runtime_device)
 
 
-def _resolve_split_normalization_metadata(
-    records: Sequence[CanonicalRowRecord],
-) -> tuple[str, int | None]:
-    method_and_artifact_pairs = {
-        (
-            normalize_runtime_method_name(record.normalization_method),
-            record.normalization_artifact_id,
-        )
+def resolve_stage4_split_bundle_id(records: Sequence[CanonicalRowRecord]) -> int | None:
+    """Return the one shared Stage 4 split bundle id for a runtime split."""
+
+    stage4_split_bundle_ids = {
+        record.stage4_split_bundle_id
         for record in records
+        if record.stage4_split_bundle_id is not None
     }
-    if not method_and_artifact_pairs:
+    if not stage4_split_bundle_ids:
+        return None
+    if len(stage4_split_bundle_ids) != 1:
+        raise ValueError(
+            "Runtime split rows do not agree on stage4_split_bundle_id: "
+            f"{sorted(stage4_split_bundle_ids)}"
+        )
+    return next(iter(stage4_split_bundle_ids))
+
+
+def resolve_runtime_normalization_selection(
+    master_manifest_path: Path,
+    records: Sequence[CanonicalRowRecord],
+    *,
+    runtime_normalization_method: str,
+) -> tuple[str, int | None]:
+    method = normalize_runtime_method_name(runtime_normalization_method)
+    if method == "none":
         return "none", None
-    if len(method_and_artifact_pairs) != 1:
+    stage4_split_bundle_id = resolve_stage4_split_bundle_id(records)
+    if stage4_split_bundle_id is None:
         raise ValueError(
-            "Runtime split rows do not agree on normalization metadata: "
-            f"{sorted(method_and_artifact_pairs)}"
+            "Normalized runtime selection requires split rows with one shared "
+            "stage4_split_bundle_id in master_manifest.sqlite."
         )
-    method, normalization_artifact_id = next(iter(method_and_artifact_pairs))
-    if method == "none" and normalization_artifact_id is not None:
+    return method, _load_split_bundle_artifact_id(
+        master_manifest_path,
+        stage4_split_bundle_id=stage4_split_bundle_id,
+        method=runtime_normalization_method,
+    )
+
+
+def _load_split_bundle_artifact_id(
+    master_manifest_path: Path,
+    *,
+    stage4_split_bundle_id: int,
+    method: str,
+) -> int:
+    with sqlite3.connect(master_manifest_path) as connection:
+        row = connection.execute(
+            """
+            SELECT sba.normalization_artifact_id
+            FROM stage4_split_bundle_artifacts sba
+            INNER JOIN normalization_artifacts na
+                ON na.normalization_artifact_id = sba.normalization_artifact_id
+            WHERE sba.stage4_split_bundle_id = ? AND UPPER(na.method) = ?
+            """,
+            (stage4_split_bundle_id, method.strip().upper()),
+        ).fetchone()
+    if row is None:
         raise ValueError(
-            "Non-normalized runtime rows must not reference a normalization artifact id."
+            "Requested runtime normalization artifact is missing for split bundle "
+            f"{stage4_split_bundle_id}: {method.strip().upper()}"
         )
-    return method, normalization_artifact_id
+    return int(row[0])
 
 
 def _load_normalization_artifact(

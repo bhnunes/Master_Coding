@@ -1,7 +1,7 @@
 flowchart LR
-    manifest[(master_manifest.sqlite<br/>Split + normalization + sampling state)]
+    manifest[(master_manifest.sqlite<br/>Split + split bundle + sampling state)]
     shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
-    phase4_outputs[Input<br/>Normalization artifacts + run config]
+    phase4_outputs[Input<br/>Stage 4 run config + runtime artifacts]
     phase6_outputs[Optional input<br/>Sampling sidecars]
     phase7_outputs[Input<br/>Approved LR / architecture reports]
     p8[Phase 8<br/>8_training_ensemble.py<br/>Train approved runs]

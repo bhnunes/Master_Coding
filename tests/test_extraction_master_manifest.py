@@ -288,6 +288,11 @@ def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Pa
             },
         ]
     )
+    run_id = manifest.create_run(stage_name="STAGE4", config_path=tmp_path / "run_config.json")
+    split_bundle = manifest.create_stage4_split_bundle(
+        run_id=run_id,
+        output_dir=tmp_path / "stage4",
+    )
     manifest.update_stage4_split_assignments(
         assignments=[
             {
@@ -307,6 +312,7 @@ def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Pa
                 "split": "VALIDATION",
             },
         ],
+        stage4_split_bundle_id=split_bundle.stage4_split_bundle_id,
         normalization_method="NOT_NORMALIZED",
         normalization_artifact_id=None,
     )
@@ -335,17 +341,29 @@ def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Pa
 
     with sqlite3.connect(tmp_path / "master_manifest.sqlite") as connection:
         rows = connection.execute(
-            "SELECT cleaning_decision, contamination_rate, split, normalization_method, "
+            "SELECT cleaning_decision, contamination_rate, split, stage4_split_bundle_id, "
+            "normalization_method, "
             "sampling_decision, is_stage4_accepted, is_stage7_selected, last_updated_stage_name "
             "FROM patch_stage_state ORDER BY patch_id ASC"
         ).fetchall()
 
     assert rows == [
-        ("accepted", 0.1, "TRAIN", "NOT_NORMALIZED", "protected_kept", 1, 1, "STAGE6"),
+        (
+            "accepted",
+            0.1,
+            "TRAIN",
+            split_bundle.stage4_split_bundle_id,
+            "NOT_NORMALIZED",
+            "protected_kept",
+            1,
+            1,
+            "STAGE6",
+        ),
         (
             "rejected",
             0.8,
             "VALIDATION",
+            split_bundle.stage4_split_bundle_id,
             "NOT_NORMALIZED",
             "rejected_reducible",
             0,

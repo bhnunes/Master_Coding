@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.logging_utils import resolve_log_folder
+from helpers.runtime_normalization import (
+    RUNTIME_NORMALIZATION_METHOD_ENV_VAR,
+    parse_runtime_normalization_method,
+)
 from helpers.runtime_platform import resolve_env_path
 from helpers.training.registry import validate_architecture_encoder_pair
 
@@ -125,6 +129,7 @@ class TrainingEnsembleConfig:
     encoder: str
     resume_checkpoint: Path | None
     use_artifact_aware_loss: bool
+    runtime_normalization_method: str = "NOT_NORMALIZED"
     log_folder: Path = Path("logs")
     log_file_name: str = "training_ensemble.log"
 
@@ -266,6 +271,9 @@ def load_training_ensemble_config(
         encoder=encoder,
         resume_checkpoint=resume_checkpoint,
         use_artifact_aware_loss=use_artifact_aware_loss,
+        runtime_normalization_method=parse_runtime_normalization_method(
+            values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
+        ),
         log_folder=resolve_log_folder(
             values,
             system_name=system_name,

@@ -123,6 +123,8 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
         lambda layout: {
             "attrs": {
                 "master_manifest_sha256": "manifest-sha",
+                "stage4_split_bundle_id": None,
+                "runtime_normalization_method": "none",
                 "normalization_method": "none",
                 "normalization_artifact_id": None,
             }
@@ -160,12 +162,16 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
                         "sha256": "validation-sha",
                         "attrs": {
                             "master_manifest_sha256": "manifest-sha",
+                            "stage4_split_bundle_id": None,
+                            "runtime_normalization_method": "none",
                             "normalization_method": "none",
                             "normalization_artifact_id": None,
                         },
                     },
                     "validation_lineage": {
                         "master_manifest_sha256": "manifest-sha",
+                        "stage4_split_bundle_id": None,
+                        "runtime_normalization_method": "none",
                         "normalization_method": "none",
                         "normalization_artifact_id": None,
                     },
@@ -207,6 +213,8 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
         lambda layout: {
             "attrs": {
                 "master_manifest_sha256": "other-manifest-sha",
+                "stage4_split_bundle_id": None,
+                "runtime_normalization_method": "none",
                 "normalization_method": "none",
                 "normalization_artifact_id": None,
             }
@@ -250,6 +258,8 @@ def test_execute_pipeline_rejects_missing_validation_lineage_key(
                         "sha256": "validation-sha",
                         "attrs": {
                             "master_manifest_sha256": "manifest-sha",
+                            "stage4_split_bundle_id": None,
+                            "runtime_normalization_method": "none",
                             "normalization_method": "none",
                             "normalization_artifact_id": None,
                         },
@@ -296,6 +306,8 @@ def test_execute_pipeline_rejects_missing_validation_lineage_key(
         lambda layout: {
             "attrs": {
                 "master_manifest_sha256": "manifest-sha",
+                "stage4_split_bundle_id": None,
+                "runtime_normalization_method": "none",
                 "normalization_method": "none",
                 "normalization_artifact_id": None,
             }
@@ -308,5 +320,5 @@ def test_execute_pipeline_rejects_missing_validation_lineage_key(
         ),
     )
 
-    with pytest.raises(ValueError, match="validation_lineage missing 'normalization_artifact_id'"):
+    with pytest.raises(ValueError, match="validation_lineage missing 'stage4_split_bundle_id'"):
         _execute_pipeline(config)

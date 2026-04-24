@@ -19,6 +19,7 @@ class CanonicalRowRecord:
     normalization_artifact_id: int | None
     sampling_decision: str | None
     is_stage7_selected: bool
+    stage4_split_bundle_id: int | None = None
 
 
 def load_lr_finder_training_records(
@@ -63,7 +64,18 @@ def _load_split_records(
     split: str,
     require_stage7_selected: bool = False,
 ) -> list[CanonicalRowRecord]:
-    query = """
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.row_factory = sqlite3.Row
+        patch_stage_state_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(patch_stage_state)").fetchall()
+        }
+        stage4_split_bundle_select = (
+            "s.stage4_split_bundle_id"
+            if "stage4_split_bundle_id" in patch_stage_state_columns
+            else "NULL AS stage4_split_bundle_id"
+        )
+        query = f"""
         SELECT
             p.source_hdf5_path,
             p.source_row_index,
@@ -71,6 +83,7 @@ def _load_split_records(
             p.label,
             p.filename,
             s.split,
+            {stage4_split_bundle_select},
             s.normalization_method,
             s.normalization_artifact_id,
             s.sampling_decision,
@@ -80,13 +93,10 @@ def _load_split_records(
         WHERE s.is_stage4_accepted = 1
           AND s.split = ?
     """
-    parameters: list[object] = [split]
-    if require_stage7_selected:
-        query += " AND s.is_stage7_selected = 1"
-    query += " ORDER BY p.patient_id ASC, p.source_hdf5_path ASC, p.source_row_index ASC"
-
-    with sqlite3.connect(master_manifest_path) as connection:
-        connection.row_factory = sqlite3.Row
+        parameters: list[object] = [split]
+        if require_stage7_selected:
+            query += " AND s.is_stage7_selected = 1"
+        query += " ORDER BY p.patient_id ASC, p.source_hdf5_path ASC, p.source_row_index ASC"
         rows = connection.execute(query, parameters).fetchall()
 
     return [
@@ -115,6 +125,11 @@ def _load_split_records(
                 str(row["sampling_decision"]) if row["sampling_decision"] is not None else None
             ),
             is_stage7_selected=bool(row["is_stage7_selected"]),
+            stage4_split_bundle_id=(
+                int(row["stage4_split_bundle_id"])
+                if row["stage4_split_bundle_id"] is not None
+                else None
+            ),
         )
         for row in rows
     ]

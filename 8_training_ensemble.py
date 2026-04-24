@@ -189,6 +189,7 @@ prepared_training_data = prepare_training_data(
     subset_ratio=subset_ratio,
     seed=seed,
     use_artifact_aware_loss=use_artifact_aware_loss,
+    runtime_normalization_method=training_config.runtime_normalization_method,
 )
 train_dataset_provenance = prepared_training_data.training_provenance
 validation_dataset_provenance = prepared_training_data.validation_provenance

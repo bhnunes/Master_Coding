@@ -15,11 +15,13 @@ import pandas as pd
 from helpers.crossfold.entropy import (
     calculate_image_entropy_from_hdf5_row,
     calculate_image_entropy_from_path,
+    compute_patient_entropy_median,
 )
 from helpers.cv2_compat import ensure_cv2_compat
 from helpers.runtime_platform import load_openslide_module
 
 cv2 = ensure_cv2_compat(cv2)
+FITTED_NORMALIZATION_METHODS = ("REINHARD", "RUIFROK", "MACENKO", "VAHADANE")
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -128,6 +130,189 @@ def _export_hdf5_template_image(template_ref: str, destination: Path) -> None:
         raise ValueError(f"Could not export HDF5 template image: {template_ref}")
 
 
+def select_template_rows_from_entropy(
+    train_df: pd.DataFrame,
+    entropy_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Pick one highest-entropy TRAIN patch per patient."""
+
+    if train_df.empty:
+        raise ValueError("TRAIN dataframe is empty; cannot select template rows.")
+    if entropy_df.empty:
+        raise ValueError("Entropy dataframe is empty; cannot select template rows.")
+
+    merged = train_df.merge(entropy_df, on="image_path", how="left")
+    merged["entropy"] = merged["entropy"].fillna(0.0)
+    idx = merged.groupby("patient_id")["entropy"].idxmax()
+    selected_rows = merged.loc[idx].dropna(subset=["image_path"]).reset_index(drop=True)
+    if selected_rows.empty:
+        raise ValueError("No template rows were selected from TRAIN entropy values.")
+    return selected_rows
+
+
+def build_aggregate_target_from_template_rows(
+    selected_rows: pd.DataFrame,
+) -> npt.NDArray[np.uint8]:
+    """Build the shared aggregate target from selected TRAIN template rows."""
+
+    if selected_rows.empty:
+        raise ValueError("Template row selection is empty; cannot build aggregate target.")
+    template_paths = selected_rows["image_path"].astype(str).tolist()
+    if _can_use_hdf5_rows(selected_rows):
+        return _make_aggregate_target_from_images(_load_rgb_images_from_hdf5_rows(selected_rows))
+    return make_aggregate_target(template_paths)
+
+
+def _export_template_images(template_paths: list[str], destination_dir: Path) -> None:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for index, source in enumerate(template_paths):
+        parsed = _parse_hdf5_image_ref(source)
+        if parsed is not None:
+            source_hdf5_path, row_index = parsed
+            destination = destination_dir / (
+                f"template_{index:03d}_{source_hdf5_path.stem}_row_{row_index:06d}.png"
+            )
+            _export_hdf5_template_image(source, destination)
+            continue
+
+        source_path = Path(source)
+        destination = destination_dir / f"template_{index:03d}_{source_path.name}"
+        shutil.copy(source_path, destination)
+
+
+def save_template_selection_artifacts(
+    output_dir: Path,
+    *,
+    train_df: pd.DataFrame,
+    entropy_df: pd.DataFrame,
+    selected_rows: pd.DataFrame,
+    aggregate_target_rgb: npt.NDArray[np.uint8],
+    save_entropy_cache_csv: bool,
+) -> dict[str, Any]:
+    """Persist shared Stage 4 entropy and template-selection provenance once."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    template_paths = selected_rows["image_path"].astype(str).tolist()
+    template_dir = output_dir / "template_selection"
+    _export_template_images(template_paths, template_dir)
+
+    aggregate_target_path = output_dir / "aggregate_target.png"
+    aggregate_target_bgr = cv2.cvtColor(aggregate_target_rgb, cv2.COLOR_RGB2BGR)
+    if not cv2.imwrite(str(aggregate_target_path), aggregate_target_bgr):
+        raise ValueError(f"Could not save aggregate target image: {aggregate_target_path}")
+
+    patient_entropy_df = compute_patient_entropy_median(train_df, entropy_df)
+    if save_entropy_cache_csv:
+        entropy_df.to_csv(output_dir / "entropy_cache.csv", index=False)
+        patient_entropy_df.to_csv(output_dir / "patient_entropy_median.csv", index=False)
+
+    template_selection_records: list[dict[str, Any]] = []
+    for row in selected_rows.to_dict("records"):
+        template_selection_records.append(
+            {
+                "patient_id": int(row["patient_id"]),
+                "image_path": str(row["image_path"]),
+                "entropy": float(row["entropy"]),
+                "source_hdf5_path": (
+                    str(row["source_hdf5_path"])
+                    if row.get("source_hdf5_path") is not None
+                    else None
+                ),
+                "source_row_index": (
+                    int(row["source_row_index"])
+                    if row.get("source_row_index") is not None
+                    else None
+                ),
+            }
+        )
+    metadata = {
+        "selection_method": "highest_entropy_per_train_patient",
+        "template_count": len(template_selection_records),
+        "aggregate_target_path": str(aggregate_target_path.name),
+        "template_dir": str(template_dir.name),
+        "templates": template_selection_records,
+    }
+    metadata_path = output_dir / "template_selection.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2, cls=NumpyEncoder), encoding="utf-8")
+    return metadata
+
+
+def fit_normalizer_to_target(
+    method_name: str,
+    target_rgb: npt.NDArray[np.uint8],
+) -> Any:
+    """Fit one stain normalizer to a shared aggregate target image."""
+
+    logging.info("Fitting '%s' normalizer from shared aggregate target...", method_name)
+    stainnorm_module = load_stain_normalizer_backend()
+    normalizer = stainnorm_module.get_normalizer(method_name)
+    normalizer.fit(target_rgb)
+    logging.info("Normalizer '%s' fitted from shared aggregate target.", method_name)
+    return normalizer
+
+
+def _collect_normalizer_stats(
+    normalizer: Any,
+    method_name: str,
+    *,
+    stainnorm_module: Any | None = None,
+) -> dict[str, Any]:
+    stats: dict[str, Any] = {"method": method_name}
+    stainnorm = stainnorm_module or load_stain_normalizer_backend()
+    try:
+        if isinstance(normalizer, stainnorm.StainNormalizer):
+            if hasattr(normalizer, "stain_matrix_target"):
+                stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
+            if hasattr(normalizer, "maxC_target"):
+                stats["maxC_target"] = normalizer.maxC_target.tolist()
+            if method_name == "MACENKO" and hasattr(normalizer.extractor, "stains"):
+                stats["stain_vectors_source_estimate"] = normalizer.extractor.stains.tolist()
+        elif isinstance(normalizer, stainnorm.ReinhardNormalizer):
+            stats["target_means"] = list(normalizer.target_means)
+            stats["target_stds"] = list(normalizer.target_stds)
+        else:
+            stats["info"] = "Unknown or unsupported normalizer type."
+            logging.warning("Unrecognized normalizer type for '%s'.", method_name)
+    except Exception as error:
+        stats["error"] = str(error)
+        logging.error("Failed extracting normalizer stats: %s", error, exc_info=True)
+    return stats
+
+
+def generate_all_normalization_artifacts(
+    output_dir: Path,
+    *,
+    aggregate_target_rgb: npt.NDArray[np.uint8],
+    shared_template_dir: Path,
+) -> list[dict[str, object]]:
+    """Generate all Stage 4 runtime normalization artifacts from one target."""
+
+    artifacts_root = output_dir / "runtime_normalization_artifacts"
+    artifacts_root.mkdir(parents=True, exist_ok=True)
+    artifact_records: list[dict[str, object]] = []
+    stainnorm_module = load_stain_normalizer_backend()
+    for method_name in FITTED_NORMALIZATION_METHODS:
+        normalizer = fit_normalizer_to_target(method_name, aggregate_target_rgb)
+        stats = _collect_normalizer_stats(
+            normalizer,
+            method_name,
+            stainnorm_module=stainnorm_module,
+        )
+        method_dir = artifacts_root / method_name.lower()
+        method_dir.mkdir(parents=True, exist_ok=True)
+        state_path = method_dir / "normalization_stats.json"
+        state_path.write_text(json.dumps(stats, indent=2, cls=NumpyEncoder), encoding="utf-8")
+        artifact_records.append(
+            {
+                "method": method_name,
+                "state_path": state_path,
+                "template_path": shared_template_dir,
+                "fit_scope": "TRAIN",
+            }
+        )
+    return artifact_records
+
+
 def fit_normalizer_on_train_set(
     train_df: pd.DataFrame,
     method_name: str,
@@ -142,10 +327,7 @@ def fit_normalizer_on_train_set(
     template_paths: list[str]
     if entropy_df is not None and not entropy_df.empty:
         logging.info("Selecting templates using cached entropy_df (no disk rereads).")
-        merged = train_df.merge(entropy_df, on="image_path", how="left")
-        merged["entropy"] = merged["entropy"].fillna(0.0)
-        idx = merged.groupby("patient_id")["entropy"].idxmax()
-        selected_rows = merged.loc[idx].dropna(subset=["image_path"])
+        selected_rows = select_template_rows_from_entropy(train_df, entropy_df)
         template_paths = selected_rows["image_path"].tolist()
     else:
         logging.warning("entropy_df not provided; selecting templates by rereading images (slow).")
@@ -173,12 +355,7 @@ def fit_normalizer_on_train_set(
     if not template_paths:
         raise ValueError("No templates found to fit normalizer.")
 
-    if _can_use_hdf5_rows(selected_rows):
-        target_rgb = _make_aggregate_target_from_images(
-            _load_rgb_images_from_hdf5_rows(selected_rows)
-        )
-    else:
-        target_rgb = make_aggregate_target(template_paths)
+    target_rgb = build_aggregate_target_from_template_rows(selected_rows)
     stainnorm_module = load_stain_normalizer_backend()
     normalizer = stainnorm_module.get_normalizer(method_name)
     normalizer.fit(target_rgb)
@@ -195,25 +372,11 @@ def save_normalizer_stats(
 ) -> None:
     """Persist normalizer metadata and template images for provenance."""
 
-    stats: dict[str, Any] = {"method": method_name}
-    stainnorm = stainnorm_module or load_stain_normalizer_backend()
-    try:
-        if isinstance(normalizer, stainnorm.StainNormalizer):
-            if hasattr(normalizer, "stain_matrix_target"):
-                stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
-            if hasattr(normalizer, "maxC_target"):
-                stats["maxC_target"] = normalizer.maxC_target.tolist()
-            if method_name == "MACENKO" and hasattr(normalizer.extractor, "stains"):
-                stats["stain_vectors_source_estimate"] = normalizer.extractor.stains.tolist()
-        elif isinstance(normalizer, stainnorm.ReinhardNormalizer):
-            stats["target_means"] = list(normalizer.target_means)
-            stats["target_stds"] = list(normalizer.target_stds)
-        else:
-            stats["info"] = "Unknown or unsupported normalizer type."
-            logging.warning("Unrecognized normalizer type for '%s'.", method_name)
-    except Exception as error:
-        stats["error"] = str(error)
-        logging.error("Failed extracting normalizer stats: %s", error, exc_info=True)
+    stats = _collect_normalizer_stats(
+        normalizer,
+        method_name,
+        stainnorm_module=stainnorm_module,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stats_path = output_dir / "normalization_stats.json"
@@ -221,18 +384,5 @@ def save_normalizer_stats(
     logging.info("Normalization stats saved: %s", stats_path)
 
     template_dir = output_dir / "normalization_templates"
-    template_dir.mkdir(parents=True, exist_ok=True)
-    for index, source in enumerate(template_paths):
-        parsed = _parse_hdf5_image_ref(source)
-        if parsed is not None:
-            source_hdf5_path, row_index = parsed
-            destination = template_dir / (
-                f"template_{index:03d}_{source_hdf5_path.stem}_row_{row_index:06d}.png"
-            )
-            _export_hdf5_template_image(source, destination)
-            continue
-
-        source_path = Path(source)
-        destination = template_dir / f"template_{index:03d}_{source_path.name}"
-        shutil.copy(source_path, destination)
+    _export_template_images(template_paths, template_dir)
     logging.info("Saved %s template images: %s", len(template_paths), template_dir)

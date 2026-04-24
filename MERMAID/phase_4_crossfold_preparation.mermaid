@@ -1,11 +1,11 @@
 flowchart LR
     manifest[(master_manifest.sqlite<br/>Canonical rows + cleaning state)]
     shards[Input<br/>Phase 2 HDF5 shards<br/>Pixel backend for split writing]
-    env[Input<br/>Crossfold + normalization config]
-    p4[Phase 4<br/>4_crossfold.py<br/>Assign TRAIN / VALIDATION / TEST]
+    env[Input<br/>Crossfold config]
+    p4[Phase 4<br/>4_crossfold.py<br/>Assign one TRAIN / VALIDATION / TEST split]
     split_hdf5[Output<br/>Split HDF5 datasets / manifests]
-    run_cfg[Output<br/>run_config.json + split_stats.csv + manifest.csv]
-    norm_artifacts[Output<br/>Optional normalization artifacts fit on TRAIN]
+    run_cfg[Output<br/>run_config.json + split_stats.csv + manifest.csv<br/>+ template-selection sidecars]
+    norm_artifacts[Output<br/>runtime_normalization_artifacts/<br/>REINHARD + RUIFROK + MACENKO + VAHADANE]
 
     manifest -. read canonical rows + cleaning state .-> p4
     shards -. read pixels for split outputs .-> p4
@@ -13,4 +13,4 @@ flowchart LR
     p4 --> split_hdf5
     p4 --> run_cfg
     p4 --> norm_artifacts
-    p4 -. updates split + normalization state .-> manifest
+    p4 -. updates split bundle + split state .-> manifest

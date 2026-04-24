@@ -67,6 +67,7 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     assert config.log_path == Path("logs/lr_finder.log")
     assert config.execution_mode == "PAPER"
     assert config.amp_precision == "fp32"
+    assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.hf_token is None
     assert [(plan.architecture, plan.encoder) for plan in config.model_plans] == [
         ("FPN", "senet154"),
@@ -92,6 +93,22 @@ def test_load_lr_finder_config_reads_huggingface_token_aliases(tmp_path: Path) -
     )
 
     assert config.hf_token == "hf_primary"
+
+
+def test_load_lr_finder_config_reads_shared_runtime_normalization_method(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_text("", encoding="utf-8")
+
+    config = load_lr_finder_config(
+        {
+            "LR_FINDER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+            "LR_FINDER_OUTPUT_DIR": str(tmp_path / "reports"),
+            "LR_FINDER_LOCAL_DATA_DIR": str(tmp_path / "local"),
+            "RUNTIME_NORMALIZATION_METHOD": "ruifrok",
+        }
+    )
+
+    assert config.runtime_normalization_method == "RUIFROK"
 
 
 def test_load_lr_finder_config_rejects_unknown_architecture_filter(

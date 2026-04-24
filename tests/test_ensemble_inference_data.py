@@ -243,6 +243,8 @@ def test_collect_test_dataset_provenance_reports_manifest_metadata(
     assert provenance["shard_count"] == EXPECTED_SHARD_COUNT
     assert provenance["attrs"] == {
         "master_manifest_sha256": provenance["master_manifest_sha256"],
+        "stage4_split_bundle_id": None,
+        "runtime_normalization_method": "none",
         "normalization_method": "none",
         "normalization_artifact_id": None,
     }

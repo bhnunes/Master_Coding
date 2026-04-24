@@ -21,7 +21,6 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     config = load_crossfold_config(
         {
             "CROSSFOLD_SOURCE_HDF5_PATH": str(tmp_path / "SOURCE_DATASET.h5"),
-            "CROSSFOLD_NORMALIZATION_METHOD": "MACENKO",
             "CROSSFOLD_OVERWRITE_OUTPUT_DIR": "false",
             "CROSSFOLD_RANDOM_STATE": "7",
             "CROSSFOLD_TEST_PATIENT_COUNT": "24",
@@ -38,7 +37,6 @@ def test_load_crossfold_config_reads_expected_environment(tmp_path: Path) -> Non
     )
 
     assert config.source_path == tmp_path / "SOURCE_DATASET.h5"
-    assert config.normalization_method == "MACENKO"
     assert config.overwrite_output_dir is False
     assert config.random_state == TEST_RANDOM_STATE
     assert config.constraints.test_patient_count == EXPLICIT_TEST_PATIENT_COUNT
@@ -91,18 +89,6 @@ def test_load_crossfold_config_accepts_sqlite_source_path(tmp_path: Path) -> Non
     )
 
     assert config.source_path == tmp_path / "master_manifest.sqlite"
-
-
-def test_load_crossfold_config_rejects_invalid_normalization_method(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="CROSSFOLD_NORMALIZATION_METHOD"):
-        load_crossfold_config(
-            {
-                "CROSSFOLD_SOURCE_HDF5_PATH": str(tmp_path / "SOURCE_DATASET.h5"),
-                "CROSSFOLD_NORMALIZATION_METHOD": "INVALID",
-            }
-        )
-
-
 def test_load_crossfold_config_defaults_new_split_surface(tmp_path: Path) -> None:
     config = load_crossfold_config(
         {
@@ -113,6 +99,8 @@ def test_load_crossfold_config_defaults_new_split_surface(tmp_path: Path) -> Non
     assert config.constraints.test_patient_count == DEFAULT_TEST_PATIENT_COUNT
     assert config.constraints.validation_patient_count == DEFAULT_VALIDATION_PATIENT_COUNT
     assert config.objective.optuna_trials == DEFAULT_OPTUNA_TRIALS
+    assert config.output_base_dir == tmp_path / "STAGE4_SPLITS"
+    assert config.output_run_dir == tmp_path / "STAGE4_SPLITS" / "split_seed_42"
 
 
 def test_load_crossfold_config_ignores_removed_legacy_split_env_vars(tmp_path: Path) -> None:

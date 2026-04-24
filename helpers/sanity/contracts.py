@@ -9,6 +9,13 @@ from helpers.stage_contracts import STAGE5_SINGLETON_SPLIT_FILES
 
 PATIENT_FILENAME_PATTERN = re.compile(r"PATIENT_(\d+)_")
 LOGICAL_HDF5_REF_PATTERN = re.compile(r"^HDF5::(?P<dataset>images|masks)\[(?P<row>\d+)\]$")
+RUNTIME_HDF5_REF_PATTERN = re.compile(
+    r"^(?P<path>.+)::(?P<dataset>images|masks)\[(?P<row>\d+)\]$"
+)
+
+
+def _match_hdf5_ref(reference: str) -> re.Match[str] | None:
+    return LOGICAL_HDF5_REF_PATTERN.match(reference) or RUNTIME_HDF5_REF_PATTERN.match(reference)
 
 
 def check_filename_uniqueness(manifest_df: pd.DataFrame) -> CheckResult:
@@ -72,13 +79,14 @@ def check_source_reference_contract(manifest_df: pd.DataFrame) -> CheckResult:
             invalid.append(str(getattr(row, "filename", "<missing filename>")))
             continue
 
-        image_match = LOGICAL_HDF5_REF_PATTERN.match(image_ref)
-        mask_match = LOGICAL_HDF5_REF_PATTERN.match(mask_ref)
+        image_match = _match_hdf5_ref(image_ref)
+        mask_match = _match_hdf5_ref(mask_ref)
         if image_match and mask_match:
             if (
                 image_match.group("row") != mask_match.group("row")
                 or image_match.group("dataset") != "images"
                 or mask_match.group("dataset") != "masks"
+                or image_match.groupdict().get("path") != mask_match.groupdict().get("path")
             ):
                 invalid.append(str(getattr(row, "filename", "<missing filename>")))
             continue

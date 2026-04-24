@@ -14,7 +14,7 @@
 \shorttitle{End-to-End Cancer Detection in Digital Pathology}
 \shortauthors{Bruno Henrique Nunes}
 
-\title[mode=title]{A Reproducibility-Oriented Pipeline for Whole-Slide Cancer Detection in Digital Pathology}
+\title[mode=title]{A Reproducibility-Oriented Workflow for Whole-Slide Cancer Detection in Digital Pathology}
 
 \tnotemark[1]
 \tnotetext[1]{This manuscript draft was written directly from repository inspection. Statements are restricted to behaviors verifiable from source code, configuration templates, and pipeline contracts. Sections requiring empirical outcomes that were not available in the repository are explicitly marked as work in progress.}
@@ -33,7 +33,7 @@
 \cortext[1]{Corresponding author}
 
 \begin{abstract}
-This article documents a computational pathology pipeline implemented as a script-driven Python research workflow for whole-slide cancer detection. The repository defines an end-to-end sequence comprising slide-level artifact detection, SQLite-backed and HDF5-native patch extraction from heterogeneous annotation formats, human-in-the-loop and graph-based cleaning of cancer patches, canonical source-HDF5 packaging, patient-identifier-aware split generation with optional train-only stain normalization, scientific sanity checks, embedding-based smart sampling, repeated learning-rate and loss-weight screening, single-model segmentation training, validation-only ensemble recipe optimization, and frozen test-time inference. The implementation emphasizes explicit file contracts, provenance-aware fail-closed validation, and reproducibility sidecars across downstream stages. Quantitative performance results are not reported here because authoritative experiment artifacts were not available to the repository inspection workflow. Cohort statistics, hardware details for claim-bearing runs, and final experiment-specific model selections therefore remain explicit placeholders.
+This article documents a computational pathology pipeline implemented as a script-driven Python research workflow for whole-slide cancer detection. The repository defines an end-to-end sequence comprising slide-level artifact detection, SQLite-backed and HDF5-native patch extraction from heterogeneous annotation formats, human-in-the-loop and graph-based cleaning of cancer patches, canonical source-HDF5 packaging, patient-identifier-aware split generation with shared Stage~4 entropy and template selection, runtime stain-normalization artifact generation from a shared training target, scientific sanity checks, embedding-based smart sampling, repeated learning-rate and loss-weight screening, single-model segmentation training, validation-only ensemble recipe optimization, and frozen test-time inference. The implementation emphasizes explicit file contracts, provenance-aware fail-closed validation, and reproducibility sidecars across downstream stages. Quantitative performance results are not reported here because authoritative experiment artifacts were not available to the repository inspection workflow. Cohort statistics, hardware details for claim-bearing runs, and final experiment-specific model selections therefore remain explicit placeholders.
 \end{abstract}
 
 \begin{highlights}
@@ -56,7 +56,7 @@ This manuscript is intentionally restricted to claims that can be verified from 
 
 \section{Related Work}
 
-The implemented workflow sits at the intersection of several established lines of computational pathology research, including whole-slide quality control, patch-based histopathology learning, stain normalization, patient-level dataset partitioning, and multi-model aggregation. These themes are reflected directly in the code structure: Stage~1 performs slide-level artifact characterization before patch extraction, Stage~4 constrains data partitioning at the patient-identifier level, Stage~4 optionally fits stain normalization on \texttt{TRAIN} only, and Stages~9--10 implement validation-only ensemble design followed by frozen test-time inference. From a methodological perspective, the repository therefore combines ideas usually discussed separately in the literature: image-quality characterization, annotation-aware patch extraction, train-only preprocessing, provenance-aware experiment tracking, and post hoc ensemble optimization.
+The implemented workflow sits at the intersection of several established lines of computational pathology research, including whole-slide quality control, patch-based histopathology learning, stain normalization, patient-level dataset partitioning, and multi-model aggregation. These themes are reflected directly in the code structure: Stage~1 performs slide-level artifact characterization before patch extraction, Stage~4 constrains data partitioning at the patient-identifier level, Stage~4 computes shared template-selection and runtime-normalization artifacts from \texttt{TRAIN} only, and Stages~9--10 implement validation-only ensemble design followed by frozen test-time inference. From a methodological perspective, the repository therefore combines ideas usually discussed separately in the literature: image-quality characterization, annotation-aware patch extraction, train-only preprocessing, provenance-aware experiment tracking, and post hoc ensemble optimization.
 
 Because the present draft is restricted to repository-grounded claims, it does not attempt to attribute novelty or priority relative to specific published methods without an externally curated bibliography. A submission-ready version of this section should situate the implementation against prior work on digital pathology quality control, stain normalization, segmentation-model ensembling, and leakage-aware evaluation in medical imaging, and should add the corresponding citations explicitly.
 
@@ -64,7 +64,7 @@ Because the present draft is restricted to repository-grounded claims, it does n
 
 \subsection{Pipeline overview}
 
-The repository is organized as a script-driven pipeline in which each numbered entrypoint represents a distinct processing stage. Stage~1 generates GeoJSON artifact annotations directly from archived whole-slide images. Stage~2 ingests cases into SQLite and extracts HDF5 patch shards from slide annotations. Stages~3.1--3.3 perform human-in-the-loop review preparation and graph-based cleaning of cancer patches, and the resulting accepted rows can be repackaged into a canonical source HDF5 before model development. Stage~4 creates patient-level \texttt{TRAIN}, \texttt{VALIDATION}, and \texttt{TEST} HDF5 splits and can optionally fit stain normalization on the training split only. Stage~5 performs scientific sanity checks over manifests, provenance, HDF5 contracts, and label--mask semantics. Stage~6 optionally filters the training split by embedding-based smart sampling. Stage~7 performs repeated learning-rate screening over an approved model registry. Stage~8 trains one segmentation model per execution. Stage~9 optimizes a two-stream ensemble recipe using the validation split only, and Stage~10 evaluates the frozen recipe on the test split.
+The repository is organized as a script-driven pipeline in which each numbered entrypoint represents a distinct processing stage. Stage~1 generates GeoJSON artifact annotations directly from archived whole-slide images. Stage~2 ingests cases into SQLite and extracts HDF5 patch shards from slide annotations. Stages~3.1--3.3 perform human-in-the-loop review preparation and graph-based cleaning of cancer patches, and the resulting accepted rows can be repackaged into a canonical source HDF5 before model development. Stage~4 creates one patient-level \texttt{TRAIN}, \texttt{VALIDATION}, and \texttt{TEST} split assignment, computes shared entropy and template-selection provenance, and persists runtime stain-normalization artifacts for downstream selection. Stage~5 performs scientific sanity checks over manifests, provenance, HDF5 contracts, and label--mask semantics. Stage~6 optionally filters training rows by embedding-based smart sampling. Stage~7 performs repeated learning-rate screening over an approved model registry. Stage~8 trains one segmentation model per execution. Stage~9 optimizes a two-stream ensemble recipe using the validation split only, and Stage~10 evaluates the frozen recipe on the test split.
 
 The pipeline is helper-first rather than package-first. Root scripts remain orchestration layers, whereas implementation details are delegated to helper modules grouped by domain. This organization is scientifically relevant because configuration loading, provenance capture, normalization, sampling, and evaluation behavior are not hidden in notebooks or ad hoc scripts, but encoded as explicit reusable modules.
 
@@ -121,7 +121,7 @@ F1_{\mathrm{Rejected}}(\tau;\theta).
 \end{equation}
 In this expression, $\theta$ collects the graph parameters $T_{\mathrm{bg}}$ (background-intensity threshold), $k$ (Felzenszwalb scale parameter), $m_{\min}$ (minimum segment size), and $e_{\mathrm{roi}}$ (ROI erosion radius in pixels); $\tau^*(\theta)$ is the threshold selected for parameter setting $\theta$; $\mathcal{T}=\{0.05,0.06,\ldots,0.95\}$ is the discrete threshold grid searched by the implementation; and $F1_{\mathrm{Rejected}}(\tau;\theta)$ denotes the F1 score of the \emph{Rejected} class obtained when threshold $\tau$ is applied under parameter setting $\theta$. Bayesian optimization then minimizes the negative mean grouped cross-validated rejected-class F1 score over these fold-wise optima. In other words, the graph parameters and threshold are not fixed from external assumptions; they are selected to maximize agreement with the manual \texttt{REJECTED} labels produced in Stage~3.1 under the grouped cross-validation protocol implemented by the repository.
 
-Stage~3.3 applies the tuned contamination rule to the full cancer subset of the canonical source HDF5 dataset. Each cancer row is paired with its mask by row identity, the contamination score is recomputed using the shared Stage~3.2 logic, and the stage emits \texttt{accepted\_manifest.csv} and \texttt{rejected\_manifest.csv} rather than mutating the HDF5 file in place. In the current implementation, rejection occurs only when $c>\tau$; scores exactly equal to $\tau$ are accepted, and undefined contamination scores are also recorded as accepted rather than forcibly rejected. The accepted manifest records immutable source identity fields, including source-path and source-file digest metadata, so that a subsequent Stage~3 repackaging step can fail closed if a stale manifest is applied to a regenerated source file.
+Stage~3.3 applies the tuned contamination rule to the full cancer subset of the canonical source HDF5 dataset. Each cancer row is paired with its mask by row identity, the contamination score is recomputed using the shared Stage~3.2 logic, and the stage emits accepted and rejected manifest CSV files rather than mutating the HDF5 file in place. In the current implementation, rejection occurs only when $c>\tau$; scores exactly equal to $\tau$ are accepted, and undefined contamination scores are also recorded as accepted rather than forcibly rejected. The accepted manifest records immutable source identity fields, including source-path and source-file digest metadata, so that a subsequent Stage~3 repackaging step can fail closed if a stale manifest is applied to a regenerated source file.
 
 \subsection{Stage 3: packaging canonical source HDF5 datasets}
 
@@ -129,15 +129,13 @@ Stage~3 consolidates Stage~2 HDF5 shards into a canonical source dataset and can
 
 The source HDF5 stores row-aligned datasets named \texttt{images}, \texttt{masks}, \texttt{labels}, \texttt{patient\_ids}, and \texttt{filenames}, together with source path provenance fields. This contract is critical because subsequent stages rely on filename identity and row alignment to join metadata and to preserve correspondence between images, masks, labels, and patients. The writer also records a content-based source signature so that downstream stages can fail closed when an HDF5 file is silently replaced while reusing the same path.
 
-\subsection{Stage 4: patient-level split generation and train-only stain normalization}
+\subsection{Stage 4: patient-level split generation and shared runtime-normalization artifacts}
 
-Stage~4 reads the source HDF5 dataset and constructs one patient-disjoint \texttt{TRAIN}, \texttt{VALIDATION}, and \texttt{TEST} split. Patient stratification is based on the maximum patch label observed within each stored patient identifier, thereby preserving the patient as the unit of leakage prevention under the identifier assumption described above. Split search is randomized but constrained by configurable minimum patient counts, split-ratio targets, and optional requirements that both classes appear in each split. The code also includes validation-size guardrails motivated by the downstream ensemble-optimization design, with a nominal default target of at least 30 validation patients and, when possible, at least 15 positive and 15 negative validation patients. For small cohorts, the implementation adaptively relaxes these minima rather than failing unnecessarily.
+Stage~4 reads accepted canonical rows from the Stage~2 master manifest and constructs one patient-disjoint \texttt{TRAIN}, \texttt{VALIDATION}, and \texttt{TEST} split assignment. Patient stratification is based on the maximum patch label observed within each stored patient identifier, thereby preserving the patient as the unit of leakage prevention under the identifier assumption described above. Split search is randomized but constrained by configurable patient counts and split-ratio targets, and the resulting split is persisted once as a Stage~4 split bundle in SQLite rather than as one normalization-specific split per method.
 
-The current Stage~4 design freezes \texttt{TEST} first with a neutral patient-level stratified split before any optional entropy-guided optimization is applied. When \texttt{CROSSFOLD\_OPTIMIZE\_TRAINING\_SET=True}, entropy-guided search is restricted to the \texttt{TRAIN}/\texttt{VALIDATION} allocation inside the remaining development pool. This design preserves a neutral held-out test set while still allowing an information-enrichment heuristic for model-development data.
+The current Stage~4 design computes entropy on \texttt{TRAIN} once per run, selects one high-entropy template patch per training patient, and aggregates those templates into a shared target image. That shared target is then used to persist runtime-ready artifacts for \texttt{REINHARD}, \texttt{RUIFROK}, \texttt{MACENKO}, and \texttt{VAHADANE}, while \texttt{NOT\_NORMALIZED} is treated as the no-artifact runtime option. This train-only target-building policy is scientifically important because it prevents distributional information from validation or test data from leaking into preprocessing while avoiding redundant Stage~4 split generation across normalization methods.
 
-When enabled, stain normalization is fitted strictly on the training split. One high-entropy template patch is first selected per patient, and these templates are aggregated into a median RGB target image. The repository supports \texttt{REINHARD}, \texttt{RUIFROK}, \texttt{MACENKO}, and \texttt{VAHADANE} normalization modes in addition to \texttt{NOT\_NORMALIZED}. Regardless of method, the normalizer is fitted on \texttt{TRAIN} only and then frozen before application to \texttt{TRAIN}, \texttt{VALIDATION}, and \texttt{TEST}. This train-only fitting policy is scientifically important because it prevents distributional information from validation or test data from leaking into preprocessing.
-
-The stage writes three split HDF5 files together with provenance artifacts including \texttt{manifest.csv}, \texttt{split\_stats.csv}, \texttt{run\_config.json}, and optional entropy and normalization summaries. The split HDF5 files preserve the row-aligned datasets \texttt{images}, \texttt{masks}, \texttt{labels}, \texttt{patient\_ids}, and \texttt{filenames}, and include source provenance attributes linking them back to the packaged HDF5.
+The stage writes provenance artifacts including \texttt{manifest.csv}, \texttt{split\_stats.csv}, \texttt{run\_config.json}, template-selection sidecars, optional entropy-cache CSV files, and runtime-normalization state JSON files. Downstream stages resolve the selected normalization method at runtime from \texttt{RUNTIME\_NORMALIZATION\_METHOD} and the Stage~4 split-bundle artifact registry recorded in \texttt{master\_manifest.sqlite}, rather than from per-patch persisted normalization state.
 
 \subsection{Stage 5: scientific sanity checks}
 
@@ -147,7 +145,7 @@ This stage acts as a scientific gate rather than a mere file-existence test. A r
 
 \subsection{Stage 6: embedding-based smart sampling of the training split}
 
-Stage~6 optionally reduces the training set to a more compact subset while preserving within-patient diversity. The stage reads \texttt{TRAIN.h5}, builds a patient-wise patch index, and extracts encoder embeddings using the encoder of a segmentation model initialized with ImageNet weights. Global-average pooled feature maps are used as patch descriptors. For each patient, the algorithm begins with a starting sample size and estimates clustering stability through the adjusted Rand index between two random subsamples. The number of embedded patches is then increased multiplicatively until the stability threshold is reached or configured limits are exceeded.
+Stage~6 optionally reduces the effective training set to a more compact subset while preserving within-patient diversity. The stage reads \texttt{TRAIN} rows from \texttt{master\_manifest.sqlite}, loads pixels from canonical Phase~2 patient shards, builds a patient-wise patch index, and extracts encoder embeddings using the encoder of a segmentation model initialized with ImageNet weights. Global-average pooled feature maps are used as patch descriptors. For each patient, the algorithm begins with a starting sample size and estimates clustering stability through the adjusted Rand index between two random subsamples. The number of embedded patches is then increased multiplicatively until the stability threshold is reached or configured limits are exceeded.
 
 For a patch indexed by $i$, let $F_i\in\mathbb{R}^{C\times H\times W}$ denote the final encoder feature map, where $C$ is the number of feature channels and $H$ and $W$ are the spatial height and width of that map. The embedding used for smart sampling is the global-average-pooled descriptor
 \[
@@ -159,7 +157,7 @@ n_{t+1}=\min\!\left(n_{\max},\left\lfloor g\,n_t\right\rfloor\right),
 \]
 where $n_t$ is the candidate count at iteration $t$, $n_{t+1}$ is the updated count for the next iteration, $g$ is the configured multiplicative growth factor, $n_{\max}$ is the maximum allowed sample count, and $\lfloor\cdot\rfloor$ denotes the floor operator. At each step, two random subsets of size $n_t$ are clustered and their stability is measured by the adjusted Rand index. Iteration stops once the estimated stability exceeds the configured threshold or the iteration cap is reached.
 
-Once the patch budget for a patient is determined, diversity selection is performed with \texttt{MiniBatchKMeans}. Patches are then sampled approximately uniformly across clusters, yielding a filtered training HDF5 file, \texttt{TRAIN\_FILTERED.h5}, that preserves the same downstream dataset names used by later stages. The implementation also stores content signatures and configuration sidecars so that training code can verify whether the filtered file still corresponds to the current training split.
+Once the patch budget for a patient is determined, diversity selection is performed with \texttt{MiniBatchKMeans}. Patches are then sampled approximately uniformly across clusters, and the implementation persists only sidecar summaries plus SQLite row-state updates such as \texttt{sampling\_decision} and \texttt{is\_stage7\_selected}. Downstream training code therefore continues to load canonical Phase~2 patient shards directly while resolving the selected training rows from the master manifest.
 
 If the final candidate set for a patient contains $n$ embedded patches, the cluster count is chosen adaptively and a target subset size $m$ is allocated approximately uniformly across clusters. With $K$ clusters, the quota-based selection rule is
 \[
@@ -175,7 +173,7 @@ For each sampled loss triplet $(\alpha,\beta,\gamma)$ and model pair, the stage 
 
 \subsection{Stage 8: single-model segmentation training}
 
-Stage~8 trains one segmentation model per execution. The training stage selects the standard training HDF5 or the smart-sampled training HDF5 according to configuration and provenance checks, and always uses \texttt{VALIDATION.h5} for validation. Before optimization, it verifies that training and validation patients are disjoint. Class imbalance is addressed with a \texttt{WeightedRandomSampler} based on inverse class frequencies at the patch level.
+Stage~8 trains one segmentation model per execution. The training stage resolves \texttt{TRAIN} and \texttt{VALIDATION} rows from \texttt{master\_manifest.sqlite}, optionally respecting Stage~6 smart-sampling row state for the training split, and then loads pixels directly from canonical Phase~2 patient shards. Before optimization, it verifies that training and validation patients are disjoint. Class imbalance is addressed with a \texttt{WeightedRandomSampler} based on inverse class frequencies at the patch level.
 
 Training uses a two-channel segmentation network instantiated through the approved model registry. Optimization is performed with \texttt{AdamWScheduleFree} in the current code path, while learning-rate defaults remain architecture-specific in the registry. The loss is a weighted binary cross-entropy plus Dice hybrid,
 \begin{equation}
@@ -211,11 +209,12 @@ Data augmentation is implemented with Albumentations and includes horizontal and
 Model selection is driven by pixel-level validation area under the precision--recall curve rather than Dice. The validation stage tracks area under the precision--recall curve, area under the receiver-operating characteristic curve, and an MCC-based threshold sweep statistic. Early stopping and best-checkpoint selection both use validation area under the precision--recall curve. The code also rejects collapsed epochs whose predicted foreground prevalence is effectively zero or nearly one, and it rejects NaN or infinite metric values. Best checkpoints are saved together with metadata sidecars containing hyperparameters and provenance signatures.
 
 Writing precision and recall at threshold $t$ as
-\[
-\mathrm{Precision}(t)=\frac{TP_t}{TP_t+FP_t},
-\qquad
-\mathrm{Recall}(t)=\frac{TP_t}{TP_t+FN_t},
-\]
+\begin{equation}
+\begin{aligned}
+\mathrm{Precision}(t) &= \frac{TP_t}{TP_t+FP_t}, \\
+\mathrm{Recall}(t) &= \frac{TP_t}{TP_t+FN_t},
+\end{aligned}
+\end{equation}
 where $TP_t$, $FP_t$, and $FN_t$ denote the numbers of true-positive, false-positive, and false-negative pixels obtained after thresholding predictions at $t$, the validation AUPRC used for model selection is the area under the precision--recall curve,
 \[
 \mathrm{AUPRC}=\int_0^1 \mathrm{Precision}(r)\,dr,
@@ -223,13 +222,16 @@ where $TP_t$, $FP_t$, and $FN_t$ denote the numbers of true-positive, false-posi
 where $r$ denotes recall and the practical implementation uses the discrete thresholded predictions accumulated by the validation metric tracker to approximate this integral. In the current code, this AUPRC is the primary checkpoint-selection criterion, whereas the MCC sweep is an auxiliary guardrail statistic used to summarize threshold sensitivity.
 
 The reported MCC sweep statistic is
-\[
+\begin{equation}
 \mathrm{MCC}^* = \max_{t\in\{0.1,0.2,\ldots,0.9\}} \mathrm{MCC}(t),
-\]
+\end{equation}
 where $\mathrm{MCC}^*$ is the maximum Matthews correlation coefficient over the evaluated threshold grid and $t$ is the probability threshold used to binarize the foreground prediction. Let $TP_t$, $FP_t$, $TN_t$, and $FN_t$ denote the true-positive, false-positive, true-negative, and false-negative pixel counts at threshold $t$. The implementation defines
-\[
-D_t=(TP_t+FP_t)(TP_t+FN_t)(TN_t+FP_t)(TN_t+FN_t)+\varepsilon,
-\]
+\begin{equation}
+\begin{aligned}
+D_t ={}&(TP_t+FP_t)(TP_t+FN_t) \\
+&\cdot (TN_t+FP_t)(TN_t+FN_t)+\varepsilon,
+\end{aligned}
+\end{equation}
 where $D_t$ is the denominator term of the MCC expression and $\varepsilon$ is the numerical-stability constant. The corresponding MCC is
 \begin{multline}
 \mathrm{MCC}(t) = \frac{TP_tTN_t-FP_tFN_t}{\sqrt{D_t}}.
@@ -380,9 +382,9 @@ Stage & Setting group & Default values & Purpose \\
 
 \subsection{Determinism and provenance tracking}
 
-The downstream stages implement reproducibility controls beyond fixed seeds alone. Training and learning-rate screening default to a \texttt{PAPER} execution profile that disables CuDNN benchmarking, enables deterministic settings where possible, and records execution metadata. Content signatures are stored for packaged HDF5 datasets, split HDF5 outputs, and smart-sampled datasets. Training checkpoints carry metadata sidecars describing upstream packaging, splitting, normalization, smart-sampling, and artifact-aware-loss lineage, and Stage~9 refuses to combine models from incompatible provenance groups. Stage~10 further validates recipe signatures and checkpoint hashes before running final inference.
+The downstream stages implement reproducibility controls beyond fixed seeds alone. Training and learning-rate screening default to a \texttt{PAPER} execution profile that disables CuDNN benchmarking, enables deterministic settings where possible, and records execution metadata. Content signatures are stored for packaged HDF5 datasets, Stage~4 runtime-normalization artifacts, and other persisted lineage sidecars. Training checkpoints carry metadata sidecars describing upstream packaging, split-bundle identity, runtime normalization, smart-sampling, and artifact-aware-loss lineage, and Stage~9 refuses to combine models from incompatible provenance groups. Stage~10 further validates recipe signatures and checkpoint hashes before running final inference.
 
-The repository also applies fail-closed provenance checks at multiple dataset boundaries. Stage~2 refuses to continue when previously completed slides become stale with respect to changed extraction settings. Stage~3 binds accepted-manifest filtering to immutable source-file identity, preventing stale review decisions from being silently reused after source-HDF5 regeneration. Stage~4 records source-HDF5 provenance and split-selection metadata in \texttt{run\_config.json}, and Stage~10 validates recipe and checkpoint compatibility before test-time execution. These mechanisms are methodologically important because they reduce the risk of reporting results from silently mixed experimental lineages.
+The repository also applies fail-closed provenance checks at multiple dataset boundaries. Stage~2 refuses to continue when previously completed slides become stale with respect to changed extraction settings. Stage~3 binds accepted-manifest filtering to immutable source-file identity, preventing stale review decisions from being silently reused after source-HDF5 regeneration. Stage~4 records source-dataset provenance, template-selection metadata, generated normalization artifacts, and split-bundle lineage in \texttt{run\_config.json} and \texttt{master\_manifest.sqlite}, and Stage~10 validates recipe and checkpoint compatibility before test-time execution. These mechanisms are methodologically important because they reduce the risk of reporting results from silently mixed experimental lineages.
 
 \subsection{Known limits of code-grounded reporting}
 
@@ -400,7 +402,7 @@ An additional scientific limitation concerns patient identity semantics. The imp
 
 \section{Conclusion}
 
-The implemented repository defines a reproducibility-oriented computational pathology workflow spanning slide-level artifact characterization, HDF5-native patch extraction, manifest-based graph cleaning, canonical source-dataset packaging, patient-identifier-aware splitting, training-data filtering, single-model optimization, validation-only ensemble design, and frozen test-time inference. The code supports a manuscript-grade description of methodology and execution logic. Final scientific conclusions, however, must be completed from experiment artifacts rather than inferred from source code alone.
+The implemented repository defines a reproducibility-oriented computational pathology workflow spanning slide-level artifact characterization, HDF5-native patch extraction, manifest-based graph cleaning, canonical source-dataset packaging, patient-identifier-aware splitting, training-data filtering, single-model optimization, validation-only ensemble design, and frozen test-time inference. The code therefore supports a manuscript-grade description of methodology and execution logic. Final scientific conclusions, however, must still be completed from experiment artifacts rather than inferred from source code alone.
 
 \appendix
 

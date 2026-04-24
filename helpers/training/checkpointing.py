@@ -153,6 +153,8 @@ def _build_training_provenance(request: TrainingProvenanceRequest) -> tuple[dict
     dataset_provenance = _build_dataset_provenance(request.dataset)
     validation_dataset_provenance = _build_dataset_provenance(request.validation_dataset)
     artifact_loss_provenance = _build_artifact_loss_provenance(request.master_manifest_path)
+    dataset_attrs = cast(dict[str, Any], dataset_provenance.get("attrs", {}))
+    validation_attrs = cast(dict[str, Any], validation_dataset_provenance.get("attrs", {}))
     resume_path_str = (
         os.fspath(request.resume_checkpoint) if request.resume_checkpoint is not None else None
     )
@@ -167,6 +169,7 @@ def _build_training_provenance(request: TrainingProvenanceRequest) -> tuple[dict
         "split_lineage": {
             "dataset_sha256": dataset_provenance["sha256"],
             "source_signature": dataset_provenance["source_signature"],
+            "stage4_split_bundle_id": dataset_attrs.get("stage4_split_bundle_id"),
         },
         "packaging_lineage": {
             "dataset_sha256": dataset_provenance["sha256"],
@@ -174,6 +177,10 @@ def _build_training_provenance(request: TrainingProvenanceRequest) -> tuple[dict
         },
         "normalization_lineage": {
             "dataset_sha256": dataset_provenance["sha256"],
+            "stage4_split_bundle_id": dataset_attrs.get("stage4_split_bundle_id"),
+            "runtime_normalization_method": dataset_attrs.get("runtime_normalization_method"),
+            "normalization_method": dataset_attrs.get("normalization_method"),
+            "normalization_artifact_id": dataset_attrs.get("normalization_artifact_id"),
         },
         "smart_sampling_lineage": {
             "enabled": dataset_provenance["smart_sampling_enabled"],
@@ -200,6 +207,10 @@ def _build_training_provenance(request: TrainingProvenanceRequest) -> tuple[dict
         "validation_lineage": {
             "dataset_sha256": validation_dataset_provenance["sha256"],
             "source_signature": validation_dataset_provenance["source_signature"],
+            "stage4_split_bundle_id": validation_attrs.get("stage4_split_bundle_id"),
+            "runtime_normalization_method": validation_attrs.get("runtime_normalization_method"),
+            "normalization_method": validation_attrs.get("normalization_method"),
+            "normalization_artifact_id": validation_attrs.get("normalization_artifact_id"),
         },
         "artifact_aware_loss": artifact_loss_provenance,
         "ohem": {

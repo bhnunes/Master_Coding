@@ -23,8 +23,8 @@ graph TD
     end
 
     subgraph P4[Phase 4: Crossfold Dataset Preparation]
-        p4[4_crossfold.py<br/>Assign TRAIN / VALIDATION / TEST<br/>and fit normalization on TRAIN]
-        p4_out[manifest.csv + split_stats.csv + run_config.json<br/>+ split / normalization state in SQLite]
+        p4[4_crossfold.py<br/>Assign one TRAIN / VALIDATION / TEST split<br/>and build shared runtime artifacts]
+        p4_out[manifest.csv + split_stats.csv + run_config.json<br/>+ template-selection sidecars + runtime artifacts<br/>+ split bundle state in SQLite]
         p4 --> p4_out
     end
 
@@ -85,11 +85,11 @@ graph TD
     manifest -. sample cancer rows .-> p31
     p33 -. updates cleaning state .-> manifest
     manifest -. read cleaning + split state .-> p4
-    p4 -. updates split + normalization state .-> manifest
+    p4 -. updates split bundle + split state .-> manifest
     manifest -. validate provenance/state .-> p5
     manifest -. read TRAIN candidate rows .-> p6
     p6 -. updates sampling state .-> manifest
-    manifest -. read selected rows + normalization refs .-> p7
-    manifest -. read selected rows + normalization refs .-> p8
-    manifest -. read VALIDATION rows + normalization refs .-> p9
-    manifest -. read TEST rows + normalization refs .-> p10
+    manifest -. read selected rows + split bundle refs .-> p7
+    manifest -. read selected rows + split bundle refs .-> p8
+    manifest -. read VALIDATION rows + split bundle refs .-> p9
+    manifest -. read TEST rows + split bundle refs .-> p10

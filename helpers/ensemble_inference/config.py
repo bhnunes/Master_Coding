@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.logging_utils import resolve_log_folder
+from helpers.runtime_normalization import (
+    RUNTIME_NORMALIZATION_METHOD_ENV_VAR,
+    parse_runtime_normalization_method,
+)
 from helpers.runtime_platform import resolve_env_path
 
 
@@ -56,6 +60,7 @@ class EnsembleInferenceConfig:
     export_csv: bool
     export_latex: bool
     export_visualizations: bool
+    runtime_normalization_method: str = "NOT_NORMALIZED"
     log_folder: Path = Path("logs")
     log_file_name: str = "ensemble_inference.log"
 
@@ -115,6 +120,9 @@ def load_ensemble_inference_config(
         export_visualizations=_parse_bool(
             values.get("ENSEMBLE_INFER_EXPORT_VISUALIZATIONS"),
             default=True,
+        ),
+        runtime_normalization_method=parse_runtime_normalization_method(
+            values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
         ),
         log_folder=resolve_log_folder(
             values,

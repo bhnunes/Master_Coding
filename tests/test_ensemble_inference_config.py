@@ -23,4 +23,19 @@ def test_load_ensemble_inference_config_uses_defaults(tmp_path: Path) -> None:
     assert config.batch_size == DEFAULT_BATCH_SIZE
     assert config.visualization_samples == DEFAULT_VISUALIZATION_SAMPLES
     assert config.export_latex is True
+    assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.log_path == Path("logs/ensemble_inference.log")
+
+
+def test_load_ensemble_inference_config_reads_shared_runtime_normalization_method(
+    tmp_path: Path,
+) -> None:
+    env = {
+        "ENSEMBLE_INFER_RECIPE_PATH": str(tmp_path / "recipe.json"),
+        "ENSEMBLE_INFER_MASTER_MANIFEST_PATH": str(tmp_path / "master_manifest.sqlite"),
+        "RUNTIME_NORMALIZATION_METHOD": "reinhard",
+    }
+
+    config = load_ensemble_inference_config(env)
+
+    assert config.runtime_normalization_method == "REINHARD"

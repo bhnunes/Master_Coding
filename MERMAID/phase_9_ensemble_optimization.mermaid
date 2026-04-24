@@ -1,7 +1,7 @@
 flowchart LR
-    manifest[(master_manifest.sqlite<br/>VALIDATION row selection + normalization refs)]
+    manifest[(master_manifest.sqlite<br/>VALIDATION row selection + split bundle refs)]
     shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
-    phase4_outputs[Input<br/>Normalization artifacts + run config]
+    phase4_outputs[Input<br/>Stage 4 run config + runtime artifacts]
     checkpoints[Input<br/>Phase 8 checkpoints + metrics]
     p9[Phase 9<br/>9_optimizer_ensemble.py<br/>Optimize ensemble recipe]
     recipe[Output<br/>Declarative ensemble recipe JSON]

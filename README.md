@@ -169,7 +169,7 @@ Helper modules are organized by domain under `helpers/<domain>/`. New domain-spe
 | 1 | `1_artifact_detection.py` | Detect artifacts on whole-slide images using a `.env`-driven Phase 1 pipeline. Output: GeoJSON files with artifact annotations and SQLite processing status |
 | 2 | `2_database_manager.py` | Extract canonical HDF5 patch shards from WSIs, populate `master_manifest.sqlite`, and optionally emit PNG exports when explicitly enabled |
 | 3.1-3.3 | `3_1_optimization_sampling.py` → `3_2_tune_graph_method.py` → `3_3_cleaner_script.py` | HDF5-backed human-in-the-loop review plus graph-based cleaning, with PNG retained only for review/export workflows |
-| 4 | `4_crossfold.py` | Create Phase 4 split assignments in `master_manifest.sqlite`, emit split/normalization sidecars, and fit stain normalization on `TRAIN` only |
+| 4 | `4_crossfold.py` | Create one normalization-agnostic Phase 4 split assignment in `master_manifest.sqlite`, emit shared split/template sidecars, and persist runtime normalization artifacts for downstream phases |
 | 5 | `5_sanity_checks.py` | Validate Phase 4 singleton split integrity, provenance, leakage, and mask/label semantics |
 | 6 | `6_smart_sampler.py` | Select informative TRAIN rows in `master_manifest.sqlite` and write lineage sidecars without materializing filtered shards |
 | 7-10 | `7_lr_finder.py` → `8_training_ensemble.py` → `9_optimizer_ensemble.py` → `10_inference_ensemble.py` | Resolve runtime rows from `master_manifest.sqlite` once at startup, then load pixels directly from canonical Phase 2 patient shards |
@@ -244,7 +244,7 @@ Current Phase 3 behavior:
 
 | Script | Purpose |
 |--------|---------|
-| `4_crossfold.py` | Thin Phase 4 orchestrator that loads `.env`, reads `master_manifest.sqlite`, builds patient-level TRAIN/VALIDATION/TEST split assignments, optionally fits stain normalization on TRAIN only, and writes provenance artifacts. |
+| `4_crossfold.py` | Thin Phase 4 orchestrator that loads `.env`, reads `master_manifest.sqlite`, builds one patient-level TRAIN/VALIDATION/TEST split assignment, writes shared entropy/template sidecars, and persists runtime normalization artifacts for downstream phases. |
 
 Current Phase 4 behavior:
 
@@ -253,12 +253,21 @@ Current Phase 4 behavior:
 - Preserves patient-level split isolation and stratifies patients by `max(patch_label)`
 - Uses explicit patient capacities for `TEST` and `VALIDATION`; `TRAIN` receives the remainder
 - Carries a Phase 4 Optuna split-search budget via `CROSSFOLD_SPLIT_OPTUNA_TRIALS`
+- Computes the patient split exactly once per Stage 4 run and persists one Stage 4 split bundle identity
 - Reuses cached source-HDF5 provenance inside one run instead of rehashing the same source file for every split artifact
 - Uses batched HDF5-backed entropy reads when the Phase 4 source is an HDF5 dataset
-- Fits stain normalization on TRAIN only when a normalization method other than `NOT_NORMALIZED` is configured
-- Applies the frozen TRAIN-fitted normalizer to `TRAIN`, `VALIDATION`, and `TEST`
+- Computes TRAIN entropy and template selection once per run, then builds one shared aggregate target
+- Generates runtime-ready `REINHARD`, `RUIFROK`, `MACENKO`, and `VAHADANE` artifacts from that one shared target
+- Treats `NOT_NORMALIZED` as the no-artifact runtime option
 - Emits lightweight log-based progress for entropy and split selection
-- Writes `manifest.csv`, `split_stats.csv`, `run_config.json`, optional entropy-cache CSV artifacts, and SQLite split / normalization state for traceability
+- Writes `manifest.csv`, `split_stats.csv`, `run_config.json`, shared template-selection sidecars, optional entropy-cache CSV artifacts, and `runtime_normalization_artifacts/` for traceability
+
+Current runtime normalization contract:
+
+- Stage 4 now persists one normalization-agnostic split assignment per run
+- Phases 7-10 now reserve one shared runtime selector, `RUNTIME_NORMALIZATION_METHOD`, for choosing `NOT_NORMALIZED`, `REINHARD`, `RUIFROK`, `MACENKO`, or `VAHADANE`
+- Downstream runtime loading resolves the selected method from the Stage 4 split bundle artifact registry instead of per-patch normalization state
+- Old normalization-specific Stage 4 persisted-state assumptions are intentionally unsupported
 
 ### Phase 5: Quality Assurance
 
@@ -563,6 +572,8 @@ The pipeline produces these standardized folders and artifacts:
 - `NOT_CANCER_MASK/` - Non-cancer segmentation masks
 - Phase 4 source HDF5 - cleaned accepted patch pool packaged for Phase 4
 - `manifest.csv`, `split_stats.csv`, `run_config.json` - Phase 4 split and lineage sidecars
+- `template_selection/`, `template_selection.json`, `aggregate_target.png` - Phase 4 shared template-selection provenance artifacts
+- `runtime_normalization_artifacts/` - Phase 4 runtime-ready normalization state for `REINHARD`, `RUIFROK`, `MACENKO`, and `VAHADANE`
 - `train_filtered_selection.csv`, `patient_filter_stats.csv`, `filter_run_config.json`, `filter_summary.json` - Phase 6 selection and lineage sidecars
 
 ## Dependencies

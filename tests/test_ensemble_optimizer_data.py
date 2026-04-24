@@ -235,6 +235,10 @@ def test_collect_validation_provenance_reports_manifest_metadata(
     assert provenance["master_manifest_path"] == str(master_manifest_path)
     assert provenance["row_count"] == EXPECTED_ROW_COUNT
     assert provenance["shard_count"] == EXPECTED_SHARD_COUNT
+    assert provenance["stage4_split_bundle_id"] is None
+    assert provenance["runtime_normalization_method"] == "none"
+    assert provenance["attrs"]["stage4_split_bundle_id"] is None
+    assert provenance["attrs"]["runtime_normalization_method"] == "none"
 
 
 def test_validation_dataset_builds_two_channel_mask(

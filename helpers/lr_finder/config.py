@@ -7,6 +7,10 @@ from pathlib import Path
 
 from helpers.logging_utils import resolve_log_folder
 from helpers.lr_finder.search_space import BCEDiceSearchSpace
+from helpers.runtime_normalization import (
+    RUNTIME_NORMALIZATION_METHOD_ENV_VAR,
+    parse_runtime_normalization_method,
+)
 from helpers.runtime_platform import resolve_env_path
 from helpers.training.registry import load_training_model_registry
 
@@ -47,6 +51,7 @@ class LRFinderConfig:
     hf_token: str | None
     search_space: BCEDiceSearchSpace
     model_plans: list[ModelPlan]
+    runtime_normalization_method: str = "NOT_NORMALIZED"
     log_folder: Path = Path("logs")
     log_file_name: str = "lr_finder.log"
 
@@ -182,6 +187,9 @@ def load_lr_finder_config(
         end_lr=_parse_float(values.get("LR_FINDER_END_LR"), default=1e-1),
         num_iter=_parse_int(values.get("LR_FINDER_NUM_ITER"), default=100),
         num_repeats=_parse_int(values.get("LR_FINDER_NUM_REPEATS"), default=3),
+        runtime_normalization_method=parse_runtime_normalization_method(
+            values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
+        ),
         optimizer_weight_decay=_parse_float(
             values.get("LR_FINDER_OPTIMIZER_WEIGHT_DECAY"), default=1e-4
         ),

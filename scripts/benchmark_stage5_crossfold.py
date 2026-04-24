@@ -177,7 +177,6 @@ def _baseline_write_split_hdf5(
 
 def _build_benchmark_config(config: BenchmarkCrossfoldConfig) -> CrossfoldConfig:
     return CrossfoldConfig(
-        normalization_method="NOT_NORMALIZED",
         source_path=config.source_hdf5_path,
         overwrite_output_dir=True,
         random_state=config.random_state,

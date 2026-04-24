@@ -58,6 +58,15 @@ class ManifestPatchRecord:
     source_mask_path: str
 
 
+@dataclass(frozen=True)
+class Stage4SplitBundleRecord:
+    """One normalization-agnostic Stage 4 split bundle."""
+
+    stage4_split_bundle_id: int
+    run_id: int
+    output_dir_path: Path
+
+
 def _coerce_int(value: object, *, field_name: str) -> int:
     try:
         return int(cast(SupportsInt | str | bytes | bytearray, value))
@@ -129,6 +138,7 @@ class MasterManifest:
                     cleaning_decision TEXT,
                     contamination_rate REAL,
                     split TEXT,
+                    stage4_split_bundle_id INTEGER,
                     normalization_method TEXT,
                     normalization_artifact_id INTEGER,
                     sampling_decision TEXT,
@@ -163,6 +173,26 @@ class MasterManifest:
                     FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS stage4_split_bundles (
+                    stage4_split_bundle_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    output_dir_path TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS stage4_split_bundle_artifacts (
+                    stage4_split_bundle_id INTEGER NOT NULL,
+                    normalization_artifact_id INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (stage4_split_bundle_id, normalization_artifact_id),
+                    FOREIGN KEY (stage4_split_bundle_id)
+                        REFERENCES stage4_split_bundles(stage4_split_bundle_id) ON DELETE CASCADE,
+                    FOREIGN KEY (normalization_artifact_id)
+                        REFERENCES normalization_artifacts(normalization_artifact_id)
+                        ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_patches_patient_id ON patches(patient_id);
                 CREATE INDEX IF NOT EXISTS idx_patches_filename ON patches(filename);
                 CREATE INDEX IF NOT EXISTS idx_patch_stage_state_cleaning_decision
@@ -173,7 +203,33 @@ class MasterManifest:
                     ON patch_stage_state(sampling_decision);
                 """
             )
+            self._ensure_patch_stage_state_column(
+                connection,
+                column_name="stage4_split_bundle_id",
+                column_sql="INTEGER",
+            )
+            connection.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_patch_stage_state_stage4_split_bundle_id
+                    ON patch_stage_state(stage4_split_bundle_id);
+                """
+            )
             connection.commit()
+
+    @staticmethod
+    def _ensure_patch_stage_state_column(
+        connection: sqlite3.Connection,
+        *,
+        column_name: str,
+        column_sql: str,
+    ) -> None:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(patch_stage_state)").fetchall()
+        }
+        if column_name in columns:
+            return
+        connection.execute(f"ALTER TABLE patch_stage_state ADD COLUMN {column_name} {column_sql}")
 
     def replace_stage2_slide_rows(self, payload: Stage2SlideRows) -> None:
         """Replace one slide's Stage 2 rows with the canonical HDF5-backed identities."""
@@ -493,12 +549,87 @@ class MasterManifest:
             raise ValueError("Stage 4 normalization artifact insert did not return an id.")
         return int(cursor.lastrowid)
 
+    def create_stage4_split_bundle(
+        self,
+        *,
+        run_id: int,
+        output_dir: Path,
+    ) -> Stage4SplitBundleRecord:
+        """Create one normalization-agnostic Stage 4 split bundle."""
+
+        self.initialize()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO stage4_split_bundles (run_id, output_dir_path)
+                VALUES (?, ?)
+                """,
+                (
+                    run_id,
+                    to_manifest_path_ref(output_dir, manifest_path=self.database_path),
+                ),
+            )
+            connection.commit()
+        if cursor.lastrowid is None:
+            raise ValueError("Stage 4 split bundle insert did not return an id.")
+        return Stage4SplitBundleRecord(
+            stage4_split_bundle_id=int(cursor.lastrowid),
+            run_id=run_id,
+            output_dir_path=output_dir,
+        )
+
+    def link_stage4_split_bundle_artifact(
+        self,
+        *,
+        stage4_split_bundle_id: int,
+        normalization_artifact_id: int,
+    ) -> None:
+        """Link one normalization artifact to a Stage 4 split bundle."""
+
+        self.initialize()
+        with self._connect() as connection:
+            method_row = connection.execute(
+                "SELECT method FROM normalization_artifacts WHERE normalization_artifact_id = ?",
+                (normalization_artifact_id,),
+            ).fetchone()
+            if method_row is None:
+                raise ValueError(
+                    "Stage 4 split bundle references a missing normalization artifact id: "
+                    f"{normalization_artifact_id}"
+                )
+            duplicate_row = connection.execute(
+                """
+                SELECT na.method
+                FROM stage4_split_bundle_artifacts sba
+                INNER JOIN normalization_artifacts na
+                    ON na.normalization_artifact_id = sba.normalization_artifact_id
+                WHERE sba.stage4_split_bundle_id = ? AND na.method = ?
+                """,
+                (stage4_split_bundle_id, str(method_row[0])),
+            ).fetchone()
+            if duplicate_row is not None:
+                raise ValueError(
+                    "Stage 4 split bundle already has a normalization artifact for method "
+                    f"{duplicate_row[0]}"
+                )
+            connection.execute(
+                """
+                INSERT INTO stage4_split_bundle_artifacts (
+                    stage4_split_bundle_id,
+                    normalization_artifact_id
+                ) VALUES (?, ?)
+                """,
+                (stage4_split_bundle_id, normalization_artifact_id),
+            )
+            connection.commit()
+
     def update_stage4_split_assignments(
         self,
         *,
         assignments: Sequence[Mapping[str, object]],
-        normalization_method: str,
-        normalization_artifact_id: int | None,
+        stage4_split_bundle_id: int,
+        normalization_method: str | None = None,
+        normalization_artifact_id: int | None = None,
     ) -> None:
         """Persist Stage 4 split assignments onto existing canonical patch rows."""
 
@@ -521,6 +652,7 @@ class MasterManifest:
                 updates.append(
                     (
                         str(assignment["split"]),
+                        stage4_split_bundle_id,
                         normalization_method,
                         normalization_artifact_id,
                         STAGE4_STAGE_NAME,
@@ -531,6 +663,7 @@ class MasterManifest:
                 """
                 UPDATE patch_stage_state
                 SET split = ?,
+                    stage4_split_bundle_id = ?,
                     normalization_method = ?,
                     normalization_artifact_id = ?,
                     last_updated_stage_name = ?,

@@ -98,6 +98,8 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
 
     assert payload["provenance"]["validation_lineage"] == {
         "master_manifest_sha256": "manifest-sha",
+        "stage4_split_bundle_id": None,
+        "runtime_normalization_method": None,
         "normalization_method": "none",
         "normalization_artifact_id": None,
     }

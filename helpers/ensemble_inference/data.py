@@ -15,7 +15,8 @@ from helpers.training.master_manifest_queries import CanonicalRowRecord, load_te
 from helpers.training.runtime import worker_init_fn
 from helpers.training.stain_normalization import (
     build_split_stain_normalizer,
-    normalize_runtime_method_name,
+    resolve_runtime_normalization_selection,
+    resolve_stage4_split_bundle_id,
 )
 
 
@@ -24,6 +25,7 @@ class TestDatasetLayout:
     records: tuple[CanonicalRowRecord, ...]
     local_cache_dir: Path | None
     master_manifest_path: Path
+    runtime_normalization_method: str = "NOT_NORMALIZED"
 
 
 def setup_test_data(
@@ -31,6 +33,7 @@ def setup_test_data(
     local_data_dir: Path,
     *,
     stage_input_locally: bool,
+    runtime_normalization_method: str = "NOT_NORMALIZED",
 ) -> TestDatasetLayout:
     if not master_manifest_path.is_file():
         raise FileNotFoundError(f"Missing {master_manifest_path}")
@@ -46,34 +49,29 @@ def setup_test_data(
         records=tuple(load_test_records(master_manifest_path)),
         local_cache_dir=local_cache_dir,
         master_manifest_path=master_manifest_path,
+        runtime_normalization_method=runtime_normalization_method,
     )
 
 
 def _build_manifest_runtime_lineage_attrs(layout: TestDatasetLayout) -> dict[str, Any]:
-    method_and_artifact_pairs = {
-        (
-            normalize_runtime_method_name(record.normalization_method),
-            record.normalization_artifact_id,
-        )
-        for record in layout.records
-    }
-    if len(method_and_artifact_pairs) > 1:
-        raise ValueError(
-            "TEST rows do not agree on runtime normalization metadata: "
-            f"{sorted(method_and_artifact_pairs)}"
-        )
-    normalization_method, normalization_artifact_id = (
-        next(iter(method_and_artifact_pairs)) if method_and_artifact_pairs else ("none", None)
+    stage4_split_bundle_id = resolve_stage4_split_bundle_id(layout.records)
+    normalization_method, normalization_artifact_id = resolve_runtime_normalization_selection(
+        layout.master_manifest_path,
+        layout.records,
+        runtime_normalization_method=layout.runtime_normalization_method,
     )
 
     return {
         "master_manifest_sha256": hash_file_sha256(layout.master_manifest_path),
+        "stage4_split_bundle_id": stage4_split_bundle_id,
+        "runtime_normalization_method": normalization_method,
         "normalization_method": normalization_method,
         "normalization_artifact_id": normalization_artifact_id,
     }
 
 
 def collect_test_dataset_provenance(layout: TestDatasetLayout) -> dict[str, Any]:
+    attrs = _build_manifest_runtime_lineage_attrs(layout)
     return {
         "path": str(layout.master_manifest_path),
         "master_manifest_path": str(layout.master_manifest_path),
@@ -81,13 +79,10 @@ def collect_test_dataset_provenance(layout: TestDatasetLayout) -> dict[str, Any]
         "split": "TEST",
         "row_count": len(layout.records),
         "shard_count": len({str(record.source_hdf5_path) for record in layout.records}),
-        "normalization_methods": sorted(
-            {
-                normalize_runtime_method_name(record.normalization_method)
-                for record in layout.records
-            }
-        ),
-        "attrs": _build_manifest_runtime_lineage_attrs(layout),
+        "stage4_split_bundle_id": attrs["stage4_split_bundle_id"],
+        "runtime_normalization_method": attrs["runtime_normalization_method"],
+        "normalization_methods": [str(attrs["normalization_method"])],
+        "attrs": attrs,
     }
 
 
@@ -107,6 +102,7 @@ class TestDataset(Dataset[Any]):
             image_normalizer=build_split_stain_normalizer(
                 layout.master_manifest_path,
                 self.records,
+                runtime_normalization_method=layout.runtime_normalization_method,
                 device="cpu",
             ),
         )

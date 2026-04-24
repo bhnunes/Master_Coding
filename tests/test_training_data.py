@@ -871,6 +871,8 @@ def test_prepare_training_data_uses_sqlite_rows_and_manifest_provenance(
     assert validation_dataset.get_patient_ids().tolist() == ["3", "3", "4", "4"]
     assert prepared.training_provenance["split"] == "TRAIN"
     assert prepared.training_provenance["smart_sampling"] is True
+    assert prepared.training_provenance["stage4_split_bundle_id"] is None
+    assert prepared.training_provenance["runtime_normalization_method"] == "none"
     assert prepared.validation_provenance["split"] == "VALIDATION"
 
 
@@ -1024,3 +1026,7 @@ def test_collect_manifest_split_provenance_reports_manifest_metadata(
     assert provenance["master_manifest_path"] == str(master_manifest_path)
     assert provenance["row_count"] == MANIFEST_ROW_COUNT
     assert provenance["selection_mode"] == "stage7_selected"
+    assert provenance["stage4_split_bundle_id"] is None
+    assert provenance["runtime_normalization_method"] == "none"
+    assert provenance["attrs"]["stage4_split_bundle_id"] is None
+    assert provenance["attrs"]["runtime_normalization_method"] == "none"

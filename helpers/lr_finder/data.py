@@ -20,7 +20,8 @@ from helpers.training.master_manifest_queries import (
 from helpers.training.runtime import worker_init_fn
 from helpers.training.stain_normalization import (
     build_split_stain_normalizer,
-    normalize_runtime_method_name,
+    resolve_runtime_normalization_selection,
+    resolve_stage4_split_bundle_id,
 )
 
 
@@ -51,6 +52,7 @@ def prepare_training_data(config: LRFinderConfig) -> PreparedTrainingData:
     image_normalizer = build_split_stain_normalizer(
         config.master_manifest_path,
         training_records,
+        runtime_normalization_method=config.runtime_normalization_method,
         device="cpu",
     )
 
@@ -94,12 +96,14 @@ def prepare_training_data(config: LRFinderConfig) -> PreparedTrainingData:
             records=dataset.records,
             split="TRAIN",
             smart_sampling=config.smart_sampling,
+            runtime_normalization_method=config.runtime_normalization_method,
         ),
         validation_provenance=collect_manifest_split_provenance(
             config.master_manifest_path,
             records=validation_records,
             split="VALIDATION",
             smart_sampling=False,
+            runtime_normalization_method=config.runtime_normalization_method,
         ),
     )
 
@@ -110,9 +114,13 @@ def collect_manifest_split_provenance(
     records: Sequence[CanonicalRowRecord],
     split: str,
     smart_sampling: bool,
+    runtime_normalization_method: str = "NOT_NORMALIZED",
 ) -> dict[str, Any]:
-    normalization_methods = sorted(
-        {normalize_runtime_method_name(record.normalization_method) for record in records}
+    stage4_split_bundle_id = resolve_stage4_split_bundle_id(records)
+    normalization_method, normalization_artifact_id = resolve_runtime_normalization_selection(
+        master_manifest_path,
+        records,
+        runtime_normalization_method=runtime_normalization_method,
     )
     return {
         "path": str(master_manifest_path),
@@ -122,8 +130,17 @@ def collect_manifest_split_provenance(
         "row_count": len(records),
         "shard_count": len({str(record.source_hdf5_path) for record in records}),
         "smart_sampling": smart_sampling,
+        "stage4_split_bundle_id": stage4_split_bundle_id,
+        "runtime_normalization_method": normalization_method,
         "selection_mode": "stage7_selected" if smart_sampling else "all_stage4_accepted",
-        "normalization_methods": normalization_methods,
+        "normalization_methods": [normalization_method],
+        "attrs": {
+            "master_manifest_sha256": hash_file_sha256(master_manifest_path),
+            "stage4_split_bundle_id": stage4_split_bundle_id,
+            "runtime_normalization_method": normalization_method,
+            "normalization_method": normalization_method,
+            "normalization_artifact_id": normalization_artifact_id,
+        },
     }
 
 

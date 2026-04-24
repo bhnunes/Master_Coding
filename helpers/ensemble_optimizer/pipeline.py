@@ -321,6 +321,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.master_manifest_path,
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
+        runtime_normalization_method=config.runtime_normalization_method,
     )
     LOGGER.info("Validation source ready: %s", config.master_manifest_path)
     split = _build_validation_split(config, validation_layout)

@@ -147,6 +147,8 @@ Agent guide for coding agents working in this repository.
 - Current best-known Phase 4 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
 - Phase 6 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes only sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
 - Phases 7-10 now query `master_manifest.sqlite` once at startup and then load pixels only from canonical Phase 2 patient shards.
+- The normalization refactor contract now reserves one shared downstream env var, `RUNTIME_NORMALIZATION_METHOD`, for Phases 7-10. Stage 4 split assignment is normalization-agnostic; do not add new code that hard-couples per-patch split state to one active normalization choice.
+- No backward compatibility is required for the old normalization-specific Stage 4 persisted-state contract during this refactor unless the user explicitly asks for it.
 
 ## Scientific and Data Integrity Rules
 - Preserve patient-level split isolation.
@@ -178,6 +180,7 @@ Agent guide for coding agents working in this repository.
 - Treat `.env`, credentials files, databases, HDF5 outputs, manifests, logs, checkpoints, and Aim repos as sensitive or generated.
 - Do not delete datasets, logs, or outputs unless explicitly requested.
 - Never use destructive git commands such as `git reset --hard` or `git checkout --` unless explicitly requested.
+- The Elsevier LaTeX class used by `reports/main.tex` is available in `/workspace/latex_template/cas-dc.cls`. When rebuilding `reports/main.pdf`, make sure TeX can resolve that template location (for example via `TEXINPUTS` or by copying the class and its required bundled files into the build-visible path).
 - Mermaid diagrams can be authored as `.mermaid` sources under `/workspace/MERMAID/` and rendered to SVG in the same folder.
 - Preferred Mermaid render flow: generate the diagram source with `mermaid-py` when appropriate, then render with `npx -y @mermaid-js/mermaid-cli -i /workspace/MERMAID/<name>.mermaid -o /workspace/MERMAID/<name>.svg -p /workspace/MERMAID/puppeteer-config.json`.
 - Treat `/workspace/MERMAID/*.svg` as generated artifacts unless the task explicitly says otherwise.

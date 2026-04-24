@@ -8,13 +8,6 @@ from pathlib import Path
 from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
 
-VALID_NORMALIZATION_METHODS = (
-    "NOT_NORMALIZED",
-    "REINHARD",
-    "RUIFROK",
-    "MACENKO",
-    "VAHADANE",
-)
 VALID_HDF5_COMPRESSION = ("NONE", "LZF", "GZIP")
 
 
@@ -87,7 +80,6 @@ class ObjectiveConfig:
 
 @dataclass(frozen=True)
 class CrossfoldConfig:
-    normalization_method: str
     source_path: Path
     overwrite_output_dir: bool
     random_state: int
@@ -102,11 +94,11 @@ class CrossfoldConfig:
 
     @property
     def output_base_dir(self) -> Path:
-        return self.source_path.parent / self.normalization_method
+        return self.source_path.parent / "STAGE4_SPLITS"
 
     @property
     def output_run_dir(self) -> Path:
-        return self.output_base_dir / f"{self.normalization_method}_seed_{self.random_state}"
+        return self.output_base_dir / f"split_seed_{self.random_state}"
 
     @property
     def log_path(self) -> Path:
@@ -182,12 +174,6 @@ def load_crossfold_config(
     )
 
     return CrossfoldConfig(
-        normalization_method=_parse_choice(
-            values.get("CROSSFOLD_NORMALIZATION_METHOD"),
-            "CROSSFOLD_NORMALIZATION_METHOD",
-            default="NOT_NORMALIZED",
-            allowed=VALID_NORMALIZATION_METHODS,
-        ),
         source_path=source_path,
         overwrite_output_dir=_parse_bool(
             values.get("CROSSFOLD_OVERWRITE_OUTPUT_DIR"),

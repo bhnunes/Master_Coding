@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from helpers.logging_utils import resolve_log_folder
+from helpers.runtime_normalization import (
+    RUNTIME_NORMALIZATION_METHOD_ENV_VAR,
+    parse_runtime_normalization_method,
+)
 from helpers.runtime_platform import resolve_env_path
 from helpers.training.registry import load_training_model_registry
 
@@ -96,6 +100,7 @@ class EnsembleOptimizerConfig:
     spatial_patient_policy: str
     num_trials_semantic: int
     num_trials_spatial: int
+    runtime_normalization_method: str = "NOT_NORMALIZED"
     log_folder: Path = Path("logs")
     log_file_name: str = "ensemble_optimizer.log"
 
@@ -187,6 +192,9 @@ def load_ensemble_optimizer_config(
         ),
         num_trials_semantic=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC"), default=50),
         num_trials_spatial=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SPATIAL"), default=50),
+        runtime_normalization_method=parse_runtime_normalization_method(
+            values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
+        ),
         log_folder=resolve_log_folder(
             values,
             system_name=system_name,

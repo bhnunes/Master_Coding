@@ -55,6 +55,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.spatial_architectures == ("FPN", "MANET")
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
+    assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.log_path == Path("logs/ensemble_optimizer.log")
 
 
@@ -76,6 +77,23 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.sort_metric == "best_val_auprc_pixel_score"
     assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
+    assert config.runtime_normalization_method == "NOT_NORMALIZED"
+
+
+def test_load_ensemble_optimizer_config_reads_shared_runtime_normalization_method(
+    tmp_path: Path,
+) -> None:
+    config = load_ensemble_optimizer_config(
+        {
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                tmp_path / "dataset" / "master_manifest.sqlite"
+            ),
+            "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+            "RUNTIME_NORMALIZATION_METHOD": "vahadane",
+        }
+    )
+
+    assert config.runtime_normalization_method == "VAHADANE"
 
 
 def test_load_ensemble_optimizer_config_allows_explicit_positive_only_policy(

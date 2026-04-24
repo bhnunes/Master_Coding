@@ -4,6 +4,7 @@ import logging
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
@@ -11,7 +12,12 @@ from helpers.crossfold.config import CrossfoldConfig
 from helpers.crossfold.discovery import collect_source_dataset_provenance, load_patch_dataset
 from helpers.crossfold.entropy import compute_all_patch_entropies
 from helpers.crossfold.logging import configure_crossfold_logging
-from helpers.crossfold.normalization import fit_normalizer_on_train_set, save_normalizer_stats
+from helpers.crossfold.normalization import (
+    build_aggregate_target_from_template_rows,
+    generate_all_normalization_artifacts,
+    save_template_selection_artifacts,
+    select_template_rows_from_entropy,
+)
 from helpers.crossfold.provenance import (
     ManifestWriteConfig,
     build_hdf5_manifest_from_split_dfs,
@@ -47,7 +53,6 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     output_dir.mkdir(parents=True, exist_ok=True)
     configure_crossfold_logging(config.log_path)
     logging.info("=== Data Preparation (Refactored) ===")
-    logging.info("Normalization method: %s", config.normalization_method)
     logging.info("Random state: %s", config.random_state)
     logging.info("Constraints: %s", asdict(config.constraints))
     logging.info("Objective: %s", asdict(config.objective))
@@ -62,34 +67,36 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         objective=config.objective,
     )
     split_data["constraints"]["random_state"] = config.random_state
-    run_id = f"{config.normalization_method}_seed_{config.random_state}"
+    run_id = f"split_seed_{config.random_state}"
     manifest_df = build_hdf5_manifest_from_split_dfs(
         output_dir=output_dir,
         run_id=run_id,
-        normalization_method=config.normalization_method,
-        is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
+        normalization_method="NOT_NORMALIZED",
+        is_normalized=False,
         split_data=split_data,
     )
 
-    normalizer = None
-    template_paths: list[str] | None = None
-    entropy_df: pd.DataFrame | None = None
-    if config.normalization_method != "NOT_NORMALIZED":
-        entropy_df = compute_all_patch_entropies(
-            df=split_data["train_df"],
-            num_workers=config.objective.num_workers,
-            chunksize=config.objective.chunksize,
-            entropy_thumbnail=config.objective.entropy_thumbnail,
-        )
-        if config.save_entropy_cache_csv:
-            entropy_df.to_csv(output_dir / "entropy_cache.csv", index=False)
-            logging.info("Saved entropy cache: %s", output_dir / "entropy_cache.csv")
-        normalizer, template_paths = fit_normalizer_on_train_set(
-            split_data["train_df"],
-            config.normalization_method,
-            entropy_df=entropy_df,
-        )
-        save_normalizer_stats(normalizer, config.normalization_method, output_dir, template_paths)
+    entropy_df = compute_all_patch_entropies(
+        df=split_data["train_df"],
+        num_workers=config.objective.num_workers,
+        chunksize=config.objective.chunksize,
+        entropy_thumbnail=config.objective.entropy_thumbnail,
+    )
+    selected_template_rows = select_template_rows_from_entropy(split_data["train_df"], entropy_df)
+    aggregate_target_rgb = build_aggregate_target_from_template_rows(selected_template_rows)
+    template_selection_metadata = save_template_selection_artifacts(
+        output_dir,
+        train_df=split_data["train_df"],
+        entropy_df=entropy_df,
+        selected_rows=selected_template_rows,
+        aggregate_target_rgb=aggregate_target_rgb,
+        save_entropy_cache_csv=config.save_entropy_cache_csv,
+    )
+    normalization_artifacts = generate_all_normalization_artifacts(
+        output_dir,
+        aggregate_target_rgb=aggregate_target_rgb,
+        shared_template_dir=output_dir / "template_selection",
+    )
 
     split_frames = {
         "TRAIN": split_data["train_df"],
@@ -108,12 +115,22 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     }
     if "verification" in split_data:
         extra["verification"] = split_data["verification"]
+    extra["template_selection"] = template_selection_metadata
+    extra["normalization_artifacts"] = [
+        {
+            "method": str(artifact["method"]),
+            "state_path": str(cast(Path, artifact["state_path"]).relative_to(output_dir)),
+            "template_path": str(cast(Path, artifact["template_path"]).relative_to(output_dir)),
+            "fit_scope": str(artifact["fit_scope"]),
+        }
+        for artifact in normalization_artifacts
+    ]
     write_manifest_and_log_stats(
         config=ManifestWriteConfig(
             output_dir=output_dir,
             run_id=run_id,
-            normalization_method=config.normalization_method,
-            is_normalized=(config.normalization_method != "NOT_NORMALIZED"),
+            normalization_method="NOT_NORMALIZED",
+            is_normalized=False,
             source_hdf5_path=config.source_path,
             split_data=split_data,
             manifest_df=manifest_df,
@@ -125,8 +142,8 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     _persist_stage5_split_state(
         master_manifest_path=config.source_path,
         split_frames=split_frames,
-        normalization_method=config.normalization_method,
         output_dir=output_dir,
+        normalization_artifacts=normalization_artifacts,
     )
     logging.info("=== DONE ===")
     return CrossfoldRunSummary(
@@ -139,22 +156,29 @@ def _persist_stage5_split_state(
     *,
     master_manifest_path: Path,
     split_frames: dict[str, pd.DataFrame],
-    normalization_method: str,
     output_dir: Path,
+    normalization_artifacts: list[dict[str, object]] | None = None,
 ) -> None:
     master_manifest = MasterManifest(master_manifest_path)
     run_id = master_manifest.create_run(
         stage_name=STAGE4_STAGE_NAME,
         config_path=output_dir / "run_config.json",
     )
-    normalization_artifact_id: int | None = None
-    if normalization_method != "NOT_NORMALIZED":
+    stage4_split_bundle = master_manifest.create_stage4_split_bundle(
+        run_id=run_id,
+        output_dir=output_dir,
+    )
+    for artifact in normalization_artifacts or []:
         normalization_artifact_id = master_manifest.create_normalization_artifact(
             run_id=run_id,
-            method=normalization_method,
-            state_path=output_dir / "normalization_stats.json",
-            template_path=output_dir / "normalization_templates",
-            fit_scope="TRAIN",
+            method=str(artifact["method"]),
+            state_path=cast(Path, artifact["state_path"]),
+            template_path=cast(Path, artifact["template_path"]),
+            fit_scope=str(artifact["fit_scope"]),
+        )
+        master_manifest.link_stage4_split_bundle_artifact(
+            stage4_split_bundle_id=stage4_split_bundle.stage4_split_bundle_id,
+            normalization_artifact_id=normalization_artifact_id,
         )
 
     assignments: list[dict[str, object]] = []
@@ -174,6 +198,5 @@ def _persist_stage5_split_state(
             )
     master_manifest.update_stage4_split_assignments(
         assignments=assignments,
-        normalization_method=normalization_method,
-        normalization_artifact_id=normalization_artifact_id,
+        stage4_split_bundle_id=stage4_split_bundle.stage4_split_bundle_id,
     )
