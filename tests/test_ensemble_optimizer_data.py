@@ -126,7 +126,7 @@ def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) 
                     INSERT INTO patch_stage_state (
                         patch_id, split, normalization_method, normalization_artifact_id,
                         is_stage4_accepted, is_stage7_selected, last_updated_stage_name
-                    ) VALUES (?, 'VALIDATION', 'NOT_NORMALIZED', NULL, 1, NULL, 'STAGE5')
+                    ) VALUES (?, 'VALIDATION', 'NOT_NORMALIZED', NULL, 1, NULL, 'STAGE4')
                     """,
                     (cursor.lastrowid,),
                 )

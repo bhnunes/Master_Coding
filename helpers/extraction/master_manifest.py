@@ -11,9 +11,9 @@ import h5py
 from helpers.provenance import hash_file_sha256
 
 STAGE2_STAGE_NAME = "STAGE2"
-STAGE4_CLEANING_STAGE_NAME = "STAGE4_3"
-STAGE5_STAGE_NAME = "STAGE5"
-STAGE7_STAGE_NAME = "STAGE7_2"
+STAGE3_3_STAGE_NAME = "STAGE3_3"
+STAGE4_STAGE_NAME = "STAGE4"
+STAGE6_STAGE_NAME = "STAGE6"
 
 
 @dataclass(frozen=True)
@@ -310,7 +310,7 @@ class MasterManifest:
             for row in rows
         ]
 
-    def update_stage4_cleaning_decisions(
+    def update_stage3_3_cleaning_decisions(
         self,
         *,
         decisions: Sequence[Mapping[str, object]],
@@ -327,14 +327,17 @@ class MasterManifest:
             )
             updates: list[tuple[object, ...]] = []
             for decision, patch_row in zip(decisions, patch_rows, strict=True):
-                self._validate_stage4_decision_provenance(patch_row=patch_row, decision=decision)
+                self._validate_stage3_3_decision_provenance(
+                    patch_row=patch_row,
+                    decision=decision,
+                )
                 decision_text = str(decision["decision"])
                 updates.append(
                     (
                         decision_text,
                         _coerce_float_or_none(decision.get("contamination_rate")),
                         1 if decision_text.lower() == "accepted" else 0,
-                        STAGE4_CLEANING_STAGE_NAME,
+                        STAGE3_3_STAGE_NAME,
                         int(patch_row["patch_id"]),
                     )
                 )
@@ -410,12 +413,12 @@ class MasterManifest:
         template_path: Path | None,
         fit_scope: str,
     ) -> int:
-        """Insert one Stage 5 normalization artifact row and return its id."""
+        """Insert one Stage 4 normalization artifact row and return its id."""
 
         self.initialize()
         if not state_path.is_file():
             raise FileNotFoundError(
-                f"Stage 5 normalization state artifact is missing: {state_path}"
+                f"Stage 4 normalization state artifact is missing: {state_path}"
             )
         state_sha256 = hash_file_sha256(state_path)
         with self._connect() as connection:
@@ -443,17 +446,17 @@ class MasterManifest:
             )
             connection.commit()
         if cursor.lastrowid is None:
-            raise ValueError("Stage 5 normalization artifact insert did not return an id.")
+            raise ValueError("Stage 4 normalization artifact insert did not return an id.")
         return int(cursor.lastrowid)
 
-    def update_stage5_split_assignments(
+    def update_stage4_split_assignments(
         self,
         *,
         assignments: Sequence[Mapping[str, object]],
         normalization_method: str,
         normalization_artifact_id: int | None,
     ) -> None:
-        """Persist Stage 5 split assignments onto existing canonical patch rows."""
+        """Persist Stage 4 split assignments onto existing canonical patch rows."""
 
         self.initialize()
         with self._connect() as connection:
@@ -462,12 +465,12 @@ class MasterManifest:
                 rows=assignments,
                 selected_columns=("filename", "patient_id", "label"),
                 missing_message=(
-                    "Stage 5 split assignment targets a missing canonical Stage 2 row"
+                    "Stage 4 split assignment targets a missing canonical Stage 2 row"
                 ),
             )
             updates: list[tuple[object, ...]] = []
             for assignment, patch_row in zip(assignments, patch_rows, strict=True):
-                self._validate_stage5_assignment_provenance(
+                self._validate_stage4_assignment_provenance(
                     patch_row=patch_row,
                     assignment=assignment,
                 )
@@ -476,7 +479,7 @@ class MasterManifest:
                         str(assignment["split"]),
                         normalization_method,
                         normalization_artifact_id,
-                        STAGE5_STAGE_NAME,
+                        STAGE4_STAGE_NAME,
                         int(patch_row["patch_id"]),
                     )
                 )
@@ -494,12 +497,12 @@ class MasterManifest:
             )
             connection.commit()
 
-    def update_stage7_sampling_decisions(
+    def update_stage6_sampling_decisions(
         self,
         *,
         decisions: Sequence[Mapping[str, object]],
     ) -> None:
-        """Persist Stage 7.2 sampling decisions onto existing canonical patch rows."""
+        """Persist Stage 6 sampling decisions onto existing canonical patch rows."""
 
         self.initialize()
         with self._connect() as connection:
@@ -508,12 +511,12 @@ class MasterManifest:
                 rows=decisions,
                 selected_columns=("filename", "patient_id", "label"),
                 missing_message=(
-                    "Stage 7.2 sampling decision targets a missing canonical Stage 2 row"
+                    "Stage 6 sampling decision targets a missing canonical Stage 2 row"
                 ),
             )
             updates: list[tuple[object, ...]] = []
             for decision, patch_row in zip(decisions, patch_rows, strict=True):
-                self._validate_stage5_assignment_provenance(
+                self._validate_stage4_assignment_provenance(
                     patch_row=patch_row,
                     assignment=decision,
                 )
@@ -521,7 +524,7 @@ class MasterManifest:
                     (
                         str(decision["sampling_decision"]),
                         1 if bool(decision["is_stage7_selected"]) else 0,
-                        STAGE7_STAGE_NAME,
+                        STAGE6_STAGE_NAME,
                         int(patch_row["patch_id"]),
                     )
                 )
@@ -600,7 +603,7 @@ class MasterManifest:
                 )
         return patch_rows
 
-    def _validate_stage4_decision_provenance(
+    def _validate_stage3_3_decision_provenance(
         self,
         *,
         patch_row: sqlite3.Row,
@@ -642,7 +645,7 @@ class MasterManifest:
                 f"expected {actual_source_signature!r}, got {expected_source_signature!r}."
             )
 
-    def _validate_stage5_assignment_provenance(
+    def _validate_stage4_assignment_provenance(
         self,
         *,
         patch_row: sqlite3.Row,
@@ -651,7 +654,7 @@ class MasterManifest:
         expected_filename = _coerce_str_or_none(assignment.get("filename"))
         if expected_filename is not None and expected_filename != str(patch_row["filename"]):
             raise ValueError(
-                "Stage 5 split assignment filename does not match the canonical Stage 2 row: "
+                "Stage 4 split assignment filename does not match the canonical Stage 2 row: "
                 f"expected {patch_row['filename']!r}, got {expected_filename!r}."
             )
 
@@ -661,7 +664,7 @@ class MasterManifest:
             field_name="patient_id",
         ) != int(patch_row["patient_id"]):
             raise ValueError(
-                "Stage 5 split assignment patient_id does not match the canonical Stage 2 row: "
+                "Stage 4 split assignment patient_id does not match the canonical Stage 2 row: "
                 f"expected {patch_row['patient_id']!r}, got {expected_patient_id!r}."
             )
 
@@ -671,7 +674,7 @@ class MasterManifest:
             field_name="label",
         ) != int(patch_row["label"]):
             raise ValueError(
-                "Stage 5 split assignment label does not match the canonical Stage 2 row: "
+                "Stage 4 split assignment label does not match the canonical Stage 2 row: "
                 f"expected {patch_row['label']!r}, got {expected_label!r}."
             )
 

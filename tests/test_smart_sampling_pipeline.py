@@ -91,7 +91,7 @@ def _write_stage2_patient_shards_and_master_manifest(tmp_path: Path) -> Path:
                         split,
                         is_stage4_accepted,
                         last_updated_stage_name
-                    ) VALUES (?, 'TRAIN', 1, 'STAGE5')
+                    ) VALUES (?, 'TRAIN', 1, 'STAGE4')
                     """,
                     ((cursor.lastrowid or 0),),
                 )
@@ -236,10 +236,10 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
         == REJECTED_SAMPLE_COUNT
     )
     assert sum(1 for _, selected, _ in stage_rows if selected == 1) == SELECTED_SAMPLE_COUNT
-    assert {stage_name for _, _, stage_name in stage_rows} == {"STAGE7_2"}
+    assert {stage_name for _, _, stage_name in stage_rows} == {"STAGE6"}
     assert run_rows == [
         (
-            "STAGE7_2",
+            "STAGE6",
             str(tmp_path / "out" / "filter_run_config.json"),
             str(tmp_path / "out" / "filter_summary.json"),
         )

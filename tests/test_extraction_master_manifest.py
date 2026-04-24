@@ -205,7 +205,7 @@ def test_master_manifest_removes_stale_rows_for_rewritten_stage2_shard(tmp_path:
     assert rows == [("new.png", 0, "second")]
 
 
-def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path) -> None:
+def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Path) -> None:
     records = [
         {
             "filename": "a.png",
@@ -243,7 +243,7 @@ def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path
     with h5py.File(shard_path, "r") as handle:
         source_signature = str(handle.attrs["source_signature"])
 
-    manifest.update_stage4_cleaning_decisions(
+    manifest.update_stage3_3_cleaning_decisions(
         decisions=[
             {
                 "source_hdf5_path": str(shard_path),
@@ -267,7 +267,7 @@ def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path
             },
         ]
     )
-    manifest.update_stage5_split_assignments(
+    manifest.update_stage4_split_assignments(
         assignments=[
             {
                 "source_hdf5_path": str(shard_path),
@@ -289,7 +289,7 @@ def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path
         normalization_method="NOT_NORMALIZED",
         normalization_artifact_id=None,
     )
-    manifest.update_stage7_sampling_decisions(
+    manifest.update_stage6_sampling_decisions(
         decisions=[
             {
                 "source_hdf5_path": str(shard_path),
@@ -320,7 +320,7 @@ def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path
         ).fetchall()
 
     assert rows == [
-        ("accepted", 0.1, "TRAIN", "NOT_NORMALIZED", "protected_kept", 1, 1, "STAGE7_2"),
+        ("accepted", 0.1, "TRAIN", "NOT_NORMALIZED", "protected_kept", 1, 1, "STAGE6"),
         (
             "rejected",
             0.8,
@@ -329,6 +329,6 @@ def test_master_manifest_batches_stage4_stage5_and_stage7_updates(tmp_path: Path
             "rejected_reducible",
             0,
             0,
-            "STAGE7_2",
+            "STAGE6",
         ),
     ]

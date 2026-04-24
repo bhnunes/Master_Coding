@@ -549,8 +549,8 @@ def test_run_graph_cleaning_pipeline_updates_master_manifest_state(tmp_path: Pat
         ).fetchall()
 
     assert rows == [
-        ("accepted", 0.1, 1, "STAGE4_3"),
-        ("rejected", 0.5, 0, "STAGE4_3"),
+        ("accepted", 0.1, 1, "STAGE3_3"),
+        ("rejected", 0.5, 0, "STAGE3_3"),
     ]
 
 
@@ -677,8 +677,8 @@ def test_run_graph_cleaning_pipeline_updates_only_canonical_cancer_rows(
         ).fetchall()
 
     assert rows == [
-        (0, "cancer_accept.png", "accepted", 0.1, 1, "STAGE4_3"),
-        (1, "cancer_reject.png", "rejected", 0.5, 0, "STAGE4_3"),
+        (0, "cancer_accept.png", "accepted", 0.1, 1, "STAGE3_3"),
+        (1, "cancer_reject.png", "rejected", 0.5, 0, "STAGE3_3"),
         (2, "not_cancer_ignore.png", None, None, None, "STAGE2"),
     ]
 

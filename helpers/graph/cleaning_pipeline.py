@@ -119,7 +119,7 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
         scorer=config.scorer,
         progress_factory=config.progress_factory,
     )
-    MasterManifest(config.master_manifest_path).update_stage4_cleaning_decisions(
+    MasterManifest(config.master_manifest_path).update_stage3_3_cleaning_decisions(
         decisions=[record.__dict__ for record in decisions]
     )
     _write_decision_manifest(accepted_manifest_path, decisions, ACCEPTED)

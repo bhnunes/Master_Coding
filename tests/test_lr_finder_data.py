@@ -206,7 +206,7 @@ def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) 
                         is_stage4_accepted,
                         is_stage7_selected,
                         last_updated_stage_name
-                    ) VALUES (?, ?, ?, ?, ?, 1, ?, 'STAGE7_2')
+                    ) VALUES (?, ?, ?, ?, ?, 1, ?, 'STAGE6')
                     """,
                     (
                         cursor.lastrowid,

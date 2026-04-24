@@ -90,34 +90,38 @@ The patient identifier stored by Stage~2 is presently a slide-level operational 
 
 Stage~3.1 prepares a human-review subset from cancer patches only. Image--mask pairs are discovered by identical filename stem, and grouping is inferred from filename tokens so that sampling is patient-aware whenever patient identifiers are available. One representative patch is first selected per group, after which the required review set size is estimated using Cochran's formula under configurable confidence, error, and proportion assumptions. The stage produces a pilot sample and a master candidate pool, each with \texttt{APPROVED} and \texttt{REJECTED} subfolders, and generates contour overlays from the binary masks to support manual review.
 
-Let $s$ denote a patch stem and let $g(s)$ be the grouping function induced from the filename, using patient identifier when available, otherwise slide identifier, otherwise the stem itself. After selecting one representative per group, the grouped population size is $N=|G|$. The required review size is then computed with Cochran's formula,
+Let $s$ denote a patch stem and let $g(s)$ be the grouping function induced from the filename, using patient identifier when available, otherwise slide identifier, otherwise the stem itself. Let $G$ denote the resulting set of groups and let $N=|G|$ denote the number of distinct groups after one representative patch has been selected per group. The required review size is then computed with Cochran's formula,
 \[
 n_{\mathrm{req}} = \left\lceil \frac{z^2 p (1-p)}{e^2} \right\rceil,
 \]
-where $z$ is the normal quantile associated with the configured confidence level, $p$ is the assumed proportion, and $e$ is the margin of error. The implementation then derives a master-pool size $n_{\mathrm{master}}=\lceil f_{\mathrm{master}}N \rceil$ and uses the configured pilot size $n_{\mathrm{pilot}}$ to create two non-overlapping review subsets. The code does not apply a finite-population correction, and representative selection within each group is random rather than optimization-based.
+where $n_{\mathrm{req}}$ is the required review size, $z$ is the standard-normal quantile associated with the configured confidence level, $p$ is the assumed approval or rejection proportion used by the sample-size calculation, and $e$ is the target margin of error. The implementation then derives a master-pool size $n_{\mathrm{master}}=\lceil f_{\mathrm{master}}N \rceil$, where $f_{\mathrm{master}}$ is the configured master-pool fraction, and uses the configured pilot size $n_{\mathrm{pilot}}$ to create two non-overlapping review subsets. The code does not apply a finite-population correction, and representative selection within each group is random rather than optimization-based.
 
-Stage~3.2 tunes a graph-based contamination score using the manually labeled folders produced by Stage~3.1. For each reviewed cancer patch, the binary region of interest is optionally eroded and then analyzed by OpenCV graph segmentation with fixed \texttt{sigma}=0.5 and tunable \texttt{k}, \texttt{min\_size}, and background-intensity threshold. Segments whose mean intensity exceeds the threshold are marked as background-like, and contamination is defined as the fraction of region-of-interest pixels assigned to such segments. Bayesian optimization with grouped inner cross-validation searches over graph parameters, and the rejection threshold $\tau$ is reselected within each training fold to maximize the F1 score of the \emph{Rejected} class. The final tuned parameter set is then evaluated on a held-out grouped test split and stored in a JSON artifact.
+Stage~3.2 tunes a graph-based contamination score using the manually labeled folders produced by Stage~3.1. The score is intended to quantify how much of the annotated region of interest is occupied by bright background-like area rather than usable tissue. For each reviewed cancer patch, the binary region of interest is thresholded and may be eroded by a configurable radius $e_{\mathrm{roi}}$ before scoring. This erosion step reduces sensitivity to boundary pixels near the annotation contour, where small alignment errors or edge effects could otherwise dominate the score. The corresponding image is then partitioned into coherent regions using Felzenszwalb graph segmentation with fixed $\sigma=0.5$ and tunable $k$ and $m_{\min}$. Each segment is classified as background-like or non-background-like according to its mean RGB intensity, and contamination is defined as the fraction of region-of-interest pixels that fall inside segments classified as background-like. Bayesian optimization with grouped inner cross-validation searches over graph parameters, and the rejection threshold $\tau$ is reselected within each training fold to maximize the F1 score of the \emph{Rejected} class. The final tuned parameter set is then evaluated on a held-out grouped test split and stored in a JSON artifact.
 
-More formally, let $R(x)\in\{0,1\}$ denote the binary region-of-interest mask after optional erosion, and let $S_j$ denote graph segment $j$. For each segment, the code computes the mean RGB intensity
+More formally, let $R(x)\in\{0,1\}$ denote the binary region-of-interest mask after optional erosion, where $x$ indexes pixel locations, and let $S_j$ denote graph segment $j$. For each segment, the code computes the mean RGB intensity
 \[
 I_j = \frac{1}{3}\left(\overline{B}_{S_j}+\overline{G}_{S_j}+\overline{R}_{S_j}\right),
 \]
-and marks the segment as background-like when $I_j>T_{\mathrm{bg}}$, where $T_{\mathrm{bg}}$ is the tuned background-intensity threshold. Defining $B(x)=1$ when the segment containing pixel $x$ is background-like, the contamination score is
+where $I_j$ is the mean intensity of segment $S_j$, and $\overline{B}_{S_j}$, $\overline{G}_{S_j}$, and $\overline{R}_{S_j}$ denote the mean blue-, green-, and red-channel intensities over the pixels belonging to segment $S_j$. The method marks the segment as background-like when $I_j>T_{\mathrm{bg}}$, where $T_{\mathrm{bg}}$ is the tuned background-intensity threshold. Defining $B(x)=1$ when the segment containing pixel $x$ is background-like and $B(x)=0$ otherwise, the contamination score is
 \[
 c = \frac{\sum_x B(x)R(x)}{\sum_x R(x)}.
 \]
+The numerator counts region-of-interest pixels that lie inside segments classified as background-like, and the denominator normalizes by the final region-of-interest area after erosion. The score is therefore interpretable as the fraction of the annotated region that appears to be background. A low value indicates that most of the region of interest is covered by non-background tissue-like content, whereas a high value indicates that a substantial part of the region is occupied by bright empty or weakly informative areas. The term \emph{contamination} in the implementation should therefore be understood as contamination of the annotated region by background-like area rather than contamination in a microbiological sense.
+
 The Stage~3.3 rejection rule is then
 \[
 \hat{y}=\mathrm{Rejected}\quad \text{iff} \quad c>\tau.
 \]
+Here, $\hat{y}$ denotes the predicted cleaning label for a patch, $c$ denotes its contamination score, and $\tau$ denotes the tuned rejection threshold.
+
 For fixed graph parameters $\theta=(T_{\mathrm{bg}},k,m_{\min},e_{\mathrm{roi}})$, the threshold is reselected on each training fold as
 \begin{equation}
 \tau^*(\theta)=\arg\max_{\tau\in\mathcal{T}}
 F1_{\mathrm{Rejected}}(\tau;\theta).
 \end{equation}
-where $\mathcal{T}=\{0.05,0.06,\ldots,0.95\}$. Bayesian optimization minimizes the negative mean grouped cross-validated F1 score over these fold-wise optima.
+In this expression, $\theta$ collects the graph parameters $T_{\mathrm{bg}}$ (background-intensity threshold), $k$ (Felzenszwalb scale parameter), $m_{\min}$ (minimum segment size), and $e_{\mathrm{roi}}$ (ROI erosion radius in pixels); $\tau^*(\theta)$ is the threshold selected for parameter setting $\theta$; $\mathcal{T}=\{0.05,0.06,\ldots,0.95\}$ is the discrete threshold grid searched by the implementation; and $F1_{\mathrm{Rejected}}(\tau;\theta)$ denotes the F1 score of the \emph{Rejected} class obtained when threshold $\tau$ is applied under parameter setting $\theta$. Bayesian optimization then minimizes the negative mean grouped cross-validated rejected-class F1 score over these fold-wise optima. In other words, the graph parameters and threshold are not fixed from external assumptions; they are selected to maximize agreement with the manual \texttt{REJECTED} labels produced in Stage~3.1 under the grouped cross-validation protocol implemented by the repository.
 
-Stage~3.3 applies the tuned contamination rule to the full cancer subset of the canonical source HDF5 dataset. Each cancer row is paired with its mask by row identity, the contamination score is recomputed using the shared Stage~3.2 logic, and the stage emits \texttt{accepted\_manifest.csv} and \texttt{rejected\_manifest.csv} rather than mutating the HDF5 file in place. The accepted manifest records immutable source identity fields, including source-path and source-file digest metadata, so that a subsequent Stage~3 repackaging step can fail closed if a stale manifest is applied to a regenerated source file.
+Stage~3.3 applies the tuned contamination rule to the full cancer subset of the canonical source HDF5 dataset. Each cancer row is paired with its mask by row identity, the contamination score is recomputed using the shared Stage~3.2 logic, and the stage emits \texttt{accepted\_manifest.csv} and \texttt{rejected\_manifest.csv} rather than mutating the HDF5 file in place. In the current implementation, rejection occurs only when $c>\tau$; scores exactly equal to $\tau$ are accepted, and undefined contamination scores are also recorded as accepted rather than forcibly rejected. The accepted manifest records immutable source identity fields, including source-path and source-file digest metadata, so that a subsequent Stage~3 repackaging step can fail closed if a stale manifest is applied to a regenerated source file.
 
 \subsection{Stage 3: packaging canonical source HDF5 datasets}
 
@@ -145,15 +149,15 @@ This stage acts as a scientific gate rather than a mere file-existence test. A r
 
 Stage~6 optionally reduces the training set to a more compact subset while preserving within-patient diversity. The stage reads \texttt{TRAIN.h5}, builds a patient-wise patch index, and extracts encoder embeddings using the encoder of a segmentation model initialized with ImageNet weights. Global-average pooled feature maps are used as patch descriptors. For each patient, the algorithm begins with a starting sample size and estimates clustering stability through the adjusted Rand index between two random subsamples. The number of embedded patches is then increased multiplicatively until the stability threshold is reached or configured limits are exceeded.
 
-For a patch $i$, let $F_i\in\mathbb{R}^{C\times H\times W}$ denote the final encoder feature map. The embedding used for smart sampling is the global-average-pooled descriptor
+For a patch indexed by $i$, let $F_i\in\mathbb{R}^{C\times H\times W}$ denote the final encoder feature map, where $C$ is the number of feature channels and $H$ and $W$ are the spatial height and width of that map. The embedding used for smart sampling is the global-average-pooled descriptor
 \[
 z_i[c] = \frac{1}{HW}\sum_{h=1}^{H}\sum_{w=1}^{W} F_i[c,h,w].
 \]
-For each patient, the stage starts from an initial candidate count $n_0$ and iteratively increases the embedding budget according to
+Here, $z_i[c]$ is the $c$th component of the embedding for patch $i$, $c\in\{1,\ldots,C\}$ indexes channels, and $h$ and $w$ index spatial positions within the feature map. For each patient, the stage starts from an initial candidate count $n_0$ and iteratively increases the embedding budget according to
 \[
 n_{t+1}=\min\!\left(n_{\max},\left\lfloor g\,n_t\right\rfloor\right),
 \]
-where $g$ is the configured growth factor and $n_{\max}$ is the maximum allowed sample count. At each step, two random subsets of size $n_t$ are clustered and their stability is measured by the adjusted Rand index. Iteration stops once the estimated stability exceeds the configured threshold or the iteration cap is reached.
+where $n_t$ is the candidate count at iteration $t$, $n_{t+1}$ is the updated count for the next iteration, $g$ is the configured multiplicative growth factor, $n_{\max}$ is the maximum allowed sample count, and $\lfloor\cdot\rfloor$ denotes the floor operator. At each step, two random subsets of size $n_t$ are clustered and their stability is measured by the adjusted Rand index. Iteration stops once the estimated stability exceeds the configured threshold or the iteration cap is reached.
 
 Once the patch budget for a patient is determined, diversity selection is performed with \texttt{MiniBatchKMeans}. Patches are then sampled approximately uniformly across clusters, yielding a filtered training HDF5 file, \texttt{TRAIN\_FILTERED.h5}, that preserves the same downstream dataset names used by later stages. The implementation also stores content signatures and configuration sidecars so that training code can verify whether the filtered file still corresponds to the current training split.
 
@@ -161,7 +165,7 @@ If the final candidate set for a patient contains $n$ embedded patches, the clus
 \[
 q = \left\lceil \frac{m}{K} \right\rceil,
 \]
-after which up to $q$ samples are drawn from each cluster and any remaining slots are filled from the residual candidate pool. The resulting policy is therefore diversity-oriented rather than centroid-nearest or density-proportional.
+where $q$ is the nominal per-cluster quota, $m$ is the desired number of retained patches for the patient, $K$ is the number of clusters, and $\lceil\cdot\rceil$ denotes the ceiling operator. After this quota is computed, up to $q$ samples are drawn from each cluster and any remaining slots are filled from the residual candidate pool. The resulting policy is therefore diversity-oriented rather than centroid-nearest or density-proportional.
 
 \subsection{Stage 7: repeated learning-rate and loss-weight screening}
 
@@ -179,9 +183,9 @@ Training uses a two-channel segmentation network instantiated through the approv
 + \beta\,\mathcal{L}_{\mathrm{Dice,bg}}
 + \gamma\,\mathcal{L}_{\mathrm{Dice,fg}}.
 \end{equation}
-with default weights $\alpha=0.125$, $\beta=0.157$, and $\gamma=0.173$. The BCE term is applied to the foreground probability after softmax, whereas Dice terms are computed separately for the background and foreground channels. When artifact-aware loss is enabled, the per-sample loss is discounted according to the maximum artifact coverage associated with the filename in the Stage~2 Parquet sidecar.
+In this expression, $\mathcal{L}$ is the total training loss, $\mathcal{L}_{\mathrm{BCE,fg}}$ is the foreground binary cross-entropy term, $\mathcal{L}_{\mathrm{Dice,bg}}$ is the Dice loss for the background channel, $\mathcal{L}_{\mathrm{Dice,fg}}$ is the Dice loss for the foreground channel, and $\alpha$, $\beta$, and $\gamma$ are scalar mixing weights with default values $\alpha=0.125$, $\beta=0.157$, and $\gamma=0.173$. The BCE term is applied to the foreground probability after softmax, whereas Dice terms are computed separately for the background and foreground channels. When artifact-aware loss is enabled, the per-sample loss is discounted according to the maximum artifact coverage associated with the filename in the Stage~2 Parquet sidecar.
 
-Let $p_{c,h,w}$ and $g_{c,h,w}$ denote the predicted class probability and one-hot target for class $c\in\{\mathrm{bg},\mathrm{fg}\}$. The foreground BCE term is
+Let $p_{c,h,w}$ and $g_{c,h,w}$ denote the predicted class probability and one-hot target, respectively, for class $c\in\{\mathrm{bg},\mathrm{fg}\}$ at spatial location $(h,w)$, where $\mathrm{bg}$ denotes background, $\mathrm{fg}$ denotes foreground, and $H$ and $W$ denote the mask height and width. The foreground BCE term is
 \begin{equation}
 \begin{aligned}
 \mathcal{L}_{\mathrm{BCE,fg}} = -\frac{1}{HW}\sum_{h,w}\Bigl[
@@ -193,11 +197,14 @@ and the class-specific Dice term is
 \[
 \mathcal{L}_{\mathrm{Dice},c} = 1 - \frac{2\sum_{h,w} p_{c,h,w}g_{c,h,w}+\varepsilon}{\sum_{h,w} p_{c,h,w}^2 + \sum_{h,w} g_{c,h,w}^2 + \varepsilon}.
 \]
+Here, the sums run over all pixel locations $(h,w)$ in the patch, and $\varepsilon$ is the small positive constant used by the implementation for numerical stability. When the subscript $c$ is instantiated as $\mathrm{bg}$ or $\mathrm{fg}$, the equation yields the background-channel or foreground-channel Dice loss, respectively.
+
 When artifact-aware training is enabled, the stage loads per-patch artifact coverage values and uses their maximum as a discount factor. Writing this maximum as $a_{\max}$, the multiplicative discount is
 \begin{equation}
 \mathcal{L}_{\mathrm{artifact}} = (1-a_{\max})\,\mathcal{L},
 \qquad a_{\max}=\max_j a_j.
 \end{equation}
+In this notation, $\mathcal{L}_{\mathrm{artifact}}$ is the artifact-discounted loss, $a_j$ is the coverage fraction of artifact class $j$ for the current patch, and $a_{\max}$ is the maximum coverage across all tracked artifact classes for that patch.
 
 Data augmentation is implemented with Albumentations and includes horizontal and vertical flips, affine perturbations, a probabilistic color-transform block, a probabilistic blur-or-noise block, and coarse dropout. Validation uses tensor conversion only, without augmentation. ImageNet mean and standard deviation are applied on the GPU, and a low-probability GPU downscaling augmentation is also available during training. Under the default \texttt{PAPER} execution mode, the stage enables deterministic CuDNN settings and seeded execution where possible.
 
@@ -209,21 +216,21 @@ Writing precision and recall at threshold $t$ as
 \qquad
 \mathrm{Recall}(t)=\frac{TP_t}{TP_t+FN_t},
 \]
-the validation AUPRC used for model selection is the area under the precision--recall curve,
+where $TP_t$, $FP_t$, and $FN_t$ denote the numbers of true-positive, false-positive, and false-negative pixels obtained after thresholding predictions at $t$, the validation AUPRC used for model selection is the area under the precision--recall curve,
 \[
 \mathrm{AUPRC}=\int_0^1 \mathrm{Precision}(r)\,dr,
 \]
-where $r$ denotes recall and the practical implementation uses the discrete thresholded predictions accumulated by the validation metric tracker. In the current code, this AUPRC is the primary checkpoint-selection criterion, whereas the MCC sweep is an auxiliary guardrail statistic used to summarize threshold sensitivity.
+where $r$ denotes recall and the practical implementation uses the discrete thresholded predictions accumulated by the validation metric tracker to approximate this integral. In the current code, this AUPRC is the primary checkpoint-selection criterion, whereas the MCC sweep is an auxiliary guardrail statistic used to summarize threshold sensitivity.
 
 The reported MCC sweep statistic is
 \[
 \mathrm{MCC}^* = \max_{t\in\{0.1,0.2,\ldots,0.9\}} \mathrm{MCC}(t),
 \]
-where
+where $\mathrm{MCC}^*$ is the maximum Matthews correlation coefficient over the evaluated threshold grid and $t$ is the probability threshold used to binarize the foreground prediction. Let $TP_t$, $FP_t$, $TN_t$, and $FN_t$ denote the true-positive, false-positive, true-negative, and false-negative pixel counts at threshold $t$. The implementation defines
 \[
 D_t=(TP_t+FP_t)(TP_t+FN_t)(TN_t+FP_t)(TN_t+FN_t)+\varepsilon,
 \]
-and
+where $D_t$ is the denominator term of the MCC expression and $\varepsilon$ is the numerical-stability constant. The corresponding MCC is
 \begin{multline}
 \mathrm{MCC}(t) = \frac{TP_tTN_t-FP_tFN_t}{\sqrt{D_t}}.
 \end{multline}
@@ -231,7 +238,7 @@ The implementation also computes the foreground prevalence at threshold $0.5$,
 \[
 \hat{\pi}_{0.5}=\frac{1}{N_{\mathrm{pix}}}\sum_i 1[p_i\geq 0.5],
 \]
-and rejects validation epochs when $\hat{\pi}_{0.5}<0.001$ or $\hat{\pi}_{0.5}>0.99$, thereby preventing collapsed predictions from being selected as best checkpoints.
+where $\hat{\pi}_{0.5}$ is the predicted foreground prevalence at threshold $0.5$, $N_{\mathrm{pix}}$ is the total number of evaluated pixels, $p_i$ is the predicted foreground probability for pixel $i$, and $1[\cdot]$ denotes the indicator function. The implementation rejects validation epochs when $\hat{\pi}_{0.5}<0.001$ or $\hat{\pi}_{0.5}>0.99$, thereby preventing collapsed predictions from being selected as best checkpoints.
 
 \subsection{Stage 9: validation-only optimization of a two-stream ensemble recipe}
 
@@ -239,17 +246,19 @@ Stage~9 aggregates multiple trained models into a two-stream ensemble. Before an
 
 The ensemble strategy is explicitly declared as \texttt{two\_stream\_spatial\_gating}. Semantic-stream models produce a coarse region-of-interest mask by weighted averaging their probabilities, downsampling by a configurable context scale, thresholding at an optimized region-of-interest threshold, and then upsampling back to full patch resolution. Spatial-stream models produce finer-grained predictions that are multiplicatively gated by the semantic region of interest. Importantly, the region-of-interest threshold and the final hard-decision threshold are optimized as separate quantities.
 
-Let $\mathcal{M}_{\mathrm{sem}}$ and $\mathcal{M}_{\mathrm{spa}}$ denote the semantic and spatial model sets, and let $P_m(x)$ be the test-time-augmented foreground probability from model $m$ at pixel $x$. The weighted stream predictions are
+Let $\mathcal{M}_{\mathrm{sem}}$ and $\mathcal{M}_{\mathrm{spa}}$ denote the semantic and spatial model sets, respectively, and let $P_m(x)$ be the test-time-augmented foreground probability from model $m$ at pixel $x$. The weighted stream predictions are
 \begin{equation}
 \begin{aligned}
 P_{\mathrm{sem}}(x) &= \sum_{m\in\mathcal{M}_{\mathrm{sem}}} w_m^{\mathrm{sem}} P_m(x), \\
 P_{\mathrm{spa}}(x) &= \sum_{m\in\mathcal{M}_{\mathrm{spa}}} w_m^{\mathrm{spa}} P_m(x).
 \end{aligned}
 \end{equation}
-with normalized non-negative weights. The semantic region of interest is generated by downsampling $P_{\mathrm{sem}}$ by context scale $s$, thresholding at $\tau_{\mathrm{roi}}$, and upsampling back to the original grid:
+Here, $P_{\mathrm{sem}}(x)$ and $P_{\mathrm{spa}}(x)$ are the semantic-stream and spatial-stream foreground probabilities at pixel $x$, while $w_m^{\mathrm{sem}}$ and $w_m^{\mathrm{spa}}$ are the normalized non-negative weights assigned to model $m$ in the semantic and spatial streams, respectively. The semantic region of interest is generated by downsampling $P_{\mathrm{sem}}$ by context scale $s$, thresholding at $\tau_{\mathrm{roi}}$, and upsampling back to the original grid:
 \[
 R(x)=\mathrm{Up}\!\left(1\left[\mathrm{Down}(P_{\mathrm{sem}};s) > \tau_{\mathrm{roi}}\right]\right)(x).
 \]
+In this expression, $R(x)\in\{0,1\}$ is the semantic region-of-interest mask at pixel $x$, $\mathrm{Down}(\cdot;s)$ denotes downsampling by scale factor $s$, $\mathrm{Up}(\cdot)$ denotes upsampling back to the original patch resolution, $\tau_{\mathrm{roi}}$ is the semantic region-of-interest threshold, and $1[\cdot]$ denotes the indicator function.
+
 The final gated prediction is then
 \begin{equation}
 \begin{aligned}
@@ -257,15 +266,15 @@ P_{\mathrm{final}}(x) &= P_{\mathrm{spa}}(x)R(x), \\
 \hat{Y}(x) &= 1\left[P_{\mathrm{final}}(x)>\tau_{\mathrm{dec}}\right].
 \end{aligned}
 \end{equation}
-This formulation is central to the repository design because $\tau_{\mathrm{roi}}$ and $\tau_{\mathrm{dec}}$ have distinct semantics and are optimized separately.
+Here, $P_{\mathrm{final}}(x)$ is the gated ensemble foreground probability, $\hat{Y}(x)\in\{0,1\}$ is the final binary prediction at pixel $x$, and $\tau_{\mathrm{dec}}$ is the final hard-decision threshold. This formulation is central to the repository design because $\tau_{\mathrm{roi}}$ and $\tau_{\mathrm{dec}}$ have distinct semantics and are optimized separately.
 
 Optimization is performed with Optuna. For the semantic stream, the objective favors high positive-patient region-of-interest recall while penalizing trivial empty or overly permissive regions. For the spatial stream, the objective combines positive-patient macro area under the precision--recall curve inside the region of interest with penalties for prediction spill outside the region of interest and for false-positive mass on negative patients. After stream-level weights and the region-of-interest threshold are selected on the optimization subset, a separate patient-level decision threshold is calibrated on the calibration subset by maximizing the Matthews correlation coefficient. The resulting recipe JSON records the ensemble strategy, stream assignments, normalized weights, thresholds, provenance signatures, checkpoint hashes, and holdout metrics.
 
-For a positive patient $i$ with binary ground-truth mask $Y_i$, the semantic stream seeks high region-of-interest recall,
+For a positive patient indexed by $i$, let $Y_i$ denote the binary ground-truth mask and let $R_i$ denote the semantic region-of-interest mask produced for that patient. The semantic stream seeks high region-of-interest recall,
 \[
 \mathrm{Rec}_{\mathrm{ROI}}^{(i)} = \frac{|R_i \cap Y_i|}{|Y_i|+\varepsilon},
 \]
-subject to pruning rules that reject empty or overly permissive regions of interest. The spatial objective is evaluated inside the region of interest and can be summarized as
+where $|\cdot|$ denotes the number of positive pixels in a set or mask, $R_i \cap Y_i$ is the overlap between the proposed region of interest and the ground-truth positive region, and $\varepsilon$ is the numerical-stability constant. This quantity is subject to pruning rules that reject empty or overly permissive regions of interest. The spatial objective is evaluated inside the region of interest and can be summarized as
 \begin{equation}
 \begin{aligned}
 J_{\mathrm{spa}} =
@@ -275,11 +284,11 @@ J_{\mathrm{spa}} =
 &- \lambda \frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-} F_j.
 \end{aligned}
 \end{equation}
-where $\mathcal{P}_+$ and $\mathcal{P}_-$ denote the positive and negative patient sets, $S_i$ is the fraction of predicted probability mass spilled outside the region of interest for positive patient $i$, $F_j$ is the mean false-positive mass on negative patient $j$, and $\lambda$ is the configured spill-penalty coefficient. The final threshold calibration step searches over a fixed threshold grid and selects
+Here, $J_{\mathrm{spa}}$ is the spatial-stream optimization objective, $\mathcal{P}_+$ and $\mathcal{P}_-$ denote the positive and negative patient sets in the optimization subset, $P_{\mathrm{spa},i}$ is the spatial-stream probability map for positive patient $i$, $Y_i[R_i=1]$ and $P_{\mathrm{spa},i}[R_i=1]$ denote restriction of the mask and probabilities to pixels inside the region of interest, $S_i$ is the fraction of predicted probability mass spilled outside the region of interest for positive patient $i$, $F_j$ is the mean false-positive mass on negative patient $j$, and $\lambda$ is the configured spill-penalty coefficient. The final threshold calibration step searches over a fixed threshold grid and selects
 \begin{equation}
 \tau_{\mathrm{dec}}^* = \arg\max_t \; \overline{\mathrm{MCC}}_{\mathrm{cal}}(t),
 \end{equation}
-where $t\in\{0.05,0.10,\ldots,0.95\}$ and $\overline{\mathrm{MCC}}_{\mathrm{cal}}(t)$ denotes the mean per-patient pixel-level MCC on the calibration subset.
+where $\tau_{\mathrm{dec}}^*$ is the calibrated decision threshold, $t\in\{0.05,0.10,\ldots,0.95\}$ is the threshold candidate, and $\overline{\mathrm{MCC}}_{\mathrm{cal}}(t)$ denotes the mean per-patient pixel-level MCC evaluated on the calibration subset at threshold $t$.
 
 \subsection{Stage 10: frozen test-time ensemble inference}
 
@@ -287,7 +296,7 @@ Stage~10 is the claim-bearing endpoint of the implemented workflow. It loads the
 
 Final reporting includes micro-averaged pixel-level metrics, macro-averaged patient-level metrics, pixel-level receiver-operating characteristic area under the curve, and a decomposition that reports macro Dice on positive-ground-truth patients together with negative clean rate on negative patients. When at least 20 patients are available, the stage also computes bootstrap confidence intervals over patients. Output artifacts include a metrics JSON file, a confusion-matrix image, optional CSV and LaTeX/PDF reports, visualization outputs, and a run-configuration file recording inference provenance. The reported AUROC is computed from the foreground probability scores and their corresponding binary targets prior to hard thresholding, complementing the threshold-dependent segmentation statistics with a threshold-free ranking measure.
 
-For pooled pixel counts $(TP,FP,FN,TN)$, the main segmentation metrics are
+For pooled pixel counts $(TP,FP,FN,TN)$, where $TP$, $FP$, $FN$, and $TN$ denote the total true-positive, false-positive, false-negative, and true-negative pixel counts, respectively, the main segmentation metrics are
 \begin{equation}
 \begin{aligned}
 \mathrm{Dice} &= \frac{2TP}{2TP+FP+FN}, \\
@@ -308,7 +317,7 @@ Micro-averaged scores are obtained by pooling pixel counts across patients befor
 \[
 \mathrm{NCR}=\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-} 1[FP_j=0],
 \]
-where $FP_j$ is the number of false-positive pixels for negative patient $j$. Bootstrap confidence intervals are computed by patient-wise resampling only when at least 20 patients are available.
+where $\mathcal{P}_-$ is the set of negative patients, $FP_j$ is the number of false-positive pixels for negative patient $j$, and $1[FP_j=0]$ is the indicator that patient $j$ is completely free of false-positive pixels. Bootstrap confidence intervals are computed by patient-wise resampling only when at least 20 patients are available.
 
 \section{Experimental Setup and Reproducibility}
 

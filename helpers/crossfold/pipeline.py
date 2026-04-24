@@ -18,7 +18,7 @@ from helpers.crossfold.provenance import (
     write_manifest_and_log_stats,
 )
 from helpers.crossfold.splitting import create_train_val_test_split_best
-from helpers.extraction.master_manifest import STAGE5_STAGE_NAME, MasterManifest
+from helpers.extraction.master_manifest import STAGE4_STAGE_NAME, MasterManifest
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,7 @@ def _persist_stage5_split_state(
 ) -> None:
     master_manifest = MasterManifest(master_manifest_path)
     run_id = master_manifest.create_run(
-        stage_name=STAGE5_STAGE_NAME,
+        stage_name=STAGE4_STAGE_NAME,
         config_path=output_dir / "run_config.json",
     )
     normalization_artifact_id: int | None = None
@@ -172,7 +172,7 @@ def _persist_stage5_split_state(
                     "source_row_index": int(row.source_row_index),
                 }
             )
-    master_manifest.update_stage5_split_assignments(
+    master_manifest.update_stage4_split_assignments(
         assignments=assignments,
         normalization_method=normalization_method,
         normalization_artifact_id=normalization_artifact_id,

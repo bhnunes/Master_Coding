@@ -418,7 +418,7 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
                 "INSERT INTO patch_stage_state ("
                 "patch_id, is_stage4_accepted, last_updated_stage_name"
                 ") VALUES (?, 1, ?)",
-                ((cursor.lastrowid or 0), "STAGE4_3"),
+                ((cursor.lastrowid or 0), "STAGE3_3"),
             )
         connection.commit()
 
@@ -471,10 +471,10 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
         run_rows = connection.execute("SELECT stage_name, config_path FROM runs").fetchall()
 
     assert updated_rows == [
-        ("TRAIN", "NOT_NORMALIZED", None, "STAGE5"),
-        ("VALIDATION", "NOT_NORMALIZED", None, "STAGE5"),
+        ("TRAIN", "NOT_NORMALIZED", None, "STAGE4"),
+        ("VALIDATION", "NOT_NORMALIZED", None, "STAGE4"),
     ]
-    assert run_rows == [("STAGE5", str(output_dir / "run_config.json"))]
+    assert run_rows == [("STAGE4", str(output_dir / "run_config.json"))]
 
 
 def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Path) -> None:
@@ -577,7 +577,7 @@ def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Pat
             "INSERT INTO patch_stage_state ("
             "patch_id, is_stage4_accepted, last_updated_stage_name"
             ") VALUES (?, 1, ?)",
-            ((cursor.lastrowid or 0), "STAGE4_3"),
+            ((cursor.lastrowid or 0), "STAGE3_3"),
         )
         connection.commit()
 
