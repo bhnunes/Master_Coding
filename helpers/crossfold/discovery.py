@@ -8,6 +8,7 @@ from pathlib import Path
 import h5py
 import pandas as pd
 
+from helpers.extraction.manifest_paths import resolve_manifest_path_ref, to_runtime_hdf5_ref
 from helpers.provenance import hash_file_sha256
 
 
@@ -140,6 +141,31 @@ def _load_sqlite_patch_dataset(source_path: Path) -> pd.DataFrame:
         )
     if dataset.empty:
         raise ValueError(f"No accepted Stage 3.3 rows found in master manifest: {source_path}")
+    dataset["source_hdf5_path"] = dataset["source_hdf5_path"].map(
+        lambda value: str(
+            resolve_manifest_path_ref(
+                str(value),
+                source_root=source_path.parent,
+                manifest_path=source_path,
+            )
+        )
+    )
+    dataset["image_path"] = dataset.apply(
+        lambda row: to_runtime_hdf5_ref(
+            Path(str(row["source_hdf5_path"])),
+            str(row["image_path"]),
+            expected_dataset="images",
+        ),
+        axis=1,
+    )
+    dataset["mask_path"] = dataset.apply(
+        lambda row: to_runtime_hdf5_ref(
+            Path(str(row["source_hdf5_path"])),
+            str(row["mask_path"]),
+            expected_dataset="masks",
+        ),
+        axis=1,
+    )
     logging.info(
         "Loaded %s SQLite-backed rows from %s patients.",
         len(dataset),

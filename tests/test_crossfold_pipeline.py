@@ -7,6 +7,7 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold.config import CrossfoldConfig, ObjectiveConfig, SplitConstraints
 from helpers.crossfold.pipeline import _persist_stage5_split_state, run_crossfold_pipeline
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 
 OPTUNA_TRIALS = 25
 
@@ -400,15 +401,18 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    "/patches/patient_1.h5",
+                    to_manifest_path_ref(
+                        tmp_path / "patches" / "patient_1.h5",
+                        manifest_path=master_manifest_path,
+                    ),
                     row_index,
                     filename,
                     1,
                     row_index,
                     "slide_0",
                     "sig",
-                    f"/patches/patient_1.h5::images[{row_index}]",
-                    f"/patches/patient_1.h5::masks[{row_index}]",
+                    build_hdf5_dataset_ref("images", row_index),
+                    build_hdf5_dataset_ref("masks", row_index),
                     "/slides/slide_0.svs",
                     1,
                     "COMPLETED",
@@ -429,7 +433,7 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
                     "patient_id": 1,
                     "label": 0,
                     "filename": "a.png",
-                    "source_hdf5_path": "/patches/patient_1.h5",
+                    "source_hdf5_path": str(tmp_path / "patches" / "patient_1.h5"),
                     "source_row_index": 0,
                 }
             ]
@@ -440,7 +444,7 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
                     "patient_id": 1,
                     "label": 1,
                     "filename": "b.png",
-                    "source_hdf5_path": "/patches/patient_1.h5",
+                    "source_hdf5_path": str(tmp_path / "patches" / "patient_1.h5"),
                     "source_row_index": 1,
                 }
             ]
@@ -474,7 +478,15 @@ def test_persist_stage5_split_state_updates_master_manifest_sqlite(tmp_path: Pat
         ("TRAIN", "NOT_NORMALIZED", None, "STAGE4"),
         ("VALIDATION", "NOT_NORMALIZED", None, "STAGE4"),
     ]
-    assert run_rows == [("STAGE4", str(output_dir / "run_config.json"))]
+    assert run_rows == [
+        (
+            "STAGE4",
+            to_manifest_path_ref(
+                output_dir / "run_config.json",
+                manifest_path=master_manifest_path,
+            ),
+        )
+    ]
 
 
 def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Path) -> None:
@@ -556,18 +568,21 @@ def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Pat
                 source_hdf5_path, source_row_index, filename, patient_id, label, slide_id,
                 source_signature, source_image_path, source_mask_path, source_slide_path,
                 stage2_case_record_id, stage2_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "/patches/patient_1.h5",
-                0,
-                "a.png",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    to_manifest_path_ref(
+                        tmp_path / "patches" / "patient_1.h5",
+                        manifest_path=master_manifest_path,
+                    ),
+                    0,
+                    "a.png",
                 1,
                 1,
                 "slide_0",
                 "sig",
-                "/patches/patient_1.h5::images[0]",
-                "/patches/patient_1.h5::masks[0]",
+                build_hdf5_dataset_ref("images", 0),
+                build_hdf5_dataset_ref("masks", 0),
                 "/slides/slide_0.svs",
                 1,
                 "COMPLETED",
@@ -590,7 +605,7 @@ def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Pat
                         "patient_id": 1,
                         "label": 1,
                         "filename": "a.png",
-                        "source_hdf5_path": "/patches/patient_1.h5",
+                            "source_hdf5_path": str(tmp_path / "patches" / "patient_1.h5"),
                         "source_row_index": 0,
                     }
                 ]
@@ -630,8 +645,11 @@ def test_persist_stage5_split_state_records_normalization_artifact(tmp_path: Pat
     assert artifact_rows == [
         (
             "REINHARD",
-            str(output_dir / "normalization_stats.json"),
-            str(templates_dir),
+            to_manifest_path_ref(
+                output_dir / "normalization_stats.json",
+                manifest_path=master_manifest_path,
+            ),
+            to_manifest_path_ref(templates_dir, manifest_path=master_manifest_path),
             "TRAIN",
         )
     ]

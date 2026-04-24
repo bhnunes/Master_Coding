@@ -12,6 +12,7 @@ import numpy.typing as npt
 import torch
 from torch import nn
 
+from helpers.extraction.manifest_paths import resolve_manifest_path_ref
 from helpers.provenance import hash_file_sha256
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 
@@ -140,7 +141,11 @@ def _load_normalization_artifact(
     return NormalizationArtifactRecord(
         normalization_artifact_id=int(row["normalization_artifact_id"]),
         method=str(row["method"]),
-        state_path=Path(str(row["state_path"])),
+        state_path=resolve_manifest_path_ref(
+            str(row["state_path"]),
+            source_root=master_manifest_path.parent,
+            manifest_path=master_manifest_path,
+        ),
         state_sha256=str(row["state_sha256"]),
         fit_scope=str(row["fit_scope"]),
     )

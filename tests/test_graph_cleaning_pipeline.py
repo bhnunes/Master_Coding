@@ -11,6 +11,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 from helpers.extraction.master_manifest import MasterManifest, Stage2SlideRows
 from helpers.graph import cleaning_pipeline
 from helpers.graph.cleaning_pipeline import (
@@ -80,7 +81,8 @@ def _write_manifest_for_shard(
     slide_ids: list[str] | None = None,
 ) -> None:
     resolved_labels = labels if labels is not None else ([1] * len(filenames))
-    MasterManifest(master_manifest_path).replace_stage2_slide_rows(
+    manifest = MasterManifest(master_manifest_path, source_root=master_manifest_path.parent)
+    manifest.replace_stage2_slide_rows(
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=[
@@ -501,15 +503,15 @@ def test_run_graph_cleaning_pipeline_updates_master_manifest_state(tmp_path: Pat
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    str(shard_path),
+                    to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                     row_index,
                     filename,
                     row_index + 1,
                     1,
                     f"slide_{row_index}",
                     "stage2-sig",
-                    f"{shard_path}::images[{row_index}]",
-                    f"{shard_path}::masks[{row_index}]",
+                    build_hdf5_dataset_ref("images", row_index),
+                    build_hdf5_dataset_ref("masks", row_index),
                     str(shard_path),
                     1,
                     "COMPLETED",
@@ -627,15 +629,15 @@ def test_run_graph_cleaning_pipeline_updates_only_canonical_cancer_rows(
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    str(shard_path),
+                    to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                     source_row_index,
                     filename,
                     patient_id,
                     label,
                     slide_id,
                     "stage2-sig",
-                    f"{shard_path}::images[{source_row_index}]",
-                    f"{shard_path}::masks[{source_row_index}]",
+                    build_hdf5_dataset_ref("images", source_row_index),
+                    build_hdf5_dataset_ref("masks", source_row_index),
                     str(shard_path),
                     1,
                     "COMPLETED",
@@ -745,16 +747,16 @@ def test_run_graph_cleaning_pipeline_rejects_stale_master_manifest_provenance(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                str(shard_path),
+                to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                 0,
                 "a.png",
                 1,
                 1,
                 "slide_0",
                 "stale-signature",
-                f"{shard_path}::images[0]",
-                f"{shard_path}::masks[0]",
-                str(shard_path),
+                build_hdf5_dataset_ref("images", 0),
+                build_hdf5_dataset_ref("masks", 0),
+                to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                 1,
                 "COMPLETED",
             ),
@@ -868,15 +870,15 @@ def test_run_graph_cleaning_pipeline_rejects_mismatched_filename_join(tmp_path: 
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                str(shard_path),
+                to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                 0,
                 "expected.png",
                 1,
                 1,
                 "slide_0",
                 "stage2-sig",
-                f"{shard_path}::images[0]",
-                f"{shard_path}::masks[0]",
+                build_hdf5_dataset_ref("images", 0),
+                build_hdf5_dataset_ref("masks", 0),
                 str(shard_path),
                 1,
                 "COMPLETED",

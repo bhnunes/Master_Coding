@@ -10,6 +10,7 @@ import numpy.typing as npt
 import pytest
 import torch
 
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
 from helpers.training.master_manifest_queries import (
     load_lr_finder_training_records,
@@ -134,15 +135,15 @@ def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) 
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(shard_path),
+                        to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                         row_index,
                         filename,
                         patient_id,
                         label,
                         f"slide_{patient_id}",
                         f"sig_{patient_id}",
-                        f"{shard_path}::images[{row_index}]",
-                        f"{shard_path}::masks[{row_index}]",
+                        build_hdf5_dataset_ref("images", row_index),
+                        build_hdf5_dataset_ref("masks", row_index),
                         f"/slides/{patient_id}.svs",
                         patient_id,
                         "COMPLETED",

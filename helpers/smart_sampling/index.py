@@ -11,6 +11,8 @@ import numpy.typing as npt
 import pandas as pd
 import pyarrow.parquet as pq
 
+from helpers.extraction.manifest_paths import resolve_manifest_path_ref
+
 REQUIRED_DATASETS = ("images", "masks", "patient_ids", "labels")
 FILENAME_DATASET_CANDIDATES = ("filenames", "filename")
 
@@ -139,7 +141,11 @@ class MasterManifestIndex:
 
         for row in rows:
             patient_id = int(row["patient_id"])
-            source_hdf5_path = Path(str(row["source_hdf5_path"]))
+            source_hdf5_path = resolve_manifest_path_ref(
+                str(row["source_hdf5_path"]),
+                source_root=master_manifest_path.parent,
+                manifest_path=master_manifest_path,
+            )
             existing_path = patient_paths.get(patient_id)
             if existing_path is None:
                 patient_paths[patient_id] = source_hdf5_path

@@ -130,6 +130,7 @@ Agent guide for coding agents working in this repository.
 - Update `.env_example` when adding or renaming environment variables.
 - Use `helpers.runtime_platform.resolve_env_path` and related helpers for path-like environment variables.
 - Preserve cross-platform behavior, especially Windows `OPENSLIDE_PATH` handling.
+- `master_manifest.sqlite` now stores source-file lineage relative to `SOURCE_FOLDER` and generated-artifact lineage relative to the manifest directory. Do not reintroduce machine-specific absolute persisted paths.
 - `TAG=HISEG` enables the HISEG-specific Phase 2 SVS/XML annotation path.
 - `TAG=Chile` enables the CHILE-specific Phase 2 SVS/XML annotation path.
 - Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.

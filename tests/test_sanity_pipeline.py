@@ -5,6 +5,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref
 from helpers.sanity.config import SanityConfig
 from helpers.sanity.pipeline import run_sanity_pipeline
 
@@ -81,8 +82,8 @@ def test_run_sanity_pipeline_checks_logical_source_refs(tmp_path: Path) -> None:
                 "hdf5_row_index": 0,
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
-                "source_image_path": "/data/stage2_source.h5::images[0]",
-                "source_mask_path": "/data/stage2_source.h5::masks[1]",
+                "source_image_path": build_hdf5_dataset_ref("images", 0),
+                "source_mask_path": build_hdf5_dataset_ref("masks", 1),
             }
         ]
     )

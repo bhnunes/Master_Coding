@@ -5,6 +5,7 @@ import h5py
 import numpy as np
 
 from helpers.crossfold.discovery import collect_source_dataset_provenance, load_patch_dataset
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 
 
 def test_load_patch_dataset_reads_hdf5_source_dataset(tmp_path: Path) -> None:
@@ -113,13 +114,13 @@ def test_load_patch_dataset_reads_sqlite_accepted_rows(tmp_path: Path) -> None:
             "source_image_path, source_mask_path"
             ") VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                str(source_hdf5_path),
+                to_manifest_path_ref(source_hdf5_path, manifest_path=sqlite_path),
                 4,
                 "accepted.png",
                 11,
                 1,
-                f"{source_hdf5_path}::images[4]",
-                f"{source_hdf5_path}::masks[4]",
+                build_hdf5_dataset_ref("images", 4),
+                build_hdf5_dataset_ref("masks", 4),
             ),
         )
         connection.execute(

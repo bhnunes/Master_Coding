@@ -11,6 +11,7 @@ import pytest
 import torch
 from torch.utils.data import Dataset
 
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 from helpers.lr_finder import data as lr_data
 from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
 
@@ -154,7 +155,7 @@ def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) 
                 run_id, method, state_path, state_sha256, template_path, template_sha256, fit_scope
             ) VALUES (1, 'NOT_NORMALIZED', ?, 'unused', NULL, NULL, 'TRAIN')
             """,
-            (str(state_path),),
+            (to_manifest_path_ref(state_path, manifest_path=master_manifest_path),),
         )
         selected_rows = {(str(shard_paths[0]), 0), (str(shard_paths[1]), 1)}
         split_by_patient = {1: "TRAIN", 2: "TRAIN", 3: "VALIDATION"}
@@ -181,15 +182,15 @@ def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) 
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(shard_path),
+                        to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                         row_index,
                         filename,
                         patient_id,
                         label,
                         f"slide_{patient_id}",
                         f"sig_{patient_id}",
-                        f"{shard_path}::images[{row_index}]",
-                        f"{shard_path}::masks[{row_index}]",
+                        build_hdf5_dataset_ref("images", row_index),
+                        build_hdf5_dataset_ref("masks", row_index),
                         f"/slides/{patient_id}.svs",
                         patient_id,
                         "COMPLETED",

@@ -8,9 +8,7 @@ from helpers.sanity.models import CheckResult
 from helpers.stage_contracts import STAGE5_SINGLETON_SPLIT_FILES
 
 PATIENT_FILENAME_PATTERN = re.compile(r"PATIENT_(\d+)_")
-LOGICAL_HDF5_REF_PATTERN = re.compile(
-    r"^(?P<path>.+\.h5)::(?P<dataset>images|masks)\[(?P<row>\d+)\]$"
-)
+LOGICAL_HDF5_REF_PATTERN = re.compile(r"^HDF5::(?P<dataset>images|masks)\[(?P<row>\d+)\]$")
 
 
 def check_filename_uniqueness(manifest_df: pd.DataFrame) -> CheckResult:
@@ -78,8 +76,7 @@ def check_source_reference_contract(manifest_df: pd.DataFrame) -> CheckResult:
         mask_match = LOGICAL_HDF5_REF_PATTERN.match(mask_ref)
         if image_match and mask_match:
             if (
-                image_match.group("path") != mask_match.group("path")
-                or image_match.group("row") != mask_match.group("row")
+                image_match.group("row") != mask_match.group("row")
                 or image_match.group("dataset") != "images"
                 or mask_match.group("dataset") != "masks"
             ):
@@ -87,6 +84,10 @@ def check_source_reference_contract(manifest_df: pd.DataFrame) -> CheckResult:
             continue
 
         if image_match or mask_match:
+            invalid.append(str(getattr(row, "filename", "<missing filename>")))
+            continue
+
+        if image_ref or mask_ref:
             invalid.append(str(getattr(row, "filename", "<missing filename>")))
 
     if invalid:

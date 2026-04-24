@@ -11,6 +11,7 @@ import pytest
 import torch
 
 from helpers.ensemble_optimizer import data as optimizer_data
+from helpers.extraction.manifest_paths import to_manifest_path_ref
 
 PATCH_SIDE = 4
 RGB_CHANNELS = 3
@@ -112,7 +113,7 @@ def _write_master_manifest(master_manifest_path: Path, shard_paths: list[Path]) 
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(shard_path),
+                        to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                         row_index,
                         filename,
                         patient_id,

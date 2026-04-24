@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 from helpers.extraction.master_manifest import MasterManifest
 from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.pipeline import run_smart_sampling_pipeline
@@ -70,15 +71,15 @@ def _write_stage2_patient_shards_and_master_manifest(tmp_path: Path) -> Path:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(shard_path),
+                        to_manifest_path_ref(shard_path, manifest_path=master_manifest_path),
                         row_index,
                         filename,
                         patient_id,
                         1 if row_index == 1 else 0,
                         f"slide_{patient_id}",
                         f"sig-{patient_id}",
-                        f"{shard_path}::images[{row_index}]",
-                        f"{shard_path}::masks[{row_index}]",
+                        build_hdf5_dataset_ref("images", row_index),
+                        build_hdf5_dataset_ref("masks", row_index),
                         f"/slides/{patient_id}.svs",
                         patient_id,
                         "COMPLETED",
@@ -240,8 +241,14 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
     assert run_rows == [
         (
             "STAGE6",
-            str(tmp_path / "out" / "filter_run_config.json"),
-            str(tmp_path / "out" / "filter_summary.json"),
+            to_manifest_path_ref(
+                tmp_path / "out" / "filter_run_config.json",
+                manifest_path=master_manifest_path,
+            ),
+            to_manifest_path_ref(
+                tmp_path / "out" / "filter_summary.json",
+                manifest_path=master_manifest_path,
+            ),
         )
     ]
 

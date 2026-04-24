@@ -8,6 +8,13 @@ from typing import SupportsFloat, SupportsInt, cast
 
 import h5py
 
+from helpers.extraction.manifest_paths import (
+    build_hdf5_dataset_ref,
+    resolve_manifest_path_ref,
+    to_manifest_path_ref,
+    to_runtime_hdf5_ref,
+    to_source_path_ref,
+)
 from helpers.provenance import hash_file_sha256
 
 STAGE2_STAGE_NAME = "STAGE2"
@@ -51,10 +58,6 @@ class ManifestPatchRecord:
     source_mask_path: str
 
 
-def _logical_hdf5_ref(output_path: Path, dataset_name: str, row_index: int) -> str:
-    return f"{output_path}::{dataset_name}[{row_index}]"
-
-
 def _coerce_int(value: object, *, field_name: str) -> int:
     try:
         return int(cast(SupportsInt | str | bytes | bytearray, value))
@@ -84,8 +87,9 @@ def _coerce_str_or_none(value: object) -> str | None:
 class MasterManifest:
     """SQLite-backed master manifest owned by Stage 2."""
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, *, source_root: Path | None = None) -> None:
         self.database_path = database_path
+        self.source_root = source_root
 
     def initialize(self) -> None:
         """Create the master-manifest schema when needed."""
@@ -175,6 +179,11 @@ class MasterManifest:
         """Replace one slide's Stage 2 rows with the canonical HDF5-backed identities."""
 
         self.initialize()
+        source_root = self._require_source_root()
+        source_hdf5_path_ref = to_manifest_path_ref(
+            payload.source_hdf5_path,
+            manifest_path=self.database_path,
+        )
         source_signature = (
             self._read_source_signature(payload.source_hdf5_path) if payload.records else None
         )
@@ -182,7 +191,7 @@ class MasterManifest:
         with self._connect() as connection:
             connection.execute(
                 "DELETE FROM patches WHERE source_hdf5_path = ?",
-                (str(payload.source_hdf5_path),),
+                (source_hdf5_path_ref,),
             )
 
             patch_rows: list[tuple[object, ...]] = []
@@ -190,21 +199,26 @@ class MasterManifest:
                 artifact_coverages = self._artifact_coverages(record)
                 patch_rows.append(
                     (
-                        str(payload.source_hdf5_path),
+                        source_hdf5_path_ref,
                         source_row_index,
                         str(record["filename"]),
                         _coerce_int(record.get("patient_id"), field_name="patient_id"),
                         _coerce_int(record.get("label"), field_name="label"),
                         str(record.get("slide_id") or payload.source_hdf5_path.stem),
                         source_signature,
-                        _logical_hdf5_ref(payload.source_hdf5_path, "images", source_row_index),
-                        _logical_hdf5_ref(payload.source_hdf5_path, "masks", source_row_index),
-                        str(payload.source_slide_path),
-                        str(payload.annotation_path)
-                        if payload.annotation_path is not None
-                        else None,
+                        build_hdf5_dataset_ref("images", source_row_index),
+                        build_hdf5_dataset_ref("masks", source_row_index),
+                        to_source_path_ref(payload.source_slide_path, source_root=source_root),
                         (
-                            str(payload.artifacts_geojson_path)
+                            to_source_path_ref(payload.annotation_path, source_root=source_root)
+                            if payload.annotation_path is not None
+                            else None
+                        ),
+                        (
+                            to_source_path_ref(
+                                payload.artifacts_geojson_path,
+                                source_root=source_root,
+                            )
                             if payload.artifacts_geojson_path is not None
                             else None
                         ),
@@ -252,7 +266,7 @@ class MasterManifest:
                     for row in connection.execute(
                         "SELECT patch_id FROM patches WHERE source_hdf5_path = ? "
                         "ORDER BY source_row_index ASC",
-                        (str(payload.source_hdf5_path),),
+                        (source_hdf5_path_ref,),
                     ).fetchall()
                 ]
                 if len(patch_ids) != len(patch_rows):
@@ -298,14 +312,34 @@ class MasterManifest:
                 label=_coerce_int(row["label"], field_name="label"),
                 patient_id=_coerce_int(row["patient_id"], field_name="patient_id"),
                 slide_id=_coerce_str_or_none(row["slide_id"]),
-                source_hdf5_path=Path(str(row["source_hdf5_path"])),
+                source_hdf5_path=resolve_manifest_path_ref(
+                    str(row["source_hdf5_path"]),
+                    source_root=self.source_root or self.database_path.parent,
+                    manifest_path=self.database_path,
+                ),
                 source_signature=_coerce_str_or_none(row["source_signature"]),
                 source_row_index=_coerce_int(
                     row["source_row_index"],
                     field_name="source_row_index",
                 ),
-                source_image_path=str(row["source_image_path"]),
-                source_mask_path=str(row["source_mask_path"]),
+                source_image_path=to_runtime_hdf5_ref(
+                    resolve_manifest_path_ref(
+                        str(row["source_hdf5_path"]),
+                        source_root=self.source_root or self.database_path.parent,
+                        manifest_path=self.database_path,
+                    ),
+                    str(row["source_image_path"]),
+                    expected_dataset="images",
+                ),
+                source_mask_path=to_runtime_hdf5_ref(
+                    resolve_manifest_path_ref(
+                        str(row["source_hdf5_path"]),
+                        source_root=self.source_root or self.database_path.parent,
+                        manifest_path=self.database_path,
+                    ),
+                    str(row["source_mask_path"]),
+                    expected_dataset="masks",
+                ),
             )
             for row in rows
         ]
@@ -365,9 +399,15 @@ class MasterManifest:
         """Insert one stage execution row and return its run_id."""
 
         self.initialize()
-        config_path_str = str(config_path) if config_path is not None else None
+        config_path_str = (
+            to_manifest_path_ref(config_path, manifest_path=self.database_path)
+            if config_path is not None
+            else None
+        )
         input_summary_path_str = (
-            str(input_summary_json_path) if input_summary_json_path is not None else None
+            to_manifest_path_ref(input_summary_json_path, manifest_path=self.database_path)
+            if input_summary_json_path is not None
+            else None
         )
         config_sha256 = (
             hash_file_sha256(config_path)
@@ -437,9 +477,13 @@ class MasterManifest:
                 (
                     run_id,
                     method,
-                    str(state_path),
+                    to_manifest_path_ref(state_path, manifest_path=self.database_path),
                     state_sha256,
-                    str(template_path) if template_path is not None else None,
+                    (
+                        to_manifest_path_ref(template_path, manifest_path=self.database_path)
+                        if template_path is not None
+                        else None
+                    ),
                     None,
                     fit_scope,
                 ),
@@ -554,7 +598,7 @@ class MasterManifest:
 
         ordered_keys = [
             _ManifestPatchKey(
-                source_hdf5_path=str(row["source_hdf5_path"]),
+                source_hdf5_path=self._normalize_source_hdf5_path_ref(row["source_hdf5_path"]),
                 source_row_index=_coerce_int(
                     row.get("source_row_index"),
                     field_name="source_row_index",
@@ -683,6 +727,19 @@ class MasterManifest:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
+
+    def _require_source_root(self) -> Path:
+        if self.source_root is None:
+            raise ValueError(
+                "MasterManifest requires source_root to write source-rooted Stage 2 paths."
+            )
+        return self.source_root
+
+    def _normalize_source_hdf5_path_ref(self, value: object) -> str:
+        source_hdf5_path = str(value)
+        if source_hdf5_path.startswith("MANIFEST::"):
+            return source_hdf5_path
+        return to_manifest_path_ref(Path(source_hdf5_path), manifest_path=self.database_path)
 
     def _read_source_signature(self, source_hdf5_path: Path) -> str:
         if not source_hdf5_path.is_file():

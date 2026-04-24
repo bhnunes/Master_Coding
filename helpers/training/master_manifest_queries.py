@@ -4,6 +4,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers.extraction.manifest_paths import resolve_manifest_path_ref
+
 
 @dataclass(frozen=True)
 class CanonicalRowRecord:
@@ -89,7 +91,11 @@ def _load_split_records(
 
     return [
         CanonicalRowRecord(
-            source_hdf5_path=Path(str(row["source_hdf5_path"])),
+            source_hdf5_path=resolve_manifest_path_ref(
+                str(row["source_hdf5_path"]),
+                source_root=master_manifest_path.parent,
+                manifest_path=master_manifest_path,
+            ),
             source_row_index=int(row["source_row_index"]),
             patient_id=str(row["patient_id"]),
             label=int(row["label"]),

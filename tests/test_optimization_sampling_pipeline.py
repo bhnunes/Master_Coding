@@ -69,7 +69,8 @@ def _write_manifest_for_shard(
     labels: Sequence[int],
     patient_ids: Sequence[int],
 ) -> None:
-    MasterManifest(master_manifest_path).replace_stage2_slide_rows(
+    manifest = MasterManifest(master_manifest_path, source_root=master_manifest_path.parent)
+    manifest.replace_stage2_slide_rows(
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=[

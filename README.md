@@ -11,6 +11,7 @@ A Python research pipeline for pathology whole-slide-image (WSI) processing. It 
 - Patient-level stratified dataset splitting on HDF5 datasets
 - Train-fitted stain normalization support
 - Metadata-first downstream data preparation from canonical Phase 2 patient shards
+- Portable `master_manifest.sqlite` lineage across local and Colab-style roots
 - Ensemble model training and inference
 - GPU-accelerated deep learning with PyTorch
 
@@ -203,6 +204,9 @@ Current Phase 2 artifact-aware behavior:
 - `USE_ADVANCED_ARTIFACT_FILTERING=True` computes per-class artifact coverage for every saved patch instead of rejecting patches by threshold
 - `USE_ADVANCED_ARTIFACT_FILTERING=False` skips artifact geometry work for speed, but still writes the same Parquet schema with zero-valued coverage columns
 - Phase 2 writes compact filename-keyed artifact coverage fields into `master_manifest.sqlite`
+- Phase 2 stores source-file lineage in `master_manifest.sqlite` relative to `SOURCE_FOLDER`
+- Phase 2 stores generated-artifact lineage in `master_manifest.sqlite` relative to the manifest directory instead of persisting machine-specific absolute paths
+- `source_image_path` and `source_mask_path` now persist logical `HDF5::dataset[row]` references; runtime code rehydrates them using the resolved shard path
 - Phase 8 can join those SQLite-backed artifact coverage values with runtime filenames for artifact-aware loss discounting during training
 
 Current Phase 2 multi-dataset XML behavior:
@@ -378,6 +382,12 @@ OPENSLIDE_PATH=
 For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Phase 2 resolves the supported label colors internally and does not require manual SQLite color setup.
 
 See `.env_example` for the current commented template, including Phase 1, Phase 2 local WSI staging, Phase 3 cleaning, Phase 4/5 manifest-driven preparation, Phase 6 smart-sampling sidecars, Phase 7 LR-finder reporting, the Phase 8 training matrix, and Phase 9 ensemble-optimizer settings.
+
+Portable manifest path rules:
+
+- `SOURCE_FOLDER` is the runtime root for source-slide lineage stored in `master_manifest.sqlite`
+- Generated artifact lineage in `master_manifest.sqlite` resolves relative to the manifest directory
+- To move a run between local and Colab-style environments, keep `master_manifest.sqlite` and its colocated artifact tree together and update `SOURCE_FOLDER` for the new source-data root
 
 Phase 7 runtime notes:
 

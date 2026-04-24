@@ -3,8 +3,14 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
 
 from helpers.extraction.hdf5_storage import write_slide_patch_dataset_hdf5
+from helpers.extraction.manifest_paths import (
+    build_hdf5_dataset_ref,
+    to_manifest_path_ref,
+    to_source_path_ref,
+)
 from helpers.extraction.master_manifest import MasterManifest, Stage2SlideRows
 
 
@@ -47,15 +53,16 @@ def test_master_manifest_replaces_stage2_slide_rows_with_canonical_source_identi
         },
     ]
     shard_path = _write_stage2_shard(tmp_path, name="slide_a", records=records)
-    manifest = MasterManifest(tmp_path / "master_manifest.sqlite")
+    source_root = tmp_path / "source"
+    manifest = MasterManifest(tmp_path / "master_manifest.sqlite", source_root=source_root)
 
     manifest.replace_stage2_slide_rows(
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=records,
-            source_slide_path=tmp_path / "source" / "IMAGES" / "slide_a.svs",
-            annotation_path=tmp_path / "source" / "ANNOTATIONS" / "slide_a.xml",
-            artifacts_geojson_path=tmp_path / "source" / "GEOJSON" / "slide_a.geojson",
+            source_slide_path=source_root / "IMAGES" / "slide_a.svs",
+            annotation_path=source_root / "ANNOTATIONS" / "slide_a.xml",
+            artifacts_geojson_path=source_root / "GEOJSON" / "slide_a.geojson",
             stage2_case_record_id=17,
             stage2_processing_signature="proc-sig",
             stage2_status="COMPLETED",
@@ -98,18 +105,24 @@ def test_master_manifest_replaces_stage2_slide_rows_with_canonical_source_identi
 
     assert rows == [
         (
-            str(shard_path),
+            to_manifest_path_ref(shard_path, manifest_path=tmp_path / "master_manifest.sqlite"),
             0,
             "cancer.png",
             1001,
             1,
             "slide_a",
             source_signature,
-            f"{shard_path}::images[0]",
-            f"{shard_path}::masks[0]",
-            str(tmp_path / "source" / "IMAGES" / "slide_a.svs"),
-            str(tmp_path / "source" / "ANNOTATIONS" / "slide_a.xml"),
-            str(tmp_path / "source" / "GEOJSON" / "slide_a.geojson"),
+            build_hdf5_dataset_ref("images", 0),
+            build_hdf5_dataset_ref("masks", 0),
+            to_source_path_ref(source_root / "IMAGES" / "slide_a.svs", source_root=source_root),
+            to_source_path_ref(
+                source_root / "ANNOTATIONS" / "slide_a.xml",
+                source_root=source_root,
+            ),
+            to_source_path_ref(
+                source_root / "GEOJSON" / "slide_a.geojson",
+                source_root=source_root,
+            ),
             17,
             "proc-sig",
             "COMPLETED",
@@ -121,18 +134,24 @@ def test_master_manifest_replaces_stage2_slide_rows_with_canonical_source_identi
             "STAGE2",
         ),
         (
-            str(shard_path),
+            to_manifest_path_ref(shard_path, manifest_path=tmp_path / "master_manifest.sqlite"),
             1,
             "not_cancer.png",
             1001,
             0,
             "slide_a",
             source_signature,
-            f"{shard_path}::images[1]",
-            f"{shard_path}::masks[1]",
-            str(tmp_path / "source" / "IMAGES" / "slide_a.svs"),
-            str(tmp_path / "source" / "ANNOTATIONS" / "slide_a.xml"),
-            str(tmp_path / "source" / "GEOJSON" / "slide_a.geojson"),
+            build_hdf5_dataset_ref("images", 1),
+            build_hdf5_dataset_ref("masks", 1),
+            to_source_path_ref(source_root / "IMAGES" / "slide_a.svs", source_root=source_root),
+            to_source_path_ref(
+                source_root / "ANNOTATIONS" / "slide_a.xml",
+                source_root=source_root,
+            ),
+            to_source_path_ref(
+                source_root / "GEOJSON" / "slide_a.geojson",
+                source_root=source_root,
+            ),
             17,
             "proc-sig",
             "COMPLETED",
@@ -168,14 +187,15 @@ def test_master_manifest_removes_stale_rows_for_rewritten_stage2_shard(tmp_path:
         }
     ]
     shard_path = _write_stage2_shard(tmp_path, name="slide_b", records=first_records)
-    manifest = MasterManifest(tmp_path / "master_manifest.sqlite")
+    source_root = tmp_path / "source"
+    manifest = MasterManifest(tmp_path / "master_manifest.sqlite", source_root=source_root)
 
     manifest.replace_stage2_slide_rows(
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=first_records,
-            source_slide_path=tmp_path / "slide_b.svs",
-            annotation_path=tmp_path / "slide_b.xml",
+            source_slide_path=source_root / "IMAGES" / "slide_b.svs",
+            annotation_path=source_root / "ANNOTATIONS" / "slide_b.xml",
             artifacts_geojson_path=None,
             stage2_case_record_id=19,
             stage2_processing_signature="first",
@@ -188,8 +208,8 @@ def test_master_manifest_removes_stale_rows_for_rewritten_stage2_shard(tmp_path:
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=second_records,
-            source_slide_path=tmp_path / "slide_b.svs",
-            annotation_path=tmp_path / "slide_b.xml",
+            source_slide_path=source_root / "IMAGES" / "slide_b.svs",
+            annotation_path=source_root / "ANNOTATIONS" / "slide_b.xml",
             artifacts_geojson_path=None,
             stage2_case_record_id=19,
             stage2_processing_signature="second",
@@ -225,13 +245,14 @@ def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Pa
         },
     ]
     shard_path = _write_stage2_shard(tmp_path, name="batched_updates", records=records)
-    manifest = MasterManifest(tmp_path / "master_manifest.sqlite")
+    source_root = tmp_path / "source"
+    manifest = MasterManifest(tmp_path / "master_manifest.sqlite", source_root=source_root)
 
     manifest.replace_stage2_slide_rows(
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=records,
-            source_slide_path=tmp_path / "slides" / "batched_updates.svs",
+            source_slide_path=source_root / "IMAGES" / "batched_updates.svs",
             annotation_path=None,
             artifacts_geojson_path=None,
             stage2_case_record_id=23,
@@ -332,3 +353,80 @@ def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Pa
             "STAGE6",
         ),
     ]
+
+
+def test_list_stage2_patch_records_rejects_legacy_absolute_manifest_paths(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "master_manifest.sqlite"
+    shard_path = tmp_path / "PATCHES" / "HDF5_SHARDS" / "legacy.h5"
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(shard_path, "w") as handle:
+        handle.create_dataset("images", data=np.zeros((1, 4, 4, 3), dtype=np.uint8))
+        handle.create_dataset("masks", data=np.zeros((1, 4, 4), dtype=np.uint8))
+        handle.attrs["source_signature"] = "legacy-sig"
+
+    with sqlite3.connect(manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE patches (
+                patch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_hdf5_path TEXT NOT NULL,
+                source_row_index INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                patient_id INTEGER NOT NULL,
+                label INTEGER NOT NULL,
+                slide_id TEXT,
+                source_signature TEXT,
+                source_image_path TEXT NOT NULL,
+                source_mask_path TEXT NOT NULL,
+                source_slide_path TEXT NOT NULL,
+                annotation_path TEXT,
+                artifacts_geojson_path TEXT,
+                stage2_case_record_id INTEGER NOT NULL,
+                stage2_processing_signature TEXT,
+                stage2_status TEXT NOT NULL,
+                cov_fold REAL NOT NULL DEFAULT 0.0,
+                cov_penmarking REAL NOT NULL DEFAULT 0.0,
+                cov_oof REAL NOT NULL DEFAULT 0.0,
+                cov_darkspot_foreign REAL NOT NULL DEFAULT 0.0,
+                cov_edge_airbubble REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (source_hdf5_path, source_row_index)
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO patches (
+                source_hdf5_path,
+                source_row_index,
+                filename,
+                patient_id,
+                label,
+                slide_id,
+                source_signature,
+                source_image_path,
+                source_mask_path,
+                source_slide_path,
+                stage2_case_record_id,
+                stage2_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(shard_path),
+                0,
+                "legacy.png",
+                1,
+                1,
+                "slide_1",
+                "legacy-sig",
+                "HDF5::images[0]",
+                "HDF5::masks[0]",
+                "SOURCE::IMAGES/legacy.svs",
+                1,
+                "COMPLETED",
+            ),
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError, match="Legacy absolute-path manifest values are not supported"):
+        MasterManifest(manifest_path).list_stage2_patch_records()

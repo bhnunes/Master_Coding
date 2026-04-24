@@ -392,7 +392,7 @@ def main_process() -> None:
     config = load_database_manager_config(os.environ)
     logger = _configure_stage2_logger(config)
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
-    master_manifest = MasterManifest(config.master_manifest_path)
+    master_manifest = MasterManifest(config.master_manifest_path, source_root=config.source_folder)
     master_manifest.initialize()
     folders, setup_needed = ensure_project_is_initialized(
         repository,

@@ -92,7 +92,8 @@ def _write_manifest_for_shard(
     labels: list[int] | None = None,
 ) -> None:
     resolved_labels = labels if labels is not None else ([1] * len(filenames))
-    MasterManifest(master_manifest_path).replace_stage2_slide_rows(
+    manifest = MasterManifest(master_manifest_path, source_root=master_manifest_path.parent)
+    manifest.replace_stage2_slide_rows(
         Stage2SlideRows(
             source_hdf5_path=shard_path,
             records=[

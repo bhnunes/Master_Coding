@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any, cast
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 
+from helpers.extraction.manifest_paths import to_manifest_path_ref
 from helpers.provenance import hash_file_sha256
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 from helpers.training.stain_normalization import build_split_stain_normalizer
@@ -78,7 +80,11 @@ def _write_normalization_manifest(
                 fit_scope
             ) VALUES (1, ?, ?, ?, NULL, NULL, 'TRAIN')
             """,
-            (method, str(state_path), state_sha256),
+            (
+                method,
+                to_manifest_path_ref(state_path, manifest_path=master_manifest_path),
+                state_sha256,
+            ),
         )
         connection.commit()
 
@@ -119,6 +125,90 @@ def test_build_split_stain_normalizer_returns_none_for_not_normalized(tmp_path: 
     )
 
     assert normalizer is None
+
+
+def test_build_split_stain_normalizer_rejects_legacy_absolute_state_path(
+    tmp_path: Path,
+) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    state_path = tmp_path / "normalization_stats.json"
+    state_path.write_text("{}", encoding="utf-8")
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE normalization_artifacts (
+                normalization_artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                state_path TEXT NOT NULL,
+                state_sha256 TEXT NOT NULL,
+                template_path TEXT,
+                template_sha256 TEXT,
+                fit_scope TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO normalization_artifacts (
+                run_id,
+                method,
+                state_path,
+                state_sha256,
+                template_path,
+                template_sha256,
+                fit_scope
+            ) VALUES (1, 'REINHARD', ?, ?, NULL, NULL, 'TRAIN')
+            """,
+            (str(state_path), hash_file_sha256(state_path)),
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError, match="Legacy absolute-path manifest values are not supported"):
+        build_split_stain_normalizer(
+            master_manifest_path,
+            [_make_record(method="REINHARD", normalization_artifact_id=1)],
+        )
+
+
+def test_build_split_stain_normalizer_resolves_state_path_after_manifest_relocation(
+    tmp_path: Path,
+) -> None:
+    original_dir = tmp_path / "local_run"
+    relocated_dir = tmp_path / "colab_run"
+    original_dir.mkdir()
+    relocated_dir.mkdir()
+
+    original_manifest_path = original_dir / "master_manifest.sqlite"
+    original_state_path = original_dir / "normalization_stats.json"
+    original_state_path.write_text(
+        json.dumps(
+            {
+                "target_means": [0.1, 0.2, 0.3],
+                "target_stds": [0.4, 0.5, 0.6],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_normalization_manifest(
+        original_manifest_path,
+        method="REINHARD",
+        state_path=original_state_path,
+        state_sha256=hash_file_sha256(original_state_path),
+    )
+
+    relocated_manifest_path = relocated_dir / "master_manifest.sqlite"
+    relocated_state_path = relocated_dir / "normalization_stats.json"
+    shutil.copy2(original_manifest_path, relocated_manifest_path)
+    shutil.copy2(original_state_path, relocated_state_path)
+
+    normalizer = build_split_stain_normalizer(
+        relocated_manifest_path,
+        [_make_record(method="REINHARD", normalization_artifact_id=1)],
+    )
+
+    assert normalizer is not None
 
 
 def test_build_split_stain_normalizer_loads_reinhard_state_and_normalizes_image(
