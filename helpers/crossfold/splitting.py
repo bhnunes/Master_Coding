@@ -51,19 +51,15 @@ class _StudyProgressCallback:
 
     def __init__(self, progress_bar: tqdm[Any]) -> None:
         self._progress_bar = progress_bar
+        self._completed_trials = 0
 
     def __call__(self, study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-        del trial
         self._progress_bar.update(1)
-        completed = len(
-            [
-                finished_trial
-                for finished_trial in getattr(study, "trials", [])
-                if finished_trial.state == optuna.trial.TrialState.COMPLETE
-            ]
-        )
-        postfix: dict[str, str] = {"done": str(completed)}
-        if completed > 0:
+        trial_state = getattr(trial, "state", optuna.trial.TrialState.COMPLETE)
+        if trial_state == optuna.trial.TrialState.COMPLETE:
+            self._completed_trials += 1
+        postfix: dict[str, str] = {"done": str(self._completed_trials)}
+        if self._completed_trials > 0:
             best_value = float(study.best_value)
             if np.isfinite(best_value):
                 postfix["best"] = f"{best_value:.4f}"
