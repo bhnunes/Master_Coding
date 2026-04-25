@@ -11,17 +11,23 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import torch
 
 from helpers.crossfold.entropy import (
-    calculate_image_entropy_from_hdf5_row,
-    calculate_image_entropy_from_path,
     compute_patient_entropy_median,
 )
 from helpers.cv2_compat import ensure_cv2_compat
-from helpers.runtime_platform import load_openslide_module
 
 cv2 = ensure_cv2_compat(cv2)
 FITTED_NORMALIZATION_METHODS = ("REINHARD", "RUIFROK", "MACENKO", "VAHADANE")
+_RUIFROK_HE_STAIN_MATRIX = torch.tensor(
+    [
+        [0.644211, 0.716556, 0.266844],
+        [0.092789, 0.954111, 0.283111],
+    ],
+    dtype=torch.float32,
+)
+_EPSILON = 1e-6
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -33,29 +39,6 @@ class NumpyEncoder(json.JSONEncoder):
         if isinstance(obj, np.floating):
             return float(obj)
         return super().default(obj)
-
-
-def load_stain_normalizer_backend() -> Any:
-    """Load the TIAToolbox stain normalizer backend with OpenSlide initialized."""
-
-    load_openslide_module()
-    try:
-        from tiatoolbox.tools import stainnorm
-    except ModuleNotFoundError as error:
-        message = (
-            "Stage 5 normalization requires a working TIAToolbox stain normalization backend. "
-            "Install a Python 3.12-compatible TIAToolbox release."
-        )
-        if error.name == "pkg_resources":
-            message = (
-                "Stage 5 normalization could not import TIAToolbox because `pkg_resources` is "
-                "missing. This usually means an older TIAToolbox release is installed alongside "
-                "a newer setuptools version. Upgrade TIAToolbox to a Python 3.12-compatible 2.x "
-                "release, or temporarily pin `setuptools<82`."
-            )
-        raise RuntimeError(message) from error
-
-    return stainnorm
 
 
 def make_aggregate_target(image_paths: list[str]) -> npt.NDArray[np.uint8]:
@@ -97,25 +80,11 @@ def _can_use_hdf5_rows(frame: pd.DataFrame) -> bool:
     return {"source_hdf5_path", "source_row_index"}.issubset(frame.columns)
 
 
-def _row_has_hdf5_columns(row: pd.Series) -> bool:
-    return {"source_hdf5_path", "source_row_index"}.issubset(row.index)
-
-
 def _parse_hdf5_image_ref(template_ref: str) -> tuple[Path, int] | None:
     if "::images[" not in template_ref or not template_ref.endswith("]"):
         return None
     source_hdf5_path, row_index_text = template_ref.split("::images[", maxsplit=1)
     return Path(source_hdf5_path), int(row_index_text[:-1])
-
-
-def _build_image_path_lookup(train_df: pd.DataFrame) -> dict[str, pd.Series]:
-    if train_df.empty:
-        return {}
-    deduplicated = train_df.drop_duplicates(subset=["image_path"], keep="first")
-    return {
-        str(image_path): row
-        for image_path, row in deduplicated.set_index("image_path", drop=False).iterrows()
-    }
 
 
 def _export_hdf5_template_image(template_ref: str, destination: Path) -> None:
@@ -237,48 +206,6 @@ def save_template_selection_artifacts(
     return metadata
 
 
-def fit_normalizer_to_target(
-    method_name: str,
-    target_rgb: npt.NDArray[np.uint8],
-) -> Any:
-    """Fit one stain normalizer to a shared aggregate target image."""
-
-    logging.info("Fitting '%s' normalizer from shared aggregate target...", method_name)
-    stainnorm_module = load_stain_normalizer_backend()
-    normalizer = stainnorm_module.get_normalizer(method_name)
-    normalizer.fit(target_rgb)
-    logging.info("Normalizer '%s' fitted from shared aggregate target.", method_name)
-    return normalizer
-
-
-def _collect_normalizer_stats(
-    normalizer: Any,
-    method_name: str,
-    *,
-    stainnorm_module: Any | None = None,
-) -> dict[str, Any]:
-    stats: dict[str, Any] = {"method": method_name}
-    stainnorm = stainnorm_module or load_stain_normalizer_backend()
-    try:
-        if isinstance(normalizer, stainnorm.StainNormalizer):
-            if hasattr(normalizer, "stain_matrix_target"):
-                stats["stain_matrix_target"] = normalizer.stain_matrix_target.tolist()
-            if hasattr(normalizer, "maxC_target"):
-                stats["maxC_target"] = normalizer.maxC_target.tolist()
-            if method_name == "MACENKO" and hasattr(normalizer.extractor, "stains"):
-                stats["stain_vectors_source_estimate"] = normalizer.extractor.stains.tolist()
-        elif isinstance(normalizer, stainnorm.ReinhardNormalizer):
-            stats["target_means"] = list(normalizer.target_means)
-            stats["target_stds"] = list(normalizer.target_stds)
-        else:
-            stats["info"] = "Unknown or unsupported normalizer type."
-            logging.warning("Unrecognized normalizer type for '%s'.", method_name)
-    except Exception as error:
-        stats["error"] = str(error)
-        logging.error("Failed extracting normalizer stats: %s", error, exc_info=True)
-    return stats
-
-
 def generate_all_normalization_artifacts(
     output_dir: Path,
     *,
@@ -290,14 +217,11 @@ def generate_all_normalization_artifacts(
     artifacts_root = output_dir / "runtime_normalization_artifacts"
     artifacts_root.mkdir(parents=True, exist_ok=True)
     artifact_records: list[dict[str, object]] = []
-    stainnorm_module = load_stain_normalizer_backend()
     for method_name in FITTED_NORMALIZATION_METHODS:
-        normalizer = fit_normalizer_to_target(method_name, aggregate_target_rgb)
-        stats = _collect_normalizer_stats(
-            normalizer,
-            method_name,
-            stainnorm_module=stainnorm_module,
+        logging.info(
+            "Fitting runtime '%s' normalization state from aggregate target...", method_name
         )
+        stats = fit_runtime_normalization_state(method_name, aggregate_target_rgb)
         method_dir = artifacts_root / method_name.lower()
         method_dir.mkdir(parents=True, exist_ok=True)
         state_path = method_dir / "normalization_stats.json"
@@ -313,76 +237,92 @@ def generate_all_normalization_artifacts(
     return artifact_records
 
 
-def fit_normalizer_on_train_set(
-    train_df: pd.DataFrame,
+def fit_runtime_normalization_state(
     method_name: str,
-    entropy_df: pd.DataFrame | None = None,
-) -> tuple[Any, list[str]]:
-    """Fit one stain normalizer from TRAIN-only template images."""
+    target_rgb: npt.NDArray[np.uint8],
+) -> dict[str, Any]:
+    """Fit the downstream runtime-normalizer state without requiring TIAToolbox."""
 
-    logging.info("Fitting '%s' normalizer using TRAIN only...", method_name)
-    if train_df.empty:
-        raise ValueError("TRAIN dataframe is empty; cannot fit normalizer.")
+    normalized_method = method_name.strip().upper()
+    target_tensor = _rgb_uint8_to_torch_tensor(target_rgb)
+    if normalized_method == "RUIFROK":
+        return _fit_ruifrok_runtime_state(target_tensor)
 
-    template_paths: list[str]
-    if entropy_df is not None and not entropy_df.empty:
-        logging.info("Selecting templates using cached entropy_df (no disk rereads).")
-        selected_rows = select_template_rows_from_entropy(train_df, entropy_df)
-        template_paths = selected_rows["image_path"].tolist()
-    else:
-        logging.warning("entropy_df not provided; selecting templates by rereading images (slow).")
-        patient_files = train_df.groupby("patient_id")["image_path"].apply(list).to_dict()
-        image_path_lookup = _build_image_path_lookup(train_df)
-        template_paths = []
-        for files in patient_files.values():
-            best_path: str | None = None
-            best_entropy = -1.0
-            for image_path in files:
-                row = image_path_lookup.get(image_path)
-                if row is not None and _row_has_hdf5_columns(row):
-                    _, entropy = calculate_image_entropy_from_hdf5_row(
-                        (str(row["source_hdf5_path"]), int(row["source_row_index"]), image_path)
-                    )
-                else:
-                    _, entropy = calculate_image_entropy_from_path(image_path)
-                if entropy > best_entropy:
-                    best_entropy = entropy
-                    best_path = image_path
-            if best_path is not None:
-                template_paths.append(best_path)
-        selected_rows = train_df[train_df["image_path"].isin(template_paths)]
-
-    if not template_paths:
-        raise ValueError("No templates found to fit normalizer.")
-
-    target_rgb = build_aggregate_target_from_template_rows(selected_rows)
-    stainnorm_module = load_stain_normalizer_backend()
-    normalizer = stainnorm_module.get_normalizer(method_name)
-    normalizer.fit(target_rgb)
-    logging.info("Normalizer '%s' fitted.", method_name)
-    return normalizer, template_paths
+    builder = _load_torch_staintools_builder()
+    runtime_module = builder.build(
+        normalized_method.lower(),
+        concentration_solver="qr",
+        use_cache=False,
+        device=torch.device("cpu"),
+    )
+    runtime_module.fit(target_tensor)
+    return _collect_torch_runtime_stats(runtime_module, normalized_method)
 
 
-def save_normalizer_stats(
-    normalizer: Any,
-    method_name: str,
-    output_dir: Path,
-    template_paths: list[str],
-    stainnorm_module: Any | None = None,
-) -> None:
-    """Persist normalizer metadata and template images for provenance."""
+def _load_torch_staintools_builder() -> Any:
+    try:
+        from torch_staintools.constants import CONFIG
+        from torch_staintools.normalizer import NormalizerBuilder
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "Stage 4 runtime normalization artifact generation requires the "
+            "`torch-staintools` package. Install project dependencies with "
+            "`uv sync --python 3.12`."
+        ) from error
+    CONFIG.ENABLE_COMPILE = False
+    return NormalizerBuilder
 
-    stats = _collect_normalizer_stats(
-        normalizer,
-        method_name,
-        stainnorm_module=stainnorm_module,
+
+def _collect_torch_runtime_stats(runtime_module: Any, method_name: str) -> dict[str, Any]:
+    if method_name == "REINHARD":
+        return {
+            "method": method_name,
+            "target_means": _squeeze_json_tensor(runtime_module.target_means),
+            "target_stds": _squeeze_json_tensor(runtime_module.target_stds),
+        }
+    return {
+        "method": method_name,
+        "stain_matrix_target": _squeeze_json_tensor(runtime_module.stain_matrix_target),
+        "maxC_target": _squeeze_json_tensor(runtime_module.maxC_target),
+    }
+
+
+def _fit_ruifrok_runtime_state(target_tensor: torch.Tensor) -> dict[str, Any]:
+    stain_matrix = _RUIFROK_HE_STAIN_MATRIX.unsqueeze(0)
+    flattened_od = (
+        _rgb_to_od(target_tensor).permute(0, 2, 3, 1).reshape(target_tensor.shape[0], -1, 3)
+    )
+    target_concentration = _solve_concentration(flattened_od, stain_matrix)
+    max_c_target = torch.quantile(target_concentration, q=0.99, dim=1).clamp_min(_EPSILON)
+    return {
+        "method": "RUIFROK",
+        "stain_matrix_source": _RUIFROK_HE_STAIN_MATRIX.tolist(),
+        "stain_matrix_target": _RUIFROK_HE_STAIN_MATRIX.tolist(),
+        "maxC_target": _squeeze_json_tensor(max_c_target),
+    }
+
+
+def _rgb_uint8_to_torch_tensor(image: npt.NDArray[np.uint8]) -> torch.Tensor:
+    return (
+        torch.from_numpy(np.asarray(image, dtype=np.uint8))
+        .permute(2, 0, 1)
+        .unsqueeze(0)
+        .to(dtype=torch.float32)
+        .div_(255.0)
     )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stats_path = output_dir / "normalization_stats.json"
-    stats_path.write_text(json.dumps(stats, indent=2, cls=NumpyEncoder), encoding="utf-8")
-    logging.info("Normalization stats saved: %s", stats_path)
 
-    template_dir = output_dir / "normalization_templates"
-    _export_template_images(template_paths, template_dir)
-    logging.info("Saved %s template images: %s", len(template_paths), template_dir)
+def _squeeze_json_tensor(tensor: torch.Tensor) -> list[Any]:
+    return tensor.detach().cpu().squeeze().tolist()
+
+
+def _rgb_to_od(x: torch.Tensor) -> torch.Tensor:
+    return -torch.log(x.clamp_min(_EPSILON))
+
+
+def _solve_concentration(flattened_od: torch.Tensor, stain_matrix: torch.Tensor) -> torch.Tensor:
+    solved = cast(
+        torch.Tensor,
+        torch.linalg.lstsq(stain_matrix.transpose(1, 2), flattened_od.transpose(1, 2)).solution,
+    )
+    return solved.transpose(1, 2).clamp_min(0.0)

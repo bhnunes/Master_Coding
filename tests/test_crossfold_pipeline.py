@@ -69,6 +69,19 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
     provenance_kwargs: dict[str, object] = {}
     persist_kwargs: dict[str, object] = {}
     template_selection_calls: list[dict[str, object]] = []
+    generated_artifacts = [
+        {
+            "method": "REINHARD",
+            "state_path": tmp_path
+            / "STAGE4_SPLITS"
+            / "split_seed_42"
+            / "runtime_normalization_artifacts"
+            / "reinhard"
+            / "normalization_stats.json",
+            "template_path": tmp_path / "STAGE4_SPLITS" / "split_seed_42" / "template_selection",
+            "fit_scope": "TRAIN",
+        }
+    ]
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
     def record(name: str, return_value: object | None = None) -> object | None:
@@ -124,6 +137,10 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
         "helpers.crossfold.pipeline.save_template_selection_artifacts",
         fake_save_template_selection_artifacts,
     )
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.generate_all_normalization_artifacts",
+        lambda *args, **kwargs: record("normalization_artifacts", generated_artifacts),
+    )
 
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
@@ -168,14 +185,21 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
     assert cast(dict[str, Any], provenance_config.extra)["template_selection"] == {
         "template_count": 1
     }
-    assert cast(dict[str, Any], provenance_config.extra)["normalization_artifacts"] == []
+    assert cast(dict[str, Any], provenance_config.extra)["normalization_artifacts"] == [
+        {
+            "method": "REINHARD",
+            "state_path": str(generated_artifacts[0]["state_path"]),
+            "template_path": str(generated_artifacts[0]["template_path"]),
+            "fit_scope": "TRAIN",
+        }
+    ]
+    assert persist_kwargs["normalization_artifacts"] is generated_artifacts
     assert len(template_selection_calls) == 1
     assert calls.count("split") == 1
     assert calls.count("entropy") == 1
     assert calls.count("template_rows") == 1
     assert (
-        cast(dict[str, Any], provenance_config.extra)["verification"]
-        == split_data["verification"]
+        cast(dict[str, Any], provenance_config.extra)["verification"] == split_data["verification"]
     )
     assert calls == [
         "log:data_preparation.log",
@@ -186,6 +210,7 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
         "template_rows",
         "aggregate_target",
         "template_artifacts",
+        "normalization_artifacts",
         "provenance",
         "persist",
     ]
@@ -319,6 +344,10 @@ def test_run_crossfold_pipeline_computes_entropy_once_for_train_split(
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.save_template_selection_artifacts",
         fake_save_template_artifacts,
+    )
+    monkeypatch.setattr(
+        "helpers.crossfold.pipeline.generate_all_normalization_artifacts",
+        lambda *args, **kwargs: [],
     )
 
     monkeypatch.setattr(
@@ -643,13 +672,13 @@ def test_persist_stage5_split_state_records_all_normalization_artifacts(tmp_path
                 stage2_case_record_id, stage2_status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    to_manifest_path_ref(
-                        tmp_path / "patches" / "patient_1.h5",
-                        manifest_path=master_manifest_path,
-                    ),
-                    0,
-                    "a.png",
+            (
+                to_manifest_path_ref(
+                    tmp_path / "patches" / "patient_1.h5",
+                    manifest_path=master_manifest_path,
+                ),
+                0,
+                "a.png",
                 1,
                 1,
                 "slide_0",
@@ -678,7 +707,7 @@ def test_persist_stage5_split_state_records_all_normalization_artifacts(tmp_path
                         "patient_id": 1,
                         "label": 1,
                         "filename": "a.png",
-                            "source_hdf5_path": str(tmp_path / "patches" / "patient_1.h5"),
+                        "source_hdf5_path": str(tmp_path / "patches" / "patient_1.h5"),
                         "source_row_index": 0,
                     }
                 ]

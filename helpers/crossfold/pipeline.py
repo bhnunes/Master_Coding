@@ -14,6 +14,7 @@ from helpers.crossfold.entropy import compute_all_patch_entropies
 from helpers.crossfold.logging import configure_crossfold_logging
 from helpers.crossfold.normalization import (
     build_aggregate_target_from_template_rows,
+    generate_all_normalization_artifacts,
     save_template_selection_artifacts,
     select_template_rows_from_entropy,
 )
@@ -91,6 +92,11 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         aggregate_target_rgb=aggregate_target_rgb,
         save_entropy_cache_csv=config.save_entropy_cache_csv,
     )
+    normalization_artifacts = generate_all_normalization_artifacts(
+        output_dir,
+        aggregate_target_rgb=aggregate_target_rgb,
+        shared_template_dir=output_dir / "template_selection",
+    )
     split_frames = {
         "TRAIN": split_data["train_df"],
         "VALIDATION": split_data["val_df"],
@@ -109,7 +115,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
     if "verification" in split_data:
         extra["verification"] = split_data["verification"]
     extra["template_selection"] = template_selection_metadata
-    extra["normalization_artifacts"] = []
+    extra["normalization_artifacts"] = _serialize_normalization_artifacts(normalization_artifacts)
     write_manifest_and_log_stats(
         config=ManifestWriteConfig(
             output_dir=output_dir,
@@ -128,7 +134,7 @@ def run_crossfold_pipeline(config: CrossfoldConfig) -> CrossfoldRunSummary:
         master_manifest_path=config.source_path,
         split_frames=split_frames,
         output_dir=output_dir,
-        normalization_artifacts=[],
+        normalization_artifacts=normalization_artifacts,
     )
     logging.info("=== DONE ===")
     return CrossfoldRunSummary(
@@ -185,3 +191,21 @@ def _persist_stage5_split_state(
         assignments=assignments,
         stage4_split_bundle_id=stage4_split_bundle.stage4_split_bundle_id,
     )
+
+
+def _serialize_normalization_artifacts(
+    normalization_artifacts: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "method": str(artifact["method"]),
+            "state_path": str(cast(Path, artifact["state_path"])),
+            "template_path": (
+                str(cast(Path, artifact["template_path"]))
+                if artifact.get("template_path") is not None
+                else None
+            ),
+            "fit_scope": str(artifact["fit_scope"]),
+        }
+        for artifact in normalization_artifacts
+    ]

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 
@@ -24,6 +25,7 @@ class ValidationDatasetLayout:
     local_cache_dir: Path | None
     master_manifest_path: Path
     runtime_normalization_method: str = "NOT_NORMALIZED"
+    normalizer_device: torch.device | str = "cpu"
 
 
 def setup_validation_data(
@@ -32,6 +34,7 @@ def setup_validation_data(
     *,
     stage_input_locally: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    normalizer_device: torch.device | str = "cpu",
 ) -> ValidationDatasetLayout:
     local_cache_dir = local_data_dir / "patient_shards" if stage_input_locally else None
     if local_cache_dir is not None:
@@ -46,6 +49,7 @@ def setup_validation_data(
         local_cache_dir=local_cache_dir,
         master_manifest_path=master_manifest_path,
         runtime_normalization_method=runtime_normalization_method,
+        normalizer_device=normalizer_device,
     )
 
 
@@ -100,7 +104,7 @@ class ValidationDataset(Dataset[Any]):
                 layout.master_manifest_path,
                 self.records,
                 runtime_normalization_method=layout.runtime_normalization_method,
-                device="cpu",
+                device=layout.normalizer_device,
             ),
         )
         self.h5_file = None

@@ -20,6 +20,11 @@ DECISION_THRESHOLD = 0.6
 OPTIMIZATION_SUBSET_SCORE = 0.9
 
 
+@pytest.fixture(autouse=True)
+def _stub_cuda_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("helpers.ensemble_optimizer.pipeline.require_cuda_device", lambda: "cuda")
+
+
 def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> None:
     config = EnsembleOptimizerConfig(
         master_manifest_path=tmp_path / "dataset" / "master_manifest.sqlite",

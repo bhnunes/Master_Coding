@@ -34,7 +34,11 @@ class PreparedTrainingData:
     validation_provenance: dict[str, Any]
 
 
-def prepare_training_data(config: LRFinderConfig) -> PreparedTrainingData:
+def prepare_training_data(
+    config: LRFinderConfig,
+    *,
+    normalizer_device: torch.device | str = "cpu",
+) -> PreparedTrainingData:
     if config.stage_input_locally and config.local_data_dir.exists():
         import shutil
 
@@ -53,7 +57,7 @@ def prepare_training_data(config: LRFinderConfig) -> PreparedTrainingData:
         config.master_manifest_path,
         training_records,
         runtime_normalization_method=config.runtime_normalization_method,
-        device="cpu",
+        device=normalizer_device,
     )
 
     base_dataset = CanonicalRowHDF5Dataset(

@@ -658,6 +658,7 @@ def prepare_training_data(  # noqa: PLR0913
     seed: int,
     use_artifact_aware_loss: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    normalizer_device: torch.device | str = "cpu",
 ) -> PreparedTrainingData:
     if local_data_dir.exists():
         shutil.rmtree(local_data_dir)
@@ -718,7 +719,7 @@ def prepare_training_data(  # noqa: PLR0913
             master_manifest_path,
             train_records_for_dataset,
             runtime_normalization_method=runtime_normalization_method,
-            device="cpu",
+            device=normalizer_device,
         ),
     )
     validation_dataset_base = CanonicalRowHDF5Dataset(
@@ -732,7 +733,7 @@ def prepare_training_data(  # noqa: PLR0913
             master_manifest_path,
             validation_records_for_dataset,
             runtime_normalization_method=runtime_normalization_method,
-            device="cpu",
+            device=normalizer_device,
         ),
     )
     train_dataset: Dataset[Any]

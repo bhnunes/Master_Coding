@@ -9,6 +9,7 @@ import torch
 
 from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
+from helpers.training.device import require_cuda_device
 
 
 def _parse_bool(value: str | None, variable_name: str, default: bool) -> bool:
@@ -122,9 +123,10 @@ def load_smart_sampler_config(
         values.get("SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR"),
         "SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR",
     )
-    device = (
-        values.get("SMART_SAMPLER_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
-    ).strip()
+    device = (values.get("SMART_SAMPLER_DEVICE") or "cuda").strip()
+    if torch.device(device).type != "cuda":
+        raise ValueError("SMART_SAMPLER_DEVICE must be a CUDA device for Stage 6.")
+    require_cuda_device()
     growth_factor = _parse_positive_float(
         values.get("SMART_SAMPLER_GROWTH_FACTOR"),
         "SMART_SAMPLER_GROWTH_FACTOR",

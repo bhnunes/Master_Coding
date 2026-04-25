@@ -26,6 +26,7 @@ class TestDatasetLayout:
     local_cache_dir: Path | None
     master_manifest_path: Path
     runtime_normalization_method: str = "NOT_NORMALIZED"
+    normalizer_device: torch.device | str = "cpu"
 
 
 def setup_test_data(
@@ -34,6 +35,7 @@ def setup_test_data(
     *,
     stage_input_locally: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    normalizer_device: torch.device | str = "cpu",
 ) -> TestDatasetLayout:
     if not master_manifest_path.is_file():
         raise FileNotFoundError(f"Missing {master_manifest_path}")
@@ -50,6 +52,7 @@ def setup_test_data(
         local_cache_dir=local_cache_dir,
         master_manifest_path=master_manifest_path,
         runtime_normalization_method=runtime_normalization_method,
+        normalizer_device=normalizer_device,
     )
 
 
@@ -103,7 +106,7 @@ class TestDataset(Dataset[Any]):
                 layout.master_manifest_path,
                 self.records,
                 runtime_normalization_method=layout.runtime_normalization_method,
-                device="cpu",
+                device=layout.normalizer_device,
             ),
         )
         self.h5_file = None

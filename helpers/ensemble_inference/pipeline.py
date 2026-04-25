@@ -42,6 +42,7 @@ from helpers.provenance import (
     hash_file_sha256,
     hash_json_payload,
 )
+from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import seed_everything
 from helpers.training.utils import get_formatted_datetime_string
@@ -179,7 +180,12 @@ def _validate_checkpoint_hashes(recipe_payload: dict[str, Any]) -> dict[str, str
     return observed_checkpoint_hashes
 
 
-def _prepare_pipeline(config: EnsembleInferenceConfig, *, output_dir: Path) -> PipelinePreparation:
+def _prepare_pipeline(
+    config: EnsembleInferenceConfig,
+    *,
+    output_dir: Path,
+    normalizer_device: torch.device,
+) -> PipelinePreparation:
     recipe_payload, recipe_copy_path = _copy_recipe_payload(config, output_dir=output_dir)
     recipe = parse_ensemble_recipe(recipe_payload)
     test_layout = setup_test_data(
@@ -187,6 +193,7 @@ def _prepare_pipeline(config: EnsembleInferenceConfig, *, output_dir: Path) -> P
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
         runtime_normalization_method=config.runtime_normalization_method,
+        normalizer_device=normalizer_device,
     )
     observed_checkpoint_hashes = _validate_checkpoint_hashes(recipe_payload)
     test_dataset_provenance = collect_test_dataset_provenance(test_layout)
@@ -295,10 +302,10 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
     output_dir = _resolve_output_dir(config)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = get_formatted_datetime_string()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = require_cuda_device()
     seed_everything(config.seed)
 
-    preparation = _prepare_pipeline(config, output_dir=output_dir)
+    preparation = _prepare_pipeline(config, output_dir=output_dir, normalizer_device=device)
     test_loader = create_test_dataloader(
         preparation.test_layout,
         batch_size=config.batch_size,

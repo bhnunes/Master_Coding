@@ -477,7 +477,8 @@ def test_run_lr_finder_screening_writes_summaries(
     progress = DummyProgress()
 
     monkeypatch.setattr(
-        "helpers.lr_finder.runner.prepare_training_data", lambda config: data_bundle
+        "helpers.lr_finder.runner.prepare_training_data",
+        lambda config, *, normalizer_device: data_bundle,
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.sample_bcedice_params", lambda n, search_space, seed: samples
@@ -492,8 +493,7 @@ def test_run_lr_finder_screening_writes_summaries(
         "helpers.lr_finder.runner.GPUDownscale",
         lambda p: SimpleNamespace(to=lambda device: lambda x: x),
     )
-    monkeypatch.setattr("helpers.lr_finder.runner.torch.cuda.is_available", lambda: False)
-    monkeypatch.setattr("helpers.lr_finder.runner.torch.device", lambda device_type: device_type)
+    monkeypatch.setattr("helpers.lr_finder.runner.require_cuda_device", lambda: "cuda")
 
     def fake_capture_pretrained_model_state(
         model_plan: ModelPlan, device: object

@@ -39,6 +39,7 @@ from helpers.ensemble_optimizer.reporting import (
 )
 from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
 from helpers.provenance import build_split_fingerprint
+from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
@@ -308,7 +309,7 @@ def _build_validation_split(
 
 
 def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutputs:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = require_cuda_device()
     seed_everything(config.seed)
     LOGGER.info(
         "Stage 10 starting on %s. validation staging=%s output_dir=%s",
@@ -322,6 +323,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
         runtime_normalization_method=config.runtime_normalization_method,
+        normalizer_device=device,
     )
     LOGGER.info("Validation source ready: %s", config.master_manifest_path)
     split = _build_validation_split(config, validation_layout)

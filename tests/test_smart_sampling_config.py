@@ -14,6 +14,11 @@ MASK_FRACTION_THRESHOLD = 0.25
 LOCAL_CACHE_BYTES = 4096
 
 
+@pytest.fixture(autouse=True)
+def _stub_cuda_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("helpers.smart_sampling.config.require_cuda_device", lambda: object())
+
+
 def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     master_manifest_path = tmp_path / "master_manifest.sqlite"
     master_manifest_path.write_bytes(b"sqlite")
@@ -42,7 +47,7 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.write_sidecars is True
     assert config.seed == DEFAULT_SEED
     assert config.n_start == DEFAULT_N_START
-    assert config.device in {"cpu", "cuda"}
+    assert config.device == "cuda"
     assert config.use_gist is False
     assert config.protect_positive_labels is True
     assert config.protect_mask_positive is True

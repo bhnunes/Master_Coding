@@ -21,6 +21,7 @@ from helpers.lr_finder.config import LRFinderConfig, ModelPlan
 from helpers.lr_finder.data import build_train_loader, prepare_training_data
 from helpers.lr_finder.reporting import RunRecord
 from helpers.lr_finder.search_space import BCEDiceParams, sample_bcedice_params
+from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPaper
 from helpers.training.models import create_model
@@ -511,8 +512,8 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
         json.dumps([asdict(sample) for sample in lhs_samples], indent=2), encoding="utf-8"
     )
 
-    data_bundle = prepare_training_data(config)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = require_cuda_device()
+    data_bundle = prepare_training_data(config, normalizer_device=device)
     gpu_normalizer = GPUNormalizer(
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225],

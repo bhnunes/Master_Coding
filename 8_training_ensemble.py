@@ -27,6 +27,7 @@ from helpers.training.data import (
     prepare_training_data,
     verify_patient_separation,
 )
+from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.loop import train_epoch, validate_epoch
 from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPaper
@@ -78,8 +79,8 @@ sys.stderr = LoggerWriter(training_logger, logging.ERROR)
 print("Libraries imported.")
 print("Configuring environment...")
 
-# Device (GPU if available, otherwise CPU)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Device
+device = require_cuda_device()
 print(f"Using device: {device}")
 
 
@@ -190,6 +191,7 @@ prepared_training_data = prepare_training_data(
     seed=seed,
     use_artifact_aware_loss=use_artifact_aware_loss,
     runtime_normalization_method=training_config.runtime_normalization_method,
+    normalizer_device=device,
 )
 train_dataset_provenance = prepared_training_data.training_provenance
 validation_dataset_provenance = prepared_training_data.validation_provenance

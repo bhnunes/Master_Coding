@@ -16,6 +16,11 @@ PIPELINE_BATCH_SIZE = 8
 PIPELINE_VISUALIZATION_SAMPLES = 3
 
 
+@pytest.fixture(autouse=True)
+def _stub_cuda_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("helpers.ensemble_inference.pipeline.require_cuda_device", lambda: "cuda")
+
+
 def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> None:
     config = EnsembleInferenceConfig(
         recipe_path=tmp_path / "recipe.json",

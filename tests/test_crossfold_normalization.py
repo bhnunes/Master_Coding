@@ -1,5 +1,3 @@
-import sys
-from builtins import __import__ as builtins_import
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +5,7 @@ import cv2
 import h5py
 import numpy as np
 import pandas as pd
-import pytest
+import torch
 from _pytest.monkeypatch import MonkeyPatch
 
 from helpers.crossfold import normalization
@@ -15,64 +13,27 @@ from helpers.crossfold import normalization
 MEDIAN_RGB_VALUE = 50
 
 
-class _FakeNormalizer:
-    def __init__(self) -> None:
-        self.fitted_target: Any = None
+class _FakeRuntimeModule:
+    def __init__(self, method: str) -> None:
+        self.method = method
 
-    def fit(self, target: object) -> None:
-        self.fitted_target = target
-
-
-class _FakeStainModule:
-    def __init__(self, normalizer: _FakeNormalizer) -> None:
-        self._normalizer = normalizer
-
-    def get_normalizer(self, method_name: str) -> _FakeNormalizer:
-        assert method_name == "MACENKO"
-        return self._normalizer
+    def fit(self, target: torch.Tensor) -> None:
+        assert target.shape == (1, 3, 2, 2)
+        if self.method == "reinhard":
+            self.target_means = torch.tensor([[[[0.1]], [[0.2]], [[0.3]]]])
+            self.target_stds = torch.tensor([[[[0.4]], [[0.5]], [[0.6]]]])
+            return
+        self.stain_matrix_target = torch.tensor([[[0.65, 0.70, 0.29], [0.07, 0.99, 0.11]]])
+        self.maxC_target = torch.tensor([[1.0, 0.8]])
 
 
-def test_fit_normalizer_on_train_set_uses_highest_entropy_image_per_patient(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    selected_targets: list[list[str]] = []
-    fake_normalizer = _FakeNormalizer()
-    train_df = pd.DataFrame(
-        [
-            {"patient_id": 1, "image_path": "p1_low.png"},
-            {"patient_id": 1, "image_path": "p1_high.png"},
-            {"patient_id": 2, "image_path": "p2_only.png"},
-        ]
-    )
-    entropy_df = pd.DataFrame(
-        [
-            {"image_path": "p1_low.png", "entropy": 0.1},
-            {"image_path": "p1_high.png", "entropy": 0.9},
-            {"image_path": "p2_only.png", "entropy": 0.4},
-        ]
-    )
+class _FakeRuntimeBuilder:
+    calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(
-        normalization,
-        "load_stain_normalizer_backend",
-        lambda: _FakeStainModule(fake_normalizer),
-    )
-    monkeypatch.setattr(
-        normalization,
-        "make_aggregate_target",
-        lambda image_paths: _record_target(selected_targets, image_paths),
-    )
-
-    fitted_normalizer, template_paths = normalization.fit_normalizer_on_train_set(
-        train_df,
-        "MACENKO",
-        entropy_df=entropy_df,
-    )
-
-    assert fitted_normalizer is fake_normalizer
-    assert template_paths == ["p1_high.png", "p2_only.png"]
-    assert selected_targets == [["p1_high.png", "p2_only.png"]]
-    assert fake_normalizer.fitted_target == "aggregate-target"
+    @staticmethod
+    def build(method: str, **kwargs: Any) -> _FakeRuntimeModule:
+        _FakeRuntimeBuilder.calls.append({"method": method, **kwargs})
+        return _FakeRuntimeModule(method)
 
 
 def test_select_template_rows_from_entropy_picks_one_highest_entropy_row_per_patient() -> None:
@@ -97,35 +58,6 @@ def test_select_template_rows_from_entropy_picks_one_highest_entropy_row_per_pat
         {"patient_id": 1, "image_path": "p1_high.png", "entropy": 0.9},
         {"patient_id": 2, "image_path": "p2_only.png", "entropy": 0.4},
     ]
-
-
-def _record_target(selected_targets: list[list[str]], image_paths: list[str]) -> str:
-    selected_targets.append(list(image_paths))
-    return "aggregate-target"
-
-
-def test_save_normalizer_stats_writes_json_and_template_copies(tmp_path: Path) -> None:
-    template_file = tmp_path / "template.png"
-    template_file.write_bytes(b"image")
-    fake_module = type(
-        "FakeStainModule",
-        (),
-        {
-            "StainNormalizer": type("FakeStainNormalizer", (), {}),
-            "ReinhardNormalizer": type("FakeReinhardNormalizer", (), {}),
-        },
-    )
-
-    normalization.save_normalizer_stats(
-        normalizer=object(),
-        method_name="MACENKO",
-        output_dir=tmp_path,
-        template_paths=[str(template_file)],
-        stainnorm_module=fake_module,
-    )
-
-    assert (tmp_path / "normalization_stats.json").is_file()
-    assert (tmp_path / "normalization_templates" / "template_000_template.png").is_file()
 
 
 def test_save_template_selection_artifacts_writes_shared_sidecars(tmp_path: Path) -> None:
@@ -155,6 +87,81 @@ def test_save_template_selection_artifacts_writes_shared_sidecars(tmp_path: Path
     assert (tmp_path / "template_selection" / "template_000_template.png").is_file()
 
 
+def test_save_template_selection_artifacts_exports_hdf5_templates(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE_DATASET.h5"
+    with h5py.File(source_path, "w") as handle:
+        handle.create_dataset("images", data=np.full((1, 2, 2, 3), 80, dtype=np.uint8))
+    train_df = pd.DataFrame(
+        [
+            {
+                "patient_id": 1,
+                "image_path": f"{source_path}::images[0]",
+                "source_hdf5_path": str(source_path),
+                "source_row_index": 0,
+            }
+        ]
+    )
+    entropy_df = pd.DataFrame([{"image_path": f"{source_path}::images[0]", "entropy": 0.7}])
+    selected_rows = train_df.assign(entropy=0.7)
+
+    normalization.save_template_selection_artifacts(
+        tmp_path,
+        train_df=train_df,
+        entropy_df=entropy_df,
+        selected_rows=selected_rows,
+        aggregate_target_rgb=np.full((2, 2, 3), 44, dtype=np.uint8),
+        save_entropy_cache_csv=False,
+    )
+
+    exported = tmp_path / "template_selection" / "template_000_SOURCE_DATASET_row_000000.png"
+    assert exported.is_file()
+
+
+def test_generate_all_normalization_artifacts_uses_runtime_backend(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    template_dir = tmp_path / "template_selection"
+    template_dir.mkdir()
+    _FakeRuntimeBuilder.calls = []
+    monkeypatch.setattr(
+        normalization,
+        "_load_torch_staintools_builder",
+        lambda: _FakeRuntimeBuilder,
+    )
+
+    artifact_records = normalization.generate_all_normalization_artifacts(
+        tmp_path,
+        aggregate_target_rgb=np.full((2, 2, 3), 180, dtype=np.uint8),
+        shared_template_dir=template_dir,
+    )
+
+    assert [record["method"] for record in artifact_records] == [
+        "REINHARD",
+        "RUIFROK",
+        "MACENKO",
+        "VAHADANE",
+    ]
+    assert [call["method"] for call in _FakeRuntimeBuilder.calls] == [
+        "reinhard",
+        "macenko",
+        "vahadane",
+    ]
+    assert all(call["use_cache"] is False for call in _FakeRuntimeBuilder.calls)
+    reinhard_stats = (
+        tmp_path / "runtime_normalization_artifacts" / "reinhard" / "normalization_stats.json"
+    )
+    macenko_stats = (
+        tmp_path / "runtime_normalization_artifacts" / "macenko" / "normalization_stats.json"
+    )
+    ruifrok_stats = (
+        tmp_path / "runtime_normalization_artifacts" / "ruifrok" / "normalization_stats.json"
+    )
+    assert "target_means" in reinhard_stats.read_text(encoding="utf-8")
+    assert "stain_matrix_target" in macenko_stats.read_text(encoding="utf-8")
+    assert "stain_matrix_source" in ruifrok_stats.read_text(encoding="utf-8")
+
+
 def test_make_aggregate_target_uses_median_rgb(tmp_path: Path) -> None:
     image_a = tmp_path / "a.png"
     image_b = tmp_path / "b.png"
@@ -167,75 +174,7 @@ def test_make_aggregate_target_uses_median_rgb(tmp_path: Path) -> None:
     assert int(target[0, 0, 0]) == MEDIAN_RGB_VALUE
 
 
-def test_fit_normalizer_on_train_set_falls_back_to_rereading_images(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    fake_normalizer = _FakeNormalizer()
-    train_df = pd.DataFrame(
-        [
-            {"patient_id": 1, "image_path": "a.png"},
-            {"patient_id": 1, "image_path": "b.png"},
-        ]
-    )
-
-    monkeypatch.setattr(
-        normalization,
-        "calculate_image_entropy_from_path",
-        lambda path: (path, {"a.png": 0.1, "b.png": 0.8}[path]),
-    )
-    monkeypatch.setattr(
-        normalization,
-        "load_stain_normalizer_backend",
-        lambda: _FakeStainModule(fake_normalizer),
-    )
-    monkeypatch.setattr(normalization, "make_aggregate_target", lambda image_paths: image_paths)
-
-    _, template_paths = normalization.fit_normalizer_on_train_set(
-        train_df, "MACENKO", entropy_df=None
-    )
-
-    assert template_paths == ["b.png"]
-    assert fake_normalizer.fitted_target == ["b.png"]
-
-
-def test_load_stain_normalizer_backend_uses_tiatoolbox_module(monkeypatch: MonkeyPatch) -> None:
-    fake_stainnorm = object()
-    fake_tools_module = type("FakeToolsModule", (), {"stainnorm": fake_stainnorm})
-
-    monkeypatch.setattr(normalization, "load_openslide_module", lambda: object())
-    monkeypatch.setitem(sys.modules, "tiatoolbox.tools", fake_tools_module)
-
-    assert normalization.load_stain_normalizer_backend() is fake_stainnorm
-
-
-def test_load_stain_normalizer_backend_raises_actionable_error_for_missing_pkg_resources(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    def fake_import(
-        name: str,
-        globals: dict[str, object] | None = None,
-        locals: dict[str, object] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> object:
-        if name == "tiatoolbox.tools":
-            raise ModuleNotFoundError("No module named 'pkg_resources'", name="pkg_resources")
-        return builtins_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(normalization, "load_openslide_module", lambda: object())
-    monkeypatch.setattr("builtins.__import__", fake_import)
-
-    with pytest.raises(RuntimeError, match="pkg_resources") as exc_info:
-        normalization.load_stain_normalizer_backend()
-
-    assert "Upgrade TIAToolbox" in str(exc_info.value)
-
-
-def test_fit_normalizer_on_train_set_supports_hdf5_backed_template_rows(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    fake_normalizer = _FakeNormalizer()
+def test_build_aggregate_target_from_hdf5_template_rows(tmp_path: Path) -> None:
     source_path = tmp_path / "SOURCE_DATASET.h5"
     with h5py.File(source_path, "w") as handle:
         handle.create_dataset(
@@ -243,14 +182,12 @@ def test_fit_normalizer_on_train_set_supports_hdf5_backed_template_rows(
             data=np.stack(
                 [
                     np.zeros((2, 2, 3), dtype=np.uint8),
-                    np.full((2, 2, 3), 25, dtype=np.uint8),
-                    np.full((2, 2, 3), 50, dtype=np.uint8),
+                    np.full((2, 2, 3), 100, dtype=np.uint8),
                 ],
                 axis=0,
             ),
         )
-
-    train_df = pd.DataFrame(
+    selected_rows = pd.DataFrame(
         [
             {
                 "patient_id": 1,
@@ -259,168 +196,15 @@ def test_fit_normalizer_on_train_set_supports_hdf5_backed_template_rows(
                 "source_row_index": 0,
             },
             {
-                "patient_id": 1,
+                "patient_id": 2,
                 "image_path": f"{source_path}::images[1]",
                 "source_hdf5_path": str(source_path),
                 "source_row_index": 1,
             },
-            {
-                "patient_id": 2,
-                "image_path": f"{source_path}::images[2]",
-                "source_hdf5_path": str(source_path),
-                "source_row_index": 2,
-            },
-        ]
-    )
-    entropy_df = pd.DataFrame(
-        [
-            {"image_path": f"{source_path}::images[0]", "entropy": 0.1},
-            {"image_path": f"{source_path}::images[1]", "entropy": 0.9},
-            {"image_path": f"{source_path}::images[2]", "entropy": 0.4},
         ]
     )
 
-    monkeypatch.setattr(
-        normalization,
-        "load_stain_normalizer_backend",
-        lambda: _FakeStainModule(fake_normalizer),
-    )
+    target = normalization.build_aggregate_target_from_template_rows(selected_rows)
 
-    fitted_normalizer, template_paths = normalization.fit_normalizer_on_train_set(
-        train_df,
-        "MACENKO",
-        entropy_df=entropy_df,
-    )
-
-    assert fitted_normalizer is fake_normalizer
-    assert template_paths == [f"{source_path}::images[1]", f"{source_path}::images[2]"]
-    assert np.array_equal(fake_normalizer.fitted_target, np.full((2, 2, 3), 37, dtype=np.uint8))
-
-
-def test_fit_normalizer_on_train_set_fallback_uses_indexed_hdf5_rows(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    fake_normalizer = _FakeNormalizer()
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    train_df = pd.DataFrame(
-        [
-            {
-                "patient_id": 1,
-                "image_path": f"{source_path}::images[0]",
-                "source_hdf5_path": str(source_path),
-                "source_row_index": 0,
-            },
-            {
-                "patient_id": 1,
-                "image_path": f"{source_path}::images[1]",
-                "source_hdf5_path": str(source_path),
-                "source_row_index": 1,
-            },
-            {
-                "patient_id": 2,
-                "image_path": f"{source_path}::images[2]",
-                "source_hdf5_path": str(source_path),
-                "source_row_index": 2,
-            },
-        ]
-    )
-    entropy_calls: list[tuple[str, int, str]] = []
-
-    def fake_entropy(row: tuple[str, int, str]) -> tuple[str, float]:
-        entropy_calls.append(row)
-        return (
-            row[2],
-            {
-                f"{source_path}::images[0]": 0.1,
-                f"{source_path}::images[1]": 0.9,
-                f"{source_path}::images[2]": 0.4,
-            }[row[2]],
-        )
-
-    monkeypatch.setattr(
-        normalization,
-        "calculate_image_entropy_from_hdf5_row",
-        fake_entropy,
-    )
-    monkeypatch.setattr(
-        normalization,
-        "load_stain_normalizer_backend",
-        lambda: _FakeStainModule(fake_normalizer),
-    )
-    monkeypatch.setattr(
-        normalization,
-        "_load_rgb_images_from_hdf5_rows",
-        lambda rows: [np.zeros((2, 2, 3), dtype=np.uint8)],
-    )
-
-    _, template_paths = normalization.fit_normalizer_on_train_set(
-        train_df,
-        "MACENKO",
-        entropy_df=None,
-    )
-
-    assert template_paths == [f"{source_path}::images[1]", f"{source_path}::images[2]"]
-    assert entropy_calls == [
-        (str(source_path), 0, f"{source_path}::images[0]"),
-        (str(source_path), 1, f"{source_path}::images[1]"),
-        (str(source_path), 2, f"{source_path}::images[2]"),
-    ]
-
-
-def test_save_normalizer_stats_exports_hdf5_template_images(tmp_path: Path) -> None:
-    source_path = tmp_path / "SOURCE_DATASET.h5"
-    with h5py.File(source_path, "w") as handle:
-        handle.create_dataset("images", data=np.full((1, 2, 2, 3), 80, dtype=np.uint8))
-
-    fake_module = type(
-        "FakeStainModule",
-        (),
-        {
-            "StainNormalizer": type("FakeStainNormalizer", (), {}),
-            "ReinhardNormalizer": type("FakeReinhardNormalizer", (), {}),
-        },
-    )
-
-    normalization.save_normalizer_stats(
-        normalizer=object(),
-        method_name="MACENKO",
-        output_dir=tmp_path,
-        template_paths=[f"{source_path}::images[0]"],
-        stainnorm_module=fake_module,
-    )
-
-    exported = tmp_path / "normalization_templates" / "template_000_SOURCE_DATASET_row_000000.png"
-    assert exported.is_file()
-
-
-def test_save_normalizer_stats_extracts_known_normalizer_fields(tmp_path: Path) -> None:
-    template_file = tmp_path / "template.png"
-    template_file.write_bytes(b"image")
-
-    class FakeStainNormalizer:
-        def __init__(self) -> None:
-            self.stain_matrix_target = np.array([[1.0, 2.0]])
-            self.maxC_target = np.array([3.0])
-            self.extractor = type("Extractor", (), {"stains": np.array([[4.0, 5.0]])})()
-
-    fake_module = type(
-        "FakeStainModule",
-        (),
-        {
-            "StainNormalizer": FakeStainNormalizer,
-            "ReinhardNormalizer": type("FakeReinhard", (), {}),
-        },
-    )
-
-    normalization.save_normalizer_stats(
-        normalizer=FakeStainNormalizer(),
-        method_name="MACENKO",
-        output_dir=tmp_path,
-        template_paths=[str(template_file)],
-        stainnorm_module=fake_module,
-    )
-
-    text = (tmp_path / "normalization_stats.json").read_text(encoding="utf-8")
-    assert "stain_matrix_target" in text
-    assert "maxC_target" in text
+    assert target.shape == (2, 2, 3)
+    assert int(target[0, 0, 0]) == MEDIAN_RGB_VALUE
