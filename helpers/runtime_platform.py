@@ -64,6 +64,12 @@ def resolve_env_path(
     return Path(normalized).expanduser()
 
 
+def _path_for_runtime_api(path: Path, *, runtime_os: str) -> str:
+    if runtime_os == "Windows":
+        return path.as_posix()
+    return str(path)
+
+
 def get_openslide_dll_context(
     env: dict[str, str | None] | os._Environ[str] | None = None,
     *,
@@ -93,7 +99,7 @@ def get_openslide_dll_context(
         raise RuntimeError("OpenSlide DLL loading requires os.add_dll_directory on Windows.")
 
     is_dir = is_dir_fn or os.path.isdir
-    openslide_path_str = str(openslide_path)
+    openslide_path_str = _path_for_runtime_api(openslide_path, runtime_os=runtime_os)
     if not is_dir(openslide_path_str):
         raise ValueError(
             "OPENSLIDE_PATH must point to the OpenSlide 'bin' directory on Windows. "

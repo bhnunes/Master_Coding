@@ -233,7 +233,11 @@ def test_int_with_default_falls_back_for_missing_or_empty_value() -> None:
 
 
 def test_required_path_returns_resolved_path() -> None:
-    resolved = _required_path({"ARTIFACT_IMAGES_ZIP": "/tmp/slides.zip"}, "ARTIFACT_IMAGES_ZIP")
+    resolved = _required_path(
+        {"ARTIFACT_IMAGES_ZIP": "/tmp/slides.zip"},
+        "ARTIFACT_IMAGES_ZIP",
+        system_name="Linux",
+    )
 
     assert resolved == Path("/tmp/slides.zip")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import sqlite3
 from pathlib import Path
@@ -320,6 +321,7 @@ def test_canonical_dataset_reads_rows_without_sqlite_after_startup(
         include_filename=True,
     )
 
+    gc.collect()
     master_manifest_path.unlink()
     image, mask, patient_id, filename = dataset[0]
 
