@@ -6,11 +6,9 @@ from typing import Any, cast
 
 import pandas as pd
 
-from helpers.stage_contracts import (
-    STAGE5_MANIFEST_FILE_NAME,
-    STAGE5_RUN_CONFIG_FILE_NAME,
-    STAGE5_SPLIT_STATS_FILE_NAME,
-)
+STAGE5_MANIFEST_FILE_NAME = "manifest.csv"
+STAGE5_RUN_CONFIG_FILE_NAME = "run_config.json"
+STAGE5_SPLIT_STATS_FILE_NAME = "split_stats.csv"
 
 
 def load_manifest(base_dir: Path) -> pd.DataFrame:

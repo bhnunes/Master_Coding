@@ -5,13 +5,10 @@ import re
 import pandas as pd
 
 from helpers.sanity.models import CheckResult
-from helpers.stage_contracts import STAGE5_SINGLETON_SPLIT_FILES
 
 PATIENT_FILENAME_PATTERN = re.compile(r"PATIENT_(\d+)_")
 LOGICAL_HDF5_REF_PATTERN = re.compile(r"^HDF5::(?P<dataset>images|masks)\[(?P<row>\d+)\]$")
-RUNTIME_HDF5_REF_PATTERN = re.compile(
-    r"^(?P<path>.+)::(?P<dataset>images|masks)\[(?P<row>\d+)\]$"
-)
+RUNTIME_HDF5_REF_PATTERN = re.compile(r"^(?P<path>.+)::(?P<dataset>images|masks)\[(?P<row>\d+)\]$")
 
 
 def _match_hdf5_ref(reference: str) -> re.Match[str] | None:
@@ -110,28 +107,26 @@ def check_source_reference_contract(manifest_df: pd.DataFrame) -> CheckResult:
     )
 
 
-def check_stage5_singleton_layout_contract(manifest_df: pd.DataFrame) -> CheckResult:
-    """Validate that Stage 6 inputs still reference only canonical Stage 5 singleton outputs."""
+def check_canonical_source_row_contract(manifest_df: pd.DataFrame) -> CheckResult:
+    """Validate that sanity inputs reference canonical source HDF5 rows."""
 
-    invalid_examples: list[str] = []
-    expected_paths = STAGE5_SINGLETON_SPLIT_FILES
-    for row in manifest_df.itertuples(index=False):
-        split_name = str(getattr(row, "split", ""))
-        relative_hdf5_path = str(getattr(row, "relative_hdf5_path", ""))
-        expected_path = expected_paths.get(split_name)
-        if expected_path is None or relative_hdf5_path != expected_path:
-            invalid_examples.append(f"{split_name}:{relative_hdf5_path}")
-
-    if invalid_examples:
-        expected_layout = ", ".join(
-            f"{split_name} -> {path}" for split_name, path in expected_paths.items()
-        )
+    missing_paths = [
+        str(row.filename)
+        for row in manifest_df.itertuples(index=False)
+        if not str(getattr(row, "source_hdf5_path", "") or "")
+    ][:10]
+    negative_rows = [
+        str(row.filename)
+        for row in manifest_df.itertuples(index=False)
+        if int(getattr(row, "source_row_index", -1)) < 0
+    ][:10]
+    if missing_paths or negative_rows:
         return CheckResult(
             "FAIL",
-            "Stage 6 only supports Stage 5 singleton split outputs. "
-            f"Expected layout: {expected_layout}. Examples: {invalid_examples[:10]}",
+            "Invalid canonical source-row references. "
+            f"missing_paths={missing_paths}, negative_rows={negative_rows}",
         )
     return CheckResult(
         "PASS",
-        "Manifest paths match the canonical Stage 5 singleton split layout.",
+        "Manifest uses canonical source_hdf5_path/source_row_index references.",
     )

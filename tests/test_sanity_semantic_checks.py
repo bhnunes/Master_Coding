@@ -8,6 +8,20 @@ from helpers.sanity.disk_checks import IndexedInspection
 from helpers.sanity.semantic_checks import check_mask_label_semantics
 
 
+def _manifest_row(
+    source_path: Path,
+    *,
+    label: int,
+    filename: str,
+) -> dict[str, object]:
+    return {
+        "label": label,
+        "filename": filename,
+        "source_hdf5_path": str(source_path),
+        "source_row_index": 0,
+    }
+
+
 def test_check_mask_label_semantics_reads_hdf5_masks(tmp_path: Path) -> None:
     split_path = tmp_path / "TRAIN.h5"
     with h5py.File(split_path, "w") as handle:
@@ -20,14 +34,7 @@ def test_check_mask_label_semantics_reads_hdf5_masks(tmp_path: Path) -> None:
         handle.create_dataset("filenames", data=np.array([b"PATIENT_1_PATCH_001.png"]))
 
     manifest_df = pd.DataFrame(
-        [
-            {
-                "label": 0,
-                "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
-            }
-        ]
+        [_manifest_row(split_path, label=0, filename="PATIENT_1_PATCH_001.png")]
     )
 
     result = check_mask_label_semantics(manifest_df, tmp_path, "TRAIN")
@@ -46,14 +53,7 @@ def test_check_mask_label_semantics_fails_for_empty_cancer_hdf5_mask(tmp_path: P
         handle.create_dataset("filenames", data=np.array([b"PATIENT_2_PATCH_001.png"]))
 
     manifest_df = pd.DataFrame(
-        [
-            {
-                "label": 1,
-                "filename": "PATIENT_2_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
-            }
-        ]
+        [_manifest_row(split_path, label=1, filename="PATIENT_2_PATCH_001.png")]
     )
 
     result = check_mask_label_semantics(manifest_df, tmp_path, "TRAIN")
@@ -65,12 +65,7 @@ def test_check_mask_label_semantics_fails_for_empty_cancer_hdf5_mask(tmp_path: P
 def test_check_mask_label_semantics_accepts_precomputed_row_inspections(tmp_path: Path) -> None:
     manifest_df = pd.DataFrame(
         [
-            {
-                "label": 0,
-                "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "missing.h5",
-                "hdf5_row_index": 0,
-            }
+            _manifest_row(tmp_path / "missing.h5", label=0, filename="PATIENT_1_PATCH_001.png")
         ]
     )
 

@@ -8,6 +8,7 @@ import h5py
 import pandas as pd
 
 from helpers.crossfold.provenance import recompute_split_stats_from_manifest
+from helpers.provenance import hash_file_sha256
 from helpers.sanity.models import SPLITS, CheckResult
 
 REQUIRED_MANIFEST_COLUMNS = {
@@ -18,8 +19,10 @@ REQUIRED_MANIFEST_COLUMNS = {
     "filename",
     "normalization_method",
     "is_normalized",
-    "relative_hdf5_path",
-    "hdf5_row_index",
+    "source_hdf5_path",
+    "source_row_index",
+    "source_image_path",
+    "source_mask_path",
 }
 SPLIT_STATS_COLUMNS = (
     "n_patients",
@@ -39,7 +42,8 @@ SPLIT_STATS_COLUMNS = (
 
 
 def check_manifest_schema(manifest_df: pd.DataFrame) -> CheckResult:
-    missing = sorted(REQUIRED_MANIFEST_COLUMNS - set(manifest_df.columns))
+    columns = set(manifest_df.columns)
+    missing = sorted(REQUIRED_MANIFEST_COLUMNS - columns)
     if missing:
         return CheckResult(
             "FAIL",
@@ -57,7 +61,7 @@ def check_manifest_schema(manifest_df: pd.DataFrame) -> CheckResult:
             "FAIL", f"Manifest contains invalid labels (expected 0/1): {invalid_labels}"
         )
     invalid_row_indices = manifest_df.loc[
-        manifest_df["hdf5_row_index"].astype(int) < 0, "hdf5_row_index"
+        manifest_df["source_row_index"].astype(int) < 0, "source_row_index"
     ].tolist()
     if invalid_row_indices:
         return CheckResult("FAIL", "Manifest contains negative HDF5 row indices.")
@@ -236,19 +240,20 @@ def check_stage4_cleaning_lineage(
             ),
         )
 
-    relative_paths = sorted(
-        {str(path) for path in manifest_df["relative_hdf5_path"].dropna().tolist()}
-    )
+    if str(expected_manifest_path).lower().endswith(".sqlite"):
+        return _check_sqlite_stage4_lineage(expected_manifest_path, expected_manifest_sha)
+
+    raw_paths = sorted({str(path) for path in manifest_df["source_hdf5_path"].dropna().tolist()})
     mismatches: list[str] = []
-    for relative_path in relative_paths:
-        hdf5_path = base_dir / relative_path
+    for raw_path in raw_paths:
+        hdf5_path = Path(raw_path)
         if not hdf5_path.is_file():
             continue
         with h5py.File(hdf5_path, "r") as handle:
             observed_path = handle.attrs.get("stage4_cleaning_manifest_path")
             observed_sha = handle.attrs.get("stage4_cleaning_manifest_sha256")
         if observed_path != expected_manifest_path or observed_sha != expected_manifest_sha:
-            mismatches.append(relative_path)
+            mismatches.append(raw_path)
     if mismatches:
         return CheckResult(
             "FAIL",
@@ -258,6 +263,28 @@ def check_stage4_cleaning_lineage(
     return CheckResult(
         "PASS",
         "Stage 3.3 cleaning lineage matches run_config.json across split HDF5 artifacts.",
+    )
+
+
+def _check_sqlite_stage4_lineage(
+    expected_manifest_path: object,
+    expected_manifest_sha: object,
+) -> CheckResult:
+    manifest_path = Path(str(expected_manifest_path))
+    if not manifest_path.is_file():
+        return CheckResult(
+            "FAIL", f"Stage 3.3 cleaning master manifest is missing: {manifest_path}"
+        )
+    observed_sha = hash_file_sha256(manifest_path)
+    if observed_sha != str(expected_manifest_sha):
+        return CheckResult(
+            "FAIL",
+            "Stage 3.3 cleaning master manifest hash mismatch: "
+            f"expected={expected_manifest_sha}, observed={observed_sha}",
+        )
+    return CheckResult(
+        "PASS",
+        "Stage 3.3 cleaning lineage matches the source master_manifest.sqlite.",
     )
 
 

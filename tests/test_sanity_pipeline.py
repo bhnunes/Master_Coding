@@ -12,6 +12,8 @@ from helpers.sanity.pipeline import run_sanity_pipeline
 
 def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None:
     output_dir = tmp_path
+    train_path = output_dir / "TRAIN.h5"
+    test_path = output_dir / "TEST.h5"
     manifest_df = pd.DataFrame(
         [
             {
@@ -20,8 +22,10 @@ def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None
                 "label": 1,
                 "patient_id": 1,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(train_path),
+                "source_row_index": 0,
+                "source_image_path": f"{train_path}::images[0]",
+                "source_mask_path": f"{train_path}::masks[0]",
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
             },
@@ -31,8 +35,10 @@ def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None
                 "label": 1,
                 "patient_id": 2,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TEST.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(test_path),
+                "source_row_index": 0,
+                "source_image_path": f"{test_path}::images[0]",
+                "source_mask_path": f"{test_path}::masks[0]",
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
             },
@@ -70,6 +76,7 @@ def test_run_sanity_pipeline_rejects_duplicate_filenames(tmp_path: Path) -> None
 
 def test_run_sanity_pipeline_checks_logical_source_refs(tmp_path: Path) -> None:
     output_dir = tmp_path
+    train_path = output_dir / "TRAIN.h5"
     manifest_df = pd.DataFrame(
         [
             {
@@ -78,8 +85,8 @@ def test_run_sanity_pipeline_checks_logical_source_refs(tmp_path: Path) -> None:
                 "label": 1,
                 "patient_id": 1,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(train_path),
+                "source_row_index": 0,
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
                 "source_image_path": build_hdf5_dataset_ref("images", 0),
@@ -137,6 +144,7 @@ def test_run_sanity_pipeline_checks_logical_source_refs(tmp_path: Path) -> None:
 
 def test_run_sanity_pipeline_fails_on_stage4_cleaning_lineage_mismatch(tmp_path: Path) -> None:
     output_dir = tmp_path
+    train_path = output_dir / "TRAIN.h5"
     manifest_df = pd.DataFrame(
         [
             {
@@ -145,8 +153,10 @@ def test_run_sanity_pipeline_fails_on_stage4_cleaning_lineage_mismatch(tmp_path:
                 "label": 1,
                 "patient_id": 1,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(train_path),
+                "source_row_index": 0,
+                "source_image_path": f"{train_path}::images[0]",
+                "source_mask_path": f"{train_path}::masks[0]",
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
             }
@@ -194,7 +204,7 @@ def test_run_sanity_pipeline_fails_on_stage4_cleaning_lineage_mismatch(tmp_path:
     assert report.dataset_checks["Stage4 Cleaning Lineage"].status == "FAIL"
 
 
-def test_run_sanity_pipeline_rejects_non_singleton_stage5_layout(tmp_path: Path) -> None:
+def test_run_sanity_pipeline_rejects_missing_canonical_source_columns(tmp_path: Path) -> None:
     output_dir = tmp_path
     manifest_df = pd.DataFrame(
         [
@@ -204,8 +214,6 @@ def test_run_sanity_pipeline_rejects_non_singleton_stage5_layout(tmp_path: Path)
                 "label": 1,
                 "patient_id": 1,
                 "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN_shards/1.h5",
-                "hdf5_row_index": 0,
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
             }
@@ -257,4 +265,4 @@ def test_run_sanity_pipeline_rejects_non_singleton_stage5_layout(tmp_path: Path)
     )
 
     assert report.verdict == "SPLITS REJECTED"
-    assert report.dataset_checks["Stage 5 Singleton Layout"].status == "FAIL"
+    assert report.dataset_checks["Manifest Schema"].status == "FAIL"

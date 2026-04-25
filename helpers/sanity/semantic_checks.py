@@ -6,7 +6,11 @@ from typing import cast
 import pandas as pd
 from tqdm import tqdm
 
-from helpers.sanity.disk_checks import IndexedInspection, inspect_hdf5_row
+from helpers.sanity.disk_checks import (
+    IndexedInspection,
+    _resolve_source_hdf5_path,
+    inspect_hdf5_row,
+)
 from helpers.sanity.models import CheckResult
 
 
@@ -20,8 +24,8 @@ def _load_mask_positive_flag(
         inspection = row_inspections[cast(int, record["index"])].inspection
     else:
         inspection = inspect_hdf5_row(
-            str(base_dir / str(record["relative_hdf5_path"])),
-            cast(int, record["hdf5_row_index"]),
+            str(_resolve_source_hdf5_path(record["source_hdf5_path"])),
+            cast(int, record["source_row_index"]),
         )
     return inspection["mask_has_positive_pixels"]
 

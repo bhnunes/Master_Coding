@@ -8,8 +8,6 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import psutil
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 import torch
 
@@ -19,22 +17,16 @@ from helpers.training import data as training_data
 from helpers.training.data import (
     ArtifactAwareDatasetView,
     HybridProstateDataset,
-    HybridProstateShardDataset,
-    PreparedShardTrainingData,
     PreparedTrainingData,
     ProstateCancerDatasetHDF5,
-    ProstateCancerShardDataset,
-    ShardDatasetLayout,
     SubsetView,
     _decode_filename,
     collate_batch,
     collect_manifest_split_provenance,
-    collect_shard_dataset_provenance,
     create_stratified_subset_within_patients,
     get_training_hdf5_filename,
     load_artifact_coverage_lookup,
     prepare_training_data,
-    prepare_training_shard_data,
     setup_local_hdf5,
     verify_patient_separation,
 )
@@ -110,64 +102,6 @@ def _write_hdf5_with_legacy_filename_dataset(path: Path) -> None:
                 dtype="S64",
             ),
         )
-
-
-def _write_shard_split(root: Path, split_name: str, patient_ids: list[str]) -> ShardDatasetLayout:
-    shard_dir = root / split_name
-    shard_dir.mkdir(parents=True, exist_ok=True)
-    manifest_rows: list[dict[str, object]] = []
-    sample_rows: list[dict[str, object]] = []
-    for index, patient_id in enumerate(patient_ids):
-        relative_hdf5_path = f"{split_name}/{patient_id}.h5"
-        with h5py.File(shard_dir / f"{patient_id}.h5", "w") as handle:
-            handle.create_dataset(
-                "images",
-                data=np.full(
-                    (1, PATCH_SIDE, PATCH_SIDE, RGB_CHANNELS),
-                    index + SHARD_BATCH_VALUE_OFFSET,
-                    dtype=np.uint8,
-                ),
-            )
-            handle.create_dataset(
-                "masks",
-                data=np.full((1, PATCH_SIDE, PATCH_SIDE), index % 2, dtype=np.uint8),
-            )
-            handle.create_dataset("labels", data=np.array([index % 2], dtype=np.uint8))
-            handle.create_dataset("patient_ids", data=np.array([patient_id.encode()], dtype="S16"))
-            handle.create_dataset(
-                "filenames",
-                data=np.array([f"{patient_id}.png".encode()], dtype="S32"),
-            )
-            handle.attrs["source_signature"] = f"{split_name}-sig"
-            handle.attrs["source_hdf5_sha256"] = f"{split_name}-sha"
-        manifest_rows.append(
-            {
-                "split": split_name.replace("_shards", ""),
-                "patient_id": patient_id,
-                "relative_hdf5_path": relative_hdf5_path,
-                "rows": 1,
-                "label_0_count": 1 if index % 2 == 0 else 0,
-                "label_1_count": 1 if index % 2 == 1 else 0,
-            }
-        )
-        sample_rows.append(
-            {
-                "split": split_name.replace("_shards", ""),
-                "patient_id": patient_id,
-                "relative_hdf5_path": relative_hdf5_path,
-                "row_in_shard": 0,
-                "label": index % 2,
-                "filename": f"{patient_id}.png",
-            }
-        )
-    pq.write_table(pa.Table.from_pylist(manifest_rows), shard_dir / "manifest.parquet")
-    pq.write_table(pa.Table.from_pylist(sample_rows), shard_dir / "sample_manifest.parquet")
-    return ShardDatasetLayout(
-        shard_dir=shard_dir,
-        manifest_path=shard_dir / "manifest.parquet",
-        sample_manifest_path=shard_dir / "sample_manifest.parquet",
-        local_cache_dir=None,
-    )
 
 
 class _IdentityTransform:
@@ -545,100 +479,6 @@ def test_create_stratified_subset_within_patients_preserves_patient_class_groups
     assert len(subset_indices) == SUBSET_INDEX_COUNT
     assert {0, 1, 2, 5}.issubset(subset_indices)
     assert any(index in subset_indices for index in (3, 4))
-
-
-def test_prepare_training_shard_data_prefers_filtered_train_shards(tmp_path: Path) -> None:
-    data_root = tmp_path / "data"
-    _write_shard_split(data_root, "TRAIN_FILTERED_shards", ["p1"])
-    _write_shard_split(data_root, "VALIDATION_shards", ["v1"])
-
-    prepared = prepare_training_shard_data(data_root, tmp_path / "local", smart_sampling=True)
-
-    assert isinstance(prepared, PreparedShardTrainingData)
-    assert prepared.source_split_name == "TRAIN_FILTERED_shards"
-    assert prepared.train_layout.shard_dir == data_root / "TRAIN_FILTERED_shards"
-
-
-def test_collect_shard_dataset_provenance_hashes_manifests(tmp_path: Path) -> None:
-    layout = _write_shard_split(tmp_path / "data", "TRAIN_shards", ["p1", "p2"])
-
-    provenance = collect_shard_dataset_provenance(layout)
-
-    assert provenance["path"].endswith("sample_manifest.parquet")
-    assert provenance["manifest_sha256"] == hash_file_sha256(layout.manifest_path)
-    assert provenance["source_signature"] == "TRAIN_shards-sig"
-
-
-def test_collect_shard_dataset_provenance_includes_filtered_selection_metadata(
-    tmp_path: Path,
-) -> None:
-    layout = _write_shard_split(tmp_path / "data", "TRAIN_FILTERED_shards", ["p1", "p2"])
-    for shard_path in layout.shard_dir.glob("*.h5"):
-        with h5py.File(shard_path, "a") as handle:
-            handle.attrs["stage7_label_aware"] = True
-            handle.attrs["stage7_holdout_mode"] = "within_patient_patch_holdout"
-            handle.attrs["stage7_selected_count"] = int(handle["labels"].shape[0])
-    (layout.shard_dir / "summary.json").write_text(
-        '{"selection_signature": "selection-123"}', encoding="utf-8"
-    )
-
-    provenance = collect_shard_dataset_provenance(layout)
-
-    assert provenance["selection_signature"] == "selection-123"
-    assert provenance["smart_sampling_enabled"] is True
-    assert provenance["source_signature"] == "TRAIN_FILTERED_shards-sig"
-    assert provenance["summary_path"] is not None
-    assert provenance["summary_sha256"] == hash_file_sha256(layout.shard_dir / "summary.json")
-    assert provenance["smart_sampling_metadata"] == {
-        "stage7_holdout_mode": "within_patient_patch_holdout",
-        "stage7_label_aware": True,
-        "stage7_selected_count": 1,
-    }
-
-
-def test_prostate_shard_dataset_reads_items_and_metadata(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    layout = _write_shard_split(tmp_path / "data", "VALIDATION_shards", ["p1", "p2"])
-    monkeypatch.setattr(
-        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
-    )
-
-    dataset = ProstateCancerShardDataset(layout, mode="val", subset_indices=[1])
-    image, mask = cast(tuple[torch.Tensor, torch.Tensor], dataset[0])
-
-    assert tuple(image.shape) == (3, 4, 4)
-    assert tuple(mask.shape) == (4, 4)
-    assert dataset.get_labels().tolist() == [1]
-    assert dataset.get_patient_ids().tolist() == ["p2"]
-
-
-def test_hybrid_shard_dataset_supports_ram_cache_and_artifact_covariates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    layout = _write_shard_split(tmp_path / "data", "TRAIN_shards", ["p1"])
-    monkeypatch.setattr(
-        training_data, "get_transforms", lambda mode, img_size: _IdentityTransform()
-    )
-
-    class MemoryInfo:
-        available = 10**12
-
-    monkeypatch.setattr(psutil, "virtual_memory", lambda: MemoryInfo())
-    dataset = HybridProstateShardDataset(
-        layout,
-        mode="train",
-        artifact_coverage_by_filename={"p1.png": (0.1, 0.2, 0.3, 0.4, 0.5)},
-    )
-
-    image, mask, artifact_covariates = cast(
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor], dataset[0]
-    )
-
-    assert dataset.use_ram_cache is True
-    assert tuple(image.shape) == (3, 4, 4)
-    assert tuple(mask.shape) == (4, 4)
-    assert torch.allclose(artifact_covariates, torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5]))
 
 
 def _write_stage2_manifest_shard(

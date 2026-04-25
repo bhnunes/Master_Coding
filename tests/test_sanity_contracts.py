@@ -1,6 +1,7 @@
 import pandas as pd
 
 from helpers.sanity.contracts import (
+    check_canonical_source_row_contract,
     check_filename_patient_id_consistency,
     check_filename_uniqueness,
     check_source_reference_contract,
@@ -78,3 +79,20 @@ def test_check_source_reference_contract_rejects_misaligned_logical_hdf5_refs() 
 
     assert result.status == "FAIL"
     assert "logical hdf5 refs" in result.details.lower()
+
+
+def test_check_canonical_source_row_contract_requires_source_columns() -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {
+                "filename": "PATIENT_1_PATCH_001.png",
+                "source_hdf5_path": "",
+                "source_row_index": -1,
+            }
+        ]
+    )
+
+    result = check_canonical_source_row_contract(manifest_df)
+
+    assert result.status == "FAIL"
+    assert "canonical source-row" in result.details.lower()

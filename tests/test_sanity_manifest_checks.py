@@ -58,8 +58,10 @@ def test_check_manifest_schema_accepts_hdf5_native_manifest_columns() -> None:
                 "filename": "PATIENT_1_PATCH_001.png",
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": "/tmp/TRAIN.h5",
+                "source_row_index": 0,
+                "source_image_path": "/tmp/TRAIN.h5::images[0]",
+                "source_mask_path": "/tmp/TRAIN.h5::masks[0]",
             }
         ]
     )
@@ -130,8 +132,10 @@ def test_check_stage4_cleaning_lineage_fails_on_split_attr_mismatch(tmp_path: Pa
                 "filename": "PATIENT_1_PATCH_001.png",
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(tmp_path / "TRAIN.h5"),
+                "source_row_index": 0,
+                "source_image_path": f"{tmp_path / 'TRAIN.h5'}::images[0]",
+                "source_mask_path": f"{tmp_path / 'TRAIN.h5'}::masks[0]",
             }
         ]
     )
@@ -171,8 +175,10 @@ def test_check_stage4_cleaning_lineage_passes_when_split_attrs_match(tmp_path: P
                 "filename": "PATIENT_1_PATCH_001.png",
                 "normalization_method": "NOT_NORMALIZED",
                 "is_normalized": False,
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(tmp_path / "TRAIN.h5"),
+                "source_row_index": 0,
+                "source_image_path": f"{tmp_path / 'TRAIN.h5'}::images[0]",
+                "source_mask_path": f"{tmp_path / 'TRAIN.h5'}::masks[0]",
             }
         ]
     )

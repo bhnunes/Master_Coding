@@ -59,8 +59,10 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
     manifest_df = pd.DataFrame(
         [
             {
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
+                "source_hdf5_path": str(tmp_path / "TRAIN.h5"),
+                "source_row_index": 0,
+                "source_image_path": f"{tmp_path / 'TRAIN.h5'}::images[0]",
+                "source_mask_path": f"{tmp_path / 'TRAIN.h5'}::masks[0]",
             }
         ]
     )
@@ -282,7 +284,16 @@ def test_run_crossfold_pipeline_computes_entropy_once_for_train_split(
             },
         },
     }
-    manifest_df = pd.DataFrame([{"relative_hdf5_path": "TRAIN.h5", "hdf5_row_index": 0}])
+    manifest_df = pd.DataFrame(
+        [
+            {
+                "source_hdf5_path": str(tmp_path / "TRAIN.h5"),
+                "source_row_index": 0,
+                "source_image_path": f"{tmp_path / 'TRAIN.h5'}::images[0]",
+                "source_mask_path": f"{tmp_path / 'TRAIN.h5'}::masks[0]",
+            }
+        ]
+    )
     entropy_inputs: list[pd.DataFrame] = []
     template_rows_inputs: list[dict[str, object]] = []
     template_artifact_calls: list[dict[str, object]] = []

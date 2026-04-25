@@ -13,6 +13,23 @@ from helpers.sanity.disk_checks import (
 )
 
 
+def _manifest_row(
+    source_path: Path,
+    *,
+    row_index: int = 0,
+    label: int = 1,
+    patient_id: int = 1,
+    filename: str = "PATIENT_1_PATCH_001.png",
+) -> dict[str, object]:
+    return {
+        "label": label,
+        "patient_id": patient_id,
+        "filename": filename,
+        "source_hdf5_path": str(source_path),
+        "source_row_index": row_index,
+    }
+
+
 def test_check_manifest_disk_parity_fails_when_hdf5_row_metadata_differs(tmp_path: Path) -> None:
     split_path = tmp_path / "TRAIN.h5"
     with h5py.File(split_path, "w") as handle:
@@ -22,17 +39,7 @@ def test_check_manifest_disk_parity_fails_when_hdf5_row_metadata_differs(tmp_pat
         handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_1_PATCH_002.png"]))
 
-    manifest_df = pd.DataFrame(
-        [
-            {
-                "label": 1,
-                "patient_id": 1,
-                "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
-            }
-        ]
-    )
+    manifest_df = pd.DataFrame([_manifest_row(split_path)])
 
     result = check_manifest_disk_parity(manifest_df, tmp_path, "TRAIN")
 
@@ -49,17 +56,7 @@ def test_check_manifest_disk_parity_uses_hdf5_manifest_contract(tmp_path: Path) 
         handle.create_dataset("patient_ids", data=np.array([1], dtype=np.int32))
         handle.create_dataset("filenames", data=np.array([b"PATIENT_1_PATCH_001.png"]))
 
-    manifest_df = pd.DataFrame(
-        [
-            {
-                "label": 1,
-                "patient_id": 1,
-                "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
-            }
-        ]
-    )
+    manifest_df = pd.DataFrame([_manifest_row(split_path)])
 
     result = check_manifest_disk_parity(manifest_df, tmp_path, "TRAIN")
 
@@ -85,20 +82,8 @@ def test_collect_hdf5_row_inspections_handles_out_of_order_rows(tmp_path: Path) 
 
     manifest_df = pd.DataFrame(
         [
-            {
-                "label": 1,
-                "patient_id": 2,
-                "filename": "c.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 2,
-            },
-            {
-                "label": 0,
-                "patient_id": 1,
-                "filename": "a.png",
-                "relative_hdf5_path": "TRAIN.h5",
-                "hdf5_row_index": 0,
-            },
+            _manifest_row(split_path, row_index=2, label=1, patient_id=2, filename="c.png"),
+            _manifest_row(split_path, row_index=0, label=0, patient_id=1, filename="a.png"),
         ]
     )
 
@@ -113,13 +98,7 @@ def test_collect_hdf5_row_inspections_handles_out_of_order_rows(tmp_path: Path) 
 def test_disk_checks_accept_precomputed_row_inspections(tmp_path: Path) -> None:
     manifest_df = pd.DataFrame(
         [
-            {
-                "label": 1,
-                "patient_id": 1,
-                "filename": "PATIENT_1_PATCH_001.png",
-                "relative_hdf5_path": "missing.h5",
-                "hdf5_row_index": 0,
-            }
+            _manifest_row(tmp_path / "missing.h5")
         ]
     )
     inspections = {

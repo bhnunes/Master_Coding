@@ -31,6 +31,10 @@ class IndexedInspection:
 _HDF5_SCAN_BATCH_SIZE = 512
 
 
+def _resolve_source_hdf5_path(raw_path: object) -> Path:
+    return Path(str(raw_path))
+
+
 @lru_cache(maxsize=8192)
 def inspect_hdf5_row(hdf5_path: str, row_index: int) -> PairInspection:
     with h5py.File(hdf5_path, "r") as handle:
@@ -98,10 +102,10 @@ def collect_hdf5_row_inspections(
     del split
     if manifest_split.empty:
         return {}
-    grouped = manifest_split.groupby("relative_hdf5_path", sort=True)
+    grouped = manifest_split.groupby("source_hdf5_path", sort=True)
     collected: dict[int, IndexedInspection] = {}
-    for relative_hdf5_path, group in grouped:
-        hdf5_path = base_dir / str(relative_hdf5_path)
+    for raw_hdf5_path, group in grouped:
+        hdf5_path = _resolve_source_hdf5_path(raw_hdf5_path)
         if not hdf5_path.is_file():
             for manifest_index, filename in zip(
                 group.index.tolist(), group["filename"].astype(str), strict=True
@@ -112,13 +116,13 @@ def collect_hdf5_row_inspections(
                     inspection=_empty_inspection(),
                 )
             continue
-        ordered_group = group.sort_values("hdf5_row_index", kind="mergesort")
+        ordered_group = group.sort_values("source_row_index", kind="mergesort")
         with h5py.File(hdf5_path, "r") as handle:
             image_dataset = cast(Any, handle["images"])
             mask_dataset = cast(Any, handle["masks"])
             labels_dataset = cast(Any, handle["labels"])
             label_count = len(labels_dataset)
-            rows = ordered_group["hdf5_row_index"].astype(int).tolist()
+            rows = ordered_group["source_row_index"].astype(int).tolist()
             manifest_indexes = [int(value) for value in ordered_group.index.tolist()]
             filenames = ordered_group["filename"].astype(str).tolist()
             start = 0
@@ -181,26 +185,23 @@ def check_manifest_disk_parity(
 ) -> CheckResult:
     del split
     errors: list[str] = []
-    grouped = manifest_split.groupby("relative_hdf5_path", sort=True)
-    for relative_hdf5_path, group in grouped:
-        hdf5_path = base_dir / str(relative_hdf5_path)
+    grouped = manifest_split.groupby("source_hdf5_path", sort=True)
+    for raw_hdf5_path, group in grouped:
+        hdf5_path = _resolve_source_hdf5_path(raw_hdf5_path)
+        hdf5_label = str(raw_hdf5_path)
         if not hdf5_path.is_file():
-            errors.append(f"Missing HDF5 file referenced by manifest: {relative_hdf5_path}")
+            errors.append(f"Missing HDF5 file referenced by manifest: {hdf5_label}")
             continue
-        ordered_group = group.sort_values("hdf5_row_index", kind="mergesort")
+        ordered_group = group.sort_values("source_row_index", kind="mergesort")
         with h5py.File(hdf5_path, "r") as handle:
             labels_dataset = cast(Any, handle["labels"])
             patient_ids_dataset = cast(Any, handle["patient_ids"])
             filenames_dataset = cast(Any, handle["filenames"])
-            if len(labels_dataset) != len(ordered_group):
-                errors.append(
-                    "HDF5 row count mismatch for "
-                    f"{relative_hdf5_path}: manifest={len(ordered_group)} "
-                    f"hdf5={len(labels_dataset)}"
-                )
-                continue
             for record in ordered_group.to_dict("records"):
-                row_index = int(record["hdf5_row_index"])
+                row_index = int(record["source_row_index"])
+                if row_index < 0 or row_index >= len(labels_dataset):
+                    errors.append(f"Row index out of bounds at {hdf5_label}[{row_index}]")
+                    continue
                 filename = filenames_dataset[row_index]
                 decoded_filename = (
                     filename.decode("utf-8") if isinstance(filename, bytes) else str(filename)
@@ -208,18 +209,16 @@ def check_manifest_disk_parity(
                 if decoded_filename != str(record["filename"]):
                     errors.append(
                         "Filename mismatch at "
-                        f"{relative_hdf5_path}[{row_index}]: manifest={record['filename']} "
+                        f"{hdf5_label}[{row_index}]: manifest={record['filename']} "
                         f"hdf5={decoded_filename}"
                     )
                 if int(labels_dataset[row_index]) != int(record["label"]):
                     errors.append(
-                        "Label mismatch at "
-                        f"{relative_hdf5_path}[{row_index}] for {record['filename']}"
+                        f"Label mismatch at {hdf5_label}[{row_index}] for {record['filename']}"
                     )
                 if int(patient_ids_dataset[row_index]) != int(record["patient_id"]):
                     errors.append(
-                        "Patient mismatch at "
-                        f"{relative_hdf5_path}[{row_index}] for {record['filename']}"
+                        f"Patient mismatch at {hdf5_label}[{row_index}] for {record['filename']}"
                     )
     if errors:
         return CheckResult("FAIL", "; ".join(errors[:10]))
@@ -235,18 +234,13 @@ def check_paths_exist_and_relative(
         return CheckResult("PASS", "Split is empty; nothing to check.")
     sample_df = _sample_df(manifest_split, sample_n, random_state=42)
     missing: list[str] = []
-    absolute_paths: list[str] = []
     for record in sample_df.to_dict("records"):
-        relative_hdf5_path = str(record["relative_hdf5_path"])
-        if Path(relative_hdf5_path).is_absolute():
-            absolute_paths.append(str(record["filename"]))
-        if not (base_dir / relative_hdf5_path).is_file():
+        hdf5_path = _resolve_source_hdf5_path(record["source_hdf5_path"])
+        if not hdf5_path.is_file():
             missing.append(str(record["filename"]))
-    if absolute_paths:
-        return CheckResult("FAIL", f"Found absolute HDF5 paths in manifest: {absolute_paths[:10]}")
     if missing:
         return CheckResult("FAIL", f"Missing HDF5 files referenced by manifest: {missing[:20]}")
-    return CheckResult("PASS", f"Sampled {len(sample_df)} rows: relative HDF5 paths exist.")
+    return CheckResult("PASS", f"Sampled {len(sample_df)} rows: referenced HDF5 paths exist.")
 
 
 def check_decode_and_shapes(
@@ -272,7 +266,8 @@ def check_decode_and_shapes(
             inspection = row_inspections[int(record["index"])].inspection
         else:
             inspection = inspect_hdf5_row(
-                str(base_dir / str(record["relative_hdf5_path"])), int(record["hdf5_row_index"])
+                str(_resolve_source_hdf5_path(record["source_hdf5_path"])),
+                int(record["source_row_index"]),
             )
         if inspection["image_shape"] is None or inspection["mask_shape"] is None:
             unreadable.append(str(record["filename"]))
@@ -318,7 +313,8 @@ def check_mask_pixel_values(
             inspection = row_inspections[int(record["index"])].inspection
         else:
             inspection = inspect_hdf5_row(
-                str(base_dir / str(record["relative_hdf5_path"])), int(record["hdf5_row_index"])
+                str(_resolve_source_hdf5_path(record["source_hdf5_path"])),
+                int(record["source_row_index"]),
             )
         if inspection["mask_unique_values"] is None:
             return CheckResult(

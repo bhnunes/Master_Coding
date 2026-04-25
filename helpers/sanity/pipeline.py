@@ -7,10 +7,10 @@ import pandas as pd
 
 from helpers.sanity.config import SanityConfig
 from helpers.sanity.contracts import (
+    check_canonical_source_row_contract,
     check_filename_patient_id_consistency,
     check_filename_uniqueness,
     check_source_reference_contract,
-    check_stage5_singleton_layout_contract,
 )
 from helpers.sanity.disk_checks import (
     check_decode_and_shapes,
@@ -48,16 +48,31 @@ def run_sanity_pipeline(config: SanityConfig) -> SanityReport:
     manifest_df = load_manifest(base_dir)
     run_config = load_run_config(base_dir)
     split_stats_df = load_split_stats(base_dir)
+    manifest_schema_result = check_manifest_schema(manifest_df)
     dataset_checks = {
-        "Manifest Schema": check_manifest_schema(manifest_df),
-        "Duplicate Rows": check_duplicate_rows(manifest_df),
-        "Patient Leakage": check_patient_leakage(manifest_df),
-        "Stage 5 Singleton Layout": check_stage5_singleton_layout_contract(manifest_df),
-        "RunConfig Patient Lists": check_split_patient_lists_against_run_config(
-            manifest_df, run_config
-        ),
-        "RunConfig Constraints": check_split_constraints_from_run_config(manifest_df, run_config),
+        "Manifest Schema": manifest_schema_result,
     }
+    if manifest_schema_result.status == "FAIL":
+        return SanityReport(
+            base_dir=str(base_dir),
+            dataset_checks=dataset_checks,
+            split_checks={},
+            verdict="SPLITS REJECTED",
+        )
+
+    dataset_checks.update(
+        {
+            "Duplicate Rows": check_duplicate_rows(manifest_df),
+            "Patient Leakage": check_patient_leakage(manifest_df),
+            "Canonical Source Rows": check_canonical_source_row_contract(manifest_df),
+            "RunConfig Patient Lists": check_split_patient_lists_against_run_config(
+                manifest_df, run_config
+            ),
+            "RunConfig Constraints": check_split_constraints_from_run_config(
+                manifest_df, run_config
+            ),
+        }
+    )
     if config.enforce_filename_uniqueness:
         dataset_checks["Filename Uniqueness"] = check_filename_uniqueness(manifest_df)
     if config.enforce_regex_patient_id_match:
