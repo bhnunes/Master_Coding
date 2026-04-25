@@ -93,6 +93,24 @@ def test_build_split_stats_dataframe_summarizes_each_non_empty_split() -> None:
     ]
 
 
+def test_build_split_stats_dataframe_counts_mixed_label_patient_as_positive() -> None:
+    split_data = _split_data()
+    train_df = pd.DataFrame(
+        [
+            {"patient_id": 1, "label": 1},
+            {"patient_id": 1, "label": 0},
+            {"patient_id": 2, "label": 0},
+        ]
+    )
+    split_data["train_df"] = train_df
+
+    stats_df = build_split_stats_dataframe(split_data, run_id="run-1")
+    train_stats = stats_df.set_index("split").loc["TRAIN"]
+
+    assert int(train_stats["n_pos_patients"]) == 1
+    assert int(train_stats["n_neg_patients"]) == 1
+
+
 def test_write_manifest_and_log_stats_writes_expected_artifacts(tmp_path: Path) -> None:
     split_data = _split_data()
     manifest_df = build_hdf5_manifest_from_split_dfs(

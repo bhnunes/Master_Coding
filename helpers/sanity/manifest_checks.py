@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,6 @@ import h5py
 import pandas as pd
 
 from helpers.crossfold.provenance import recompute_split_stats_from_manifest
-from helpers.provenance import hash_file_sha256
 from helpers.sanity.models import SPLITS, CheckResult
 
 REQUIRED_MANIFEST_COLUMNS = {
@@ -216,7 +216,7 @@ def check_split_stats_against_manifest(
     return CheckResult("PASS", "split_stats.csv matches manifest-derived statistics.")
 
 
-def check_stage4_cleaning_lineage(
+def check_stage4_cleaning_lineage(  # noqa: PLR0911
     manifest_df: pd.DataFrame,
     run_cfg: dict[str, Any] | None,
     base_dir: Path,
@@ -230,18 +230,29 @@ def check_stage4_cleaning_lineage(
     expected_manifest_sha = attrs.get("stage4_cleaning_manifest_sha256")
     if expected_manifest_path is None and expected_manifest_sha is None:
         return CheckResult("PASS", "No Stage 3.3 cleaning lineage recorded in source provenance.")
-    lineage_complete = bool(expected_manifest_path and expected_manifest_sha)
-    if not lineage_complete:
+    if not expected_manifest_path:
         return CheckResult(
             "FAIL",
             (
                 "Stage 3.3 cleaning lineage is incomplete in run_config.json; "
-                "expected both manifest path and sha256."
+                "expected a manifest path."
             ),
         )
 
     if str(expected_manifest_path).lower().endswith(".sqlite"):
-        return _check_sqlite_stage4_lineage(expected_manifest_path, expected_manifest_sha)
+        return _check_sqlite_stage4_lineage(
+            expected_manifest_path,
+            attrs.get("stage4_cleaning_selected_rows"),
+        )
+
+    if not expected_manifest_sha:
+        return CheckResult(
+            "FAIL",
+            (
+                "Stage 3.3 cleaning lineage is incomplete in run_config.json; "
+                "expected a manifest sha256 for immutable non-SQLite lineage."
+            ),
+        )
 
     raw_paths = sorted({str(path) for path in manifest_df["source_hdf5_path"].dropna().tolist()})
     mismatches: list[str] = []
@@ -268,23 +279,38 @@ def check_stage4_cleaning_lineage(
 
 def _check_sqlite_stage4_lineage(
     expected_manifest_path: object,
-    expected_manifest_sha: object,
+    expected_selected_rows: object,
 ) -> CheckResult:
     manifest_path = Path(str(expected_manifest_path))
     if not manifest_path.is_file():
         return CheckResult(
             "FAIL", f"Stage 3.3 cleaning master manifest is missing: {manifest_path}"
         )
-    observed_sha = hash_file_sha256(manifest_path)
-    if observed_sha != str(expected_manifest_sha):
+
+    if expected_selected_rows is None:
+        return CheckResult(
+            "WARN",
+            (
+                "Stage 3.3 cleaning lineage points to mutable master_manifest.sqlite, "
+                "but run_config.json does not record stage4_cleaning_selected_rows."
+            ),
+        )
+
+    with sqlite3.connect(manifest_path) as connection:
+        observed_selected_rows = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM patch_stage_state WHERE is_stage4_accepted = 1"
+            ).fetchone()[0]
+        )
+    if observed_selected_rows != int(str(expected_selected_rows)):
         return CheckResult(
             "FAIL",
-            "Stage 3.3 cleaning master manifest hash mismatch: "
-            f"expected={expected_manifest_sha}, observed={observed_sha}",
+            "Stage 3.3 cleaning selected-row count mismatch in master_manifest.sqlite: "
+            f"expected={expected_selected_rows}, observed={observed_selected_rows}",
         )
     return CheckResult(
         "PASS",
-        "Stage 3.3 cleaning lineage matches the source master_manifest.sqlite.",
+        "Stage 3.3 cleaning lineage points to the mutable source master_manifest.sqlite.",
     )
 
 

@@ -97,22 +97,16 @@ def build_split_stats_dataframe(split_data: dict[str, Any], run_id: str) -> pd.D
     ):
         if split_df.empty:
             continue
-        patient_counts = (
-            split_df.groupby(["patient_id", "label"]).size().reset_index(name="n_images_patient")
-        )
-        per_patient = patient_counts.groupby("patient_id")["n_images_patient"].sum()
+        patient_labels = split_df.groupby("patient_id")["label"].max()
+        per_patient = split_df.groupby("patient_id").size()
         per_class_images = split_df.groupby("label").size().to_dict()
         rows.append(
             {
                 "run_id": run_id,
                 "split": split_name,
-                "n_patients": int(patient_counts["patient_id"].nunique()),
-                "n_pos_patients": int(
-                    patient_counts[patient_counts["label"] == 1]["patient_id"].nunique()
-                ),
-                "n_neg_patients": int(
-                    patient_counts[patient_counts["label"] == 0]["patient_id"].nunique()
-                ),
+                "n_patients": int(split_df["patient_id"].nunique()),
+                "n_pos_patients": int(patient_labels.sum()),
+                "n_neg_patients": int(len(patient_labels) - patient_labels.sum()),
                 "n_images": int(len(split_df)),
                 "patches_per_patient_mean": float(per_patient.mean()),
                 "patches_per_patient_std": float(per_patient.std(ddof=1))

@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import h5py
@@ -198,6 +199,51 @@ def test_check_stage4_cleaning_lineage_passes_when_split_attrs_match(tmp_path: P
                 "attrs": {
                     "stage4_cleaning_manifest_path": "/tmp/accepted_manifest.csv",
                     "stage4_cleaning_manifest_sha256": "abc123",
+                }
+            }
+        },
+        tmp_path,
+    )
+
+    assert result.status == "PASS"
+
+
+def test_check_stage4_cleaning_lineage_accepts_mutated_master_manifest_sqlite(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "master_manifest.sqlite"
+    with sqlite3.connect(manifest_path) as connection:
+        connection.execute(
+            "CREATE TABLE patch_stage_state ("
+            "patch_id INTEGER PRIMARY KEY, is_stage4_accepted INTEGER)"
+        )
+        connection.execute(
+            "INSERT INTO patch_stage_state (patch_id, is_stage4_accepted) VALUES (1, 1)"
+        )
+        connection.execute(
+            "CREATE TABLE runs (run_id INTEGER PRIMARY KEY, stage_name TEXT NOT NULL)"
+        )
+        connection.execute("INSERT INTO runs (run_id, stage_name) VALUES (1, 'STAGE4')")
+        connection.commit()
+
+    with sqlite3.connect(manifest_path) as connection:
+        connection.execute("INSERT INTO runs (run_id, stage_name) VALUES (2, 'STAGE6')")
+        connection.commit()
+
+    result = check_stage4_cleaning_lineage(
+        pd.DataFrame(
+            [
+                {
+                    "source_hdf5_path": str(tmp_path / "source.h5"),
+                }
+            ]
+        ),
+        {
+            "source_hdf5_provenance": {
+                "attrs": {
+                    "stage4_cleaning_manifest_path": str(manifest_path),
+                    "stage4_cleaning_manifest_sha256": "hash-before-stage4-mutated-sqlite",
+                    "stage4_cleaning_selected_rows": 1,
                 }
             }
         },
