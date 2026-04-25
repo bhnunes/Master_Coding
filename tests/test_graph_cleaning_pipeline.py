@@ -23,6 +23,8 @@ from helpers.graph.contamination import GraphContaminationParameters, calculate_
 
 HDF5_BATCH_COUNT = 2
 CANCER_ONLY_EVALUATED_COUNT = 2
+MIXED_SOURCE_ROW_COUNT = 3
+MIXED_ACCEPTED_ROW_COUNT = 2
 
 
 def _pipeline_config(
@@ -303,17 +305,17 @@ def test_run_graph_cleaning_pipeline_uses_only_cancer_manifest_rows(tmp_path: Pa
         )
     )
 
-    assert summary.total_images == CANCER_ONLY_EVALUATED_COUNT
-    assert summary.accepted == 1
+    assert summary.total_images == MIXED_SOURCE_ROW_COUNT
+    assert summary.accepted == MIXED_ACCEPTED_ROW_COUNT
     assert summary.rejected == 1
     with (output_dir / "accepted_manifest.csv").open(encoding="utf-8", newline="") as handle:
         accepted_rows = list(csv.DictReader(handle))
     with (output_dir / "rejected_manifest.csv").open(encoding="utf-8", newline="") as handle:
         rejected_rows = list(csv.DictReader(handle))
 
-    assert [row["filename"] for row in accepted_rows] == ["cancer_a.png"]
+    assert [row["filename"] for row in accepted_rows] == ["cancer_a.png", "not_cancer_c.png"]
     assert [row["filename"] for row in rejected_rows] == ["cancer_b.png"]
-    assert all(row["filename"] != "not_cancer_c.png" for row in accepted_rows + rejected_rows)
+    assert all(row["filename"] != "not_cancer_c.png" for row in rejected_rows)
 
 
 def test_list_manifest_candidates_uses_source_signature_when_available(
@@ -556,7 +558,7 @@ def test_run_graph_cleaning_pipeline_updates_master_manifest_state(tmp_path: Pat
     ]
 
 
-def test_run_graph_cleaning_pipeline_updates_only_canonical_cancer_rows(
+def test_run_graph_cleaning_pipeline_accepts_canonical_non_cancer_rows_without_scoring(
     tmp_path: Path,
 ) -> None:
     source_path = tmp_path / "PATCHES" / "HDF5_SHARDS"
@@ -668,7 +670,9 @@ def test_run_graph_cleaning_pipeline_updates_only_canonical_cancer_rows(
         )
     )
 
-    assert summary.total_images == CANCER_ONLY_EVALUATED_COUNT
+    assert summary.total_images == MIXED_SOURCE_ROW_COUNT
+    assert summary.accepted == MIXED_ACCEPTED_ROW_COUNT
+    assert summary.rejected == 1
     with sqlite3.connect(master_manifest_path) as connection:
         rows = connection.execute(
             "SELECT p.source_row_index, p.filename, s.cleaning_decision, s.contamination_rate, "
@@ -681,7 +685,7 @@ def test_run_graph_cleaning_pipeline_updates_only_canonical_cancer_rows(
     assert rows == [
         (0, "cancer_accept.png", "accepted", 0.1, 1, "STAGE3_3"),
         (1, "cancer_reject.png", "rejected", 0.5, 0, "STAGE3_3"),
-        (2, "not_cancer_ignore.png", None, None, None, "STAGE2"),
+        (2, "not_cancer_ignore.png", "accepted", None, 1, "STAGE3_3"),
     ]
 
 

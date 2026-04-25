@@ -99,8 +99,9 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
     )
 
     candidates = _list_manifest_candidates(config.master_manifest_path, config.logger)
+    bypassed_decisions = _list_negative_bypass_decisions(config.master_manifest_path, config.logger)
 
-    if not candidates:
+    if not candidates and not bypassed_decisions:
         return GraphCleaningSummary(
             total_images=0,
             accepted=0,
@@ -111,7 +112,12 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
             rejected_manifest_path=rejected_manifest_path,
         )
 
-    config.logger.info("Found %s source rows to process.", len(candidates))
+    config.logger.info(
+        "Found %s cancer source rows to score and %s non-cancer rows to accept without "
+        "graph scoring.",
+        len(candidates),
+        len(bypassed_decisions),
+    )
     decisions = _process_hdf5_candidates(
         candidates=candidates,
         graph_params=config.graph_params,
@@ -119,6 +125,7 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
         scorer=config.scorer,
         progress_factory=config.progress_factory,
     )
+    decisions.extend(bypassed_decisions)
     MasterManifest(config.master_manifest_path).update_stage3_3_cleaning_decisions(
         decisions=[record.__dict__ for record in decisions]
     )
@@ -128,7 +135,8 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
     skipped_total = 0
 
     config.logger.info("\n--- Filtering Complete ---")
-    config.logger.info("Total source rows analyzed: %s", len(candidates))
+    config.logger.info("Cancer source rows analyzed: %s", len(candidates))
+    config.logger.info("Non-cancer source rows bypassed as accepted: %s", len(bypassed_decisions))
     config.logger.info("Accepted rows: %s", result_counts[ACCEPTED])
     config.logger.info("Rejected rows: %s", result_counts[REJECTED])
     config.logger.info("Skipped rows: %s", skipped_total)
@@ -137,7 +145,7 @@ def run_graph_cleaning_pipeline(config: GraphCleaningPipelineConfig) -> GraphCle
         "A detailed log has been saved to: %s", _resolve_log_destination(config.logger)
     )
     return GraphCleaningSummary(
-        total_images=len(candidates),
+        total_images=len(decisions),
         accepted=result_counts[ACCEPTED],
         rejected=result_counts[REJECTED],
         skipped=skipped_total,
@@ -152,7 +160,7 @@ def build_cleaning_message(summary: GraphCleaningSummary) -> str:
 
     return (
         "\n\n--- Cleaning Complete ---\n"
-        f"Total source rows analyzed: {summary.total_images}\n"
+        f"Total source rows processed: {summary.total_images}\n"
         f"Accepted: {summary.accepted}\n"
         f"Rejected: {summary.rejected}\n"
         f"Skipped: {summary.skipped}\n"
@@ -186,6 +194,36 @@ def _list_manifest_candidates(
             continue
         candidates.append(_candidate_from_manifest_record(record))
     return candidates
+
+
+def _list_negative_bypass_decisions(
+    master_manifest_path: Path,
+    logger: logging.Logger,
+) -> list[CleaningDecisionRecord]:
+    try:
+        records = MasterManifest(master_manifest_path).list_stage2_patch_records()
+    except FileNotFoundError:
+        logger.error("The Stage 2 master manifest '%s' does not exist.", master_manifest_path)
+        return []
+
+    decisions: list[CleaningDecisionRecord] = []
+    for record in records:
+        if record.label != 0:
+            continue
+        candidate = _candidate_from_manifest_record(record)
+        decisions.append(
+            CleaningDecisionRecord(
+                filename=candidate.filename,
+                decision=ACCEPTED,
+                contamination_rate=None,
+                patient_id=candidate.patient_id,
+                slide_id=candidate.slide_id,
+                source_hdf5_path=candidate.source_hdf5_path,
+                source_hdf5_sha256=candidate.source_hdf5_sha256,
+                source_row_index=candidate.source_row_index,
+            )
+        )
+    return decisions
 
 
 def _candidate_from_manifest_record(record: ManifestPatchRecord) -> SourceCandidateRecord:
