@@ -26,12 +26,11 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     config = load_smart_sampler_config(
         {
             "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
-            "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
         }
     )
 
     assert config.master_manifest_path == master_manifest_path
-    assert config.output_dir == tmp_path / "out"
+    assert config.output_dir == tmp_path / "STAGE6_SMART_SAMPLER"
     assert config.output_filename == "TRAIN_FILTERED_shards"
     assert config.stage_input_locally is False
     assert config.stage_outputs_locally is False
@@ -90,6 +89,37 @@ def test_load_smart_sampler_config_reads_gist_flag_and_legacy_alias(tmp_path: Pa
 
     assert config.use_gist is True
     assert alias_config.use_gist is True
+
+
+def test_load_smart_sampler_config_accepts_output_dir_under_manifest_root(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
+
+    config = load_smart_sampler_config(
+        {
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+            "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "custom_stage6"),
+        }
+    )
+
+    assert config.output_dir == tmp_path / "custom_stage6"
+
+
+def test_load_smart_sampler_config_rejects_output_dir_outside_manifest_root(
+    tmp_path: Path,
+) -> None:
+    manifest_root = tmp_path / "manifest_root"
+    manifest_root.mkdir()
+    master_manifest_path = manifest_root / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
+
+    with pytest.raises(ValueError, match="SMART_SAMPLER_OUTPUT_DIR must be under"):
+        load_smart_sampler_config(
+            {
+                "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+                "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "CHILE_RESULTS"),
+            }
+        )
 
 
 def test_load_smart_sampler_config_reads_protection_settings(tmp_path: Path) -> None:

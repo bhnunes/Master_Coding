@@ -59,6 +59,25 @@ def _required_path(value: str | None, variable_name: str) -> Path:
     return path
 
 
+def _resolve_output_dir(value: str | None, master_manifest_path: Path) -> Path:
+    manifest_root = master_manifest_path.parent
+    output_dir = (
+        manifest_root / "STAGE6_SMART_SAMPLER"
+        if value is None or value.strip() == ""
+        else resolve_env_path(value, "SMART_SAMPLER_OUTPUT_DIR", required=True)
+    )
+    assert output_dir is not None
+    try:
+        output_dir.expanduser().relative_to(manifest_root.expanduser())
+    except ValueError as error:
+        raise ValueError(
+            "SMART_SAMPLER_OUTPUT_DIR must be under the directory containing "
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH. Leave SMART_SAMPLER_OUTPUT_DIR blank to use "
+            f"the default: {manifest_root / 'STAGE6_SMART_SAMPLER'}."
+        ) from error
+    return output_dir
+
+
 @dataclass(frozen=True)
 class SmartSamplerConfig:
     master_manifest_path: Path
@@ -115,7 +134,10 @@ def load_smart_sampler_config(
         values.get("SMART_SAMPLER_MASTER_MANIFEST_PATH"),
         "SMART_SAMPLER_MASTER_MANIFEST_PATH",
     )
-    output_dir = _required_path(values.get("SMART_SAMPLER_OUTPUT_DIR"), "SMART_SAMPLER_OUTPUT_DIR")
+    output_dir = _resolve_output_dir(
+        values.get("SMART_SAMPLER_OUTPUT_DIR"),
+        master_manifest_path,
+    )
     local_work_dir = resolve_env_path(
         values.get("SMART_SAMPLER_LOCAL_WORK_DIR"), "SMART_SAMPLER_LOCAL_WORK_DIR"
     )
