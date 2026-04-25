@@ -17,8 +17,8 @@ from helpers.runtime_platform import load_openslide_module
 
 
 @dataclass(frozen=True)
-class HisegLabelColors:
-    """Hardcoded HISEG XML color policy."""
+class HiesdLabelColors:
+    """Hardcoded HIESD XML color policy."""
 
     cancer: frozenset[str] = frozenset({"#8B0000", "#FF00FF", "#800080"})
     not_cancer: frozenset[str] = frozenset(
@@ -27,7 +27,7 @@ class HisegLabelColors:
     rejected: frozenset[str] = frozenset({"#4B0082"})
 
 
-HISEG_LABEL_COLORS = HisegLabelColors()
+HIESD_LABEL_COLORS = HiesdLabelColors()
 
 
 @dataclass(frozen=True)
@@ -150,16 +150,16 @@ class SVS_XML_Handler(BaseHandler):
             raise FileNotFoundError(f"Annotation file not found: {annotation_path}")
 
         root = ET.parse(annotation_path).getroot()
-        if _is_hiseg_tag(kwargs.get("dataset_tag")):
-            return self._load_hiseg_annotations(
+        if _is_hiesd_tag(kwargs.get("dataset_tag")):
+            return self._load_hiesd_annotations(
                 slide,
                 root,
-                annotation_level=_required_int(kwargs.get("hiseg_xml_coord_level")),
+                annotation_level=_required_int(kwargs.get("hiesd_xml_coord_level")),
             )
         if _is_chile_tag(kwargs.get("dataset_tag")):
             return self._load_chile_annotations(root)
         raise ValueError(
-            "Unsupported .svs/.xml dataset tag. Supported tags are 'HISEG' and 'CHILE'."
+            "Unsupported .svs/.xml dataset tag. Supported tags are 'HIESD' and 'CHILE'."
         )
 
     def _load_chile_annotations(self, root: ET.Element) -> dict[str, list[Any]]:
@@ -188,7 +188,7 @@ class SVS_XML_Handler(BaseHandler):
 
         return _finalize_polygons(raw_cancer_coords, raw_not_cancer_coords)
 
-    def _load_hiseg_annotations(
+    def _load_hiesd_annotations(
         self,
         slide: Any,
         root: ET.Element,
@@ -196,19 +196,19 @@ class SVS_XML_Handler(BaseHandler):
         annotation_level: int,
     ) -> dict[str, list[Any]]:
         if slide is None:
-            raise ValueError("slide is required for HISEG annotation scaling")
+            raise ValueError("slide is required for HIESD annotation scaling")
         if annotation_level < 0:
-            raise ValueError("hiseg_xml_coord_level must be non-negative")
+            raise ValueError("hiesd_xml_coord_level must be non-negative")
         if annotation_level >= len(slide.level_downsamples):
             raise ValueError(
-                "HISEG annotation level "
+                "HIESD annotation level "
                 f"{annotation_level} is out of range for slide with "
                 f"{len(slide.level_downsamples)} levels."
             )
 
         annotation_scale = float(slide.level_downsamples[annotation_level])
         logging.info(
-            "Scaling HISEG XML annotations from level %s to level 0 with downsample %.6f.",
+            "Scaling HIESD XML annotations from level %s to level 0 with downsample %.6f.",
             annotation_level,
             annotation_scale,
         )
@@ -217,11 +217,11 @@ class SVS_XML_Handler(BaseHandler):
 
         for annotation in root.findall(".//Annotation"):
             normalized_color = _normalize_hex_color(annotation.get("Color"))
-            if normalized_color in HISEG_LABEL_COLORS.rejected:
+            if normalized_color in HIESD_LABEL_COLORS.rejected:
                 continue
 
-            is_cancer = normalized_color in HISEG_LABEL_COLORS.cancer
-            is_non_cancer = normalized_color in HISEG_LABEL_COLORS.not_cancer
+            is_cancer = normalized_color in HIESD_LABEL_COLORS.cancer
+            is_non_cancer = normalized_color in HIESD_LABEL_COLORS.not_cancer
             if not (is_cancer or is_non_cancer):
                 continue
 
@@ -379,8 +379,8 @@ def _normalize_hex_color(value: str | None) -> str:
     return normalized if normalized.startswith("#") else f"#{normalized}"
 
 
-def _is_hiseg_tag(value: object) -> bool:
-    return isinstance(value, str) and value.strip().upper() == "HISEG"
+def _is_hiesd_tag(value: object) -> bool:
+    return isinstance(value, str) and value.strip().upper() == "HIESD"
 
 
 def _is_chile_tag(value: object) -> bool:

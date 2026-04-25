@@ -25,8 +25,8 @@ from helpers.extraction.data_handlers import (
 EXPECTED_POLYGON_COUNT = 2
 EXPECTED_SQUARE_AREA = 16.0
 EXPECTED_NON_OVERLAPPING_AREA = 12.0
-EXPECTED_HISEG_CANCER_POLYGON_COUNT = 3
-HISEG_COORD_LEVEL = 6
+EXPECTED_HIESD_CANCER_POLYGON_COUNT = 3
+HIESD_COORD_LEVEL = 6
 EXPECTED_MIN_X = 64.0
 EXPECTED_MAX_X = 192.0
 EXPECTED_MIN_Y = 128.0
@@ -166,7 +166,7 @@ def test_svs_xml_handler_rejects_unsupported_dataset_tag(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Supported tags are 'HISEG' and 'CHILE'"):
+    with pytest.raises(ValueError, match="Supported tags are 'HIESD' and 'CHILE'"):
         SVS_XML_Handler().load_annotations(
             None,
             annotation_path=str(annotation_path),
@@ -174,7 +174,7 @@ def test_svs_xml_handler_rejects_unsupported_dataset_tag(tmp_path: Path) -> None
         )
 
 
-def test_svs_xml_handler_supports_hiseg_asap_color_mapping(tmp_path: Path) -> None:
+def test_svs_xml_handler_supports_hiesd_asap_color_mapping(tmp_path: Path) -> None:
     annotation_path = tmp_path / "slide.xml"
     annotation_path.write_text(
         """
@@ -210,8 +210,8 @@ def test_svs_xml_handler_supports_hiseg_asap_color_mapping(tmp_path: Path) -> No
     result = SVS_XML_Handler().load_annotations(
         FakeSlide(),
         annotation_path=str(annotation_path),
-        dataset_tag="HISEG",
-        hiseg_xml_coord_level=0,
+        dataset_tag="HIESD",
+        hiesd_xml_coord_level=0,
     )
 
     assert len(result["cancer_polygons"]) == 1
@@ -286,7 +286,7 @@ def test_svs_xml_handler_uses_hardcoded_chile_colors_with_65408(tmp_path: Path) 
     assert len(result["not_cancer_polygons"]) == 1
 
 
-def test_svs_xml_handler_merges_multiple_hiseg_cancer_colors(tmp_path: Path) -> None:
+def test_svs_xml_handler_merges_multiple_hiesd_cancer_colors(tmp_path: Path) -> None:
     annotation_path = tmp_path / "slide.xml"
     annotation_path.write_text(
         """
@@ -322,15 +322,15 @@ def test_svs_xml_handler_merges_multiple_hiseg_cancer_colors(tmp_path: Path) -> 
     result = SVS_XML_Handler().load_annotations(
         FakeSlide(),
         annotation_path=str(annotation_path),
-        dataset_tag="HISEG",
-        hiseg_xml_coord_level=0,
+        dataset_tag="HIESD",
+        hiesd_xml_coord_level=0,
     )
 
-    assert len(result["cancer_polygons"]) == EXPECTED_HISEG_CANCER_POLYGON_COUNT
+    assert len(result["cancer_polygons"]) == EXPECTED_HIESD_CANCER_POLYGON_COUNT
     assert result["not_cancer_polygons"] == []
 
 
-def test_svs_xml_handler_scales_hiseg_coordinates_from_configured_level(tmp_path: Path) -> None:
+def test_svs_xml_handler_scales_hiesd_coordinates_from_configured_level(tmp_path: Path) -> None:
     annotation_path = tmp_path / "slide.xml"
     annotation_path.write_text(
         """
@@ -352,8 +352,8 @@ def test_svs_xml_handler_scales_hiseg_coordinates_from_configured_level(tmp_path
     result = SVS_XML_Handler().load_annotations(
         FakeSlide(),
         annotation_path=str(annotation_path),
-        dataset_tag="HISEG",
-        hiseg_xml_coord_level=HISEG_COORD_LEVEL,
+        dataset_tag="HIESD",
+        hiesd_xml_coord_level=HIESD_COORD_LEVEL,
     )
 
     assert result["not_cancer_polygons"] == []

@@ -18,7 +18,7 @@ def _signature_config(
     *,
     artifacts_geojson_path: Path | None,
     use_advanced_artifact_filtering: bool,
-    hiseg_xml_coord_level: int,
+    hiesd_xml_coord_level: int,
 ) -> ProcessingSignatureConfig:
     return ProcessingSignatureConfig(
         image_path=image_path,
@@ -30,7 +30,7 @@ def _signature_config(
         tissue_percentage=0.3,
         target_level=0,
         use_advanced_artifact_filtering=use_advanced_artifact_filtering,
-        hiseg_xml_coord_level=hiseg_xml_coord_level,
+        hiesd_xml_coord_level=hiesd_xml_coord_level,
     )
 
 
@@ -50,7 +50,7 @@ def test_artifact_lookup_namespace_smoke_path(tmp_path: Path) -> None:
         annotation_path,
         artifacts_geojson_path=geojson_path,
         use_advanced_artifact_filtering=True,
-        hiseg_xml_coord_level=6,
+        hiesd_xml_coord_level=6,
     )
 
     assert (
@@ -152,7 +152,7 @@ def test_build_processing_signature_changes_when_geojson_metadata_changes(tmp_pa
             annotation_path,
             artifacts_geojson_path=geojson_path,
             use_advanced_artifact_filtering=True,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 
@@ -163,7 +163,7 @@ def test_build_processing_signature_changes_when_geojson_metadata_changes(tmp_pa
             annotation_path,
             artifacts_geojson_path=geojson_path,
             use_advanced_artifact_filtering=True,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 
@@ -201,7 +201,7 @@ def test_build_processing_signature_hashes_exact_payload(
             annotation_path,
             artifacts_geojson_path=geojson_path,
             use_advanced_artifact_filtering=True,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 
@@ -218,7 +218,7 @@ def test_build_processing_signature_hashes_exact_payload(
             "tissue_percentage": 0.3,
             "target_level": 0,
             "use_advanced_artifact_filtering": True,
-            "hiseg_xml_coord_level": 6,
+            "hiesd_xml_coord_level": 6,
         }
     ]
 
@@ -261,7 +261,7 @@ def test_build_processing_signature_skips_missing_geojson_fingerprint(
             annotation_path,
             artifacts_geojson_path=missing_geojson_path,
             use_advanced_artifact_filtering=False,
-            hiseg_xml_coord_level=5,
+            hiesd_xml_coord_level=5,
         )
     )
 
@@ -269,7 +269,7 @@ def test_build_processing_signature_skips_missing_geojson_fingerprint(
     assert captured_payloads[0]["artifacts_geojson"] is None
 
 
-def test_build_processing_signature_changes_when_hiseg_coord_level_changes(tmp_path: Path) -> None:
+def test_build_processing_signature_changes_when_hiesd_coord_level_changes(tmp_path: Path) -> None:
     image_path = tmp_path / "case_a.svs"
     annotation_path = tmp_path / "case_a.xml"
     image_path.write_text("slide")
@@ -281,7 +281,7 @@ def test_build_processing_signature_changes_when_hiseg_coord_level_changes(tmp_p
             annotation_path,
             artifacts_geojson_path=None,
             use_advanced_artifact_filtering=False,
-            hiseg_xml_coord_level=5,
+            hiesd_xml_coord_level=5,
         )
     )
     signature_after = build_processing_signature(
@@ -290,7 +290,7 @@ def test_build_processing_signature_changes_when_hiseg_coord_level_changes(tmp_p
             annotation_path,
             artifacts_geojson_path=None,
             use_advanced_artifact_filtering=False,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 
@@ -323,7 +323,7 @@ def test_build_processing_signature_avoids_opening_raw_input_files(
             annotation_path,
             artifacts_geojson_path=geojson_path,
             use_advanced_artifact_filtering=True,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 
@@ -340,7 +340,7 @@ def test_build_processing_signature_changes_when_image_metadata_changes(tmp_path
             annotation_path,
             artifacts_geojson_path=None,
             use_advanced_artifact_filtering=False,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 
@@ -351,7 +351,7 @@ def test_build_processing_signature_changes_when_image_metadata_changes(tmp_path
             annotation_path,
             artifacts_geojson_path=None,
             use_advanced_artifact_filtering=False,
-            hiseg_xml_coord_level=6,
+            hiesd_xml_coord_level=6,
         )
     )
 

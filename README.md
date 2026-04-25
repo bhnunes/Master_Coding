@@ -6,7 +6,7 @@ A Python research pipeline for pathology whole-slide-image (WSI) processing. It 
 
 - Whole-slide image processing (supports `.svs`, `.ndpi`, `.tiff` formats)
 - Annotation handling for multiple formats (XML, NDPA, JSON)
-- Dataset-aware Phase 2 SVS/XML parsing, including HISEG ASAP-style XML support
+- Dataset-aware Phase 2 SVS/XML parsing, including HIESD ASAP-style XML support
 - Patch extraction with tissue detection and artifact filtering
 - Patient-level stratified dataset splitting on HDF5 datasets
 - Train-fitted stain normalization support
@@ -212,13 +212,13 @@ Current Phase 2 artifact-aware behavior:
 Current Phase 2 multi-dataset XML behavior:
 
 - `.svs/.xml` support is dataset-aware and selected through `TAG`
-- `.svs/.xml` is supported only for `TAG=HISEG` and `TAG=Chile`
+- `.svs/.xml` is supported only for `TAG=HIESD` and `TAG=Chile`
 - Unsupported `.svs/.xml` tags now fail fast with an explicit error
-- `TAG=HISEG` enables the HISEG-specific ASAP XML path in `helpers/extraction/data_handlers.py`
+- `TAG=HIESD` enables the HIESD-specific ASAP XML path in `helpers/extraction/data_handlers.py`
 - `TAG=Chile` enables the CHILE-specific XML `LineColor` path in `helpers/extraction/data_handlers.py`
-- HISEG reads `Annotation Color="#..."` plus `Coordinates/Coordinate` entries instead of the legacy `LineColor` + `Region/Vertex` layout
+- HIESD reads `Annotation Color="#..."` plus `Coordinates/Coordinate` entries instead of the legacy `LineColor` + `Region/Vertex` layout
 - Phase 2 now resolves supported SVS/XML label colors internally in code rather than through SQLite columns
-- HISEG color policy is:
+- HIESD color policy is:
   - cancer: `#8B0000`, `#FF00FF`, `#800080`
   - not_cancer: `#8A2BE2`, `#0000FF`, `#4682B4`, `#00FF00`, `#008000`, `#FFFF00`
   - rejected: `#4B0082` (skipped entirely)
@@ -388,7 +388,7 @@ MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
 ```
 
-For SVS/XML datasets, use `TAG=HISEG` or `TAG=Chile`. Phase 2 resolves the supported label colors internally and does not require manual SQLite color setup.
+For SVS/XML datasets, use `TAG=HIESD` or `TAG=Chile`. Phase 2 resolves the supported label colors internally and does not require manual SQLite color setup.
 
 See `.env_example` for the current commented template, including Phase 1, Phase 2 local WSI staging, Phase 3 cleaning, Phase 4/5 manifest-driven preparation, Phase 6 smart-sampling sidecars, Phase 7 LR-finder reporting, the Phase 8 training matrix, and Phase 9 ensemble-optimizer settings.
 
@@ -486,9 +486,9 @@ uv run --python 3.12 python 1_artifact_detection.py
 # Configure .env first, then:
 uv run --python 3.12 python 2_database_manager.py
 
-# HISEG example
-# Set TAG=HISEG in .env, place `.svs` slides in IMAGES_HISEG,
-# place matching `.xml` files in ANNOTATIONS_HISEG, then run:
+# HIESD example
+# Set TAG=HIESD in .env, place `.svs` slides in IMAGES_HIESD,
+# place matching `.xml` files in ANNOTATIONS_HIESD, then run:
 uv run --python 3.12 python 2_database_manager.py
 
 # 3. Annotation Cleaning (optional, for cancer patches)

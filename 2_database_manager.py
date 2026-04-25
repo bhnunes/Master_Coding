@@ -158,7 +158,7 @@ def build_processing_signature_for_case(
             tissue_percentage=config.tissue_percentage,
             target_level=runtime_settings.target_level,
             use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
-            hiseg_xml_coord_level=config.hiseg_xml_coord_level,
+            hiesd_xml_coord_level=config.hiesd_xml_coord_level,
         )
     )
 
@@ -188,7 +188,7 @@ def build_slide_request(
         target_level=runtime_settings.target_level,
         num_workers=runtime_settings.num_workers,
         use_advanced_artifact_filtering=runtime_settings.use_advanced_artifact_filtering,
-        hiseg_xml_coord_level=config.hiseg_xml_coord_level,
+        hiesd_xml_coord_level=config.hiesd_xml_coord_level,
         openslide_cache_bytes=runtime_settings.openslide_cache_bytes,
         hdf5_compression=runtime_settings.hdf5_compression,
         preload_scan_area_max_bytes=runtime_settings.preload_scan_area_max_bytes,

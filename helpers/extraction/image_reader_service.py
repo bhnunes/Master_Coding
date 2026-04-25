@@ -58,7 +58,7 @@ class SlideProcessingRequest:
     target_level: int
     num_workers: int
     use_advanced_artifact_filtering: bool
-    hiseg_xml_coord_level: int
+    hiesd_xml_coord_level: int
     openslide_cache_bytes: int
     hdf5_compression: str | None
     preload_scan_area_max_bytes: int
@@ -172,7 +172,7 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
             tissue_percentage_req=request.tissue_percentage,
             match_percentage_req=request.match_percentage,
             dataset_tag=request.dataset_tag,
-            hiseg_xml_coord_level=request.hiseg_xml_coord_level,
+            hiesd_xml_coord_level=request.hiesd_xml_coord_level,
             patient=request.patient,
             path_artifacts_geojson=str(request.artifacts_geojson_path)
             if request.artifacts_geojson_path is not None

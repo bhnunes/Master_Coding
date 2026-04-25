@@ -17,7 +17,7 @@ _MODULE_SPEC.loader.exec_module(_MODULE)
 build_slide_request = _MODULE.build_slide_request
 
 
-HISEG_XML_COORD_LEVEL = 6
+HIESD_XML_COORD_LEVEL = 6
 
 
 def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -> None:
@@ -55,7 +55,7 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
         use_advanced_artifact_filtering=False,
         activate_sanity_check_geojson=False,
         geojson_path=None,
-        hiseg_xml_coord_level=6,
+        hiesd_xml_coord_level=6,
         copy_wsi_to_local_cache=False,
         local_slide_cache_dir=None,
         log_folder=tmp_path / "logs",
@@ -82,7 +82,7 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
 
     assert request.hdf5_output_path == tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide_a.h5"
     assert request.dataset_tag == "TEST"
-    assert request.hiseg_xml_coord_level == HISEG_XML_COORD_LEVEL
+    assert request.hiesd_xml_coord_level == HIESD_XML_COORD_LEVEL
     assert request.hdf5_compression == "gzip"
     assert request.preload_scan_area_max_bytes == 0
 
@@ -108,7 +108,7 @@ def test_build_slide_request_requires_annotation_path(tmp_path: Path) -> None:
         processing_signature=None,
     )
     config = DatabaseManagerConfig(
-        tag="HISEG",
+        tag="HIESD",
         source_folder=tmp_path / "source",
         database_path=tmp_path / "db.sqlite",
         base_path=tmp_path,
@@ -122,7 +122,7 @@ def test_build_slide_request_requires_annotation_path(tmp_path: Path) -> None:
         use_advanced_artifact_filtering=False,
         activate_sanity_check_geojson=False,
         geojson_path=None,
-        hiseg_xml_coord_level=6,
+        hiesd_xml_coord_level=6,
         copy_wsi_to_local_cache=False,
         local_slide_cache_dir=None,
         log_folder=tmp_path / "logs",

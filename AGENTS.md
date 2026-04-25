@@ -72,7 +72,7 @@ Agent guide for coding agents working in this repository.
 - Prefer the smallest correct change over broad rewrites.
 - Reuse existing helpers before creating new modules.
 - Preserve existing pipeline contracts unless the task explicitly changes them.
-- For Phase 2 `.svs/.xml` work, verify whether `TAG=HISEG` is active before changing color or XML parsing behavior.
+- For Phase 2 `.svs/.xml` work, verify whether `TAG=HIESD` is active before changing color or XML parsing behavior.
 - Every behavior change needs tests.
 - For bug fixes, add or update a regression test.
 - Run targeted tests for touched code before finishing.
@@ -131,7 +131,7 @@ Agent guide for coding agents working in this repository.
 - Use `helpers.runtime_platform.resolve_env_path` and related helpers for path-like environment variables.
 - Preserve cross-platform behavior, especially Windows `OPENSLIDE_PATH` handling.
 - `master_manifest.sqlite` now stores source-file lineage relative to `SOURCE_FOLDER` and generated-artifact lineage relative to the manifest directory. Do not reintroduce machine-specific absolute persisted paths.
-- `TAG=HISEG` enables the HISEG-specific Phase 2 SVS/XML annotation path.
+- `TAG=HIESD` enables the HIESD-specific Phase 2 SVS/XML annotation path.
 - `TAG=Chile` enables the CHILE-specific Phase 2 SVS/XML annotation path.
 - Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
 - Phase 7 LR-finder auth now accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both env vars before model creation.
@@ -156,7 +156,7 @@ Agent guide for coding agents working in this repository.
 - Preserve filename parity and filename-keyed provenance joins.
 - Preserve label semantics: cancer is positive (`1`), not-cancer is negative (`0`).
 - Do not change stain normalization, sampling semantics, artifact logic, or contamination logic without explicit intent.
-- For HISEG XML annotations, preserve the hardcoded label policy: cancer colors map to positive, not-cancer colors map to negative, and rejected colors are skipped entirely.
+- For HIESD XML annotations, preserve the hardcoded label policy: cancer colors map to positive, not-cancer colors map to negative, and rejected colors are skipped entirely.
 - In HDF5 workflows, keep canonical dataset names stable: `images`, `masks`, `labels`, `patient_ids`, `filenames`.
 
 ## Phase Boundaries

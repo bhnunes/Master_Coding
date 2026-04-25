@@ -11,7 +11,7 @@ from helpers.extraction.image_reader_service import (
 
 CREATED_CANCER_PATCHES = 7
 CREATED_NOT_CANCER_PATCHES = 3
-HISEG_XML_COORD_LEVEL = 6
+HIESD_XML_COORD_LEVEL = 6
 WINDOW_SIZE = 224
 OPENSLIDE_CACHE_BYTES = 134217728
 
@@ -70,7 +70,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
         target_level=0,
         num_workers=2,
         use_advanced_artifact_filtering=False,
-        hiseg_xml_coord_level=HISEG_XML_COORD_LEVEL,
+        hiesd_xml_coord_level=HIESD_XML_COORD_LEVEL,
         openslide_cache_bytes=OPENSLIDE_CACHE_BYTES,
         hdf5_compression="gzip",
         preload_scan_area_max_bytes=0,
@@ -88,7 +88,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert captured["path_Image"] == str(tmp_path / "slide.svs")
     assert captured["patient"] == "100001"
     assert captured["dataset_tag"] == "TEST"
-    assert captured["hiseg_xml_coord_level"] == HISEG_XML_COORD_LEVEL
+    assert captured["hiesd_xml_coord_level"] == HIESD_XML_COORD_LEVEL
     assert captured["window_size"] == WINDOW_SIZE
     assert captured["profile_output_path"] == str(tmp_path / "profile.json")
     assert captured["openslide_cache_bytes"] == OPENSLIDE_CACHE_BYTES

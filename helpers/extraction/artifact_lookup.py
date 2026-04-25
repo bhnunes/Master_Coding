@@ -72,7 +72,7 @@ class ProcessingSignatureConfig:
     tissue_percentage: float
     target_level: int
     use_advanced_artifact_filtering: bool
-    hiseg_xml_coord_level: int
+    hiesd_xml_coord_level: int
 
 
 def resolve_geojson_for_slide(
@@ -108,6 +108,6 @@ def build_processing_signature(
             "tissue_percentage": float(config.tissue_percentage),
             "target_level": int(config.target_level),
             "use_advanced_artifact_filtering": bool(config.use_advanced_artifact_filtering),
-            "hiseg_xml_coord_level": int(config.hiseg_xml_coord_level),
+            "hiesd_xml_coord_level": int(config.hiesd_xml_coord_level),
         }
     )
