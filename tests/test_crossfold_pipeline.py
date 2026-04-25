@@ -69,7 +69,6 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
     provenance_kwargs: dict[str, object] = {}
     persist_kwargs: dict[str, object] = {}
     template_selection_calls: list[dict[str, object]] = []
-    normalization_artifact_calls: list[dict[str, object]] = []
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
     def record(name: str, return_value: object | None = None) -> object | None:
@@ -126,34 +125,6 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
         fake_save_template_selection_artifacts,
     )
 
-    def fake_generate_all_normalization_artifacts(
-        output_dir: Path, **kwargs: object
-    ) -> list[dict[str, object]]:
-        normalization_artifact_calls.append({"output_dir": output_dir, **kwargs})
-        return cast(
-            list[dict[str, object]],
-            record(
-                "normalization_artifacts",
-                [
-                    {
-                        "method": "REINHARD",
-                        "state_path": (
-                            output_dir
-                            / "runtime_normalization_artifacts"
-                            / "reinhard"
-                            / "normalization_stats.json"
-                        ),
-                        "template_path": output_dir / "template_selection",
-                        "fit_scope": "TRAIN",
-                    }
-                ],
-            ),
-        )
-
-    monkeypatch.setattr(
-        "helpers.crossfold.pipeline.generate_all_normalization_artifacts",
-        fake_generate_all_normalization_artifacts,
-    )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.write_manifest_and_log_stats",
         lambda **kwargs: (provenance_kwargs.update(kwargs), record("provenance")),
@@ -197,16 +168,8 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
     assert cast(dict[str, Any], provenance_config.extra)["template_selection"] == {
         "template_count": 1
     }
-    assert cast(dict[str, Any], provenance_config.extra)["normalization_artifacts"] == [
-        {
-            "method": "REINHARD",
-            "state_path": "runtime_normalization_artifacts/reinhard/normalization_stats.json",
-            "template_path": "template_selection",
-            "fit_scope": "TRAIN",
-        }
-    ]
+    assert cast(dict[str, Any], provenance_config.extra)["normalization_artifacts"] == []
     assert len(template_selection_calls) == 1
-    assert len(normalization_artifact_calls) == 1
     assert calls.count("split") == 1
     assert calls.count("entropy") == 1
     assert calls.count("template_rows") == 1
@@ -223,7 +186,6 @@ def test_run_crossfold_pipeline_executes_stage_flow(  # noqa: PLR0915
         "template_rows",
         "aggregate_target",
         "template_artifacts",
-        "normalization_artifacts",
         "provenance",
         "persist",
     ]
@@ -299,7 +261,6 @@ def test_run_crossfold_pipeline_computes_entropy_once_for_train_split(
     entropy_inputs: list[pd.DataFrame] = []
     template_rows_inputs: list[dict[str, object]] = []
     template_artifact_calls: list[dict[str, object]] = []
-    normalization_artifact_calls: list[dict[str, object]] = []
     persist_kwargs: dict[str, object] = {}
     cached_provenance = {"path": str(source_path), "sha256": "source-hash", "attrs": {}}
 
@@ -360,14 +321,6 @@ def test_run_crossfold_pipeline_computes_entropy_once_for_train_split(
         fake_save_template_artifacts,
     )
 
-    def fake_generate_normalization_artifacts(output_dir: Path, **kwargs: object) -> list[object]:
-        normalization_artifact_calls.append({"output_dir": output_dir, **kwargs})
-        return []
-
-    monkeypatch.setattr(
-        "helpers.crossfold.pipeline.generate_all_normalization_artifacts",
-        fake_generate_normalization_artifacts,
-    )
     monkeypatch.setattr(
         "helpers.crossfold.pipeline.build_hdf5_manifest_from_split_dfs",
         lambda **kwargs: manifest_df,
@@ -410,7 +363,6 @@ def test_run_crossfold_pipeline_computes_entropy_once_for_train_split(
         "/src/train_1.png"
     ]
     assert len(template_artifact_calls) == 1
-    assert len(normalization_artifact_calls) == 1
     split_frames = cast(dict[str, pd.DataFrame], persist_kwargs["split_frames"])
     assert split_frames["TRAIN"]["image_path"].tolist() == ["/src/train_1.png"]
     assert split_frames["VALIDATION"]["image_path"].tolist() == ["/src/val_1.png"]
