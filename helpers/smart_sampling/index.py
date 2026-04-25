@@ -62,7 +62,7 @@ class MasterManifestIndex:
                 patient_paths[patient_id] = source_hdf5_path
             elif existing_path != source_hdf5_path:
                 raise ValueError(
-                    "Stage 7 requires one canonical Stage 2 shard per patient, but patient "
+                    "Stage 6 requires one canonical Stage 2 shard per patient, but patient "
                     f"{patient_id} spans multiple source_hdf5_path values: "
                     f"{existing_path} and {source_hdf5_path}."
                 )

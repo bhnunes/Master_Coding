@@ -58,7 +58,7 @@ class H5PatchDataset(Dataset[Any]):
         global_idx = int(self.indices[idx])
         image_data = np.asarray(cast(Any, self.images_dset)[global_idx])
         if image_data.ndim != IMAGE_TENSOR_NDIM:
-            raise ValueError(f"Expected 3D image tensor for Stage 7, got shape {image_data.shape}.")
+            raise ValueError(f"Expected 3D image tensor for Stage 6, got shape {image_data.shape}.")
         if image_data.shape[0] <= CHANNEL_FIRST_IMAGE_MAX:
             image_data = np.transpose(image_data, (1, 2, 0))
         return np.asarray(image_data, dtype=np.uint8)
@@ -109,7 +109,7 @@ class EmbeddingExtractor:
             return processor_factory.from_pretrained(self.config.model_name)
         except Exception as error:
             raise RuntimeError(
-                f"Failed to initialize Stage 7 image processor '{self.config.model_name}'."
+                f"Failed to initialize Stage 6 image processor '{self.config.model_name}'."
             ) from error
 
     def _init_model(self) -> torch.nn.Module:
@@ -118,7 +118,7 @@ class EmbeddingExtractor:
             model = model_factory.from_pretrained(self.config.model_name)
         except Exception as error:
             raise RuntimeError(
-                f"Failed to initialize Stage 7 model '{self.config.model_name}'."
+                f"Failed to initialize Stage 6 model '{self.config.model_name}'."
             ) from error
         model = cast(torch.nn.Module, model).to(self.device)
         model.eval()

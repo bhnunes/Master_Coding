@@ -160,7 +160,7 @@ def test_embedding_extractor_raises_clear_error_when_model_init_fails(
     )
     monkeypatch.setattr("helpers.smart_sampling.embeddings.AutoModel", BrokenModelFactory())
 
-    with pytest.raises(RuntimeError, match="Failed to initialize Stage 7 model"):
+    with pytest.raises(RuntimeError, match="Failed to initialize Stage 6 model"):
         EmbeddingExtractor(config)
 
 

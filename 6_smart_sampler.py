@@ -37,11 +37,11 @@ def main() -> None:
         gc.collect()
         outputs = run_smart_sampling_pipeline(config)
     except Exception as error:
-        print(f"Stage 7 smart sampling failed: {error}")
+        print(f"Stage 6 smart sampling failed: {error}")
         raise SystemExit(2) from error
 
-    logging.info("Stage 7 label-aware smart sampling completed successfully")
-    print("Stage 7 label-aware smart sampling completed successfully:")
+    logging.info("Stage 6 label-aware smart sampling completed successfully")
+    print("Stage 6 label-aware smart sampling completed successfully:")
     logging.info("Total input patches: %d", outputs.total_input_samples)
     logging.info("Kept patches: %d", outputs.selected_sample_count)
     logging.info("Rejected patches: %d", outputs.rejected_sample_count)

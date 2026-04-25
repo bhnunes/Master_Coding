@@ -62,16 +62,16 @@ class _SamplingAccumulator:
 
 def _log_sampling_start(config: SmartSamplerConfig) -> None:
     logging.info(
-        "Starting Stage 7 label-aware smart sampling from %s",
+        "Starting Stage 6 label-aware smart sampling from %s",
         config.master_manifest_path,
     )
     logging.info(
-        "Using Stage 7 selector: %s",
+        "Using Stage 6 selector: %s",
         "GIST facility-location" if config.use_gist else "legacy adaptive coverage",
     )
-    logging.info("Using Stage 7 embedding model: %s", config.model_name)
+    logging.info("Using Stage 6 embedding model: %s", config.model_name)
     logging.info(
-        "Stage 7 preserves positive labels=%s and mask-positive rows=%s before reducible sampling",
+        "Stage 6 preserves positive labels=%s and mask-positive rows=%s before reducible sampling",
         config.protect_positive_labels,
         config.protect_mask_positive,
     )
@@ -276,7 +276,7 @@ def run_smart_sampling_pipeline(
     extractor_factory: type[EmbeddingExtractor] | Any = EmbeddingExtractor,
 ) -> SmartSamplingOutputs:
     _log_sampling_start(config)
-    logging.info("Preparing Stage 7 storage")
+    logging.info("Preparing Stage 6 storage")
     storage = prepare_storage(config)
     logging.info("Building TRAIN patient index from %s", config.master_manifest_path)
     shard_index = MasterManifestIndex.build(config.master_manifest_path)
@@ -361,7 +361,7 @@ def run_smart_sampling_pipeline(
     )
     logging.info(
         (
-            "Stage 7 summary: kept %d/%d patches "
+            "Stage 6 summary: kept %d/%d patches "
             "(rejected %d, %.2f%% kept) across %d patients; %d patients reduced"
         ),
         kept_samples,

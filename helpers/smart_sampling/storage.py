@@ -39,7 +39,7 @@ def prepare_storage(config: SmartSamplerConfig) -> PreparedSmartSamplerStorage:
     if config.stage_outputs_locally:
         assert local_work_dir is not None
         sidecar_output_dir = _output_stage_dir(local_work_dir)
-        logging.info("Writing Stage 7 sidecars locally first in %s", sidecar_output_dir)
+        logging.info("Writing Stage 6 sidecars locally first in %s", sidecar_output_dir)
 
     return PreparedSmartSamplerStorage(
         final_output_dir=final_output_dir,
@@ -57,7 +57,7 @@ def publish_outputs(
     run_config_path: Path | None,
 ) -> tuple[Path | None, Path | None, Path | None]:
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    logging.info("Publishing Stage 7 sidecars back to %s", config.output_dir)
+    logging.info("Publishing Stage 6 sidecars back to %s", config.output_dir)
     published_selection_csv_path = _publish_optional_file(selection_csv_path, config.output_dir)
     published_stats_csv_path = _publish_optional_file(stats_csv_path, config.output_dir)
     published_run_config_path = _publish_optional_file(run_config_path, config.output_dir)
