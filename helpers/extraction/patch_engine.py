@@ -677,6 +677,13 @@ def _window_masks(context, patch_coords, patch_polygon, prepared_patch_polygon, 
             )
         return cancer_mask, non_cancer_mask
 
+    patch_polygon = _ensure_patch_polygon(
+        patch_polygon,
+        x_int=patch_coords[0],
+        y_int=patch_coords[1],
+        window_size=window_size,
+    )
+    prepared_patch_polygon = prepared_patch_polygon or prep(patch_polygon)
     cancer_mask_started_at = time.perf_counter()
     cancer_mask = polygons_to_mask_with_index(
         (window_size, window_size),
@@ -707,6 +714,12 @@ def _window_masks(context, patch_coords, patch_polygon, prepared_patch_polygon, 
             time.perf_counter() - non_cancer_mask_started_at,
         )
     return cancer_mask, non_cancer_mask
+
+
+def _ensure_patch_polygon(patch_polygon, *, x_int, y_int, window_size):
+    if patch_polygon is not None:
+        return patch_polygon
+    return shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
 
 
 def _decide_window_label(context, cancer_mask, non_cancer_mask):
@@ -758,7 +771,7 @@ def _read_window_patch(slide, context, patch_coords, x_int, y_int, window_phase_
     return patch_np
 
 
-def _compute_window_artifact_coverages(context, patch_polygon, window_phase_stats):
+def _compute_window_artifact_coverages(context, patch_polygon, x_int, y_int, window_phase_stats):
     artifact_coverages = get_zero_artifact_coverages()
     artifact_region_masks = context.get("artifact_region_masks")
     if context.get("use_artifact_filter") and artifact_region_masks:
@@ -768,8 +781,8 @@ def _compute_window_artifact_coverages(context, patch_polygon, window_phase_stat
                 mask,
                 region_x_start=context["region_x_start"],
                 region_y_start=context["region_y_start"],
-                x_int=int(patch_polygon.bounds[0]),
-                y_int=int(patch_polygon.bounds[1]),
+                x_int=x_int,
+                y_int=y_int,
                 window_size=context["window_size"],
             )
             artifact_coverages[column_name] = float(np.count_nonzero(patch_mask) / PATCH_AREA)
@@ -784,6 +797,12 @@ def _compute_window_artifact_coverages(context, patch_polygon, window_phase_stat
     artifact_geometry_index = context.get("artifact_geometry_index")
     if context.get("use_artifact_filter") and artifact_geometry_index:
         artifact_started_at = time.perf_counter()
+        patch_polygon = _ensure_patch_polygon(
+            patch_polygon,
+            x_int=x_int,
+            y_int=y_int,
+            window_size=context["window_size"],
+        )
         artifact_coverages = compute_artifact_coverages_from_index(
             artifact_geometry_index=artifact_geometry_index,
             patch_polygon=patch_polygon,
@@ -818,9 +837,9 @@ def _window_has_sufficient_tissue(
             y_int=y_int,
             window_size=context["window_size"],
         )
-        tissue_ok = (
-            np.count_nonzero(tissue_patch) / PATCH_AREA
-        ) >= context["tissue_percentage_req"]
+        tissue_ok = (np.count_nonzero(tissue_patch) / PATCH_AREA) >= context[
+            "tissue_percentage_req"
+        ]
         if window_phase_stats is not None:
             record_phase(
                 window_phase_stats,
@@ -864,8 +883,11 @@ def _process_window_with_slide(slide, x, y):
     x_int, y_int = int(x), int(y)
     patch_coords = (x_int, y_int)
     window_size = context["window_size"]
-    patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
-    prepared_patch_polygon = prep(patch_polygon)
+    patch_polygon = None
+    prepared_patch_polygon = None
+    if context.get("label_region_masks") is None:
+        patch_polygon = shapely.box(x_int, y_int, x_int + window_size, y_int + window_size)
+        prepared_patch_polygon = prep(patch_polygon)
     cancer_mask, non_cancer_mask = _window_masks(
         context,
         patch_coords,
@@ -905,6 +927,8 @@ def _process_window_with_slide(slide, x, y):
     artifact_coverages = _compute_window_artifact_coverages(
         context,
         patch_polygon,
+        x_int,
+        y_int,
         window_phase_stats,
     )
     return _build_saved_window_result(
@@ -1296,8 +1320,7 @@ def _raise_worker_errors(errors, slide_basename):
     first_handler = logging.getLogger().handlers[0]
     log_filename = getattr(first_handler, "baseFilename", "patch_extraction.log")
     error_summary = (
-        f"{len(errors)} worker process(es) failed. See '{log_filename}' "
-        "for detailed tracebacks."
+        f"{len(errors)} worker process(es) failed. See '{log_filename}' for detailed tracebacks."
     )
     raise Exception(error_summary)
 

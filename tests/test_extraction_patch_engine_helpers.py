@@ -592,6 +592,53 @@ def test_process_window_with_slide_skips_overlap_before_reading_slide(
     assert result[2]["read_region"].calls == 0
 
 
+def test_process_window_with_precomputed_masks_skips_shapely_patch_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSlide:
+        def read_region(
+            self, coords: tuple[int, int], level: int, size: tuple[int, int]
+        ) -> Image.Image:
+            del coords, level, size
+            return Image.new("RGB", (PATCH_SIDE, PATCH_SIDE), color=(10, 20, 30))
+
+    def fail_box(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("precomputed mask path should not build per-window geometry")
+
+    monkeypatch.setattr(patch_engine.shapely, "box", fail_box)
+    monkeypatch.setattr(patch_engine, "PATCH_AREA", PATCH_SIDE * PATCH_SIDE)
+    patch_engine._WORKER_CONTEXT = {
+        "window_size": PATCH_SIDE,
+        "use_artifact_filter": True,
+        "target_level": 0,
+        "tissue_percentage_req": 0.1,
+        "match_percentage_req": 0.1,
+        "patient": "p1",
+        "slide_id": "slide-a",
+        "filename_prefix": patch_engine.build_patch_filename_prefix(
+            patient_id="p1",
+            slide_id="slide-a",
+        ),
+        "region_x_start": 0,
+        "region_y_start": 0,
+        "label_region_masks": {
+            "cancer": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+            "not_cancer": np.zeros((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        },
+        "artifact_region_masks": {
+            "cov_fold": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+        },
+        "tissue_region_mask": np.ones((PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+    }
+
+    result = cast(
+        tuple[str, dict[str, Any]], patch_engine._process_window_with_slide(FakeSlide(), 0, 0)
+    )
+
+    assert result[0] == "SAVED_CANCER"
+    assert result[1]["cov_fold"] == 1.0
+
+
 def test_process_window_batch_returns_profiled_error_when_worker_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

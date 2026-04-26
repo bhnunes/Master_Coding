@@ -97,6 +97,34 @@ def test_write_slide_patch_dataset_hdf5_supports_in_memory_patch_records(tmp_pat
         assert set(np.unique(handle["masks"][0]).tolist()) == {1}
 
 
+def test_write_slide_patch_dataset_hdf5_signature_is_stable_across_batch_sizes(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide_batched.h5"
+    records = [
+        {
+            "filename": f"patch_{index}.png",
+            "label": index % 2,
+            "patient_id": "2002",
+            "slide_id": "slide_batched",
+            "_image_array": np.full((4, 4, 3), index, dtype=np.uint8),
+            "_mask_array": np.full((4, 4), index % 2, dtype=np.uint8),
+        }
+        for index in range(5)
+    ]
+
+    write_slide_patch_dataset_hdf5(output_path=output_path, records=records, batch_size=1)
+    with h5py.File(output_path, "r") as handle:
+        single_row_signature = str(handle.attrs["source_signature"])
+
+    write_slide_patch_dataset_hdf5(output_path=output_path, records=records, batch_size=3)
+    with h5py.File(output_path, "r") as handle:
+        batched_signature = str(handle.attrs["source_signature"])
+        assert handle["labels"][:].tolist() == [0, 1, 0, 1, 0]
+
+    assert batched_signature == single_row_signature
+
+
 def test_write_slide_patch_dataset_hdf5_rejects_records_without_in_memory_arrays(
     tmp_path: Path,
 ) -> None:

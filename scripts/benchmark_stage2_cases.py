@@ -84,6 +84,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Benchmark extraction without writing the Stage 2 HDF5 shard.",
     )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Override NUM_WORKERS for this benchmark run without editing the env file.",
+    )
     return parser
 
 
@@ -94,6 +100,10 @@ def main() -> None:
     load_dotenv(args.env_file, override=True)
     config = load_database_manager_config(os.environ)
     runtime_settings = load_slide_runtime_settings(os.environ)
+    if args.num_workers is not None:
+        if args.num_workers < 1:
+            raise ValueError("--num-workers must be at least 1.")
+        runtime_settings = replace(runtime_settings, num_workers=args.num_workers)
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
     stage2_module = cast(Any, _load_stage2_module())
 
@@ -197,6 +207,7 @@ def main() -> None:
         json.dumps(
             {
                 "case_ids": list(case_ids),
+                "num_workers": runtime_settings.num_workers,
                 "results": [asdict(result) for result in results],
                 "total_elapsed_seconds": round(
                     sum(result.elapsed_seconds for result in results), 6
