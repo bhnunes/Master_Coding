@@ -18,6 +18,7 @@ from helpers.lr_finder.reporting import RunRecord
 from helpers.lr_finder.runner import (
     LossConfigRunContext,
     LRFinderRunConfig,
+    _dispose_lr_finder,
     _run_single_loss_config,
     clear_gpu,
     configure_execution_mode,
@@ -120,6 +121,31 @@ def test_clear_gpu_calls_optional_ipc_collect(monkeypatch: pytest.MonkeyPatch) -
     assert calls == ["empty_cache", "ipc_collect"]
 
 
+def test_dispose_lr_finder_clears_cached_state_file(tmp_path: Path) -> None:
+    cache_path = tmp_path / "state_model.pt"
+    cache_path.write_text("cached", encoding="utf-8")
+    lr_finder = SimpleNamespace(
+        state_cacher=SimpleNamespace(in_memory=False, cached={"model": str(cache_path)}),
+        _train_batch=lambda: None,
+        model=object(),
+        optimizer=object(),
+        criterion=object(),
+        grad_scaler=object(),
+        history={"lr": [1.0], "loss": [2.0]},
+    )
+
+    _dispose_lr_finder(lr_finder)
+
+    assert not cache_path.exists()
+    assert lr_finder.state_cacher is None
+    assert lr_finder._train_batch is None
+    assert lr_finder.model is None
+    assert lr_finder.optimizer is None
+    assert lr_finder.criterion is None
+    assert lr_finder.grad_scaler is None
+    assert lr_finder.history is None
+
+
 def test_plot_stability_curves_replaces_colab_inline_backend(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -144,12 +170,19 @@ def test_run_lr_finder_once_raises_when_range_test_fails(
 ) -> None:
     class FakeLRFinder:
         def __init__(
-            self, model: object, optimizer: object, criterion: object, device: object
+            self,
+            model: object,
+            optimizer: object,
+            criterion: object,
+            device: object,
+            *,
+            memory_cache: bool = True,
         ) -> None:
             self.model = model
             self.optimizer = optimizer
             self.criterion = criterion
             self.device = device
+            self.memory_cache = memory_cache
             self.history: dict[str, list[float]] | None = None
 
         def range_test(
@@ -177,15 +210,25 @@ def test_run_lr_finder_once_raises_when_range_test_fails(
 def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    constructor_kwargs: dict[str, object] = {}
+
     class FakeLRFinder:
         def __init__(
-            self, model: object, optimizer: object, criterion: object, device: object
+            self,
+            model: object,
+            optimizer: object,
+            criterion: object,
+            device: object,
+            *,
+            memory_cache: bool = True,
         ) -> None:
             self.model = model
             self.optimizer = optimizer
             self.criterion = criterion
             self.device = device
+            self.memory_cache = memory_cache
             self.history: dict[str, list[float]] | None = None
+            constructor_kwargs["memory_cache"] = memory_cache
 
         def range_test(
             self, train_loader: object, end_lr: float, num_iter: int, step_mode: str
@@ -208,6 +251,7 @@ def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
     history = run_lr_finder_once(_run_config())
 
     assert os.environ["MPLBACKEND"] == "Agg"
+    assert constructor_kwargs == {"memory_cache": False}
     assert history["lr"].size == 0
     assert history["loss"].size == 0
 
@@ -217,12 +261,19 @@ def test_run_lr_finder_once_returns_partial_history_after_non_finite_loss(
 ) -> None:
     class FakeLRFinder:
         def __init__(
-            self, model: object, optimizer: object, criterion: object, device: object
+            self,
+            model: object,
+            optimizer: object,
+            criterion: object,
+            device: object,
+            *,
+            memory_cache: bool = True,
         ) -> None:
             self.model = model
             self.optimizer = optimizer
             self.criterion = criterion
             self.device = device
+            self.memory_cache = memory_cache
             self.history: dict[str, list[float]] = {"lr": [1e-5, 1e-4], "loss": [0.9, 0.7]}
 
         def range_test(
@@ -274,12 +325,19 @@ def test_run_lr_finder_once_supports_non_blocking_transfer_keyword(
 
     class FakeLRFinder:
         def __init__(
-            self, model: object, optimizer: object, criterion: object, device: object
+            self,
+            model: object,
+            optimizer: object,
+            criterion: object,
+            device: object,
+            *,
+            memory_cache: bool = True,
         ) -> None:
             self.model = model
             self.optimizer = optimizer
             self.criterion = criterion
             self.device = device
+            self.memory_cache = memory_cache
             self.history: dict[str, list[float]] = {"lr": [], "loss": []}
             self._train_batch: Any
 

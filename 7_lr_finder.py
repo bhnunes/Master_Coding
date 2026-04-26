@@ -4,6 +4,8 @@ import gc
 import logging
 import os
 
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import torch
 from dotenv import load_dotenv
 
@@ -46,7 +48,6 @@ def _print_completion_summary(outputs: LRFinderOutputs) -> None:
 def main() -> None:
     """Run Stage 8 LR Finder screening and build the LaTeX PDF report."""
 
-    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     load_dotenv(override=True)
     try:
         config = load_lr_finder_config(os.environ)

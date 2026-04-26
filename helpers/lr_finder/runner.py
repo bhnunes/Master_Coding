@@ -265,13 +265,49 @@ def _extract_lr_finder_history(
     }
 
 
+def _remove_lr_finder_cache_files(cached_paths: Any) -> None:
+    if not isinstance(cached_paths, dict):
+        return
+    for cached_path in cached_paths.values():
+        if not isinstance(cached_path, str):
+            continue
+        try:
+            os.remove(cached_path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.debug("Unable to remove LR finder cache file %s", cached_path)
+
+
+def _clear_lr_finder_state_cache(lr_finder: Any) -> None:
+    state_cacher = getattr(lr_finder, "state_cacher", None)
+    if state_cacher is None:
+        return
+
+    cached = getattr(state_cacher, "cached", None)
+    if not getattr(state_cacher, "in_memory", True):
+        _remove_lr_finder_cache_files(cached)
+    if isinstance(cached, dict):
+        cached.clear()
+    lr_finder.state_cacher = None
+
+
+def _clear_lr_finder_references(lr_finder: Any) -> None:
+    for attribute in (
+        "_train_batch",
+        "model",
+        "optimizer",
+        "criterion",
+        "grad_scaler",
+        "history",
+    ):
+        if hasattr(lr_finder, attribute):
+            setattr(lr_finder, attribute, None)
+
+
 def _dispose_lr_finder(lr_finder: Any) -> None:
-    if hasattr(lr_finder, "model"):
-        lr_finder.model = None
-    if hasattr(lr_finder, "optimizer"):
-        lr_finder.optimizer = None
-    if hasattr(lr_finder, "criterion"):
-        lr_finder.criterion = None
+    _clear_lr_finder_state_cache(lr_finder)
+    _clear_lr_finder_references(lr_finder)
 
 
 def _ensure_headless_matplotlib_backend() -> None:
@@ -284,7 +320,13 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
     from torch_lr_finder import LRFinder
 
     amp_dtype, scaler, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
-    lr_finder = LRFinder(config.model, config.optimizer, config.criterion, device=config.device)
+    lr_finder = LRFinder(
+        config.model,
+        config.optimizer,
+        config.criterion,
+        device=config.device,
+        memory_cache=False,
+    )
 
     lr_finder._train_batch = _build_lr_finder_train_batch(
         amp_dtype=amp_dtype,
@@ -319,6 +361,8 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
     finally:
         _dispose_lr_finder(lr_finder)
         del lr_finder
+        gc.collect()
+        clear_gpu()
 
     return _extract_lr_finder_history(history)
 
@@ -548,55 +592,60 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
     try:
         for model_plan in config.model_plans:
             initial_state_dict = _capture_pretrained_model_state(model_plan, device)
-            architecture_completed_before = completed_trials
-            architecture_failed_before = failed_trials
-            for config_index, params in enumerate(lhs_samples, start=1):
-                record, ok_count, fail_count = _run_single_loss_config(
-                    config,
-                    LossConfigRunContext(
-                        device=device,
-                        data_bundle=data_bundle,
-                        model_plan=model_plan,
-                        params=params,
-                        config_index=config_index,
-                        gpu_normalizer=gpu_normalizer,
-                        gpu_downscale=gpu_downscale,
-                        initial_state_dict=initial_state_dict,
-                    ),
-                )
-                completed_trials += ok_count
-                failed_trials += fail_count
-                progress.advance(
-                    config.num_repeats,
-                    architecture=model_plan.architecture,
-                    encoder=model_plan.encoder,
-                    sample_index=config_index,
-                    total_samples=len(lhs_samples),
-                    completed_trials=completed_trials,
-                    failed_trials=failed_trials,
-                )
-                if record is not None:
-                    records.append(record)
+            try:
+                architecture_completed_before = completed_trials
+                architecture_failed_before = failed_trials
+                for config_index, params in enumerate(lhs_samples, start=1):
+                    record, ok_count, fail_count = _run_single_loss_config(
+                        config,
+                        LossConfigRunContext(
+                            device=device,
+                            data_bundle=data_bundle,
+                            model_plan=model_plan,
+                            params=params,
+                            config_index=config_index,
+                            gpu_normalizer=gpu_normalizer,
+                            gpu_downscale=gpu_downscale,
+                            initial_state_dict=initial_state_dict,
+                        ),
+                    )
+                    completed_trials += ok_count
+                    failed_trials += fail_count
+                    progress.advance(
+                        config.num_repeats,
+                        architecture=model_plan.architecture,
+                        encoder=model_plan.encoder,
+                        sample_index=config_index,
+                        total_samples=len(lhs_samples),
+                        completed_trials=completed_trials,
+                        failed_trials=failed_trials,
+                    )
+                    if record is not None:
+                        records.append(record)
 
-            architecture_records = [
-                item for item in records if item.architecture == model_plan.architecture
-            ]
-            if architecture_records:
-                architecture_summary_path = (
-                    config.output_dir
-                    / model_plan.architecture
-                    / f"SUMMARY_{model_plan.architecture}_STABILITY.csv"
-                )
-                pd.DataFrame([asdict(item) for item in architecture_records]).to_csv(
-                    architecture_summary_path,
-                    index=False,
-                )
-                architecture_summary_paths[model_plan.architecture] = architecture_summary_path
-            architecture_trial_stats[model_plan.architecture] = {
-                "valid_records": len(architecture_records),
-                "completed_trials": completed_trials - architecture_completed_before,
-                "failed_trials": failed_trials - architecture_failed_before,
-            }
+                architecture_records = [
+                    item for item in records if item.architecture == model_plan.architecture
+                ]
+                if architecture_records:
+                    architecture_summary_path = (
+                        config.output_dir
+                        / model_plan.architecture
+                        / f"SUMMARY_{model_plan.architecture}_STABILITY.csv"
+                    )
+                    pd.DataFrame([asdict(item) for item in architecture_records]).to_csv(
+                        architecture_summary_path,
+                        index=False,
+                    )
+                    architecture_summary_paths[model_plan.architecture] = architecture_summary_path
+                architecture_trial_stats[model_plan.architecture] = {
+                    "valid_records": len(architecture_records),
+                    "completed_trials": completed_trials - architecture_completed_before,
+                    "failed_trials": failed_trials - architecture_failed_before,
+                }
+            finally:
+                del initial_state_dict
+                gc.collect()
+                clear_gpu()
     finally:
         progress.finish()
         close_dataset = getattr(data_bundle.dataset, "close", None)
