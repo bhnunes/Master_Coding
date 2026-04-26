@@ -274,7 +274,13 @@ def _dispose_lr_finder(lr_finder: Any) -> None:
         lr_finder.criterion = None
 
 
+def _ensure_headless_matplotlib_backend() -> None:
+    if os.environ.get("MPLBACKEND") == _COLAB_INLINE_MPL_BACKEND:
+        os.environ["MPLBACKEND"] = "Agg"
+
+
 def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.float64]]:
+    _ensure_headless_matplotlib_backend()
     from torch_lr_finder import LRFinder
 
     amp_dtype, scaler, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
@@ -318,8 +324,7 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
 
 
 def _load_matplotlib_pyplot() -> Any:
-    if os.environ.get("MPLBACKEND") == _COLAB_INLINE_MPL_BACKEND:
-        os.environ["MPLBACKEND"] = "Agg"
+    _ensure_headless_matplotlib_backend()
 
     import matplotlib
 

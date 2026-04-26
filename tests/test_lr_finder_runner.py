@@ -203,9 +203,11 @@ def test_run_lr_finder_once_returns_empty_arrays_when_history_is_missing(
     import sys
 
     monkeypatch.setitem(sys.modules, "torch_lr_finder", SimpleNamespace(LRFinder=FakeLRFinder))
+    monkeypatch.setenv("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
     history = run_lr_finder_once(_run_config())
 
+    assert os.environ["MPLBACKEND"] == "Agg"
     assert history["lr"].size == 0
     assert history["loss"].size == 0
 
