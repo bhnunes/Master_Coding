@@ -18,6 +18,7 @@ from helpers.lr_finder.runner import (
     LossConfigRunContext,
     LRFinderRunConfig,
     _run_single_loss_config,
+    _SnapshotProgressReporter,
     clear_gpu,
     configure_execution_mode,
     plot_stability_curves,
@@ -117,6 +118,32 @@ def test_clear_gpu_calls_optional_ipc_collect(monkeypatch: pytest.MonkeyPatch) -
     clear_gpu()
 
     assert calls == ["empty_cache", "ipc_collect"]
+
+
+def test_snapshot_progress_reporter_renders_compact_status_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = _SnapshotProgressReporter(total_trials=4)
+
+    reporter.advance(
+        2,
+        architecture="UNET++",
+        encoder="resnet34",
+        sample_index=1,
+        total_samples=2,
+        completed_trials=1,
+        failed_trials=1,
+    )
+    reporter.finish()
+
+    output = capsys.readouterr().out
+    assert "LR Finder [" in output
+    assert "2/4 (50.0%)" in output
+    assert "model=UNET++/resnet34" in output
+    assert "step=1/2" in output
+    assert "passed=1" in output
+    assert "failed=1" in output
+    assert "trials/s" in output
 
 
 def test_plot_stability_curves_replaces_colab_inline_backend(

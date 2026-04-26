@@ -89,14 +89,31 @@ class LossConfigRunContext:
 
 
 class _SnapshotProgressReporter:
-    """Emit compact periodic progress snapshots instead of a live progress bar."""
+    """Emit a compact single-line progress bar for LR-finder screening."""
+
+    _BAR_WIDTH = 18
 
     def __init__(self, total_trials: int) -> None:
         self._total_trials = total_trials
         self._completed = 0
         self._started_at = time.monotonic()
-        self._snapshot_every = max(1, min(25, max(5, total_trials // 20)))
-        self._next_snapshot_at = min(total_trials, self._snapshot_every)
+        self._last_rendered_length = 0
+        self._rendered = False
+
+    def _progress_bar(self) -> str:
+        if self._total_trials <= 0:
+            return "[" + ("#" * self._BAR_WIDTH) + "]"
+        completed_width = min(
+            self._BAR_WIDTH,
+            int(self._BAR_WIDTH * self._completed / self._total_trials),
+        )
+        return "[" + ("#" * completed_width) + ("-" * (self._BAR_WIDTH - completed_width)) + "]"
+
+    def _render(self, line: str) -> None:
+        padding = " " * max(0, self._last_rendered_length - len(line))
+        print(f"\r{line}{padding}", end="", flush=True)
+        self._last_rendered_length = len(line)
+        self._rendered = True
 
     def advance(
         self,
@@ -110,27 +127,24 @@ class _SnapshotProgressReporter:
         failed_trials: int,
     ) -> None:
         self._completed += increment
-        if self._completed < self._next_snapshot_at and self._completed < self._total_trials:
-            return
-
         elapsed_seconds = max(1.0, time.monotonic() - self._started_at)
         rate = self._completed / elapsed_seconds
         percent_complete = (
             (100.0 * self._completed / self._total_trials) if self._total_trials else 100.0
         )
-        print(
-            "Progress: "
+        self._render(
+            "LR Finder "
+            f"{self._progress_bar()} "
             f"{self._completed}/{self._total_trials} ({percent_complete:.1f}%) | "
-            f"arch={architecture} | encoder={encoder} | "
-            f"sample={sample_index}/{total_samples} | "
-            f"ok={completed_trials} | fail={failed_trials} | "
-            f"rate={rate:.2f} trials/s"
+            f"model={architecture}/{encoder} | "
+            f"step={sample_index}/{total_samples} | "
+            f"passed={completed_trials} | failed={failed_trials} | "
+            f"{rate:.2f} trials/s"
         )
-        while self._next_snapshot_at <= self._completed:
-            self._next_snapshot_at += self._snapshot_every
 
     def finish(self) -> None:
-        return None
+        if self._rendered:
+            print()
 
 
 def configure_execution_mode(execution_mode: str) -> None:

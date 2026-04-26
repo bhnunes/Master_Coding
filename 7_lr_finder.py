@@ -25,11 +25,11 @@ def _apply_huggingface_token(hf_token: str | None) -> None:
 
 
 def _print_startup_summary(total_trials: int, output_dir: str) -> None:
-    print(f"Stage 8 LR Finder starting: expected_trials={total_trials} output_dir={output_dir}")
+    print(f"Stage 7 LR Finder starting: expected_trials={total_trials} output_dir={output_dir}")
 
 
 def _print_completion_summary(outputs: LRFinderOutputs) -> None:
-    print("Stage 8 LR Finder completed successfully")
+    print("Stage 7 LR Finder completed successfully")
     print(f"- Valid records: {outputs.valid_records}")
     print(f"- Completed trials: {outputs.completed_trials}")
     print(f"- Failed trials: {outputs.failed_trials}")
@@ -46,7 +46,7 @@ def _print_completion_summary(outputs: LRFinderOutputs) -> None:
 
 
 def main() -> None:
-    """Run Stage 8 LR Finder screening and build the LaTeX PDF report."""
+    """Run Stage 7 LR Finder screening and build the LaTeX PDF report."""
 
     load_dotenv(override=True)
     try:
@@ -67,7 +67,7 @@ def main() -> None:
         _print_startup_summary(total_trials, str(config.output_dir))
         logging.info(
             (
-                "Stage 8 LR Finder starting: architectures=%s lhs_samples=%s repeats=%s "
+                "Stage 7 LR Finder starting: architectures=%s lhs_samples=%s repeats=%s "
                 "expected_trials=%s output_dir=%s"
             ),
             len(config.model_plans),
@@ -82,10 +82,10 @@ def main() -> None:
         gc.collect()
         outputs = run_lr_finder_pipeline(config)
     except Exception as error:
-        print(f"Stage 8 LR Finder failed: {error}")
+        print(f"Stage 7 LR Finder failed: {error}")
         raise SystemExit(2) from error
 
-    logging.info("Stage 8 LR Finder completed successfully")
+    logging.info("Stage 7 LR Finder completed successfully")
     logging.info("PDF report: %s", outputs.pdf_path)
     logging.info("LaTeX source: %s", outputs.tex_path)
     logging.info("Run config JSON: %s", outputs.run_config_path)
