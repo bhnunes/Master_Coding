@@ -13,7 +13,6 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import torch
-from torch.amp.grad_scaler import GradScaler
 
 from helpers.lr_finder.analysis import compute_curve_stats
 from helpers.lr_finder.config import LRFinderConfig, ModelPlan
@@ -60,6 +59,19 @@ class LRFinderRunConfig:
     num_iter: int
     architecture: str
     amp_precision: str
+    gpu_normalizer: GPUNormalizer
+    gpu_downscale: GPUDownscale
+
+
+@dataclass(frozen=True)
+class LRFinderBatchRuntime:
+    model: torch.nn.Module
+    optimizer: torch.optim.Optimizer
+    criterion: torch.nn.Module
+    train_iter: Any
+    device: torch.device
+    amp_dtype: torch.dtype
+    scaler: Any | None
     gpu_normalizer: GPUNormalizer
     gpu_downscale: GPUDownscale
 
@@ -206,49 +218,115 @@ def _clone_state_dict_to_cpu(model: torch.nn.Module) -> dict[str, torch.Tensor]:
     return {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
 
 
-def _build_lr_finder_train_batch(
+def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
+
+
+def _exponential_lr_at_step(
+    *, start_lr: float, end_lr: float, step_index: int, num_iter: int
+) -> float:
+    if num_iter <= 1:
+        raise ValueError("LR finder num_iter must be larger than 1.")
+    if start_lr <= 0.0 or end_lr <= 0.0:
+        raise ValueError("LR finder start and end learning rates must be positive.")
+    ratio = step_index / (num_iter - 1)
+    return float(start_lr * (end_lr / start_lr) ** ratio)
+
+
+def _train_lr_finder_batch(runtime: LRFinderBatchRuntime) -> float:
+    runtime.model.train()
+    try:
+        batch_data = next(runtime.train_iter)
+    except StopIteration:
+        return float("nan")
+    images, masks = _prepare_lr_finder_batch(
+        batch_data,
+        device=runtime.device,
+        gpu_normalizer=runtime.gpu_normalizer,
+        gpu_downscale=runtime.gpu_downscale,
+    )
+    runtime.optimizer.zero_grad(set_to_none=True)
+    with autocast_ctx(images, runtime.amp_dtype):
+        outputs = _validate_lr_finder_outputs(runtime.model(images), masks)
+        loss = runtime.criterion(outputs, masks)
+    if not torch.isfinite(loss):
+        raise _NonFiniteLossError("LR finder produced a non-finite loss.")
+    if runtime.scaler is not None:
+        runtime.scaler.scale(loss).backward()
+        runtime.scaler.unscale_(runtime.optimizer)
+        runtime.scaler.step(runtime.optimizer)
+        runtime.scaler.update()
+    else:
+        loss.backward()
+        runtime.optimizer.step()
+    return float(loss.item())
+
+
+def _run_exponential_lr_range_test(
+    config: LRFinderRunConfig,
     *,
     amp_dtype: torch.dtype,
-    gpu_normalizer: GPUNormalizer,
-    gpu_downscale: GPUDownscale,
-    scaler: GradScaler | None,
-) -> Any:
-    def _train_batch_patched(
-        self: Any,
-        train_iter: Any,
-        accumulation_steps: int,
-        non_blocking_transfer: bool = True,
-        **kwargs: Any,
-    ) -> float:
-        del accumulation_steps, non_blocking_transfer, kwargs
-        self.model.train()
-        try:
-            batch_data = next(train_iter)
-        except StopIteration:
-            return float("nan")
-        images, masks = _prepare_lr_finder_batch(
-            batch_data,
-            device=self.device,
-            gpu_normalizer=gpu_normalizer,
-            gpu_downscale=gpu_downscale,
+    scaler: Any | None,
+    smooth_f: float = 0.05,
+    diverge_th: float = 5.0,
+) -> dict[str, list[float]]:
+    initial_lrs = [float(group["lr"]) for group in config.optimizer.param_groups]
+    start_lr = initial_lrs[0]
+    if len(set(initial_lrs)) != 1:
+        logger.warning(
+            "LR finder optimizer has multiple initial learning rates; using %s",
+            start_lr,
         )
-        self.optimizer.zero_grad(set_to_none=True)
-        with autocast_ctx(images, amp_dtype):
-            outputs = _validate_lr_finder_outputs(self.model(images), masks)
-            loss = self.criterion(outputs, masks)
-        if not torch.isfinite(loss):
-            raise _NonFiniteLossError("LR finder produced a non-finite loss.")
-        if scaler is not None:
-            scaler.scale(loss).backward()
-            scaler.unscale_(self.optimizer)
-            scaler.step(self.optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            self.optimizer.step()
-        return float(loss.item())
 
-    return _train_batch_patched
+    history: dict[str, list[float]] = {"lr": [], "loss": []}
+    best_loss: float | None = None
+    runtime = LRFinderBatchRuntime(
+        model=config.model,
+        optimizer=config.optimizer,
+        criterion=config.criterion,
+        train_iter=iter(config.train_loader),
+        device=config.device,
+        amp_dtype=amp_dtype,
+        scaler=scaler,
+        gpu_normalizer=config.gpu_normalizer,
+        gpu_downscale=config.gpu_downscale,
+    )
+    for step_index in range(config.num_iter):
+        current_lr = _exponential_lr_at_step(
+            start_lr=start_lr,
+            end_lr=config.end_lr,
+            step_index=step_index,
+            num_iter=config.num_iter,
+        )
+        _set_optimizer_lr(config.optimizer, current_lr)
+        try:
+            loss = _train_lr_finder_batch(runtime)
+        except _NonFiniteLossError:
+            logger.info(
+                (
+                    "LR finder stopped early after non-finite loss: architecture=%s "
+                    "completed_steps=%s requested_steps=%s"
+                ),
+                config.architecture,
+                len(history["loss"]),
+                config.num_iter,
+            )
+            break
+        history["lr"].append(current_lr)
+        if best_loss is None:
+            smoothed_loss = loss
+            best_loss = loss
+        else:
+            previous_loss = history["loss"][-1]
+            smoothed_loss = smooth_f * loss + (1.0 - smooth_f) * previous_loss
+            best_loss = min(best_loss, smoothed_loss)
+        history["loss"].append(smoothed_loss)
+        if best_loss > 0.0 and smoothed_loss > diverge_th * best_loss:
+            logger.info("LR finder stopped early after loss divergence.")
+            break
+
+    return history
 
 
 def _extract_lr_finder_history(
@@ -265,51 +343,6 @@ def _extract_lr_finder_history(
     }
 
 
-def _remove_lr_finder_cache_files(cached_paths: Any) -> None:
-    if not isinstance(cached_paths, dict):
-        return
-    for cached_path in cached_paths.values():
-        if not isinstance(cached_path, str):
-            continue
-        try:
-            os.remove(cached_path)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            logger.debug("Unable to remove LR finder cache file %s", cached_path)
-
-
-def _clear_lr_finder_state_cache(lr_finder: Any) -> None:
-    state_cacher = getattr(lr_finder, "state_cacher", None)
-    if state_cacher is None:
-        return
-
-    cached = getattr(state_cacher, "cached", None)
-    if not getattr(state_cacher, "in_memory", True):
-        _remove_lr_finder_cache_files(cached)
-    if isinstance(cached, dict):
-        cached.clear()
-    lr_finder.state_cacher = None
-
-
-def _clear_lr_finder_references(lr_finder: Any) -> None:
-    for attribute in (
-        "_train_batch",
-        "model",
-        "optimizer",
-        "criterion",
-        "grad_scaler",
-        "history",
-    ):
-        if hasattr(lr_finder, attribute):
-            setattr(lr_finder, attribute, None)
-
-
-def _dispose_lr_finder(lr_finder: Any) -> None:
-    _clear_lr_finder_state_cache(lr_finder)
-    _clear_lr_finder_references(lr_finder)
-
-
 def _ensure_headless_matplotlib_backend() -> None:
     if os.environ.get("MPLBACKEND") == _COLAB_INLINE_MPL_BACKEND:
         os.environ["MPLBACKEND"] = "Agg"
@@ -317,50 +350,20 @@ def _ensure_headless_matplotlib_backend() -> None:
 
 def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.float64]]:
     _ensure_headless_matplotlib_backend()
-    from torch_lr_finder import LRFinder
 
     amp_dtype, scaler, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
-    lr_finder = LRFinder(
-        config.model,
-        config.optimizer,
-        config.criterion,
-        device=config.device,
-        memory_cache=False,
-    )
-
-    lr_finder._train_batch = _build_lr_finder_train_batch(
-        amp_dtype=amp_dtype,
-        gpu_normalizer=config.gpu_normalizer,
-        gpu_downscale=config.gpu_downscale,
-        scaler=scaler,
-    ).__get__(lr_finder, LRFinder)
-    history: dict[str, Any] | None = None
+    history: dict[str, list[float]] | None = None
     try:
-        lr_finder.range_test(
-            config.train_loader,
-            end_lr=config.end_lr,
-            num_iter=config.num_iter,
-            step_mode="exp",
-        )
-        history = lr_finder.history
-    except _NonFiniteLossError:
-        history = getattr(lr_finder, "history", None)
-        completed_steps = 0 if history is None else len(history.get("loss", []))
-        logger.info(
-            (
-                "LR finder stopped early after non-finite loss: architecture=%s "
-                "completed_steps=%s requested_steps=%s"
-            ),
-            config.architecture,
-            completed_steps,
-            config.num_iter,
+        history = _run_exponential_lr_range_test(
+            config,
+            amp_dtype=amp_dtype,
+            scaler=scaler,
         )
     except Exception:
         logger.exception("LR finder range test failed for architecture %s", config.architecture)
         raise
     finally:
-        _dispose_lr_finder(lr_finder)
-        del lr_finder
+        del scaler
         gc.collect()
         clear_gpu()
 

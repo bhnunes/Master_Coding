@@ -83,8 +83,8 @@ def _validate_recipe_dataset_lineage(
             mismatches.append(f"{key}: recipe={expected} test={observed}")
     if mismatches:
         raise ValueError(
-            "Dataset lineage mismatch between recipe validation provenance and Stage 11 TEST rows: "
-            + "; ".join(mismatches)
+            "Dataset lineage mismatch between recipe validation provenance and "
+            "inference TEST rows: " + "; ".join(mismatches)
         )
 
 

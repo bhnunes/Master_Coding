@@ -27,7 +27,7 @@ def load_lr_finder_training_records(
     *,
     smart_sampling: bool,
 ) -> list[CanonicalRowRecord]:
-    """Load Stage 8 training rows from SQLite once at startup."""
+    """Load LR-finder training rows from SQLite once at startup."""
 
     return load_training_records(master_manifest_path, smart_sampling=smart_sampling)
 
@@ -37,7 +37,7 @@ def load_training_records(
     *,
     smart_sampling: bool,
 ) -> list[CanonicalRowRecord]:
-    """Load Stage 9 training rows from SQLite once at startup."""
+    """Load canonical training rows from SQLite once at startup."""
 
     return _load_split_records(
         master_manifest_path,
@@ -47,13 +47,13 @@ def load_training_records(
 
 
 def load_validation_records(master_manifest_path: Path) -> list[CanonicalRowRecord]:
-    """Load validation rows for Stages 8-10 from SQLite once at startup."""
+    """Load canonical validation rows from SQLite once at startup."""
 
     return _load_split_records(master_manifest_path, split="VALIDATION")
 
 
 def load_test_records(master_manifest_path: Path) -> list[CanonicalRowRecord]:
-    """Load Stage 11 test rows from SQLite once at startup."""
+    """Load canonical test rows from SQLite once at startup."""
 
     return _load_split_records(master_manifest_path, split="TEST")
 

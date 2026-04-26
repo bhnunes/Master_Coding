@@ -46,7 +46,6 @@ def test_pyproject_declares_repo_runtime_dependencies() -> None:
         "shapely",
         "torch-staintools",
         "torch",
-        "torch-lr-finder",
         "torchaudio",
         "torchmetrics",
         "torchvision",

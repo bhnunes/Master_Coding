@@ -876,7 +876,6 @@ dependencies = [
     { name = "setuptools" },
     { name = "shapely" },
     { name = "torch" },
-    { name = "torch-lr-finder" },
     { name = "torch-staintools" },
     { name = "torchaudio" },
     { name = "torchmetrics" },
@@ -929,7 +928,6 @@ requires-dist = [
     { name = "setuptools", specifier = "<82" },
     { name = "shapely", specifier = ">=2.0.0" },
     { name = "torch", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu126" },
-    { name = "torch-lr-finder", specifier = "==0.2.2" },
     { name = "torch-staintools", git = "https://github.com/CielAl/torch-staintools.git" },
     { name = "torchaudio", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torchmetrics", specifier = "==1.9.0" },
@@ -2192,22 +2190,6 @@ wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.10.0%2Bcu126-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:81264238b3d8840276dd30c31f393e325b8f5da6390d18ac2a80dacecfd693ea" },
     { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.10.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:2a7a569206f07965eff69b28e147676540bb0ba6e1a39410802b6e4708cb8356" },
     { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.10.0%2Bcu126-cp312-cp312-win_amd64.whl", hash = "sha256:95d8409b8a15191de4c2958e86ca47f3ea8f9739b994ee4ca0e7586f37336413" },
-]
-
-[[package]]
-name = "torch-lr-finder"
-version = "0.2.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "torch" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/40/05/2113d8d9ce2ac2d6a308d309f1b46816a1defec28a382f388af8df7bc8d6/torch_lr_finder-0.2.2.tar.gz", hash = "sha256:d659725028e1ab860deeabe01f445e07f758285c524c8720bd9cc3f39343c778", size = 17970, upload-time = "2024-09-21T20:56:07.464Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/e4/e1cceb992f874aef6dd66d641ac9214ad071a7d2760978bb22066c0b6ffe/torch_lr_finder-0.2.2-py3-none-any.whl", hash = "sha256:926f451a213a6f593902c6ed2a1fa1603fb2fbdd8fb2a427d2eac8f46086ad3b", size = 12442, upload-time = "2024-09-21T20:56:06.06Z" },
 ]
 
 [[package]]

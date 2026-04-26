@@ -139,7 +139,7 @@ def build_split_fingerprint(
     calibration_patients: set[str],
     holdout_patients: set[str],
 ) -> str:
-    """Return a deterministic fingerprint for Stage 11 patient subsets."""
+    """Return a deterministic fingerprint for inference patient subsets."""
 
     return hash_json_payload(
         {

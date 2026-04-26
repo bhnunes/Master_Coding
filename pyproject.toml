@@ -26,7 +26,6 @@ dependencies = [
     "matplotlib",
     "python-dotenv==1.2.2",
     "PyYAML",
-    "torch-lr-finder==0.2.2",
     "seaborn==0.13.2",
     "torchmetrics==1.9.0",
     "optuna==4.8.0",
