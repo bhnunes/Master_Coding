@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -117,6 +118,25 @@ def test_clear_gpu_calls_optional_ipc_collect(monkeypatch: pytest.MonkeyPatch) -
     clear_gpu()
 
     assert calls == ["empty_cache", "ipc_collect"]
+
+
+def test_plot_stability_curves_replaces_colab_inline_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MPLBACKEND", "module://matplotlib_inline.backend_inline")
+    out_png = tmp_path / "curve.png"
+
+    plot_stability_curves(
+        [np.array([1e-6, 1e-5, 1e-4], dtype=np.float64)],
+        [np.array([0.9, 0.5, 0.7], dtype=np.float64)],
+        title="LR finder",
+        out_png=out_png,
+        skip_start=0,
+        skip_end=0,
+    )
+
+    assert os.environ["MPLBACKEND"] == "Agg"
+    assert out_png.is_file()
 
 
 def test_run_lr_finder_once_raises_when_range_test_fails(

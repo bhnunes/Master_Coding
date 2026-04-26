@@ -3,13 +3,12 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -27,9 +26,9 @@ from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPa
 from helpers.training.models import create_model
 from helpers.training.runtime import autocast_ctx, seed_everything, setup_precision
 
-matplotlib.use("Agg")
-
 logger = logging.getLogger(__name__)
+
+_COLAB_INLINE_MPL_BACKEND = "module://matplotlib_inline.backend_inline"
 
 
 class _NonFiniteLossError(RuntimeError):
@@ -318,6 +317,18 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
     return _extract_lr_finder_history(history)
 
 
+def _load_matplotlib_pyplot() -> Any:
+    if os.environ.get("MPLBACKEND") == _COLAB_INLINE_MPL_BACKEND:
+        os.environ["MPLBACKEND"] = "Agg"
+
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    from matplotlib import pyplot
+
+    return pyplot
+
+
 def plot_stability_curves(
     all_lrs: list[npt.NDArray[np.float64]],
     all_losses: list[npt.NDArray[np.float64]],
@@ -327,6 +338,7 @@ def plot_stability_curves(
     skip_start: int = 10,
     skip_end: int = 5,
 ) -> None:
+    plt = _load_matplotlib_pyplot()
     plt.figure(figsize=(10, 6))
     for index, (lrs, losses) in enumerate(zip(all_lrs, all_losses, strict=True)):
         lower_bound = skip_start
