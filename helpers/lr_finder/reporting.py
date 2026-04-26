@@ -21,6 +21,7 @@ class RunRecord:
     median_min_loss: float
     plot_path: Path
     csv_path: Path
+    effective_batch_size: int | None = None
 
 
 def format_metric(value: float) -> str:

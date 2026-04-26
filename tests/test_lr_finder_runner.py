@@ -434,6 +434,79 @@ def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
     assert failed == config.num_repeats
 
 
+def test_run_single_loss_config_retries_cuda_oom_with_smaller_batch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    initial_batch_size = 4
+    retry_batch_size = 2
+    config = replace(_build_config(tmp_path), batch_size=initial_batch_size, num_repeats=1)
+    model_plan = ModelPlan(architecture="UNET++", encoder="efficientnet-b7")
+    params = BCEDiceParams(alpha=0.1, beta=0.2, gamma=0.3)
+    dataset = SimpleNamespace(close=lambda: None)
+    data_bundle = SimpleNamespace(dataset=dataset, sample_weights=np.array([1.0], dtype=np.float32))
+    batch_sizes: list[int] = []
+    run_calls = {"value": 0}
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor([1.0]))
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(
+                (images.shape[0], 2, images.shape[-2], images.shape[-1]),
+                dtype=images.dtype,
+            )
+
+    def fake_build_loader(*_args: object, **kwargs: object) -> object:
+        batch_sizes.append(cast(int, kwargs["batch_size"]))
+        return object()
+
+    def fake_run_once(_config: LRFinderRunConfig) -> dict[str, Any]:
+        run_calls["value"] += 1
+        if run_calls["value"] == 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 98.00 MiB.")
+        return {
+            "lr": np.linspace(1e-8, 1e-1, 25, dtype=np.float64),
+            "loss": np.linspace(2.0, 0.5, 25, dtype=np.float64),
+        }
+
+    monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
+    monkeypatch.setattr("helpers.lr_finder.runner.build_train_loader", fake_build_loader)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.create_model",
+        lambda architecture, encoder, validation=False: FakeModel(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.BCEDiceHybridLossPaper",
+        lambda config: torch.nn.CrossEntropyLoss(),
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.run_lr_finder_once", fake_run_once)
+    monkeypatch.setattr("helpers.lr_finder.runner.clear_gpu", lambda: None)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.plot_stability_curves",
+        lambda *_args, **_kwargs: None,
+    )
+
+    record, completed, failed = _run_single_loss_config(
+        config,
+        _loss_context(
+            data_bundle=data_bundle,
+            model_plan=model_plan,
+            params=params,
+            config_index=1,
+            device=torch.device("cpu"),
+            initial_state_dict={"weight": torch.tensor([1.0])},
+        ),
+    )
+
+    assert record is not None
+    assert record.effective_batch_size == retry_batch_size
+    assert completed == 1
+    assert failed == 0
+    assert batch_sizes == [initial_batch_size, retry_batch_size]
+
+
 def test_run_lr_finder_screening_writes_summaries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

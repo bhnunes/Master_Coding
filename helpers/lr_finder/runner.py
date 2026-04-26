@@ -7,7 +7,7 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -33,6 +33,12 @@ _COLAB_INLINE_MPL_BACKEND = "module://matplotlib_inline.backend_inline"
 
 class _NonFiniteLossError(RuntimeError):
     """Signal an LR-range test that diverged to a non-finite loss."""
+
+
+@dataclass(frozen=True)
+class LRFinderRepeatResult:
+    history: dict[str, npt.NDArray[np.float64]]
+    effective_batch_size: int
 
 
 @dataclass(frozen=True)
@@ -168,6 +174,36 @@ def clear_gpu() -> None:
                 ipc_collect()
         except Exception:
             pass
+
+
+def _is_cuda_out_of_memory(error: BaseException) -> bool:
+    oom_error = cast(type[BaseException], getattr(torch, "OutOfMemoryError", RuntimeError))
+    return isinstance(error, oom_error) or "CUDA out of memory" in str(error)
+
+
+def _next_retry_batch_size(batch_size: int) -> int | None:
+    if batch_size <= 1:
+        return None
+    return max(1, batch_size // 2)
+
+
+def _format_cuda_memory_snapshot(device: torch.device) -> str:
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return "cuda_unavailable"
+    try:
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device)
+        allocated_bytes = torch.cuda.memory_allocated(device)
+        reserved_bytes = torch.cuda.memory_reserved(device)
+    except Exception:
+        return "cuda_memory_snapshot_unavailable"
+
+    mib = 1024 * 1024
+    return (
+        f"allocated={allocated_bytes / mib:.1f}MiB "
+        f"reserved={reserved_bytes / mib:.1f}MiB "
+        f"free={free_bytes / mib:.1f}MiB "
+        f"total={total_bytes / mib:.1f}MiB"
+    )
 
 
 def _prepare_lr_finder_batch(
@@ -374,8 +410,17 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
             amp_dtype=amp_dtype,
             scaler=scaler,
         )
-    except Exception:
-        logger.exception("LR finder range test failed for architecture %s", config.architecture)
+    except Exception as error:
+        if _is_cuda_out_of_memory(error):
+            logger.warning(
+                (
+                    "LR finder range test hit CUDA OOM for architecture %s; "
+                    "retry policy will handle it."
+                ),
+                config.architecture,
+            )
+        else:
+            logger.exception("LR finder range test failed for architecture %s", config.architecture)
         raise
     finally:
         del scaler
@@ -449,6 +494,70 @@ def _capture_pretrained_model_state(
         clear_gpu()
 
 
+def _run_single_lr_finder_repeat(
+    config: LRFinderConfig,
+    context: LossConfigRunContext,
+    *,
+    seed: int,
+    batch_size: int,
+) -> LRFinderRepeatResult:
+    train_loader = build_train_loader(
+        context.data_bundle.dataset,
+        context.data_bundle.sample_weights,
+        batch_size=batch_size,
+        workers=config.workers,
+        seed=seed,
+    )
+    model = None
+    optimizer = None
+    criterion = None
+    try:
+        model = create_model(
+            context.model_plan.architecture,
+            context.model_plan.encoder,
+            validation=True,
+        ).to(context.device)
+        model.load_state_dict(context.initial_state_dict)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config.optimizer_start_lr,
+            weight_decay=config.optimizer_weight_decay,
+        )
+        criterion = BCEDiceHybridLossPaper(
+            BCEDiceHybridLossConfig(
+                alpha=context.params.alpha,
+                beta=context.params.beta,
+                gamma=context.params.gamma,
+            )
+        )
+        history = run_lr_finder_once(
+            LRFinderRunConfig(
+                model=model,
+                optimizer=optimizer,
+                criterion=criterion,
+                train_loader=train_loader,
+                device=context.device,
+                end_lr=config.end_lr,
+                num_iter=config.num_iter,
+                architecture=context.model_plan.architecture,
+                amp_precision=config.amp_precision,
+                gpu_normalizer=context.gpu_normalizer,
+                gpu_downscale=context.gpu_downscale,
+            )
+        )
+        return LRFinderRepeatResult(history=history, effective_batch_size=batch_size)
+    finally:
+        del train_loader
+        if criterion is not None:
+            del criterion
+        if optimizer is not None:
+            del optimizer
+        if model is not None:
+            del model
+        gc.collect()
+        clear_gpu()
+
+
 def _run_single_loss_config(
     config: LRFinderConfig,
     context: LossConfigRunContext,
@@ -458,96 +567,98 @@ def _run_single_loss_config(
     repeated_stats = []
     completed_trials = 0
     failed_trials = 0
+    effective_batch_sizes: list[int] = []
 
     for repeat_index in range(config.num_repeats):
         current_seed = config.seed + (context.config_index * 100) + repeat_index
         seed_everything(current_seed)
-        train_loader = build_train_loader(
-            context.data_bundle.dataset,
-            context.data_bundle.sample_weights,
-            batch_size=config.batch_size,
-            workers=config.workers,
-            seed=current_seed,
-        )
-        model = None
-        optimizer = None
-        criterion = None
+        repeat_result: LRFinderRepeatResult | None = None
+        retry_batch_size = config.batch_size
+        attempt_index = 1
         try:
-            model = create_model(
-                context.model_plan.architecture,
-                context.model_plan.encoder,
-                validation=True,
-            ).to(context.device)
-            model.load_state_dict(context.initial_state_dict)
-            optimizer = torch.optim.AdamW(
-                model.parameters(),
-                lr=config.optimizer_start_lr,
-                weight_decay=config.optimizer_weight_decay,
+            while True:
+                try:
+                    repeat_result = _run_single_lr_finder_repeat(
+                        config,
+                        context,
+                        seed=current_seed,
+                        batch_size=retry_batch_size,
+                    )
+                    break
+                except Exception as error:
+                    next_batch_size = (
+                        _next_retry_batch_size(retry_batch_size)
+                        if _is_cuda_out_of_memory(error)
+                        else None
+                    )
+                    if next_batch_size is None:
+                        raise
+                    logger.warning(
+                        (
+                            "LR finder repeat hit CUDA OOM; retrying with smaller batch: "
+                            "architecture=%s encoder=%s alpha=%.3f beta=%.3f gamma=%.3f "
+                            "repeat=%s attempt=%s batch_size=%s next_batch_size=%s memory=%s"
+                        ),
+                        context.model_plan.architecture,
+                        context.model_plan.encoder,
+                        context.params.alpha,
+                        context.params.beta,
+                        context.params.gamma,
+                        repeat_index + 1,
+                        attempt_index,
+                        retry_batch_size,
+                        next_batch_size,
+                        _format_cuda_memory_snapshot(context.device),
+                    )
+                    retry_batch_size = next_batch_size
+                    attempt_index += 1
+                    gc.collect()
+                    clear_gpu()
+            assert repeat_result is not None
+            stats = compute_curve_stats(
+                repeat_result.history["lr"],
+                repeat_result.history["loss"],
+                skip_start=10,
+                skip_end=5,
             )
-            criterion = BCEDiceHybridLossPaper(
-                BCEDiceHybridLossConfig(
-                    alpha=context.params.alpha,
-                    beta=context.params.beta,
-                    gamma=context.params.gamma,
-                )
-            )
-            history = run_lr_finder_once(
-                LRFinderRunConfig(
-                    model=model,
-                    optimizer=optimizer,
-                    criterion=criterion,
-                    train_loader=train_loader,
-                    device=context.device,
-                    end_lr=config.end_lr,
-                    num_iter=config.num_iter,
-                    architecture=context.model_plan.architecture,
-                    amp_precision=config.amp_precision,
-                    gpu_normalizer=context.gpu_normalizer,
-                    gpu_downscale=context.gpu_downscale,
-                )
-            )
-            stats = compute_curve_stats(history["lr"], history["loss"], skip_start=10, skip_end=5)
             if not np.isfinite(stats.min_loss):
                 failed_trials += 1
                 logger.info(
                     (
                         "LR finder repeat produced no finite minimum loss: "
-                        "architecture=%s alpha=%.3f beta=%.3f gamma=%.3f repeat=%s"
+                        "architecture=%s alpha=%.3f beta=%.3f gamma=%.3f repeat=%s "
+                        "batch_size=%s"
                     ),
                     context.model_plan.architecture,
                     context.params.alpha,
                     context.params.beta,
                     context.params.gamma,
                     repeat_index + 1,
+                    repeat_result.effective_batch_size,
                 )
                 continue
-            repeated_lrs.append(history["lr"])
-            repeated_losses.append(history["loss"])
+            repeated_lrs.append(repeat_result.history["lr"])
+            repeated_losses.append(repeat_result.history["loss"])
             repeated_stats.append(stats)
+            effective_batch_sizes.append(repeat_result.effective_batch_size)
             completed_trials += 1
-        except Exception:
+        except Exception as error:
             logger.exception(
                 (
                     "LR finder repeat failed: architecture=%s alpha=%.3f "
-                    "beta=%.3f gamma=%.3f repeat=%s"
+                    "beta=%.3f gamma=%.3f repeat=%s batch_size=%s memory=%s"
                 ),
                 context.model_plan.architecture,
                 context.params.alpha,
                 context.params.beta,
                 context.params.gamma,
                 repeat_index + 1,
+                retry_batch_size,
+                _format_cuda_memory_snapshot(context.device)
+                if _is_cuda_out_of_memory(error)
+                else "not_cuda_oom",
             )
             failed_trials += 1
-        finally:
-            del train_loader
-            if criterion is not None:
-                del criterion
-            if optimizer is not None:
-                del optimizer
-            if model is not None:
-                del model
-            gc.collect()
-            clear_gpu()
 
     if not repeated_stats:
         return None, completed_trials, failed_trials
@@ -577,6 +688,7 @@ def _run_single_loss_config(
         median_min_loss=float(np.median([stats.min_loss for stats in repeated_stats])),
         plot_path=plot_path,
         csv_path=output_dir / f"SUMMARY_{context.model_plan.architecture}_STABILITY.csv",
+        effective_batch_size=min(effective_batch_sizes) if effective_batch_sizes else None,
     )
     return record, completed_trials, failed_trials
 
