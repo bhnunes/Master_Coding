@@ -45,6 +45,7 @@ from helpers.provenance import (
 from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import seed_everything
+from helpers.training.stain_normalization import resolve_dataloader_stain_normalizer_device
 from helpers.training.utils import get_formatted_datetime_string
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -305,7 +306,14 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
     device = require_cuda_device()
     seed_everything(config.seed)
 
-    preparation = _prepare_pipeline(config, output_dir=output_dir, normalizer_device=device)
+    preparation = _prepare_pipeline(
+        config,
+        output_dir=output_dir,
+        normalizer_device=resolve_dataloader_stain_normalizer_device(
+            device,
+            workers=config.workers,
+        ),
+    )
     test_loader = create_test_dataloader(
         preparation.test_layout,
         batch_size=config.batch_size,

@@ -65,6 +65,19 @@ def normalize_runtime_method_name(method: str | None) -> str:
     return normalized
 
 
+def resolve_dataloader_stain_normalizer_device(
+    requested_device: torch.device | str,
+    *,
+    workers: int,
+) -> torch.device:
+    """Return a worker-safe device for dataset-side stain normalization."""
+
+    device = torch.device(requested_device)
+    if workers > 0 and device.type == "cuda":
+        return torch.device("cpu")
+    return device
+
+
 def build_split_stain_normalizer(
     master_manifest_path: Path,
     records: Sequence[CanonicalRowRecord],

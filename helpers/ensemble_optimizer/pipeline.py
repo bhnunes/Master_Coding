@@ -43,6 +43,7 @@ from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
+from helpers.training.stain_normalization import resolve_dataloader_stain_normalizer_device
 from helpers.training.utils import get_formatted_datetime_string
 
 LOGGER = logging.getLogger(__name__)
@@ -323,7 +324,10 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
         runtime_normalization_method=config.runtime_normalization_method,
-        normalizer_device=device,
+        normalizer_device=resolve_dataloader_stain_normalizer_device(
+            device,
+            workers=config.workers,
+        ),
     )
     LOGGER.info("Validation source ready: %s", config.master_manifest_path)
     split = _build_validation_split(config, validation_layout)

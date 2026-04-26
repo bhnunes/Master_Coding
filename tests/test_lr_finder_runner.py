@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -436,7 +437,7 @@ def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
 def test_run_lr_finder_screening_writes_summaries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    config = _build_config(tmp_path)
+    config = replace(_build_config(tmp_path), workers=2)
     (config.output_dir / "FPN").mkdir(parents=True, exist_ok=True)
     dataset = SimpleNamespace(closed=False)
 
@@ -451,6 +452,7 @@ def test_run_lr_finder_screening_writes_summaries(
     ]
     call_count = {"value": 0}
     preload_calls: list[tuple[str, str]] = []
+    normalizer_devices: list[torch.device | str] = []
 
     class DummyProgress:
         def __init__(self) -> None:
@@ -486,9 +488,14 @@ def test_run_lr_finder_screening_writes_summaries(
 
     progress = DummyProgress()
 
+    def fake_prepare_training_data(config: LRFinderConfig, *, normalizer_device: object) -> object:
+        del config
+        normalizer_devices.append(cast(torch.device | str, normalizer_device))
+        return data_bundle
+
     monkeypatch.setattr(
         "helpers.lr_finder.runner.prepare_training_data",
-        lambda config, *, normalizer_device: data_bundle,
+        fake_prepare_training_data,
     )
     monkeypatch.setattr(
         "helpers.lr_finder.runner.sample_bcedice_params", lambda n, search_space, seed: samples
@@ -549,6 +556,7 @@ def test_run_lr_finder_screening_writes_summaries(
     assert outputs.lhs_samples_path.is_file()
     assert outputs.architecture_summary_paths["FPN"].is_file()
     assert dataset.closed is True
+    assert normalizer_devices == [torch.device("cpu")]
     assert preload_calls == [("FPN", "resnet34")]
     assert progress.updated == len(samples) * config.num_repeats
     assert progress.finished is True

@@ -55,6 +55,7 @@ from helpers.training.reporting import (
     track_epoch_metrics,
 )
 from helpers.training.runtime import seed_everything, worker_init_fn
+from helpers.training.stain_normalization import resolve_dataloader_stain_normalizer_device
 from helpers.training.utils import clear_gpu, get_formatted_datetime_string
 
 load_dotenv(override=True)
@@ -191,7 +192,7 @@ prepared_training_data = prepare_training_data(
     seed=seed,
     use_artifact_aware_loss=use_artifact_aware_loss,
     runtime_normalization_method=training_config.runtime_normalization_method,
-    normalizer_device=device,
+    normalizer_device=resolve_dataloader_stain_normalizer_device(device, workers=workers),
 )
 train_dataset_provenance = prepared_training_data.training_provenance
 validation_dataset_provenance = prepared_training_data.validation_provenance

@@ -24,6 +24,7 @@ from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPaper
 from helpers.training.models import create_model
 from helpers.training.runtime import autocast_ctx, seed_everything, setup_precision
+from helpers.training.stain_normalization import resolve_dataloader_stain_normalizer_device
 
 logger = logging.getLogger(__name__)
 
@@ -591,7 +592,11 @@ def run_lr_finder_screening(config: LRFinderConfig) -> ScreeningOutputs:
     )
 
     device = require_cuda_device()
-    data_bundle = prepare_training_data(config, normalizer_device=device)
+    normalizer_device = resolve_dataloader_stain_normalizer_device(
+        device,
+        workers=config.workers,
+    )
+    data_bundle = prepare_training_data(config, normalizer_device=normalizer_device)
     gpu_normalizer = GPUNormalizer(
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225],

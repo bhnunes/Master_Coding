@@ -13,7 +13,10 @@ import torch
 from helpers.extraction.manifest_paths import to_manifest_path_ref
 from helpers.provenance import hash_file_sha256
 from helpers.training.master_manifest_queries import CanonicalRowRecord
-from helpers.training.stain_normalization import build_split_stain_normalizer
+from helpers.training.stain_normalization import (
+    build_split_stain_normalizer,
+    resolve_dataloader_stain_normalizer_device,
+)
 
 NORMALIZED_PIXEL_VALUE = 11
 
@@ -44,6 +47,20 @@ class _FakeNormalizerBuilder:
         module = _FakeRuntimeNormalizer()
         _FakeNormalizerBuilder.last_module = module
         return module
+
+
+def test_resolve_dataloader_stain_normalizer_device_uses_cpu_for_cuda_workers() -> None:
+    device = resolve_dataloader_stain_normalizer_device("cuda", workers=2)
+
+    assert device == torch.device("cpu")
+
+
+def test_resolve_dataloader_stain_normalizer_device_keeps_requested_device_without_workers() -> (
+    None
+):
+    device = resolve_dataloader_stain_normalizer_device("cuda", workers=0)
+
+    assert device == torch.device("cuda")
 
 
 def _write_normalization_manifest(
@@ -633,6 +650,7 @@ def test_build_split_stain_normalizer_resolves_all_supported_methods_from_one_bu
         )
         assert output.shape == (4, 4, 3)
         assert output.dtype == np.uint8
+
 
 def test_build_split_stain_normalizer_uses_ruifrok_source_matrix_from_state(
     tmp_path: Path,
