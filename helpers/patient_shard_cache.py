@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,11 +20,17 @@ class PatientShardCache:
             cached_path.touch()
             return cached_path
 
-        temp_path = cached_path.with_name(f".{cached_path.name}.tmp")
-        if temp_path.exists():
-            temp_path.unlink()
-        shutil.copy2(source_path, temp_path)
-        temp_path.replace(cached_path)
+        temp_path = self._reserve_temp_path(cached_path)
+        try:
+            shutil.copy2(source_path, temp_path)
+            if cached_path.exists():
+                temp_path.unlink(missing_ok=True)
+                cached_path.touch()
+                return cached_path
+            temp_path.replace(cached_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         cached_path.touch()
         self._evict_if_needed(protected_path=cached_path)
         return cached_path
@@ -48,3 +56,12 @@ class PatientShardCache:
     def _cache_file_name(source_path: Path) -> str:
         digest = hashlib.sha256(str(source_path).encode("utf-8")).hexdigest()[:12]
         return f"{source_path.stem}-{digest}{source_path.suffix}"
+
+    def _reserve_temp_path(self, cached_path: Path) -> Path:
+        file_descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{cached_path.name}.",
+            suffix=f".{os.getpid()}.tmp",
+            dir=self.cache_dir,
+        )
+        os.close(file_descriptor)
+        return Path(temp_name)
