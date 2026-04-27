@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
+import shapely
 from PIL import Image
 from shapely.geometry import Polygon
 
@@ -19,6 +20,7 @@ PATCH_SIDE = 4
 MIN_NONZERO_PIXELS = 4
 OVERLAP_RATIO = 0.25
 COORDINATE_COLUMNS = 2
+EXPECTED_TRIANGLE_AREA = 8.0
 
 
 def test_check_tissue_percentage_robust_handles_empty_patch() -> None:
@@ -59,6 +61,20 @@ def test_build_scaled_polygon_index_skips_invalid_entries() -> None:
     )
 
     assert len(polygons) >= 1
+    assert tree is not None
+
+
+def test_build_scaled_polygon_index_skips_degenerate_rings() -> None:
+    polygons, tree = patch_engine.build_scaled_polygon_index(
+        [
+            [(0, 0), (4, 0), (0, 0)],
+            [(0, 0), (4, 0), (4, 4)],
+        ],
+        scale_factor=1.0,
+    )
+
+    assert len(polygons) == 1
+    assert round(polygons[0].area, 2) == EXPECTED_TRIANGLE_AREA
     assert tree is not None
 
 
@@ -178,6 +194,31 @@ def test_clip_geometry_to_patch_coords_handles_multipolygon_result() -> None:
     assert len(clipped) >= 1
     assert all(coords.dtype == np.int32 for coords in clipped)
     assert all(coords.shape[1] == COORDINATE_COLUMNS for coords in clipped)
+
+
+def test_clip_geometry_to_patch_coords_falls_back_when_fast_clip_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    geometry = Polygon([(0, 0), (6, 0), (6, 6), (0, 6)])
+
+    def fail_fast_clip(*_args: object) -> object:
+        raise shapely.errors.GEOSException(
+            "IllegalArgumentException: Invalid number of points in LinearRing"
+        )
+
+    monkeypatch.setattr(patch_engine, "clip_by_rect", fail_fast_clip)
+
+    clipped = patch_engine.clip_geometry_to_patch_coords(
+        geometry,
+        patch_x=1,
+        patch_y=1,
+        mask_width=4,
+        mask_height=4,
+    )
+
+    assert len(clipped) == 1
+    assert clipped[0].dtype == np.int32
+    assert clipped[0].shape[1] == COORDINATE_COLUMNS
 
 
 def test_run_extraction_returns_zero_when_handler_finds_no_annotations(
@@ -605,7 +646,7 @@ def test_process_window_with_precomputed_masks_skips_shapely_patch_geometry(
     def fail_box(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("precomputed mask path should not build per-window geometry")
 
-    monkeypatch.setattr(patch_engine.shapely, "box", fail_box)
+    monkeypatch.setattr(shapely, "box", fail_box)
     monkeypatch.setattr(patch_engine, "PATCH_AREA", PATCH_SIDE * PATCH_SIDE)
     patch_engine._WORKER_CONTEXT = {
         "window_size": PATCH_SIDE,

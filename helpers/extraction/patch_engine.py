@@ -53,6 +53,7 @@ PATCH_AREA = WINDOW_SIZE * WINDOW_SIZE
 HALF_WINDOW = WINDOW_SIZE // 2
 MIN_TISSUE_COLOR_SPREAD = 10
 MIN_POLYGON_POINTS = 3
+MIN_LINEAR_RING_POINTS = 4
 PROFILED_RESULT_TUPLE_SIZE = 3
 ARTIFACT_CLASS_TO_COLUMN = {
     "Fold": "cov_fold",
@@ -244,7 +245,7 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
                 mask_width=mask_shape[1] * scale_factor,
                 mask_height=mask_shape[0] * scale_factor,
             )
-        except shapely.errors.TopologicalError:
+        except shapely.errors.ShapelyError:
             continue
         if coords_list:
             scaled_coords_list = []
@@ -259,24 +260,109 @@ def polygons_to_mask(mask_shape, polygons_level0, scale_factor, patch_coords):
     return mask
 
 
+def _repair_geometry(geometry):
+    try:
+        if geometry.is_empty:
+            return None
+        if not geometry.is_valid:
+            geometry = geometry.buffer(0)
+        if geometry.is_empty:
+            return None
+        return geometry
+    except (ValueError, shapely.errors.ShapelyError):
+        return None
+
+
+def _is_usable_polygon(geometry):
+    try:
+        return (
+            geometry.geom_type == "Polygon"
+            and not geometry.is_empty
+            and geometry.is_valid
+            and geometry.area > 0.0
+            and len(cast(Polygon, geometry).exterior.coords) >= MIN_LINEAR_RING_POINTS
+        )
+    except (ValueError, shapely.errors.ShapelyError):
+        return False
+
+
+def _valid_polygon_parts(geometry):
+    if geometry is None:
+        return []
+    if geometry.geom_type == "Polygon":
+        candidates = [geometry]
+    elif hasattr(geometry, "geoms"):
+        candidates = list(geometry.geoms)
+    else:
+        return []
+    return [cast(Polygon, candidate) for candidate in candidates if _is_usable_polygon(candidate)]
+
+
+def _scaled_polygon_parts(polygon_points, scale_factor):
+    if len(polygon_points) < MIN_POLYGON_POINTS:
+        return []
+    try:
+        geometry = Polygon([(px / scale_factor, py / scale_factor) for px, py in polygon_points])
+    except (TypeError, ValueError, shapely.errors.ShapelyError):
+        return []
+    return _valid_polygon_parts(_repair_geometry(geometry))
+
+
+def _clip_geometry_fast_or_safe(geometry, *, patch_x, patch_y, mask_width, mask_height):
+    x_max = patch_x + mask_width
+    y_max = patch_y + mask_height
+    try:
+        return clip_by_rect(geometry, patch_x, patch_y, x_max, y_max)
+    except (ValueError, shapely.errors.ShapelyError):
+        repaired = _repair_geometry(geometry)
+        if repaired is None:
+            return None
+        try:
+            return repaired.intersection(shapely.box(patch_x, patch_y, x_max, y_max))
+        except (ValueError, shapely.errors.ShapelyError):
+            return None
+
+
+def _clipped_geometry_parts(clipped):
+    if isinstance(clipped, Polygon):
+        return [clipped]
+    if isinstance(clipped, MultiPolygon):
+        return clipped.geoms
+    if hasattr(clipped, "geoms"):
+        return clipped.geoms
+    return []
+
+
 def clip_geometry_to_patch_coords(geometry, *, patch_x, patch_y, mask_width, mask_height):
-    clipped = clip_by_rect(geometry, patch_x, patch_y, patch_x + mask_width, patch_y + mask_height)
+    clipped = _clip_geometry_fast_or_safe(
+        geometry,
+        patch_x=patch_x,
+        patch_y=patch_y,
+        mask_width=mask_width,
+        mask_height=mask_height,
+    )
+    if clipped is None:
+        return []
     if clipped.is_empty:
         return []
-    geoms = clipped.geoms if isinstance(clipped, MultiPolygon) else [clipped]
     coords_list = []
-    for geom in geoms:
+    for geom in _clipped_geometry_parts(clipped):
         if geom.geom_type != "Polygon" or geom.is_empty:
             continue
         polygon = cast(Polygon, geom)
-        coords_raw = np.asarray(polygon.exterior.coords, dtype=np.float64)
+        try:
+            coords_raw = np.asarray(polygon.exterior.coords, dtype=np.float64)
+        except (ValueError, shapely.errors.ShapelyError):
+            continue
+        if len(coords_raw) < MIN_LINEAR_RING_POINTS:
+            continue
         coords = np.column_stack(
             (
                 np.round(np.clip(coords_raw[:, 0] - patch_x, 0, mask_width - 1)),
                 np.round(np.clip(coords_raw[:, 1] - patch_y, 0, mask_height - 1)),
             )
         ).astype(np.int32)
-        if len(coords) >= MIN_POLYGON_POINTS:
+        if len(coords) >= MIN_LINEAR_RING_POINTS:
             coords_list.append(coords)
     return coords_list
 
@@ -299,17 +385,7 @@ def compute_artifact_coverages_for_patch(
 
         scaled_polys_raw = []
         for polygon_points in polygons_l0:
-            if len(polygon_points) < MIN_POLYGON_POINTS:
-                continue
-            try:
-                poly = Polygon(
-                    [(px / scale_factor, py / scale_factor) for px, py in polygon_points]
-                )
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                scaled_polys_raw.append(poly)
-            except Exception:
-                continue
+            scaled_polys_raw.extend(_scaled_polygon_parts(polygon_points, scale_factor))
 
         scaled_polys_flat = [
             geom_part
@@ -326,7 +402,7 @@ def compute_artifact_coverages_for_patch(
                 continue
             intersection = artifact_geometry.intersection(patch_polygon)
             coverages[column_name] = float(intersection.area / patch_area)
-        except shapely.errors.TopologicalError:
+        except shapely.errors.ShapelyError:
             logging.warning(
                 "Skipping artifact coverage for a problematic geometry at patch polygon %s.",
                 patch_polygon.bounds,
@@ -337,22 +413,18 @@ def compute_artifact_coverages_for_patch(
 
 def build_scaled_polygon_index(polygons_level0, scale_factor):
     scaled_polygons = []
+    skipped_polygons = 0
     for polygon_points in polygons_level0:
-        if len(polygon_points) < MIN_POLYGON_POINTS:
+        polygon_parts = _scaled_polygon_parts(polygon_points, scale_factor)
+        if not polygon_parts:
+            skipped_polygons += 1
             continue
-        try:
-            poly = Polygon([(px / scale_factor, py / scale_factor) for px, py in polygon_points])
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-            if poly.is_empty:
-                continue
-            if poly.geom_type == "MultiPolygon":
-                geoms = list(cast(MultiPolygon, poly).geoms)
-            else:
-                geoms = [poly]
-            scaled_polygons.extend([geom for geom in geoms if geom.geom_type == "Polygon"])
-        except Exception:
-            continue
+        scaled_polygons.extend(polygon_parts)
+    if skipped_polygons:
+        logging.warning(
+            "Skipped %s degenerate annotation polygon(s) while building the mask index.",
+            skipped_polygons,
+        )
     return scaled_polygons, STRtree(scaled_polygons) if scaled_polygons else None
 
 
@@ -365,19 +437,7 @@ def build_artifact_geometry_index(artifact_polygons_by_class_level0, scale_facto
 
         scaled_polys_raw = []
         for polygon_points in polygons_l0:
-            if len(polygon_points) < MIN_POLYGON_POINTS:
-                continue
-            try:
-                poly = Polygon(
-                    [(px / scale_factor, py / scale_factor) for px, py in polygon_points]
-                )
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                if poly.is_empty:
-                    continue
-                scaled_polys_raw.append(poly)
-            except Exception:
-                continue
+            scaled_polys_raw.extend(_scaled_polygon_parts(polygon_points, scale_factor))
 
         scaled_polys_flat = [
             geom_part
@@ -391,7 +451,7 @@ def build_artifact_geometry_index(artifact_polygons_by_class_level0, scale_facto
         try:
             artifact_geometry = MultiPolygon(scaled_polys_flat)
             artifact_geometries[column_name] = artifact_geometry
-        except shapely.errors.TopologicalError:
+        except shapely.errors.ShapelyError:
             logging.warning(
                 "Skipping artifact geometry index for class '%s' due to invalid geometry.",
                 artifact_class,
@@ -411,25 +471,19 @@ def _build_region_mask(polygons_level0, scale_factor, region):
     region_width = mask_shape[1]
     region_height = mask_shape[0]
     for polygon_points in polygons_level0:
-        if len(polygon_points) < MIN_POLYGON_POINTS:
-            continue
-        try:
-            polygon = Polygon([(px / scale_factor, py / scale_factor) for px, py in polygon_points])
-            if not polygon.is_valid:
-                polygon = polygon.buffer(0)
-            if polygon.is_empty:
+        for polygon in _scaled_polygon_parts(polygon_points, scale_factor):
+            try:
+                coords_list = clip_geometry_to_patch_coords(
+                    polygon,
+                    patch_x=region.x_start,
+                    patch_y=region.y_start,
+                    mask_width=region_width,
+                    mask_height=region_height,
+                )
+            except (ValueError, shapely.errors.ShapelyError):
                 continue
-            coords_list = clip_geometry_to_patch_coords(
-                polygon,
-                patch_x=region.x_start,
-                patch_y=region.y_start,
-                mask_width=region_width,
-                mask_height=region_height,
-            )
-        except (Exception, shapely.errors.TopologicalError):
-            continue
-        if coords_list:
-            cv2.fillPoly(mask, coords_list, (1,))
+            if coords_list:
+                cv2.fillPoly(mask, coords_list, (1,))
     return mask
 
 
@@ -537,7 +591,7 @@ def compute_artifact_coverages_from_index(artifact_geometry_index, patch_polygon
         try:
             intersection = artifact_geometry.intersection(patch_polygon)
             coverages[column_name] = float(intersection.area / patch_area)
-        except shapely.errors.TopologicalError:
+        except shapely.errors.ShapelyError:
             logging.warning(
                 "Skipping artifact coverage for a problematic geometry at patch polygon %s.",
                 patch_polygon.bounds,
@@ -577,7 +631,7 @@ def polygons_to_mask_with_index(
                 mask_width=mask_shape[1],
                 mask_height=mask_shape[0],
             )
-        except shapely.errors.TopologicalError:
+        except shapely.errors.ShapelyError:
             continue
         if coords_list:
             cv2.fillPoly(mask, coords_list, (1,))
@@ -1072,21 +1126,9 @@ def _prepare_extraction(handler, path_Image, kwargs, slide, slide_phase_seconds)
 def _scaled_annotation_region(slide, kwargs, all_polygons_level0):
     scale_factor = slide.level_downsamples[kwargs["target_level"]]
     target_width, target_height = slide.level_dimensions[kwargs["target_level"]]
-    scaled_polys_raw = []
-    for polygon_points in all_polygons_level0:
-        try:
-            poly = Polygon([(x / scale_factor, y / scale_factor) for x, y in polygon_points])
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-            scaled_polys_raw.append(poly)
-        except Exception:
-            continue
     scaled_polys_flat = []
-    for geom in scaled_polys_raw:
-        if geom.geom_type == "Polygon":
-            scaled_polys_flat.append(geom)
-        elif geom.geom_type == "MultiPolygon":
-            scaled_polys_flat.extend(list(geom.geoms))
+    for polygon_points in all_polygons_level0:
+        scaled_polys_flat.extend(_scaled_polygon_parts(polygon_points, scale_factor))
     if not scaled_polys_flat:
         return None
     combined_annotations = MultiPolygon(scaled_polys_flat)
