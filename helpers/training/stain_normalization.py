@@ -264,12 +264,14 @@ def _build_runtime_normalizer(
 
 def _load_torch_staintools_builder() -> Any:
     try:
+        from torch_staintools.constants import CONFIG
         from torch_staintools.normalizer import NormalizerBuilder
     except ModuleNotFoundError as error:
         raise RuntimeError(
             "Runtime stain normalization requires the `torch-staintools` package. "
             "Install project dependencies with `uv sync --python 3.12`."
         ) from error
+    CONFIG.ENABLE_COMPILE = False
     return NormalizerBuilder
 
 

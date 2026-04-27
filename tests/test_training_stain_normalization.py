@@ -12,6 +12,7 @@ import torch
 
 from helpers.extraction.manifest_paths import to_manifest_path_ref
 from helpers.provenance import hash_file_sha256
+from helpers.training import stain_normalization as stain_norm
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 from helpers.training.stain_normalization import (
     build_split_stain_normalizer,
@@ -61,6 +62,22 @@ def test_resolve_dataloader_stain_normalizer_device_keeps_requested_device_witho
     device = resolve_dataloader_stain_normalizer_device("cuda", workers=0)
 
     assert device == torch.device("cuda")
+
+
+def test_load_torch_staintools_builder_disables_compile_for_runtime_normalization() -> None:
+    pytest.importorskip("torch_staintools")
+    from torch_staintools.constants import CONFIG
+
+    original_enable_compile = CONFIG.ENABLE_COMPILE
+    try:
+        CONFIG.ENABLE_COMPILE = True
+
+        builder = stain_norm._load_torch_staintools_builder()
+
+        assert builder is not None
+        assert CONFIG.ENABLE_COMPILE is False
+    finally:
+        CONFIG.ENABLE_COMPILE = original_enable_compile
 
 
 def _write_normalization_manifest(
