@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+from collections.abc import Hashable
 from pathlib import Path
 from typing import Any, cast
 
@@ -36,6 +37,41 @@ class _FakeRuntimeNormalizer(torch.nn.Module):
         return x + (1.0 / 255.0)
 
 
+class _FakeTensorCache:
+    def __init__(self) -> None:
+        self.values: dict[Hashable, torch.Tensor] = {}
+
+    def __contains__(self, key: Hashable) -> bool:
+        return key in self.values
+
+    def query(self, key: Hashable) -> torch.Tensor:
+        return self.values[key]
+
+    def write_to_cache(self, key: Hashable, value: torch.Tensor) -> None:
+        self.values[key] = value.detach().clone()
+
+
+class _FakeCachingRuntimeNormalizer(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tensor_cache = _FakeTensorCache()
+        self.source_fit_calls = 0
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        cache_keys: list[Hashable] | None = None,
+    ) -> torch.Tensor:
+        cache_key = cache_keys[0] if cache_keys is not None else "uncached"
+        if cache_key not in self.tensor_cache:
+            self.source_fit_calls += 1
+            self.tensor_cache.write_to_cache(
+                cache_key,
+                torch.tensor([[0.65, 0.70, 0.29], [0.07, 0.99, 0.11]], dtype=torch.float32),
+            )
+        return x + (1.0 / 255.0)
+
+
 class _FakeNormalizerBuilder:
     last_method: str | None = None
     last_kwargs: dict[str, Any] | None = None
@@ -47,6 +83,17 @@ class _FakeNormalizerBuilder:
         _FakeNormalizerBuilder.last_kwargs = kwargs
         module = _FakeRuntimeNormalizer()
         _FakeNormalizerBuilder.last_module = module
+        return module
+
+
+class _FakeCachingNormalizerBuilder:
+    instances: list[_FakeCachingRuntimeNormalizer] = []
+
+    @staticmethod
+    def build(method: str, **kwargs: Any) -> _FakeCachingRuntimeNormalizer:
+        del method, kwargs
+        module = _FakeCachingRuntimeNormalizer()
+        _FakeCachingNormalizerBuilder.instances.append(module)
         return module
 
 
@@ -608,6 +655,63 @@ def test_build_split_stain_normalizer_supports_torch_staintools_matrix_methods(
         ),
     )
     assert torch.equal(max_c_target, torch.tensor([[1.0, 0.8]], dtype=torch.float32))
+
+
+def test_build_split_stain_normalizer_reuses_persistent_source_matrix_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "vahadane_stats.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "VAHADANE",
+                "stain_matrix_target": [
+                    [0.65, 0.70, 0.29],
+                    [0.07, 0.99, 0.11],
+                ],
+                "maxC_target": [1.0, 0.8],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="VAHADANE",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+    _FakeCachingNormalizerBuilder.instances = []
+    monkeypatch.setattr(
+        "helpers.training.stain_normalization._load_torch_staintools_builder",
+        lambda: _FakeCachingNormalizerBuilder,
+    )
+    cache_path = tmp_path / "runtime_stain_matrix_cache.sqlite"
+    image = np.full((4, 4, 3), 10, dtype=np.uint8)
+
+    first_normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record()],
+        runtime_normalization_method="VAHADANE",
+        source_matrix_cache_path=cache_path,
+    )
+    assert first_normalizer is not None
+    first_normalizer.normalize_image(image, cache_key="patch_001.png")
+
+    second_normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record()],
+        runtime_normalization_method="VAHADANE",
+        source_matrix_cache_path=cache_path,
+    )
+    assert second_normalizer is not None
+    second_normalizer.normalize_image(image, cache_key="patch_001.png")
+
+    source_fit_calls = [
+        module.source_fit_calls for module in _FakeCachingNormalizerBuilder.instances
+    ]
+    assert source_fit_calls == [1, 0]
 
 
 def test_build_split_stain_normalizer_resolves_all_supported_methods_from_one_bundle(

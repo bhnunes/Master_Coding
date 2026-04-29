@@ -84,6 +84,7 @@ def build_split_stain_normalizer(
     *,
     runtime_normalization_method: str = "NOT_NORMALIZED",
     device: torch.device | str | None = None,
+    source_matrix_cache_path: Path | None = None,
 ) -> ImageStainNormalizer | None:
     """Build one shared split-level stain normalizer from Stage 5 metadata."""
 
@@ -109,7 +110,13 @@ def build_split_stain_normalizer(
         )
     state = _load_normalization_state_json(artifact)
     runtime_device = torch.device(device) if device is not None else torch.device("cpu")
-    return _build_runtime_normalizer(method=method, state=state, device=runtime_device)
+    return _build_runtime_normalizer(
+        method=method,
+        state=state,
+        device=runtime_device,
+        source_matrix_cache_path=source_matrix_cache_path,
+        cache_namespace=f"{method}:{artifact.normalization_artifact_id}:{artifact.state_sha256}",
+    )
 
 
 def resolve_stage4_split_bundle_id(records: Sequence[CanonicalRowRecord]) -> int | None:
@@ -231,6 +238,8 @@ def _build_runtime_normalizer(
     method: str,
     state: dict[str, Any],
     device: torch.device,
+    source_matrix_cache_path: Path | None = None,
+    cache_namespace: str | None = None,
 ) -> ImageStainNormalizer:
     if method == "ruifrok":
         stain_matrix_source = _coerce_optional_tensor(
@@ -259,7 +268,12 @@ def _build_runtime_normalizer(
     )
     _load_runtime_state(runtime_module, method=method, state=state, device=device)
     runtime_module.eval()
-    return _TorchModuleImageNormalizer(runtime_module)
+    source_matrix_cache = (
+        _SQLiteStainMatrixCache(source_matrix_cache_path, namespace=cache_namespace or method)
+        if source_matrix_cache_path is not None and method in {"macenko", "vahadane"}
+        else None
+    )
+    return _TorchModuleImageNormalizer(runtime_module, source_matrix_cache=source_matrix_cache)
 
 
 def _load_torch_staintools_builder() -> Any:
@@ -358,8 +372,14 @@ def _coerce_optional_tensor(
 
 
 class _TorchModuleImageNormalizer:
-    def __init__(self, module: nn.Module) -> None:
+    def __init__(
+        self,
+        module: nn.Module,
+        *,
+        source_matrix_cache: _SQLiteStainMatrixCache | None = None,
+    ) -> None:
         self.module = module.eval()
+        self.source_matrix_cache = source_matrix_cache
 
     @torch.inference_mode()
     def normalize_image(
@@ -368,9 +388,93 @@ class _TorchModuleImageNormalizer:
         *,
         cache_key: Hashable | None = None,
     ) -> npt.NDArray[np.uint8]:
-        image_tensor = _numpy_image_to_tensor(image, device=_module_device(self.module))
+        module_device = _module_device(self.module)
+        persistent_cache_miss = False
+        if cache_key is not None and self.source_matrix_cache is not None:
+            if _module_stain_matrix_cache_contains(self.module, cache_key):
+                persistent_cache_miss = False
+            else:
+                cached_matrix = self.source_matrix_cache.load(cache_key, device=module_device)
+                if cached_matrix is not None:
+                    _write_module_stain_matrix_cache(self.module, cache_key, cached_matrix)
+                else:
+                    persistent_cache_miss = True
+
+        image_tensor = _numpy_image_to_tensor(image, device=module_device)
         normalized_tensor = _forward_module(self.module, image_tensor, cache_key=cache_key)
+        if (
+            cache_key is not None
+            and self.source_matrix_cache is not None
+            and persistent_cache_miss
+        ):
+            observed_matrix = _read_module_stain_matrix_cache(self.module, cache_key)
+            if observed_matrix is not None:
+                self.source_matrix_cache.store(cache_key, observed_matrix)
         return _tensor_to_numpy_image(normalized_tensor)
+
+
+class _SQLiteStainMatrixCache:
+    """Small cross-worker cache for source stain matrices computed per patch."""
+
+    def __init__(self, path: Path, *, namespace: str) -> None:
+        self.path = path
+        self.namespace = namespace
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_stain_matrices (
+                    namespace TEXT NOT NULL,
+                    cache_key TEXT NOT NULL,
+                    matrix_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (namespace, cache_key)
+                )
+                """
+            )
+            connection.commit()
+
+    def load(self, cache_key: Hashable, *, device: torch.device) -> torch.Tensor | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT matrix_json
+                FROM source_stain_matrices
+                WHERE namespace = ? AND cache_key = ?
+                """,
+                (self.namespace, self._cache_key_text(cache_key)),
+            ).fetchone()
+        if row is None:
+            return None
+        matrix = json.loads(str(row[0]))
+        return torch.as_tensor(matrix, dtype=torch.float32, device=device)
+
+    def store(self, cache_key: Hashable, matrix: torch.Tensor) -> None:
+        matrix_json = json.dumps(
+            matrix.detach().cpu().tolist(),
+            separators=(",", ":"),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO source_stain_matrices (
+                    namespace,
+                    cache_key,
+                    matrix_json
+                ) VALUES (?, ?, ?)
+                """,
+                (self.namespace, self._cache_key_text(cache_key), matrix_json),
+            )
+            connection.commit()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection.execute("PRAGMA busy_timeout = 30000")
+        return connection
+
+    @staticmethod
+    def _cache_key_text(cache_key: Hashable) -> str:
+        return str(cache_key)
 
 
 class _FixedMatrixDeconvolutionNormalizer(nn.Module):
@@ -439,6 +543,47 @@ def _forward_module(
         except TypeError:
             pass
     return cast(torch.Tensor, module(image_tensor))
+
+
+def _read_module_stain_matrix_cache(
+    module: nn.Module,
+    cache_key: Hashable,
+) -> torch.Tensor | None:
+    tensor_cache = getattr(module, "tensor_cache", None)
+    if tensor_cache is None or not _tensor_cache_contains(tensor_cache, cache_key):
+        return None
+    query = getattr(tensor_cache, "query", None)
+    if not callable(query):
+        return None
+    return cast(torch.Tensor, query(cache_key)).detach()
+
+
+def _module_stain_matrix_cache_contains(module: nn.Module, cache_key: Hashable) -> bool:
+    tensor_cache = getattr(module, "tensor_cache", None)
+    return tensor_cache is not None and _tensor_cache_contains(tensor_cache, cache_key)
+
+
+def _tensor_cache_contains(tensor_cache: object, cache_key: Hashable) -> bool:
+    contains = getattr(tensor_cache, "__contains__", None)
+    if not callable(contains):
+        return False
+    try:
+        return bool(contains(cache_key))
+    except TypeError:
+        return False
+
+
+def _write_module_stain_matrix_cache(
+    module: nn.Module,
+    cache_key: Hashable,
+    matrix: torch.Tensor,
+) -> None:
+    tensor_cache = getattr(module, "tensor_cache", None)
+    if tensor_cache is None:
+        return
+    write_to_cache = getattr(tensor_cache, "write_to_cache", None)
+    if callable(write_to_cache):
+        write_to_cache(cache_key, matrix)
 
 
 def _numpy_image_to_tensor(

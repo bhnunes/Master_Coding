@@ -11,6 +11,26 @@ LHS_SAMPLE_COUNT = 4
 NUM_REPEATS = 2
 
 
+def _write_registry(registry_path: Path) -> None:
+    registry_path.write_text(
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 3e-4,
+                    "wd": 1e-4,
+                    "encoders": ["senet154"],
+                    "loss": {
+                        "alpha_bce": 0.6,
+                        "beta_dice_bg": 0.2,
+                        "gamma_dice_fg": 0.8,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_load_lr_finder_config_builds_model_plan_from_registry(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -62,6 +82,7 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     assert config.master_manifest_path == master_manifest_path
     assert config.output_dir == output_dir
     assert config.local_data_dir == local_dir
+    assert config.stain_matrix_cache_path == output_dir / "runtime_stain_matrix_cache.sqlite"
     assert config.num_lhs_samples == LHS_SAMPLE_COUNT
     assert config.num_repeats == NUM_REPEATS
     assert config.log_path == Path("logs/lr_finder.log")
@@ -76,12 +97,39 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     ]
 
 
-def test_load_lr_finder_config_reads_huggingface_token_aliases(tmp_path: Path) -> None:
+def test_load_lr_finder_config_reads_stain_matrix_cache_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    _write_registry(registry_path)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_text("", encoding="utf-8")
+    cache_path = tmp_path / "cache" / "vahadane.sqlite"
+
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
+    config = load_lr_finder_config(
+        {
+            "LR_FINDER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+            "LR_FINDER_OUTPUT_DIR": str(tmp_path / "reports"),
+            "LR_FINDER_LOCAL_DATA_DIR": str(tmp_path / "local"),
+            "LR_FINDER_STAIN_MATRIX_CACHE_PATH": str(cache_path),
+        }
+    )
+
+    assert config.stain_matrix_cache_path == cache_path
+
+
+def test_load_lr_finder_config_reads_huggingface_token_aliases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    _write_registry(registry_path)
     master_manifest_path = tmp_path / "master_manifest.sqlite"
     master_manifest_path.write_text("", encoding="utf-8")
     output_dir = tmp_path / "reports"
     local_dir = tmp_path / "local"
 
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
     config = load_lr_finder_config(
         {
             "LR_FINDER_MASTER_MANIFEST_PATH": str(master_manifest_path),
@@ -95,10 +143,15 @@ def test_load_lr_finder_config_reads_huggingface_token_aliases(tmp_path: Path) -
     assert config.hf_token == "hf_primary"
 
 
-def test_load_lr_finder_config_reads_shared_runtime_normalization_method(tmp_path: Path) -> None:
+def test_load_lr_finder_config_reads_shared_runtime_normalization_method(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    _write_registry(registry_path)
     master_manifest_path = tmp_path / "master_manifest.sqlite"
     master_manifest_path.write_text("", encoding="utf-8")
 
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
     config = load_lr_finder_config(
         {
             "LR_FINDER_MASTER_MANIFEST_PATH": str(master_manifest_path),

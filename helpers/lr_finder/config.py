@@ -52,6 +52,7 @@ class LRFinderConfig:
     search_space: BCEDiceSearchSpace
     model_plans: list[ModelPlan]
     runtime_normalization_method: str = "NOT_NORMALIZED"
+    stain_matrix_cache_path: Path | None = None
     log_folder: Path = Path("logs")
     log_file_name: str = "lr_finder.log"
 
@@ -145,6 +146,24 @@ def load_lr_finder_config(
     pdf_name = (values.get("LR_FINDER_PDF_NAME") or "report.pdf").strip()
     if not pdf_name.endswith(".pdf"):
         raise ValueError("LR_FINDER_PDF_NAME must end with '.pdf'.")
+    output_dir = _parse_required_path(
+        values.get("LR_FINDER_OUTPUT_DIR"),
+        "LR_FINDER_OUTPUT_DIR",
+        system_name=system_name,
+        default="./reports/lr_finder",
+    )
+    local_data_dir = _parse_required_path(
+        values.get("LR_FINDER_LOCAL_DATA_DIR"),
+        "LR_FINDER_LOCAL_DATA_DIR",
+        system_name=system_name,
+        default="./temp/lr_finder",
+    )
+    configured_stain_matrix_cache_path = resolve_env_path(
+        values.get("LR_FINDER_STAIN_MATRIX_CACHE_PATH"),
+        "LR_FINDER_STAIN_MATRIX_CACHE_PATH",
+        system_name=system_name,
+        required=False,
+    )
 
     return LRFinderConfig(
         master_manifest_path=_parse_required_path(
@@ -152,17 +171,12 @@ def load_lr_finder_config(
             "LR_FINDER_MASTER_MANIFEST_PATH",
             system_name=system_name,
         ),
-        output_dir=_parse_required_path(
-            values.get("LR_FINDER_OUTPUT_DIR"),
-            "LR_FINDER_OUTPUT_DIR",
-            system_name=system_name,
-            default="./reports/lr_finder",
-        ),
-        local_data_dir=_parse_required_path(
-            values.get("LR_FINDER_LOCAL_DATA_DIR"),
-            "LR_FINDER_LOCAL_DATA_DIR",
-            system_name=system_name,
-            default="./temp/lr_finder",
+        output_dir=output_dir,
+        local_data_dir=local_data_dir,
+        stain_matrix_cache_path=(
+            configured_stain_matrix_cache_path
+            if configured_stain_matrix_cache_path is not None
+            else output_dir / "runtime_stain_matrix_cache.sqlite"
         ),
         stage_input_locally=_parse_bool(values.get("LR_FINDER_STAGE_INPUT_LOCALLY"), default=False),
         overwrite_output=_parse_bool(values.get("LR_FINDER_OVERWRITE_OUTPUT"), default=True),

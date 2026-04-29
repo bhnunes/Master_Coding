@@ -58,6 +58,7 @@ def prepare_training_data(
         training_records,
         runtime_normalization_method=config.runtime_normalization_method,
         device=normalizer_device,
+        source_matrix_cache_path=config.stain_matrix_cache_path,
     )
 
     base_dataset = CanonicalRowHDF5Dataset(
