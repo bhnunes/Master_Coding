@@ -3,7 +3,6 @@ from __future__ import annotations
 import gc
 import json
 import logging
-import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from helpers.lr_finder.config import LRFinderConfig, ModelPlan
 from helpers.lr_finder.data import build_train_loader, prepare_training_data
 from helpers.lr_finder.reporting import RunRecord
 from helpers.lr_finder.search_space import BCEDiceParams, sample_bcedice_params
+from helpers.runtime_platform import ensure_headless_matplotlib_backend
 from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPaper
@@ -27,8 +27,6 @@ from helpers.training.runtime import autocast_ctx, seed_everything, setup_precis
 from helpers.training.stain_normalization import resolve_dataloader_stain_normalizer_device
 
 logger = logging.getLogger(__name__)
-
-_COLAB_INLINE_MPL_BACKEND = "module://matplotlib_inline.backend_inline"
 
 
 class _NonFiniteLossError(RuntimeError):
@@ -394,13 +392,8 @@ def _extract_lr_finder_history(
     }
 
 
-def _ensure_headless_matplotlib_backend() -> None:
-    if os.environ.get("MPLBACKEND") == _COLAB_INLINE_MPL_BACKEND:
-        os.environ["MPLBACKEND"] = "Agg"
-
-
 def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.float64]]:
-    _ensure_headless_matplotlib_backend()
+    ensure_headless_matplotlib_backend()
 
     amp_dtype, scaler, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
     history: dict[str, list[float]] | None = None
@@ -431,7 +424,7 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
 
 
 def _load_matplotlib_pyplot() -> Any:
-    _ensure_headless_matplotlib_backend()
+    ensure_headless_matplotlib_backend()
 
     import matplotlib
 

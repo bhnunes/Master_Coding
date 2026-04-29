@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 import torch
-from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
+
+from helpers.runtime_platform import ensure_headless_matplotlib_backend
 
 LOGIT_TENSOR_NDIM = 4
 MASK_TENSOR_NDIM = 3
@@ -155,6 +156,9 @@ class AdvancedMetricTracker:
         collapse_high: float = 0.99,
         from_logits: bool = True,
     ) -> None:
+        ensure_headless_matplotlib_backend()
+        from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
+
         self.device = device
         self.from_logits = from_logits
         self.auprc = BinaryAveragePrecision(thresholds=metric_bins).to(device)

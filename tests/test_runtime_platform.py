@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import inspect
+import os
 from pathlib import Path
 
 import pytest
 
 from helpers import runtime_platform
 from helpers.runtime_platform import (
+    ensure_headless_matplotlib_backend,
     get_openslide_dll_context,
     load_openslide_module,
     resolve_env_path,
@@ -35,6 +37,24 @@ def test_get_runtime_os_prefers_explicit_value_and_platform_fallback(
 
     assert runtime_platform.get_runtime_os("Linux") == "Linux"
     assert runtime_platform.get_runtime_os() == "Darwin"
+
+
+def test_ensure_headless_matplotlib_backend_replaces_colab_inline_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MPLBACKEND", runtime_platform.COLAB_INLINE_MATPLOTLIB_BACKEND)
+
+    ensure_headless_matplotlib_backend()
+
+    assert os.environ["MPLBACKEND"] == runtime_platform.HEADLESS_MATPLOTLIB_BACKEND
+
+
+def test_ensure_headless_matplotlib_backend_keeps_supported_backend() -> None:
+    env = {"MPLBACKEND": "svg"}
+
+    ensure_headless_matplotlib_backend(env)
+
+    assert env["MPLBACKEND"] == "svg"
 
 
 def test_resolve_env_path_does_not_treat_non_alpha_drive_prefix_as_windows_path() -> None:

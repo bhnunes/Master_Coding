@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+from collections.abc import MutableMapping
 from contextlib import AbstractContextManager, nullcontext
 from importlib import import_module
 from pathlib import Path
@@ -9,12 +10,24 @@ from typing import Any, cast
 
 CONTROL_CHARACTER_MAX_ORDINAL = 31
 WINDOWS_DRIVE_PREFIX_LENGTH = 3
+COLAB_INLINE_MATPLOTLIB_BACKEND = "module://matplotlib_inline.backend_inline"
+HEADLESS_MATPLOTLIB_BACKEND = "Agg"
 
 
 def get_runtime_os(system_name: str | None = None) -> str:
     """Return the normalized runtime operating system name."""
 
     return system_name or platform.system()
+
+
+def ensure_headless_matplotlib_backend(
+    env: MutableMapping[str, str] | os._Environ[str] | None = None,
+) -> None:
+    """Use a supported non-interactive backend when Colab exports its inline backend."""
+
+    values = env if env is not None else os.environ
+    if values.get("MPLBACKEND") == COLAB_INLINE_MATPLOTLIB_BACKEND:
+        values["MPLBACKEND"] = HEADLESS_MATPLOTLIB_BACKEND
 
 
 def resolve_env_path(

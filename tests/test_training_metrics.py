@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+import os
+
 import pytest
 import torch
 
+from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_MATPLOTLIB_BACKEND
 from helpers.training.metrics import (
     AdvancedMetricTracker,
     RunningWeightedMetric,
@@ -11,6 +16,16 @@ WEIGHTED_SCORE = 3.0
 COLLAPSE_PATIENCE = 2
 PROBABILITY_THRESHOLD = 0.5
 LOGIT_PROBABILITY_CUTOFF = 0.5
+
+
+def test_advanced_metric_tracker_replaces_colab_inline_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MPLBACKEND", COLAB_INLINE_MATPLOTLIB_BACKEND)
+
+    AdvancedMetricTracker(device=torch.device("cpu"), metric_bins=8)
+
+    assert os.environ["MPLBACKEND"] == HEADLESS_MATPLOTLIB_BACKEND
 
 
 def test_running_weighted_metric_computes_average() -> None:
