@@ -19,6 +19,7 @@ from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataloader import default_collate
 
 from helpers.provenance import hash_file_sha256, hash_json_payload
+from helpers.runtime_normalization import runtime_vahadane_backend_for_provenance
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
 from helpers.training.master_manifest_queries import (
     CanonicalRowRecord,
@@ -616,12 +617,17 @@ def collect_manifest_split_provenance(
     split: str,
     smart_sampling: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    runtime_vahadane_backend: str = "fixed_source",
 ) -> dict[str, Any]:
     stage4_split_bundle_id = resolve_stage4_split_bundle_id(records)
     normalization_method, normalization_artifact_id = resolve_runtime_normalization_selection(
         master_manifest_path,
         records,
         runtime_normalization_method=runtime_normalization_method,
+    )
+    active_vahadane_backend = runtime_vahadane_backend_for_provenance(
+        runtime_normalization_method=normalization_method,
+        runtime_vahadane_backend=runtime_vahadane_backend,
     )
     manifest_sha256 = hash_file_sha256(master_manifest_path)
     source_signature = _build_manifest_record_source_signature(records)
@@ -642,12 +648,14 @@ def collect_manifest_split_provenance(
         "smart_sampling_metadata": {"selection_mode": selection_mode},
         "stage4_split_bundle_id": stage4_split_bundle_id,
         "runtime_normalization_method": normalization_method,
+        "runtime_vahadane_backend": active_vahadane_backend,
         "selection_mode": selection_mode,
         "normalization_methods": [normalization_method],
         "attrs": {
             "master_manifest_sha256": manifest_sha256,
             "stage4_split_bundle_id": stage4_split_bundle_id,
             "runtime_normalization_method": normalization_method,
+            "runtime_vahadane_backend": active_vahadane_backend,
             "normalization_method": normalization_method,
             "normalization_artifact_id": normalization_artifact_id,
         },
@@ -687,6 +695,7 @@ def prepare_training_data(  # noqa: PLR0913
     seed: int,
     use_artifact_aware_loss: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    runtime_vahadane_backend: str = "fixed_source",
     normalizer_device: torch.device | str = "cpu",
 ) -> PreparedTrainingData:
     if local_data_dir.exists():
@@ -748,6 +757,7 @@ def prepare_training_data(  # noqa: PLR0913
             master_manifest_path,
             train_records_for_dataset,
             runtime_normalization_method=runtime_normalization_method,
+            runtime_vahadane_backend=runtime_vahadane_backend,
             device=normalizer_device,
         ),
     )
@@ -762,6 +772,7 @@ def prepare_training_data(  # noqa: PLR0913
             master_manifest_path,
             validation_records_for_dataset,
             runtime_normalization_method=runtime_normalization_method,
+            runtime_vahadane_backend=runtime_vahadane_backend,
             device=normalizer_device,
         ),
     )
@@ -793,6 +804,7 @@ def prepare_training_data(  # noqa: PLR0913
             split="TRAIN",
             smart_sampling=smart_sampling,
             runtime_normalization_method=runtime_normalization_method,
+            runtime_vahadane_backend=runtime_vahadane_backend,
         ),
         validation_provenance=collect_manifest_split_provenance(
             master_manifest_path,
@@ -800,6 +812,7 @@ def prepare_training_data(  # noqa: PLR0913
             split="VALIDATION",
             smart_sampling=False,
             runtime_normalization_method=runtime_normalization_method,
+            runtime_vahadane_backend=runtime_vahadane_backend,
         ),
     )
 

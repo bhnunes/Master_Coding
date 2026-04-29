@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,37 @@ OHEM_MIN_KEPT = 2048
 DEFAULT_OHEM_START_EPOCH = 2
 DEFAULT_OHEM_RATIO = 0.25
 DEFAULT_OHEM_MIN_KEPT = 1024
+
+
+@pytest.fixture(autouse=True)
+def _training_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    registry_path = tmp_path / "training_model_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "FPN": {
+                    "lr": 1e-4,
+                    "wd": 1e-4,
+                    "encoders": ["senet154"],
+                    "loss": {"alpha_bce": 0.1, "beta_dice_bg": 0.2, "gamma_dice_fg": 0.3},
+                },
+                "SEGFORMER": {
+                    "lr": 1e-4,
+                    "wd": 1e-4,
+                    "encoders": ["mit_b5"],
+                    "loss": {"alpha_bce": 0.1, "beta_dice_bg": 0.2, "gamma_dice_fg": 0.3},
+                },
+                "SWIN": {
+                    "lr": 1e-4,
+                    "wd": 1e-4,
+                    "encoders": ["tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k"],
+                    "loss": {"alpha_bce": 0.1, "beta_dice_bg": 0.2, "gamma_dice_fg": 0.3},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
 
 
 def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path) -> None:
@@ -72,6 +104,7 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.ohem_min_kept == OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is True
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
+    assert config.runtime_vahadane_backend == "fixed_source"
     assert config.log_path == Path("logs/training_ensemble.log")
 
 
@@ -98,6 +131,7 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.ohem_min_kept == DEFAULT_OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is False
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
+    assert config.runtime_vahadane_backend == "fixed_source"
     assert config.master_manifest_path == tmp_path / "dataset" / "master_manifest.sqlite"
     assert config.log_path == Path("logs/training_ensemble.log")
 
@@ -116,6 +150,22 @@ def test_load_training_ensemble_config_reads_shared_runtime_normalization_method
     )
 
     assert config.runtime_normalization_method == "MACENKO"
+
+
+def test_load_training_ensemble_config_reads_runtime_vahadane_backend(
+    tmp_path: Path,
+) -> None:
+    config = load_training_ensemble_config(
+        {
+            "TRAINING_MASTER_MANIFEST_PATH": str(tmp_path / "dataset" / "master_manifest.sqlite"),
+            "TRAINING_METADATA_DIR": str(tmp_path / "metadata"),
+            "TRAINING_CHECKPOINT_PATH": str(tmp_path / "checkpoints"),
+            "TRAINING_AIM_REPO_PATH": str(tmp_path / "aim"),
+            "RUNTIME_VAHADANE_BACKEND": "torch_staintools_exact",
+        }
+    )
+
+    assert config.runtime_vahadane_backend == "torch_staintools_exact"
 
 
 def test_load_training_ensemble_config_rejects_invalid_execution_mode(tmp_path: Path) -> None:

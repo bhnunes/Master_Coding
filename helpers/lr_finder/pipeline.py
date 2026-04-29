@@ -60,6 +60,8 @@ def _serialize_config(config: LRFinderConfig) -> dict[str, Any]:
         "end_lr": config.end_lr,
         "num_iter": config.num_iter,
         "num_repeats": config.num_repeats,
+        "runtime_normalization_method": config.runtime_normalization_method,
+        "runtime_vahadane_backend": config.runtime_vahadane_backend,
         "optimizer_weight_decay": config.optimizer_weight_decay,
         "optimizer_start_lr": config.optimizer_start_lr,
         "pdf_name": config.pdf_name,

@@ -88,6 +88,7 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
                 "sha256": "val-sha",
                 "attrs": {
                     "master_manifest_sha256": "manifest-sha",
+                    "runtime_vahadane_backend": None,
                     "normalization_method": "none",
                     "normalization_artifact_id": None,
                 },
@@ -100,6 +101,7 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
         "master_manifest_sha256": "manifest-sha",
         "stage4_split_bundle_id": None,
         "runtime_normalization_method": None,
+        "runtime_vahadane_backend": None,
         "normalization_method": "none",
         "normalization_artifact_id": None,
     }

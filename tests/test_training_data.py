@@ -717,6 +717,7 @@ def test_prepare_training_data_uses_sqlite_rows_and_manifest_provenance(
     assert prepared.training_provenance["selection_signature"]
     assert prepared.training_provenance["stage4_split_bundle_id"] is None
     assert prepared.training_provenance["runtime_normalization_method"] == "none"
+    assert prepared.training_provenance["runtime_vahadane_backend"] is None
     assert prepared.validation_provenance["split"] == "VALIDATION"
 
 
@@ -876,6 +877,8 @@ def test_collect_manifest_split_provenance_reports_manifest_metadata(
     assert provenance["smart_sampling_enabled"] is True
     assert provenance["stage4_split_bundle_id"] is None
     assert provenance["runtime_normalization_method"] == "none"
+    assert provenance["runtime_vahadane_backend"] is None
     assert provenance["attrs"]["master_manifest_sha256"] == provenance["master_manifest_sha256"]
     assert provenance["attrs"]["stage4_split_bundle_id"] is None
     assert provenance["attrs"]["runtime_normalization_method"] == "none"
+    assert provenance["attrs"]["runtime_vahadane_backend"] is None

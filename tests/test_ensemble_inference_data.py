@@ -245,6 +245,7 @@ def test_collect_test_dataset_provenance_reports_manifest_metadata(
         "master_manifest_sha256": provenance["master_manifest_sha256"],
         "stage4_split_bundle_id": None,
         "runtime_normalization_method": "none",
+        "runtime_vahadane_backend": None,
         "normalization_method": "none",
         "normalization_artifact_id": None,
     }

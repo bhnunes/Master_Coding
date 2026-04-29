@@ -266,6 +266,7 @@ Current runtime normalization contract:
 
 - Stage 4 now persists one normalization-agnostic split assignment per run
 - Phases 7-10 now reserve one shared runtime selector, `RUNTIME_NORMALIZATION_METHOD`, for choosing `NOT_NORMALIZED`, `REINHARD`, `RUIFROK`, `MACENKO`, or `VAHADANE`
+- Runtime `VAHADANE` defaults to `RUNTIME_VAHADANE_BACKEND=fixed_source`, which uses the Stage 4 target stain matrix as a fixed-source proxy; set `RUNTIME_VAHADANE_BACKEND=torch_staintools_exact` to restore per-patch source fitting
 - Downstream runtime loading resolves the selected method from the Stage 4 split bundle artifact registry instead of per-patch normalization state
 - Old normalization-specific Stage 4 persisted-state assumptions are intentionally unsupported
 

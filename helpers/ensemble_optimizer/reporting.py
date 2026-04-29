@@ -126,9 +126,12 @@ def build_recipe_metadata(config: RecipeMetadataConfig) -> dict[str, Any]:
                 "stage4_split_bundle_id": config.validation_provenance.get("attrs", {}).get(
                     "stage4_split_bundle_id"
                 ),
-                "runtime_normalization_method": config.validation_provenance.get(
-                    "attrs", {}
-                ).get("runtime_normalization_method"),
+                "runtime_normalization_method": config.validation_provenance.get("attrs", {}).get(
+                    "runtime_normalization_method"
+                ),
+                "runtime_vahadane_backend": config.validation_provenance.get("attrs", {}).get(
+                    "runtime_vahadane_backend"
+                ),
                 "normalization_method": config.validation_provenance.get("attrs", {}).get(
                     "normalization_method"
                 ),

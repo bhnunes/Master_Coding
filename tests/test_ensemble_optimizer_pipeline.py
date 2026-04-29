@@ -67,6 +67,7 @@ def test_run_ensemble_optimizer_pipeline_writes_run_config(tmp_path: Path) -> No
     run_config = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert outputs.recipe_path.name.startswith("ENSEMBLE_TWO_STREAM_")
     assert run_config["semantic_architectures"] == ["SWIN"]
+    assert run_config["runtime_vahadane_backend"] == "fixed_source"
 
 
 def test_execute_pipeline_selects_models_from_optimization_subset_before_holdout_eval(

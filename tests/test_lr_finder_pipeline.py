@@ -115,6 +115,8 @@ def test_run_lr_finder_pipeline_writes_config_and_report(tmp_path: Path) -> None
     assert outputs.architecture_trial_stats == ARCHITECTURE_TRIAL_STATS
     run_config = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert run_config["pdf_name"] == "report.pdf"
+    assert run_config["runtime_normalization_method"] == "NOT_NORMALIZED"
+    assert run_config["runtime_vahadane_backend"] == "fixed_source"
     assert run_config["valid_records"] == VALID_RECORD_COUNT
     assert run_config["completed_trials"] == COMPLETED_TRIALS
     assert run_config["failed_trials"] == FAILED_TRIALS

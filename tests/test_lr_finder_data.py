@@ -316,6 +316,7 @@ def test_prepare_training_data_uses_sqlite_rows_for_smart_sampling(
     assert prepared.training_provenance["selection_signature"]
     assert prepared.training_provenance["stage4_split_bundle_id"] is None
     assert prepared.training_provenance["runtime_normalization_method"] == "none"
+    assert prepared.training_provenance["runtime_vahadane_backend"] is None
     assert prepared.validation_provenance["split"] == "VALIDATION"
     assert prepared.validation_provenance["row_count"] == VALIDATION_ROW_COUNT
 

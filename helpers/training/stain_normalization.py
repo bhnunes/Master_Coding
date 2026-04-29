@@ -14,6 +14,7 @@ from torch import nn
 
 from helpers.extraction.manifest_paths import resolve_manifest_path_ref
 from helpers.provenance import hash_file_sha256
+from helpers.runtime_normalization import parse_runtime_vahadane_backend
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 
 SUPPORTED_RUNTIME_NORMALIZATION_METHODS = frozenset(
@@ -85,6 +86,7 @@ def build_split_stain_normalizer(
     runtime_normalization_method: str = "NOT_NORMALIZED",
     device: torch.device | str | None = None,
     source_matrix_cache_path: Path | None = None,
+    runtime_vahadane_backend: str = "fixed_source",
 ) -> ImageStainNormalizer | None:
     """Build one shared split-level stain normalizer from Stage 5 metadata."""
 
@@ -116,6 +118,7 @@ def build_split_stain_normalizer(
         device=runtime_device,
         source_matrix_cache_path=source_matrix_cache_path,
         cache_namespace=f"{method}:{artifact.normalization_artifact_id}:{artifact.state_sha256}",
+        runtime_vahadane_backend=runtime_vahadane_backend,
     )
 
 
@@ -240,23 +243,14 @@ def _build_runtime_normalizer(
     device: torch.device,
     source_matrix_cache_path: Path | None = None,
     cache_namespace: str | None = None,
+    runtime_vahadane_backend: str = "fixed_source",
 ) -> ImageStainNormalizer:
-    if method == "ruifrok":
-        stain_matrix_source = _coerce_optional_tensor(
-            state,
-            "stain_matrix_source",
+    vahadane_backend = parse_runtime_vahadane_backend(runtime_vahadane_backend)
+    if method == "ruifrok" or (method == "vahadane" and vahadane_backend == "fixed_source"):
+        return _build_fixed_matrix_deconvolution_normalizer(
+            method=method,
+            state=state,
             device=device,
-        )
-        if stain_matrix_source is None:
-            stain_matrix_source = _ensure_batch_dimension(
-                _RUIFROK_HE_STAIN_MATRIX.to(device=device), 3
-            )
-        return _TorchModuleImageNormalizer(
-            _FixedMatrixDeconvolutionNormalizer(
-                stain_matrix_source=stain_matrix_source,
-                stain_matrix_target=_coerce_tensor(state, "stain_matrix_target", device=device),
-                max_c_target=_coerce_tensor(state, "maxC_target", device=device),
-            ).to(device)
         )
 
     builder = _load_torch_staintools_builder()
@@ -274,6 +268,36 @@ def _build_runtime_normalizer(
         else None
     )
     return _TorchModuleImageNormalizer(runtime_module, source_matrix_cache=source_matrix_cache)
+
+
+def _build_fixed_matrix_deconvolution_normalizer(
+    *,
+    method: str,
+    state: dict[str, Any],
+    device: torch.device,
+) -> ImageStainNormalizer:
+    stain_matrix_target = _coerce_tensor(state, "stain_matrix_target", device=device)
+    stain_matrix_source = _coerce_optional_tensor(
+        state,
+        "stain_matrix_source",
+        device=device,
+    )
+    if stain_matrix_source is None:
+        if method == "ruifrok":
+            stain_matrix_source = _ensure_batch_dimension(
+                _RUIFROK_HE_STAIN_MATRIX.to(device=device), 3
+            )
+        elif method == "vahadane":
+            stain_matrix_source = stain_matrix_target
+        else:
+            raise ValueError(f"Unsupported fixed-matrix normalization method: {method}")
+    return _TorchModuleImageNormalizer(
+        _FixedMatrixDeconvolutionNormalizer(
+            stain_matrix_source=stain_matrix_source,
+            stain_matrix_target=stain_matrix_target,
+            max_c_target=_coerce_tensor(state, "maxC_target", device=device),
+        ).to(device)
+    )
 
 
 def _load_torch_staintools_builder() -> Any:
@@ -402,11 +426,7 @@ class _TorchModuleImageNormalizer:
 
         image_tensor = _numpy_image_to_tensor(image, device=module_device)
         normalized_tensor = _forward_module(self.module, image_tensor, cache_key=cache_key)
-        if (
-            cache_key is not None
-            and self.source_matrix_cache is not None
-            and persistent_cache_miss
-        ):
+        if cache_key is not None and self.source_matrix_cache is not None and persistent_cache_miss:
             observed_matrix = _read_module_stain_matrix_cache(self.module, cache_key)
             if observed_matrix is not None:
                 self.source_matrix_cache.store(cache_key, observed_matrix)

@@ -192,6 +192,7 @@ prepared_training_data = prepare_training_data(
     seed=seed,
     use_artifact_aware_loss=use_artifact_aware_loss,
     runtime_normalization_method=training_config.runtime_normalization_method,
+    runtime_vahadane_backend=training_config.runtime_vahadane_backend,
     normalizer_device=resolve_dataloader_stain_normalizer_device(device, workers=workers),
 )
 train_dataset_provenance = prepared_training_data.training_provenance

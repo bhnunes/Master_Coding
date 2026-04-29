@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,31 @@ VALIDATION_CALIBRATION_FRACTION = 0.25
 VALIDATION_HOLDOUT_FRACTION = 0.3
 SEMANTIC_TRIALS = 11
 SPATIAL_TRIALS = 13
+
+
+@pytest.fixture(autouse=True)
+def _training_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    registry_path = tmp_path / "training_model_registry.json"
+    payload = {
+        architecture: {
+            "lr": 1e-4,
+            "wd": 1e-4,
+            "encoders": [encoder],
+            "loss": {"alpha_bce": 0.1, "beta_dice_bg": 0.2, "gamma_dice_fg": 0.3},
+        }
+        for architecture, encoder in {
+            "SWIN": "enc-swin",
+            "DPT": "enc-dpt",
+            "SEGFORMER": "enc-segformer",
+            "UPERNET": "enc-upernet",
+            "DEEPLABV3PLUS": "enc-deeplab",
+            "UNET++": "enc-unetpp",
+            "FPN": "enc-fpn",
+            "MANET": "enc-manet",
+        }.items()
+    }
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
 
 
 def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Path) -> None:
@@ -56,6 +82,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
+    assert config.runtime_vahadane_backend == "fixed_source"
     assert config.log_path == Path("logs/ensemble_optimizer.log")
 
 
@@ -78,6 +105,7 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
+    assert config.runtime_vahadane_backend == "fixed_source"
 
 
 def test_load_ensemble_optimizer_config_reads_shared_runtime_normalization_method(
@@ -94,6 +122,22 @@ def test_load_ensemble_optimizer_config_reads_shared_runtime_normalization_metho
     )
 
     assert config.runtime_normalization_method == "VAHADANE"
+
+
+def test_load_ensemble_optimizer_config_reads_runtime_vahadane_backend(
+    tmp_path: Path,
+) -> None:
+    config = load_ensemble_optimizer_config(
+        {
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                tmp_path / "dataset" / "master_manifest.sqlite"
+            ),
+            "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+            "RUNTIME_VAHADANE_BACKEND": "torch_staintools_exact",
+        }
+    )
+
+    assert config.runtime_vahadane_backend == "torch_staintools_exact"
 
 
 def test_load_ensemble_optimizer_config_allows_explicit_positive_only_policy(

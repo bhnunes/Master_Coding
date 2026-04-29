@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 
 from helpers.provenance import hash_file_sha256
+from helpers.runtime_normalization import runtime_vahadane_backend_for_provenance
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
 from helpers.training.master_manifest_queries import CanonicalRowRecord, load_validation_records
 from helpers.training.runtime import worker_init_fn
@@ -25,6 +26,7 @@ class ValidationDatasetLayout:
     local_cache_dir: Path | None
     master_manifest_path: Path
     runtime_normalization_method: str = "NOT_NORMALIZED"
+    runtime_vahadane_backend: str = "fixed_source"
     normalizer_device: torch.device | str = "cpu"
 
 
@@ -34,6 +36,7 @@ def setup_validation_data(
     *,
     stage_input_locally: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    runtime_vahadane_backend: str = "fixed_source",
     normalizer_device: torch.device | str = "cpu",
 ) -> ValidationDatasetLayout:
     local_cache_dir = local_data_dir / "patient_shards" if stage_input_locally else None
@@ -49,6 +52,7 @@ def setup_validation_data(
         local_cache_dir=local_cache_dir,
         master_manifest_path=master_manifest_path,
         runtime_normalization_method=runtime_normalization_method,
+        runtime_vahadane_backend=runtime_vahadane_backend,
         normalizer_device=normalizer_device,
     )
 
@@ -60,19 +64,26 @@ def collect_validation_provenance(layout: ValidationDatasetLayout) -> dict[str, 
         layout.records,
         runtime_normalization_method=layout.runtime_normalization_method,
     )
+    active_vahadane_backend = runtime_vahadane_backend_for_provenance(
+        runtime_normalization_method=normalization_method,
+        runtime_vahadane_backend=layout.runtime_vahadane_backend,
+    )
+    master_manifest_sha256 = hash_file_sha256(layout.master_manifest_path)
     return {
         "path": str(layout.master_manifest_path),
         "master_manifest_path": str(layout.master_manifest_path),
-        "master_manifest_sha256": hash_file_sha256(layout.master_manifest_path),
+        "master_manifest_sha256": master_manifest_sha256,
         "row_count": len(layout.records),
         "shard_count": len({str(record.source_hdf5_path) for record in layout.records}),
         "stage4_split_bundle_id": stage4_split_bundle_id,
         "runtime_normalization_method": normalization_method,
+        "runtime_vahadane_backend": active_vahadane_backend,
         "normalization_methods": [normalization_method],
         "attrs": {
-            "master_manifest_sha256": hash_file_sha256(layout.master_manifest_path),
+            "master_manifest_sha256": master_manifest_sha256,
             "stage4_split_bundle_id": stage4_split_bundle_id,
             "runtime_normalization_method": normalization_method,
+            "runtime_vahadane_backend": active_vahadane_backend,
             "normalization_method": normalization_method,
             "normalization_artifact_id": normalization_artifact_id,
         },
@@ -104,6 +115,7 @@ class ValidationDataset(Dataset[Any]):
                 layout.master_manifest_path,
                 self.records,
                 runtime_normalization_method=layout.runtime_normalization_method,
+                runtime_vahadane_backend=layout.runtime_vahadane_backend,
                 device=layout.normalizer_device,
             ),
         )

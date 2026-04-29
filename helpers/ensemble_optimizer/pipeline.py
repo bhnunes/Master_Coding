@@ -324,6 +324,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
         runtime_normalization_method=config.runtime_normalization_method,
+        runtime_vahadane_backend=config.runtime_vahadane_backend,
         normalizer_device=resolve_dataloader_stain_normalizer_device(
             device,
             workers=config.workers,

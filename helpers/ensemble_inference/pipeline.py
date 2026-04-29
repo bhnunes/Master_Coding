@@ -71,6 +71,7 @@ def _validate_recipe_dataset_lineage(
         "master_manifest_sha256",
         "stage4_split_bundle_id",
         "runtime_normalization_method",
+        "runtime_vahadane_backend",
         "normalization_method",
         "normalization_artifact_id",
     )
@@ -194,6 +195,7 @@ def _prepare_pipeline(
         config.local_data_dir,
         stage_input_locally=config.stage_input_locally,
         runtime_normalization_method=config.runtime_normalization_method,
+        runtime_vahadane_backend=config.runtime_vahadane_backend,
         normalizer_device=normalizer_device,
     )
     observed_checkpoint_hashes = _validate_checkpoint_hashes(recipe_payload)

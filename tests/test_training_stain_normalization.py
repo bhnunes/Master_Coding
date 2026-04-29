@@ -600,7 +600,92 @@ def test_build_split_stain_normalizer_supports_ruifrok(tmp_path: Path) -> None:
     assert output.dtype == np.uint8
 
 
-@pytest.mark.parametrize("method", ["MACENKO", "VAHADANE"])
+def test_build_split_stain_normalizer_uses_fixed_source_vahadane_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "vahadane_stats.json"
+    target_matrix = [[0.65, 0.70, 0.29], [0.07, 0.99, 0.11]]
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "VAHADANE",
+                "stain_matrix_target": target_matrix,
+                "maxC_target": [1.0, 0.8],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="VAHADANE",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+    monkeypatch.setattr(
+        "helpers.training.stain_normalization._load_torch_staintools_builder",
+        lambda: pytest.fail("fixed-source VAHADANE must not load torch-staintools"),
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record()],
+        runtime_normalization_method="VAHADANE",
+        device="cpu",
+    )
+
+    assert normalizer is not None
+    module = cast(torch.nn.Module, cast(Any, normalizer).module)
+    assert isinstance(module, stain_norm._FixedMatrixDeconvolutionNormalizer)
+    source_matrix = cast(torch.Tensor, module.stain_matrix_source)
+    target_matrix_tensor = cast(torch.Tensor, module.stain_matrix_target)
+    expected_matrix = torch.tensor([target_matrix], dtype=torch.float32)
+    assert torch.equal(source_matrix, expected_matrix)
+    assert torch.equal(target_matrix_tensor, expected_matrix)
+
+
+def test_build_split_stain_normalizer_uses_vahadane_source_matrix_when_available(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "vahadane_stats.json"
+    source_matrix = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    target_matrix = [[0.65, 0.70, 0.29], [0.07, 0.99, 0.11]]
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "VAHADANE",
+                "stain_matrix_source": source_matrix,
+                "stain_matrix_target": target_matrix,
+                "maxC_target": [1.0, 0.8],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="VAHADANE",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record()],
+        runtime_normalization_method="VAHADANE",
+        device="cpu",
+    )
+
+    assert normalizer is not None
+    module = cast(torch.nn.Module, cast(Any, normalizer).module)
+    assert torch.equal(
+        cast(torch.Tensor, module.stain_matrix_source),
+        torch.tensor([source_matrix], dtype=torch.float32),
+    )
+
+
+@pytest.mark.parametrize("method", ["MACENKO"])
 def test_build_split_stain_normalizer_supports_torch_staintools_matrix_methods(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -657,6 +742,47 @@ def test_build_split_stain_normalizer_supports_torch_staintools_matrix_methods(
     assert torch.equal(max_c_target, torch.tensor([[1.0, 0.8]], dtype=torch.float32))
 
 
+def test_build_split_stain_normalizer_can_opt_into_exact_vahadane_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "vahadane_stats.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "method": "VAHADANE",
+                "stain_matrix_target": [
+                    [0.65, 0.70, 0.29],
+                    [0.07, 0.99, 0.11],
+                ],
+                "maxC_target": [1.0, 0.8],
+            }
+        ),
+        encoding="utf-8",
+    )
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="VAHADANE",
+        state_path=state_path,
+        state_sha256=hash_file_sha256(state_path),
+    )
+    monkeypatch.setattr(
+        "helpers.training.stain_normalization._load_torch_staintools_builder",
+        lambda: _FakeNormalizerBuilder,
+    )
+
+    normalizer = build_split_stain_normalizer(
+        master_manifest_path,
+        [_make_record()],
+        runtime_normalization_method="VAHADANE",
+        runtime_vahadane_backend="torch_staintools_exact",
+    )
+
+    assert normalizer is not None
+    assert _FakeNormalizerBuilder.last_method == "vahadane"
+
+
 def test_build_split_stain_normalizer_reuses_persistent_source_matrix_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -694,6 +820,7 @@ def test_build_split_stain_normalizer_reuses_persistent_source_matrix_cache(
         master_manifest_path,
         [_make_record()],
         runtime_normalization_method="VAHADANE",
+        runtime_vahadane_backend="torch_staintools_exact",
         source_matrix_cache_path=cache_path,
     )
     assert first_normalizer is not None
@@ -703,6 +830,7 @@ def test_build_split_stain_normalizer_reuses_persistent_source_matrix_cache(
         master_manifest_path,
         [_make_record()],
         runtime_normalization_method="VAHADANE",
+        runtime_vahadane_backend="torch_staintools_exact",
         source_matrix_cache_path=cache_path,
     )
     assert second_normalizer is not None

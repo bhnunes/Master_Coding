@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 
 from helpers.provenance import hash_file_sha256
+from helpers.runtime_normalization import runtime_vahadane_backend_for_provenance
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
 from helpers.training.master_manifest_queries import CanonicalRowRecord, load_test_records
 from helpers.training.runtime import worker_init_fn
@@ -26,6 +27,7 @@ class TestDatasetLayout:
     local_cache_dir: Path | None
     master_manifest_path: Path
     runtime_normalization_method: str = "NOT_NORMALIZED"
+    runtime_vahadane_backend: str = "fixed_source"
     normalizer_device: torch.device | str = "cpu"
 
 
@@ -35,6 +37,7 @@ def setup_test_data(
     *,
     stage_input_locally: bool,
     runtime_normalization_method: str = "NOT_NORMALIZED",
+    runtime_vahadane_backend: str = "fixed_source",
     normalizer_device: torch.device | str = "cpu",
 ) -> TestDatasetLayout:
     if not master_manifest_path.is_file():
@@ -52,6 +55,7 @@ def setup_test_data(
         local_cache_dir=local_cache_dir,
         master_manifest_path=master_manifest_path,
         runtime_normalization_method=runtime_normalization_method,
+        runtime_vahadane_backend=runtime_vahadane_backend,
         normalizer_device=normalizer_device,
     )
 
@@ -63,11 +67,16 @@ def _build_manifest_runtime_lineage_attrs(layout: TestDatasetLayout) -> dict[str
         layout.records,
         runtime_normalization_method=layout.runtime_normalization_method,
     )
+    active_vahadane_backend = runtime_vahadane_backend_for_provenance(
+        runtime_normalization_method=normalization_method,
+        runtime_vahadane_backend=layout.runtime_vahadane_backend,
+    )
 
     return {
         "master_manifest_sha256": hash_file_sha256(layout.master_manifest_path),
         "stage4_split_bundle_id": stage4_split_bundle_id,
         "runtime_normalization_method": normalization_method,
+        "runtime_vahadane_backend": active_vahadane_backend,
         "normalization_method": normalization_method,
         "normalization_artifact_id": normalization_artifact_id,
     }
@@ -84,6 +93,7 @@ def collect_test_dataset_provenance(layout: TestDatasetLayout) -> dict[str, Any]
         "shard_count": len({str(record.source_hdf5_path) for record in layout.records}),
         "stage4_split_bundle_id": attrs["stage4_split_bundle_id"],
         "runtime_normalization_method": attrs["runtime_normalization_method"],
+        "runtime_vahadane_backend": attrs["runtime_vahadane_backend"],
         "normalization_methods": [str(attrs["normalization_method"])],
         "attrs": attrs,
     }
@@ -106,6 +116,7 @@ class TestDataset(Dataset[Any]):
                 layout.master_manifest_path,
                 self.records,
                 runtime_normalization_method=layout.runtime_normalization_method,
+                runtime_vahadane_backend=layout.runtime_vahadane_backend,
                 device=layout.normalizer_device,
             ),
         )

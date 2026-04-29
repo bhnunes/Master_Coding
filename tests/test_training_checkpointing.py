@@ -476,6 +476,7 @@ def test_save_metadata_records_runtime_normalization_lineage_from_manifest_paylo
         "attrs": {
             "stage4_split_bundle_id": 7,
             "runtime_normalization_method": "reinhard",
+            "runtime_vahadane_backend": None,
             "normalization_method": "reinhard",
             "normalization_artifact_id": 13,
         },
@@ -490,6 +491,7 @@ def test_save_metadata_records_runtime_normalization_lineage_from_manifest_paylo
         "attrs": {
             "stage4_split_bundle_id": 7,
             "runtime_normalization_method": "reinhard",
+            "runtime_vahadane_backend": None,
             "normalization_method": "reinhard",
             "normalization_artifact_id": 13,
         },
@@ -521,6 +523,7 @@ def test_save_metadata_records_runtime_normalization_lineage_from_manifest_paylo
         "dataset_sha256": "train-sha",
         "stage4_split_bundle_id": 7,
         "runtime_normalization_method": "reinhard",
+        "runtime_vahadane_backend": None,
         "normalization_method": "reinhard",
         "normalization_artifact_id": 13,
     }
@@ -529,6 +532,7 @@ def test_save_metadata_records_runtime_normalization_lineage_from_manifest_paylo
         "source_signature": "val-source-sig",
         "stage4_split_bundle_id": 7,
         "runtime_normalization_method": "reinhard",
+        "runtime_vahadane_backend": None,
         "normalization_method": "reinhard",
         "normalization_artifact_id": 13,
     }

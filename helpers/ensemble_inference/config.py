@@ -8,7 +8,9 @@ from pathlib import Path
 from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_normalization import (
     RUNTIME_NORMALIZATION_METHOD_ENV_VAR,
+    RUNTIME_VAHADANE_BACKEND_ENV_VAR,
     parse_runtime_normalization_method,
+    parse_runtime_vahadane_backend,
 )
 from helpers.runtime_platform import resolve_env_path
 
@@ -61,6 +63,7 @@ class EnsembleInferenceConfig:
     export_latex: bool
     export_visualizations: bool
     runtime_normalization_method: str = "NOT_NORMALIZED"
+    runtime_vahadane_backend: str = "fixed_source"
     log_folder: Path = Path("logs")
     log_file_name: str = "ensemble_inference.log"
 
@@ -123,6 +126,9 @@ def load_ensemble_inference_config(
         ),
         runtime_normalization_method=parse_runtime_normalization_method(
             values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
+        ),
+        runtime_vahadane_backend=parse_runtime_vahadane_backend(
+            values.get(RUNTIME_VAHADANE_BACKEND_ENV_VAR)
         ),
         log_folder=resolve_log_folder(
             values,

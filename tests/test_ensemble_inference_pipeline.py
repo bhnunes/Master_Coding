@@ -62,6 +62,7 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
     payload = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
     assert payload["batch_size"] == PIPELINE_BATCH_SIZE
     assert payload["visualization_samples"] == PIPELINE_VISUALIZATION_SAMPLES
+    assert payload["runtime_vahadane_backend"] == "fixed_source"
     assert "runtime_environment" in payload
     assert "git_commit" in payload["runtime_environment"]
     assert outputs.recipe_copy_path.name == "recipe.json"
@@ -130,6 +131,7 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
                 "master_manifest_sha256": "manifest-sha",
                 "stage4_split_bundle_id": None,
                 "runtime_normalization_method": "none",
+                "runtime_vahadane_backend": None,
                 "normalization_method": "none",
                 "normalization_artifact_id": None,
             }
@@ -169,6 +171,7 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
                             "master_manifest_sha256": "manifest-sha",
                             "stage4_split_bundle_id": None,
                             "runtime_normalization_method": "none",
+                            "runtime_vahadane_backend": None,
                             "normalization_method": "none",
                             "normalization_artifact_id": None,
                         },
@@ -177,6 +180,7 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
                         "master_manifest_sha256": "manifest-sha",
                         "stage4_split_bundle_id": None,
                         "runtime_normalization_method": "none",
+                        "runtime_vahadane_backend": None,
                         "normalization_method": "none",
                         "normalization_artifact_id": None,
                     },
@@ -220,6 +224,7 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
                 "master_manifest_sha256": "other-manifest-sha",
                 "stage4_split_bundle_id": None,
                 "runtime_normalization_method": "none",
+                "runtime_vahadane_backend": None,
                 "normalization_method": "none",
                 "normalization_artifact_id": None,
             }
@@ -265,6 +270,7 @@ def test_execute_pipeline_rejects_missing_validation_lineage_key(
                             "master_manifest_sha256": "manifest-sha",
                             "stage4_split_bundle_id": None,
                             "runtime_normalization_method": "none",
+                            "runtime_vahadane_backend": None,
                             "normalization_method": "none",
                             "normalization_artifact_id": None,
                         },
@@ -313,6 +319,7 @@ def test_execute_pipeline_rejects_missing_validation_lineage_key(
                 "master_manifest_sha256": "manifest-sha",
                 "stage4_split_bundle_id": None,
                 "runtime_normalization_method": "none",
+                "runtime_vahadane_backend": None,
                 "normalization_method": "none",
                 "normalization_artifact_id": None,
             }

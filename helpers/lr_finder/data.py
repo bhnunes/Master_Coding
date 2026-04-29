@@ -53,6 +53,7 @@ def prepare_training_data(
         config.master_manifest_path,
         training_records,
         runtime_normalization_method=config.runtime_normalization_method,
+        runtime_vahadane_backend=config.runtime_vahadane_backend,
         device=normalizer_device,
         source_matrix_cache_path=config.stain_matrix_cache_path,
     )
@@ -98,6 +99,7 @@ def prepare_training_data(
             split="TRAIN",
             smart_sampling=config.smart_sampling,
             runtime_normalization_method=config.runtime_normalization_method,
+            runtime_vahadane_backend=config.runtime_vahadane_backend,
         ),
         validation_provenance=collect_manifest_split_provenance(
             config.master_manifest_path,
@@ -105,6 +107,7 @@ def prepare_training_data(
             split="VALIDATION",
             smart_sampling=False,
             runtime_normalization_method=config.runtime_normalization_method,
+            runtime_vahadane_backend=config.runtime_vahadane_backend,
         ),
     )
 
