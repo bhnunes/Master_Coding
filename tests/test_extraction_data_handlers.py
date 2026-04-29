@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from shapely.geometry import GeometryCollection, LineString, Polygon
 
 from helpers.extraction import data_handlers
 from helpers.extraction.data_handlers import (
@@ -24,7 +25,6 @@ from helpers.extraction.data_handlers import (
 
 EXPECTED_POLYGON_COUNT = 2
 EXPECTED_SQUARE_AREA = 16.0
-EXPECTED_NON_OVERLAPPING_AREA = 12.0
 EXPECTED_HIESD_CANCER_POLYGON_COUNT = 3
 HIESD_COORD_LEVEL = 6
 EXPECTED_MIN_X = 64.0
@@ -76,9 +76,21 @@ def test_data_handlers_namespace_smoke_path(tmp_path: Path) -> None:
 
 
 def test_to_coord_list_handles_empty_polygon() -> None:
-    from shapely.geometry import Polygon
-
     assert _to_coord_list(Polygon()) == []
+
+
+def test_to_coord_list_ignores_non_polygon_geometry_collection_members() -> None:
+    geometry = GeometryCollection(
+        [
+            LineString([(0, 0), (1, 1)]),
+            Polygon([(2, 2), (6, 2), (6, 6), (2, 6)]),
+        ]
+    )
+
+    coord_lists = _to_coord_list(geometry)
+
+    assert len(coord_lists) == 1
+    assert Polygon(coord_lists[0]).area == EXPECTED_SQUARE_AREA
 
 
 def test_coords_to_shapely_polygons_accepts_flat_and_nested_coordinate_formats() -> None:
@@ -95,16 +107,28 @@ def test_coords_to_shapely_polygons_accepts_flat_and_nested_coordinate_formats()
     assert round(polygons[1].area, 2) == EXPECTED_SQUARE_AREA
 
 
-def test_remove_ambiguous_regions_removes_overlap_from_both_classes() -> None:
-    from shapely.geometry import Polygon
-
+def test_remove_ambiguous_regions_drops_cross_label_positive_area_overlaps(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     cancer = [Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])]
     not_cancer = [Polygon([(2, 2), (6, 2), (6, 6), (2, 6)])]
 
+    caplog.set_level("WARNING")
     clean_cancer, clean_non_cancer = _remove_ambiguous_regions(cancer, not_cancer)
 
-    assert round(clean_cancer.area, 2) == EXPECTED_NON_OVERLAPPING_AREA
-    assert round(clean_non_cancer.area, 2) == EXPECTED_NON_OVERLAPPING_AREA
+    assert clean_cancer.is_empty
+    assert clean_non_cancer.is_empty
+    assert "Discarding 1 cancer annotation polygon(s) and 1 not-cancer" in caplog.text
+
+
+def test_remove_ambiguous_regions_keeps_boundary_only_cross_label_contact() -> None:
+    cancer = [Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])]
+    not_cancer = [Polygon([(4, 0), (8, 0), (8, 4), (4, 4)])]
+
+    clean_cancer, clean_non_cancer = _remove_ambiguous_regions(cancer, not_cancer)
+
+    assert clean_cancer.area == EXPECTED_SQUARE_AREA
+    assert clean_non_cancer.area == EXPECTED_SQUARE_AREA
 
 
 def test_base_handler_rejects_non_dict_results() -> None:
@@ -117,7 +141,7 @@ def test_base_handler_rejects_missing_keys() -> None:
         DummyHandler({"cancer_polygons": []}).load_annotations(slide=None)
 
 
-def test_json_handler_loads_and_cleans_overlapping_annotations(tmp_path: Path) -> None:
+def test_json_handler_drops_cross_label_overlapping_annotations(tmp_path: Path) -> None:
     annotation_path = tmp_path / "annotations.json"
     annotation_path.write_text(
         json.dumps(
@@ -131,8 +155,34 @@ def test_json_handler_loads_and_cleans_overlapping_annotations(tmp_path: Path) -
 
     result = JSON_Handler().load_annotations(None, annotation_path=str(annotation_path))
 
+    assert result["cancer_polygons"] == []
+    assert result["not_cancer_polygons"] == []
+
+
+def test_json_handler_keeps_unrelated_annotations_after_dropping_conflicts(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "annotations.json"
+    annotation_path.write_text(
+        json.dumps(
+            {
+                "cancer_polygons": [
+                    [[(0, 0), (4, 0), (4, 4), (0, 4)]],
+                    [[(10, 10), (14, 10), (14, 14), (10, 14)]],
+                ],
+                "not_cancer_polygons": [
+                    [[(2, 2), (6, 2), (6, 6), (2, 6)]],
+                    [[(20, 20), (24, 20), (24, 24), (20, 24)]],
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = JSON_Handler().load_annotations(None, annotation_path=str(annotation_path))
+
     assert len(result["cancer_polygons"]) == 1
     assert len(result["not_cancer_polygons"]) == 1
+    assert Polygon(result["cancer_polygons"][0]).bounds == (10.0, 10.0, 14.0, 14.0)
+    assert Polygon(result["not_cancer_polygons"][0]).bounds == (20.0, 20.0, 24.0, 24.0)
 
 
 def test_svs_xml_handler_rejects_unsupported_dataset_tag(tmp_path: Path) -> None:

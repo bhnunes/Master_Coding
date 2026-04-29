@@ -10,7 +10,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, cast
 
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from helpers.runtime_platform import load_openslide_module
@@ -56,13 +57,26 @@ class NdpiSlideCalibration:
     slide_height_level0: int
 
 
-def _to_coord_list(geometry: Polygon | MultiPolygon) -> list[list[tuple[float, float]]]:
+def _iter_polygon_parts(geometry: BaseGeometry):
+    if geometry.is_empty:
+        return
+    if isinstance(geometry, Polygon):
+        yield geometry
+        return
+    if isinstance(geometry, MultiPolygon):
+        yield from geometry.geoms
+        return
+    if isinstance(geometry, GeometryCollection):
+        for subgeometry in geometry.geoms:
+            yield from _iter_polygon_parts(subgeometry)
+
+
+def _to_coord_list(geometry: BaseGeometry) -> list[list[tuple[float, float]]]:
     """Convert a Shapely polygon geometry into plain coordinate lists."""
     if geometry.is_empty:
         return []
-    geoms = geometry.geoms if isinstance(geometry, MultiPolygon) else [geometry]
     coord_lists: list[list[tuple[float, float]]] = []
-    for polygon in geoms:
+    for polygon in _iter_polygon_parts(geometry):
         if polygon.is_empty:
             continue
         coords: list[tuple[float, float]] = [
@@ -102,16 +116,48 @@ def _coords_to_shapely_polygons(coord_lists: list[Any]) -> list[Polygon]:
     return polygons
 
 
+def _has_positive_area_overlap(first_polygon: Polygon, second_polygon: Polygon) -> bool:
+    if not first_polygon.intersects(second_polygon):
+        return False
+    return first_polygon.intersection(second_polygon).area > 0
+
+
+def _union_polygons(polygons: list[Polygon]) -> BaseGeometry:
+    return unary_union(polygons) if polygons else Polygon()
+
+
 def _remove_ambiguous_regions(
     cancer_polygons: list[Polygon], non_cancer_polygons: list[Polygon]
-) -> tuple[Polygon | MultiPolygon, Polygon | MultiPolygon]:
-    """Remove overlapping regions between cancer and non-cancer polygons."""
-    cancer_area = unary_union(cancer_polygons) if cancer_polygons else Polygon()
-    non_cancer_area = unary_union(non_cancer_polygons) if non_cancer_polygons else Polygon()
-    ambiguous_area = cancer_area.intersection(non_cancer_area)
-    clean_cancer_area = cast(Polygon | MultiPolygon, cancer_area.difference(ambiguous_area))
-    clean_non_cancer_area = cast(Polygon | MultiPolygon, non_cancer_area.difference(ambiguous_area))
-    return clean_cancer_area, clean_non_cancer_area
+) -> tuple[BaseGeometry, BaseGeometry]:
+    """Drop whole annotations with positive-area cross-label overlap."""
+    cancer_to_remove: set[int] = set()
+    non_cancer_to_remove: set[int] = set()
+
+    for cancer_index, cancer_polygon in enumerate(cancer_polygons):
+        for non_cancer_index, non_cancer_polygon in enumerate(non_cancer_polygons):
+            if _has_positive_area_overlap(cancer_polygon, non_cancer_polygon):
+                cancer_to_remove.add(cancer_index)
+                non_cancer_to_remove.add(non_cancer_index)
+
+    if cancer_to_remove or non_cancer_to_remove:
+        logging.warning(
+            "Discarding %s cancer annotation polygon(s) and %s not-cancer annotation "
+            "polygon(s) because they have positive-area cross-label overlap.",
+            len(cancer_to_remove),
+            len(non_cancer_to_remove),
+        )
+    else:
+        logging.info("No positive-area cross-label annotation overlaps found.")
+
+    clean_cancer_polygons = [
+        polygon for index, polygon in enumerate(cancer_polygons) if index not in cancer_to_remove
+    ]
+    clean_non_cancer_polygons = [
+        polygon
+        for index, polygon in enumerate(non_cancer_polygons)
+        if index not in non_cancer_to_remove
+    ]
+    return _union_polygons(clean_cancer_polygons), _union_polygons(clean_non_cancer_polygons)
 
 
 class BaseHandler(ABC):
