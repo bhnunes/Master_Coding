@@ -175,7 +175,7 @@ seed_everything(seed)
 print(f"Reproducibility configured. seed={seed}")
 print("Setting up Aim repository...")
 ensure_aim_repo(aim_repo_path)
-print("Aim/Ngrok setup complete.")
+print("Aim setup complete.")
 
 
 # ==============================================================================

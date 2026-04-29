@@ -656,3 +656,53 @@ def test_build_training_compatibility_signature_accepts_precomputed_provenance()
 
     assert isinstance(signature, str)
     assert signature
+
+
+def test_build_training_compatibility_signature_accepts_manifest_backed_provenance() -> None:
+    signature = build_training_compatibility_signature(
+        TrainingProvenanceRequest(
+            dataset={
+                "path": "/tmp/master_manifest.sqlite",
+                "master_manifest_sha256": "manifest-sha",
+                "source_signature": "train-rows",
+                "selection_signature": "selected-rows",
+                "smart_sampling": True,
+                "attrs": {"stage4_split_bundle_id": 7},
+            },
+            validation_dataset={
+                "path": "/tmp/master_manifest.sqlite",
+                "attrs": {
+                    "master_manifest_sha256": "manifest-sha",
+                    "stage4_split_bundle_id": 7,
+                },
+                "source_signature": "validation-rows",
+                "smart_sampling": False,
+            },
+            master_manifest_path=None,
+            resume_checkpoint=None,
+            ohem=_ohem_settings(),
+        )
+    )
+
+    assert isinstance(signature, str)
+    assert signature
+
+
+def test_training_signature_rejects_precomputed_provenance_without_digest() -> None:
+    with pytest.raises(ValueError, match="missing a stable digest"):
+        build_training_compatibility_signature(
+            TrainingProvenanceRequest(
+                dataset={
+                    "path": "/tmp/master_manifest.sqlite",
+                    "source_signature": "train-rows",
+                },
+                validation_dataset={
+                    "path": "/tmp/master_manifest.sqlite",
+                    "master_manifest_sha256": "manifest-sha",
+                    "source_signature": "validation-rows",
+                },
+                master_manifest_path=None,
+                resume_checkpoint=None,
+                ohem=_ohem_settings(),
+            )
+        )

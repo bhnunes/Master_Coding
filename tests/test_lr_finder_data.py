@@ -309,7 +309,11 @@ def test_prepare_training_data_uses_sqlite_rows_for_smart_sampling(
     assert dataset.get_labels().tolist() == [0, 1]
     assert dataset.get_patient_ids().tolist() == ["1", "2"]
     assert prepared.training_provenance["split"] == "TRAIN"
+    assert prepared.training_provenance["sha256"]
+    assert prepared.training_provenance["source_signature"]
     assert prepared.training_provenance["smart_sampling"] is True
+    assert prepared.training_provenance["smart_sampling_enabled"] is True
+    assert prepared.training_provenance["selection_signature"]
     assert prepared.training_provenance["stage4_split_bundle_id"] is None
     assert prepared.training_provenance["runtime_normalization_method"] == "none"
     assert prepared.validation_provenance["split"] == "VALIDATION"

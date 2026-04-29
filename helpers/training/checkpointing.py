@@ -94,10 +94,17 @@ def _build_dataset_provenance(
 ) -> dict[str, Any]:
     if isinstance(dataset, Mapping):
         payload = dict(dataset)
+        attrs = _mapping_payload(payload.get("attrs"))
+        payload["attrs"] = attrs
+        payload["sha256"] = _resolve_precomputed_dataset_sha256(payload, attrs)
         payload.setdefault("source_signature", None)
         payload.setdefault("selection_signature", None)
-        payload.setdefault("smart_sampling_enabled", payload.get("selection_signature") is not None)
-        payload.setdefault("smart_sampling_metadata", {})
+        payload.setdefault(
+            "smart_sampling_enabled",
+            bool(payload.get("smart_sampling")) or payload.get("selection_signature") is not None,
+        )
+        if not isinstance(payload.get("smart_sampling_metadata"), Mapping):
+            payload["smart_sampling_metadata"] = {}
         return payload
 
     dataset_path = Path(dataset)
@@ -120,6 +127,30 @@ def _build_dataset_provenance(
             if str(key).startswith("stage7_")
         },
     }
+
+
+def _mapping_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _resolve_precomputed_dataset_sha256(
+    payload: Mapping[str, Any],
+    attrs: Mapping[str, Any],
+) -> str:
+    for key in ("sha256", "dataset_sha256", "master_manifest_sha256"):
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+
+    manifest_sha256 = attrs.get("master_manifest_sha256")
+    if manifest_sha256 is not None and str(manifest_sha256).strip():
+        return str(manifest_sha256)
+
+    path = payload.get("path", "<unknown>")
+    raise ValueError(
+        "Precomputed training dataset provenance is missing a stable digest for "
+        f"'{path}'. Expected 'sha256' or 'master_manifest_sha256'."
+    )
 
 
 def _metadata_path_for_checkpoint(checkpoint_path: str | os.PathLike[str]) -> Path:

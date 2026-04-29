@@ -18,7 +18,7 @@ import torch
 from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataloader import default_collate
 
-from helpers.provenance import hash_file_sha256
+from helpers.provenance import hash_file_sha256, hash_json_payload
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
 from helpers.training.master_manifest_queries import (
     CanonicalRowRecord,
@@ -623,26 +623,58 @@ def collect_manifest_split_provenance(
         records,
         runtime_normalization_method=runtime_normalization_method,
     )
+    manifest_sha256 = hash_file_sha256(master_manifest_path)
+    source_signature = _build_manifest_record_source_signature(records)
+    selection_signature = source_signature if smart_sampling else None
+    selection_mode = "stage7_selected" if smart_sampling else "all_stage4_accepted"
     return {
         "path": str(master_manifest_path),
         "master_manifest_path": str(master_manifest_path),
-        "master_manifest_sha256": hash_file_sha256(master_manifest_path),
+        "sha256": manifest_sha256,
+        "master_manifest_sha256": manifest_sha256,
+        "source_signature": source_signature,
+        "selection_signature": selection_signature,
         "split": split,
         "row_count": len(records),
         "shard_count": len({str(record.source_hdf5_path) for record in records}),
         "smart_sampling": smart_sampling,
+        "smart_sampling_enabled": smart_sampling,
+        "smart_sampling_metadata": {"selection_mode": selection_mode},
         "stage4_split_bundle_id": stage4_split_bundle_id,
         "runtime_normalization_method": normalization_method,
-        "selection_mode": "stage7_selected" if smart_sampling else "all_stage4_accepted",
+        "selection_mode": selection_mode,
         "normalization_methods": [normalization_method],
         "attrs": {
-            "master_manifest_sha256": hash_file_sha256(master_manifest_path),
+            "master_manifest_sha256": manifest_sha256,
             "stage4_split_bundle_id": stage4_split_bundle_id,
             "runtime_normalization_method": normalization_method,
             "normalization_method": normalization_method,
             "normalization_artifact_id": normalization_artifact_id,
         },
     }
+
+
+def _build_manifest_record_source_signature(records: Sequence[CanonicalRowRecord]) -> str:
+    return hash_json_payload(
+        {
+            "records": [
+                {
+                    "source_hdf5_path": str(record.source_hdf5_path),
+                    "source_row_index": record.source_row_index,
+                    "patient_id": record.patient_id,
+                    "label": record.label,
+                    "filename": record.filename,
+                    "split": record.split,
+                    "stage4_split_bundle_id": record.stage4_split_bundle_id,
+                    "normalization_method": record.normalization_method,
+                    "normalization_artifact_id": record.normalization_artifact_id,
+                    "sampling_decision": record.sampling_decision,
+                    "is_stage7_selected": record.is_stage7_selected,
+                }
+                for record in records
+            ]
+        }
+    )
 
 
 def prepare_training_data(  # noqa: PLR0913
@@ -818,5 +850,3 @@ def create_stratified_subset_within_patients(
         f"NOT_CANCER: {not_cancer_count}"
     )
     return Subset(full_dataset, subset_indices)
-
-

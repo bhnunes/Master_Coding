@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -10,18 +9,15 @@ import torch
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from helpers.lr_finder.config import LRFinderConfig
-from helpers.provenance import hash_file_sha256
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
+from helpers.training.data import collect_manifest_split_provenance
 from helpers.training.master_manifest_queries import (
-    CanonicalRowRecord,
     load_lr_finder_training_records,
     load_validation_records,
 )
 from helpers.training.runtime import worker_init_fn
 from helpers.training.stain_normalization import (
     build_split_stain_normalizer,
-    resolve_runtime_normalization_selection,
-    resolve_stage4_split_bundle_id,
 )
 
 
@@ -111,42 +107,6 @@ def prepare_training_data(
             runtime_normalization_method=config.runtime_normalization_method,
         ),
     )
-
-
-def collect_manifest_split_provenance(
-    master_manifest_path: Path,
-    *,
-    records: Sequence[CanonicalRowRecord],
-    split: str,
-    smart_sampling: bool,
-    runtime_normalization_method: str = "NOT_NORMALIZED",
-) -> dict[str, Any]:
-    stage4_split_bundle_id = resolve_stage4_split_bundle_id(records)
-    normalization_method, normalization_artifact_id = resolve_runtime_normalization_selection(
-        master_manifest_path,
-        records,
-        runtime_normalization_method=runtime_normalization_method,
-    )
-    return {
-        "path": str(master_manifest_path),
-        "master_manifest_path": str(master_manifest_path),
-        "master_manifest_sha256": hash_file_sha256(master_manifest_path),
-        "split": split,
-        "row_count": len(records),
-        "shard_count": len({str(record.source_hdf5_path) for record in records}),
-        "smart_sampling": smart_sampling,
-        "stage4_split_bundle_id": stage4_split_bundle_id,
-        "runtime_normalization_method": normalization_method,
-        "selection_mode": "stage7_selected" if smart_sampling else "all_stage4_accepted",
-        "normalization_methods": [normalization_method],
-        "attrs": {
-            "master_manifest_sha256": hash_file_sha256(master_manifest_path),
-            "stage4_split_bundle_id": stage4_split_bundle_id,
-            "runtime_normalization_method": normalization_method,
-            "normalization_method": normalization_method,
-            "normalization_artifact_id": normalization_artifact_id,
-        },
-    }
 
 
 def build_train_loader(
