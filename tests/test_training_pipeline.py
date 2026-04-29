@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 
-from helpers.training.checkpointing import EarlyStoppingCheckpoint
+from helpers.training.checkpointing import EarlyStoppingCheckpoint, TrainingMetadataRequest
 from helpers.training.metrics import TrainingHealthTracker
 from helpers.training.pipeline import (
     BestMetricState,
@@ -43,6 +43,38 @@ FALLBACK_VAL_AUPRC = 0.9
 FALLBACK_VAL_MCC = 0.8
 FALLBACK_VAL_AUROC = 0.7
 FALLBACK_VAL_LOSS = 0.2
+
+
+def _metadata_kwargs(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "architecture": "UNET++",
+        "encoder": "resnet34",
+        "metadata_dir": "meta",
+        "amp_log": {"amp": "ok"},
+        "base_learning_rate": BASE_LEARNING_RATE,
+        "weight_decay": WEIGHT_DECAY,
+        "batch_size": BATCH_SIZE,
+        "num_epochs": NUM_EPOCHS,
+        "workers": NUM_WORKERS,
+        "seed": SEED,
+        "dataset": {
+            "path": "train",
+            "sha256": "train-sha",
+            "source_signature": "train-source",
+        },
+        "validation_dataset": {
+            "path": "validation",
+            "sha256": "validation-sha",
+            "source_signature": "validation-source",
+        },
+        "patience": PATIENCE,
+        "optimizer_name": "AdamW",
+        "alpha_bce": ALPHA_BCE,
+        "beta_dice_bg": BETA_DICE_BG,
+        "gamma_dice_fg": GAMMA_DICE_FG,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_build_run_hparams_preserves_existing_fields() -> None:
@@ -161,8 +193,8 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
         del checkpoint
         return (val_auprc, val_mcc, val_auroc, val_loss)
 
-    def _save_metadata(**kwargs: Any) -> None:
-        calls["metadata"] = kwargs
+    def _save_metadata(request: TrainingMetadataRequest) -> None:
+        calls["metadata"] = request
 
     def _create_email_body(**kwargs: Any) -> str:
         calls["email_body"] = kwargs
@@ -188,23 +220,14 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
             load_checkpoint_fn=_load_checkpoint,
             get_previous_metrics_fn=_get_previous_metrics,
             save_metadata_fn=_save_metadata,
-            save_metadata_kwargs={
-                "architecture": "UNET++",
-                "encoder": "resnet34",
-                "metadata_dir": "meta",
-                "optimizer_name": "AdamW",
-                "base_learning_rate": BASE_LEARNING_RATE,
-                "weight_decay": WEIGHT_DECAY,
-                "alpha_bce": ALPHA_BCE,
-                "beta_dice_bg": BETA_DICE_BG,
-                "gamma_dice_fg": GAMMA_DICE_FG,
-                "master_manifest_path": "master_manifest.sqlite",
-                "use_artifact_aware_loss": True,
-                "run_ohem": True,
-                "ohem_start_epoch": OHEM_START_EPOCH,
-                "ohem_ratio": OHEM_RATIO,
-                "ohem_min_kept": OHEM_MIN_KEPT,
-            },
+            save_metadata_kwargs=_metadata_kwargs(
+                master_manifest_path="master_manifest.sqlite",
+                use_artifact_aware_loss=True,
+                run_ohem=True,
+                ohem_start_epoch=OHEM_START_EPOCH,
+                ohem_ratio=OHEM_RATIO,
+                ohem_min_kept=OHEM_MIN_KEPT,
+            ),
             create_email_body_fn=_create_email_body,
             send_email_fn=_send_email,
             email_sender="sender@example.com",
@@ -216,7 +239,11 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
 
     assert final_path == str(checkpoint_path)
     assert calls["load"] == str(checkpoint_path)
-    assert calls["metadata"]["best_val_score"] == VAL_AUPRC
+    metadata_request = calls["metadata"]
+    assert isinstance(metadata_request, TrainingMetadataRequest)
+    assert metadata_request.best_val_score == VAL_AUPRC
+    assert metadata_request.metadata_best_path == str(checkpoint_path)
+    assert metadata_request.ohem.run_ohem is True
     assert calls["email"][0] == "Finished: exp"
     assert calls["email_body"]["val_auprc"] == VAL_AUPRC
     assert calls["email_body"]["val_loss"] == VAL_LOSS
@@ -316,12 +343,8 @@ def test_finalize_training_artifacts_uses_fallback_checkpoint(tmp_path: Path) ->
                 calls.setdefault("load", path) or {"epoch": 1}
             ),
             get_previous_metrics_fn=lambda checkpoint, a, b, c, d: (a, b, c, d),
-            save_metadata_fn=lambda **kwargs: calls.setdefault("metadata", kwargs),
-            save_metadata_kwargs={
-                "architecture": "UNET++",
-                "encoder": "resnet34",
-                "metadata_dir": "meta",
-            },
+            save_metadata_fn=lambda request: calls.setdefault("metadata", request),
+            save_metadata_kwargs=_metadata_kwargs(),
             create_email_body_fn=lambda **kwargs: (
                 f"{kwargs['checkpoint_path']}|{kwargs['encoder']}|{kwargs['architecture']}"
             ),

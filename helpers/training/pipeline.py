@@ -5,11 +5,15 @@ import sys
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 
-from helpers.training.checkpointing import EarlyStoppingCheckpoint
+from helpers.training.checkpointing import (
+    EarlyStoppingCheckpoint,
+    OHEMCheckpointSettings,
+    TrainingMetadataRequest,
+)
 from helpers.training.loop import (
     TrainEpochConfig,
     TrainEpochRuntime,
@@ -405,14 +409,44 @@ def finalize_training_artifacts(config: FinalizeArtifactsConfig) -> str | None:
             config.best.val_loss,
         )
     )
+    metadata_kwargs = config.save_metadata_kwargs
+    ohem_settings = OHEMCheckpointSettings(
+        run_ohem=bool(metadata_kwargs.get("run_ohem", False)),
+        ohem_start_epoch=int(metadata_kwargs.get("ohem_start_epoch", 2)),
+        ohem_ratio=float(metadata_kwargs.get("ohem_ratio", 0.25)),
+        ohem_min_kept=int(metadata_kwargs.get("ohem_min_kept", 1024)),
+    )
     config.save_metadata_fn(
-        best_val_score=config.best.val_auprc,
-        checkpoint=checkpoint,
-        metadata_best_path=best_model_path,
-        val_loss=config.best.val_loss,
-        val_mcc=config.best.val_mcc,
-        val_auroc=config.best.val_auroc,
-        **config.save_metadata_kwargs,
+        TrainingMetadataRequest(
+            best_val_score=config.best.val_auprc,
+            checkpoint=cast(dict[str, Any], checkpoint),
+            encoder=str(metadata_kwargs["encoder"]),
+            architecture=str(metadata_kwargs["architecture"]),
+            metadata_best_path=best_model_path,
+            val_loss=config.best.val_loss,
+            val_mcc=config.best.val_mcc,
+            val_auroc=config.best.val_auroc,
+            metadata_dir=str(metadata_kwargs["metadata_dir"]),
+            amp_log=metadata_kwargs.get("amp_log", {}),
+            base_learning_rate=float(metadata_kwargs["base_learning_rate"]),
+            weight_decay=float(metadata_kwargs["weight_decay"]),
+            batch_size=int(metadata_kwargs["batch_size"]),
+            num_epochs=int(metadata_kwargs["num_epochs"]),
+            workers=int(metadata_kwargs["workers"]),
+            seed=int(metadata_kwargs["seed"]),
+            dataset=metadata_kwargs["dataset"],
+            validation_dataset=metadata_kwargs["validation_dataset"],
+            patience=int(metadata_kwargs["patience"]),
+            optimizer_name=str(metadata_kwargs["optimizer_name"]),
+            alpha_bce=float(metadata_kwargs["alpha_bce"]),
+            beta_dice_bg=float(metadata_kwargs["beta_dice_bg"]),
+            gamma_dice_fg=float(metadata_kwargs["gamma_dice_fg"]),
+            execution_mode=cast(str | None, metadata_kwargs.get("execution_mode")),
+            use_artifact_aware_loss=bool(metadata_kwargs.get("use_artifact_aware_loss", False)),
+            master_manifest_path=metadata_kwargs.get("master_manifest_path"),
+            resume_checkpoint=metadata_kwargs.get("resume_checkpoint"),
+            ohem=ohem_settings,
+        )
     )
 
     print("Emailing...")
