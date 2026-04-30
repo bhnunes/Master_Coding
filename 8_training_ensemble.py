@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from helpers.logging_utils import LoggerSettings, LoggerWriter, configure_root_logger
+from helpers.runtime_normalization import format_runtime_normalization_status
 from helpers.training.checkpointing import (
     EarlyStopping,
     OHEMCheckpointSettings,
@@ -83,6 +84,12 @@ print("Configuring environment...")
 # Device
 device = require_cuda_device()
 print(f"Using device: {device}")
+print(
+    format_runtime_normalization_status(
+        runtime_normalization_method=training_config.runtime_normalization_method,
+        runtime_vahadane_backend=training_config.runtime_vahadane_backend,
+    )
+)
 
 
 # =============================================================================

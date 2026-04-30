@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from helpers.ensemble_inference.config import load_ensemble_inference_config
 from helpers.ensemble_inference.pipeline import run_ensemble_inference_pipeline
 from helpers.logging_utils import LoggerSettings, LoggerWriter, configure_root_logger
+from helpers.runtime_normalization import format_runtime_normalization_status
 
 
 def main() -> None:
@@ -26,6 +27,12 @@ def main() -> None:
     )
     sys.stdout = LoggerWriter(logger, logging.INFO)
     sys.stderr = LoggerWriter(logger, logging.ERROR)
+    print(
+        format_runtime_normalization_status(
+            runtime_normalization_method=config.runtime_normalization_method,
+            runtime_vahadane_backend=config.runtime_vahadane_backend,
+        )
+    )
     outputs = run_ensemble_inference_pipeline(config)
     print(f"Inference output directory: {outputs.output_dir}")
     print(f"Run config saved to: {outputs.run_config_path}")

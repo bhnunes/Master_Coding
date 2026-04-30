@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from helpers.logging_utils import LoggerSettings, configure_root_logger
 from helpers.lr_finder.config import load_lr_finder_config
 from helpers.lr_finder.pipeline import LRFinderOutputs, run_lr_finder_pipeline
+from helpers.runtime_normalization import format_runtime_normalization_status
 from helpers.training.runtime import seed_everything
 
 
@@ -64,6 +65,12 @@ def main() -> None:
         )
         _apply_huggingface_token(config.hf_token)
         total_trials = len(config.model_plans) * config.num_lhs_samples * config.num_repeats
+        print(
+            format_runtime_normalization_status(
+                runtime_normalization_method=config.runtime_normalization_method,
+                runtime_vahadane_backend=config.runtime_vahadane_backend,
+            )
+        )
         _print_startup_summary(total_trials, str(config.output_dir))
         logging.info(
             (

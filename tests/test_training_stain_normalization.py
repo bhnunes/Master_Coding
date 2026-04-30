@@ -501,6 +501,32 @@ def test_build_split_stain_normalizer_fails_closed_on_hash_mismatch(
         )
 
 
+def test_build_split_stain_normalizer_fails_when_state_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "normalization_stats.json"
+    state_path.write_text(
+        json.dumps({"method": "REINHARD", "target_means": [0.1], "target_stds": [0.2]}),
+        encoding="utf-8",
+    )
+    state_sha256 = hash_file_sha256(state_path)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    _write_normalization_manifest(
+        master_manifest_path,
+        method="REINHARD",
+        state_path=state_path,
+        state_sha256=state_sha256,
+    )
+    state_path.unlink()
+
+    with pytest.raises(FileNotFoundError, match="Normalization state file is missing"):
+        build_split_stain_normalizer(
+            master_manifest_path,
+            [_make_record()],
+            runtime_normalization_method="REINHARD",
+        )
+
+
 def test_build_split_stain_normalizer_rejects_inconsistent_records(tmp_path: Path) -> None:
     master_manifest_path = tmp_path / "master_manifest.sqlite"
     state_path = tmp_path / "unused.json"

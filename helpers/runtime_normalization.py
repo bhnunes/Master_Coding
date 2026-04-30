@@ -48,3 +48,17 @@ def runtime_vahadane_backend_for_provenance(
     if runtime_normalization_method.strip().lower() not in {"vahadane"}:
         return None
     return parse_runtime_vahadane_backend(runtime_vahadane_backend)
+
+
+def format_runtime_normalization_status(
+    *,
+    runtime_normalization_method: str,
+    runtime_vahadane_backend: str,
+) -> str:
+    """Render one user-facing line describing active runtime normalization."""
+
+    method = parse_runtime_normalization_method(runtime_normalization_method)
+    if method != "VAHADANE":
+        return f"Runtime normalization: {method}"
+    backend = parse_runtime_vahadane_backend(runtime_vahadane_backend)
+    return f"Runtime normalization: {method} (backend={backend})"
