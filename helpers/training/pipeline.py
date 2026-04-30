@@ -154,10 +154,16 @@ def build_run_hparams(config: RunHParams) -> dict[str, Any]:
 
 
 def _validation_failure_reason(health: TrainingHealthTracker) -> str:
+    if health.epoch["val_naninf_loss"] > 0:
+        return "NAN_INF_VALIDATION_LOSS"
+    if health.epoch["val_skip_reasons"].get("no_samples_processed", 0) > 0:
+        return "NO_VALIDATION_SAMPLES"
     if health.epoch["val_collapsed"] == 1:
         return "COLLAPSE"
     if health.epoch["val_invalid_metrics"] == 1:
         return "INVALID_METRICS"
+    if health.epoch["val_skipped_batches"] > 0:
+        return "SKIPPED_VALIDATION_BATCHES"
     return "UNKNOWN"
 
 
@@ -170,6 +176,7 @@ def _handle_failed_validation(
     _progress_write(
         f"\n[Epoch {current_epoch_num}] Validation failed ({reason}). Skipping checkpoint."
     )
+    health.log_epoch(current_epoch_num)
     if not health.should_emergency_stop():
         return False
     _progress_write("\n!!! EMERGENCY STOP !!!")

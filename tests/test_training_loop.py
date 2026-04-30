@@ -7,10 +7,11 @@ from helpers.training.loop import (
     TrainEpochRuntime,
     ValidationEpochConfig,
     ValidationEpochRuntime,
+    _finalize_validation_epoch,
     train_epoch,
     validate_epoch,
 )
-from helpers.training.metrics import TrainingHealthTracker
+from helpers.training.metrics import AdvancedMetricTracker, TrainingHealthTracker
 
 
 class _TrackingLoss:
@@ -101,3 +102,20 @@ def test_validate_epoch_disables_ohem_and_clears_epoch() -> None:
     )
 
     assert loss_fn.calls[:2] == [("enabled", False), ("epoch", None)]
+
+
+def test_finalize_validation_epoch_marks_empty_validation_as_invalid() -> None:
+    health = TrainingHealthTracker(name="val")
+    tracker = AdvancedMetricTracker(device=torch.device("cpu"), metric_bins=8)
+
+    val_loss, val_results = _finalize_validation_epoch(
+        health=health,
+        num_samples_processed=0,
+        running_loss=0.0,
+        tracker=tracker,
+    )
+
+    assert val_loss == 0.0
+    assert val_results is None
+    assert health.epoch["val_invalid_metrics"] == 1
+    assert health.epoch["val_skip_reasons"]["no_samples_processed"] == 1

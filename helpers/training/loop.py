@@ -312,6 +312,7 @@ def _finalize_validation_epoch(
 ) -> tuple[float, dict[str, float] | None]:
     if num_samples_processed == 0:
         health.val_skip("no_samples_processed")
+        health.mark_val_invalid_metrics()
         return 0.0, None
     epoch_loss = running_loss / num_samples_processed
     return epoch_loss, tracker.compute_and_reset(health=health)

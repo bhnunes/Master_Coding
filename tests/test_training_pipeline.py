@@ -325,6 +325,46 @@ def test_run_training_epochs_emergency_stops_after_repeated_validation_collapse(
     assert state.training_successful is False
 
 
+def test_run_training_epochs_emergency_stops_after_empty_validation() -> None:
+    health = TrainingHealthTracker(name="run", patience_collapse=1)
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=BASE_LEARNING_RATE)
+
+    def fake_validate(**kwargs: Any) -> tuple[float, None]:
+        del kwargs
+        health.val_skip("no_samples_processed")
+        health.mark_val_invalid_metrics()
+        return 0.0, None
+
+    state = run_training_epochs(
+        model=model,
+        optimizer=optimizer,
+        train_loader=[object()],
+        val_loader=[object()],
+        config=EpochRunConfig(
+            health=health,
+            start_epoch=0,
+            num_epochs=2,
+            architecture="UNET++",
+            unleashed=False,
+            train_epoch_fn=lambda **kwargs: (0.4, {"amp": "ok"}),
+            validate_epoch_fn=fake_validate,
+            early_stopping=_EarlyStoppingStub(),
+            track_epoch_metrics_fn=lambda *args, **kwargs: None,
+            loss_fn=object(),
+            device=torch.device("cpu"),
+            accumulation_steps=1,
+            amp_precision="fp16",
+            gpu_normalizer=torch.nn.Identity(),
+            gpu_downscale=torch.nn.Identity(),
+            run=None,
+        ),
+    )
+
+    assert state.training_successful is False
+    assert health.run["val_invalid_metric_epochs"] == 1
+
+
 def test_finalize_training_artifacts_uses_fallback_checkpoint(tmp_path: Path) -> None:
     fallback_path = tmp_path / "fallback.pth"
     fallback_path.write_bytes(b"x")
