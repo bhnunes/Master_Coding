@@ -17,6 +17,7 @@ from helpers.training.pipeline import (
     finalize_training_artifacts,
     run_training_epochs,
 )
+from helpers.training.reporting import TrainingEmailContext, create_email_body
 
 BASE_LEARNING_RATE = 1e-3
 WEIGHT_DECAY = 1e-4
@@ -196,9 +197,9 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
     def _save_metadata(request: TrainingMetadataRequest) -> None:
         calls["metadata"] = request
 
-    def _create_email_body(**kwargs: Any) -> str:
-        calls["email_body"] = kwargs
-        return f"{kwargs['checkpoint_path']}|{kwargs['encoder']}|{kwargs['architecture']}"
+    def _create_email_body(context: TrainingEmailContext) -> str:
+        calls["email_body"] = context
+        return f"{context.checkpoint_path}|{context.encoder}|{context.architecture}"
 
     def _send_email(
         subject: str, body: str, sender: str, recipients: list[str], password: str
@@ -245,10 +246,12 @@ def test_finalize_training_artifacts_saves_metadata_and_sends_email(tmp_path: Pa
     assert metadata_request.metadata_best_path == str(checkpoint_path)
     assert metadata_request.ohem.run_ohem is True
     assert calls["email"][0] == "Finished: exp"
-    assert calls["email_body"]["val_auprc"] == VAL_AUPRC
-    assert calls["email_body"]["val_loss"] == VAL_LOSS
-    assert calls["email_body"]["use_artifact_aware_loss"] is True
-    assert calls["email_body"]["run_ohem"] is True
+    email_context = calls["email_body"]
+    assert isinstance(email_context, TrainingEmailContext)
+    assert email_context.val_auprc == VAL_AUPRC
+    assert email_context.val_loss == VAL_LOSS
+    assert email_context.use_artifact_aware_loss is True
+    assert email_context.run_ohem is True
 
 
 def test_run_training_epochs_stops_when_training_step_raises() -> None:
@@ -345,8 +348,8 @@ def test_finalize_training_artifacts_uses_fallback_checkpoint(tmp_path: Path) ->
             get_previous_metrics_fn=lambda checkpoint, a, b, c, d: (a, b, c, d),
             save_metadata_fn=lambda request: calls.setdefault("metadata", request),
             save_metadata_kwargs=_metadata_kwargs(),
-            create_email_body_fn=lambda **kwargs: (
-                f"{kwargs['checkpoint_path']}|{kwargs['encoder']}|{kwargs['architecture']}"
+            create_email_body_fn=lambda context: (
+                f"{context.checkpoint_path}|{context.encoder}|{context.architecture}"
             ),
             send_email_fn=lambda *args: calls.setdefault("email", args),
             email_sender="sender@example.com",
@@ -375,7 +378,7 @@ def test_finalize_training_artifacts_returns_none_when_no_checkpoint_exists(tmp_
                 "encoder": "resnet34",
                 "metadata_dir": "meta",
             },
-            create_email_body_fn=lambda path, encoder, architecture: path,
+            create_email_body_fn=lambda context: context.checkpoint_path,
             send_email_fn=lambda *args: None,
             email_sender="sender@example.com",
             email_recipients=["a@example.com"],
@@ -385,3 +388,45 @@ def test_finalize_training_artifacts_returns_none_when_no_checkpoint_exists(tmp_
     )
 
     assert result is None
+
+
+def test_finalize_training_artifacts_uses_real_email_body_contract(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "best.pth"
+    checkpoint_path.write_bytes(b"x")
+    calls: dict[str, Any] = {}
+
+    result = finalize_training_artifacts(
+        FinalizeArtifactsConfig(
+            best=BestMetricState(
+                val_auprc=VAL_AUPRC,
+                val_mcc=VAL_MCC,
+                val_auroc=VAL_AUROC,
+                val_loss=VAL_LOSS,
+            ),
+            metadata_best_path=str(checkpoint_path),
+            fallback_checkpoint_path=None,
+            device=torch.device("cpu"),
+            load_checkpoint_fn=lambda path, map_location: {"epoch": 1},
+            get_previous_metrics_fn=lambda checkpoint, a, b, c, d: (a, b, c, d),
+            save_metadata_fn=lambda request: calls.setdefault("metadata", request),
+            save_metadata_kwargs=_metadata_kwargs(
+                master_manifest_path="master_manifest.sqlite",
+                use_artifact_aware_loss=True,
+                run_ohem=True,
+            ),
+            create_email_body_fn=create_email_body,
+            send_email_fn=lambda *args: calls.setdefault("email", args),
+            email_sender="sender@example.com",
+            email_recipients=["a@example.com"],
+            email_password="secret",
+            experiment_name="exp",
+        )
+    )
+
+    assert result == str(checkpoint_path)
+    email_args = calls["email"]
+    assert email_args[0] == "Finished: exp"
+    assert "Checkpoint Path: " + str(checkpoint_path) in email_args[1]
+    assert "val_auprc: 0.8000" in email_args[1]
+    assert "artifact_aware_loss: enabled" in email_args[1]
+    assert "run_ohem: enabled" in email_args[1]

@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -21,6 +22,7 @@ from helpers.training.loop import (
     ValidationEpochRuntime,
 )
 from helpers.training.metrics import TrainingHealthTracker
+from helpers.training.reporting import TrainingEmailContext
 
 
 @dataclass
@@ -94,7 +96,7 @@ class FinalizeArtifactsConfig:
     get_previous_metrics_fn: Any
     save_metadata_fn: Any
     save_metadata_kwargs: dict[str, Any]
-    create_email_body_fn: Any
+    create_email_body_fn: Callable[[TrainingEmailContext], str]
     send_email_fn: Any
     email_sender: str
     email_recipients: list[str]
@@ -450,10 +452,10 @@ def finalize_training_artifacts(config: FinalizeArtifactsConfig) -> str | None:
     )
 
     print("Emailing...")
-    body = config.create_email_body_fn(
+    email_context = TrainingEmailContext(
         checkpoint_path=best_model_path,
-        encoder=config.save_metadata_kwargs["encoder"],
-        architecture=config.save_metadata_kwargs["architecture"],
+        encoder=str(config.save_metadata_kwargs["encoder"]),
+        architecture=str(config.save_metadata_kwargs["architecture"]),
         val_loss=config.best.val_loss,
         val_auprc=config.best.val_auprc,
         val_auroc=config.best.val_auroc,
@@ -473,6 +475,7 @@ def finalize_training_artifacts(config: FinalizeArtifactsConfig) -> str | None:
         ohem_ratio=float(config.save_metadata_kwargs.get("ohem_ratio", 0.25)),
         ohem_min_kept=int(config.save_metadata_kwargs.get("ohem_min_kept", 1024)),
     )
+    body = config.create_email_body_fn(email_context)
     config.send_email_fn(
         f"Finished: {config.experiment_name}",
         body,
