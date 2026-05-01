@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 import numpy.typing as npt
 
 _DEFAULT_GIST_EPS = 0.1
 MIN_PAIRWISE_CANDIDATE_SIZE = 2
+_PROGRESS_LOG_MIN_CANDIDATES = 1024
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,12 @@ def select_gist_facility_location(
         )
 
     points = np.asarray(embeddings, dtype=np.float32)
+    if n_samples >= _PROGRESS_LOG_MIN_CANDIDATES:
+        logging.info(
+            "Running GIST facility-location selector on %d candidates with target %d",
+            n_samples,
+            max_selected,
+        )
     dist_mat = _pairwise_distance_matrix(points)
     sims = _facility_location_similarity(points, dist_mat)
     selector = _GistSelector(
@@ -46,6 +55,13 @@ def select_gist_facility_location(
         eps=_DEFAULT_GIST_EPS,
     )
     selected_positions, objective_trace = selector.fit()
+    if n_samples >= _PROGRESS_LOG_MIN_CANDIDATES:
+        logging.info(
+            "GIST facility-location selector finished with %d selected positions "
+            "after evaluating %d threshold candidate sets",
+            len(selected_positions),
+            len(objective_trace),
+        )
     return GistSelectionResult(
         selected_positions=np.asarray(selected_positions, dtype=np.int64),
         objective_trace=objective_trace,
@@ -53,9 +69,14 @@ def select_gist_facility_location(
 
 
 def _pairwise_distance_matrix(points: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
-    diff = points[:, None, :] - points[None, :, :]
-    distances = np.linalg.norm(diff, axis=-1)
-    return np.asarray(distances, dtype=np.float32)
+    points = np.asarray(points, dtype=np.float32)
+    squared_norms = np.sum(points * points, axis=1, dtype=np.float32)
+    squared_distances = squared_norms[:, None] + squared_norms[None, :]
+    squared_distances -= np.asarray(2.0 * (points @ points.T), dtype=np.float32)
+    np.maximum(squared_distances, 0.0, out=squared_distances)
+    distances = np.sqrt(squared_distances, out=squared_distances).astype(np.float32, copy=False)
+    np.fill_diagonal(distances, 0.0)
+    return cast(npt.NDArray[np.float32], distances)
 
 
 def _facility_location_similarity(
@@ -84,6 +105,7 @@ class _GistSelector:
         self.eps = eps
         self.n = int(dist_mat.shape[0])
         self.d_max = float(np.max(dist_mat)) if self.n > 0 else 0.0
+        self.candidate_order = self._rank_candidates_by_singleton_coverage()
 
     def fit(self) -> tuple[list[int], list[tuple[int, float]]]:
         best_selected: list[int] = []
@@ -128,43 +150,18 @@ class _GistSelector:
 
     def _greedy_independent_set(self, threshold: float) -> list[int]:
         selected: list[int] = []
-        covered = np.zeros(self.n, dtype=np.float32)
         min_dist_to_selected = np.full(self.n, np.inf, dtype=np.float32)
 
-        for _ in range(self.k):
-            eligible_mask = np.ones(self.n, dtype=bool)
-            if selected:
-                eligible_mask = min_dist_to_selected >= threshold
-                eligible_mask[np.asarray(selected, dtype=np.int64)] = False
-
-            eligible_positions = np.flatnonzero(eligible_mask)
-            if len(eligible_positions) == 0:
+        for position in self.candidate_order.tolist():
+            if len(selected) >= self.k:
                 break
-
-            best_position = -1
-            best_gain = -math.inf
-            for position in eligible_positions.tolist():
-                gain = self._facility_location_gain(covered, position)
-                if gain > best_gain:
-                    best_gain = gain
-                    best_position = position
-
-            if best_position < 0:
-                break
-
-            selected.append(best_position)
-            covered = np.maximum(covered, self.sims[:, best_position])
+            if selected and min_dist_to_selected[position] < threshold:
+                continue
+            selected.append(int(position))
             if threshold > 0.0:
-                min_dist_to_selected = np.minimum(
-                    min_dist_to_selected, self.dist_mat[best_position]
-                )
+                min_dist_to_selected = np.minimum(min_dist_to_selected, self.dist_mat[position])
 
         return selected
-
-    def _facility_location_gain(self, covered: npt.NDArray[np.float32], position: int) -> float:
-        new_similarity = self.sims[:, position]
-        gain = np.maximum(new_similarity, covered) - covered
-        return float(np.sum(gain, dtype=np.float64))
 
     def _objective(self, selected: list[int]) -> float:
         return self._facility_location_value(selected) + self._diversity(selected)
@@ -184,3 +181,11 @@ class _GistSelector:
     def _diametrical_pair(self) -> tuple[int, int]:
         index = int(np.argmax(self.dist_mat))
         return index // self.n, index % self.n
+
+    def _rank_candidates_by_singleton_coverage(self) -> npt.NDArray[np.int64]:
+        singleton_coverage = np.sum(self.sims, axis=0, dtype=np.float64)
+        ranked = np.lexsort((np.arange(self.n, dtype=np.int64), -singleton_coverage)).astype(
+            np.int64,
+            copy=False,
+        )
+        return cast(npt.NDArray[np.int64], ranked)
