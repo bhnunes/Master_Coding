@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,6 +10,7 @@ import torch
 from torch import nn
 
 from helpers.ensemble_inference import inference
+from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_MATPLOTLIB_BACKEND
 
 ANALYSIS_SEED = 17
 EXPECTED_AUC = 0.75
@@ -340,6 +342,7 @@ def test_export_visualizations_returns_empty_for_empty_or_none_batch(tmp_path: P
 def test_export_visualizations_writes_requested_number_of_pngs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("MPLBACKEND", COLAB_INLINE_MATPLOTLIB_BACKEND)
     monkeypatch.setattr(
         inference,
         "compute_two_stream_probabilities",
@@ -386,6 +389,7 @@ def test_export_visualizations_writes_requested_number_of_pngs(
     assert len(output_paths) == 1
     assert output_paths[0].exists()
     assert output_paths[0].name.startswith("worst_dice_01__")
+    assert os.environ["MPLBACKEND"] == HEADLESS_MATPLOTLIB_BACKEND
 
 
 def test_export_visualizations_ranks_worst_dice_across_batches(

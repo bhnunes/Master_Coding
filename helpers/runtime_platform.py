@@ -30,6 +30,19 @@ def ensure_headless_matplotlib_backend(
         values["MPLBACKEND"] = HEADLESS_MATPLOTLIB_BACKEND
 
 
+def load_headless_matplotlib_pyplot() -> Any:
+    """Load matplotlib.pyplot with a backend that works in headless pipeline runs."""
+
+    ensure_headless_matplotlib_backend()
+
+    import matplotlib
+
+    matplotlib.use(HEADLESS_MATPLOTLIB_BACKEND, force=True)
+    from matplotlib import pyplot
+
+    return pyplot
+
+
 def resolve_env_path(
     value: str | None,
     variable_name: str,

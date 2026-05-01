@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from dotenv import dotenv_values, find_dotenv
+
+from helpers.runtime_platform import load_headless_matplotlib_pyplot
 
 _METRIC_ORDER = ("dice", "iou", "tpr", "tnr", "precision", "accuracy", "fpr", "fnr")
 _SENSITIVE_ENV_TERMS = ("PASSWORD", "TOKEN", "SECRET", "PRIVATE", "CREDENTIAL")
@@ -109,6 +109,9 @@ class MarkdownReportConfig:
 
 
 def save_confusion_matrix_png(tp: int, fp: int, fn: int, tn: int, out_path_png: Path) -> Path:
+    plt = load_headless_matplotlib_pyplot()
+    import seaborn as sns
+
     cm = np.array([[tn, fp], [fn, tp]], dtype=np.float64)
     row_sums = cm.sum(axis=1, keepdims=True)
     cm_norm = np.divide(cm, row_sums, out=np.zeros_like(cm), where=row_sums != 0)

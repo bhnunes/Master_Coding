@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,11 @@ from helpers.ensemble_inference.reporting import (
     LatexReportConfig,
     MarkdownReportConfig,
     export_results_to_csv,
+    save_confusion_matrix_png,
     write_ensemble_report_latex,
     write_ensemble_report_markdown,
 )
+from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_MATPLOTLIB_BACKEND
 
 
 def _sample_recipe() -> dict[str, object]:
@@ -66,6 +69,17 @@ def test_export_results_to_csv_writes_report(tmp_path: Path) -> None:
     assert csv_path.name == "FINAL_EVALUATION_REPORT_2026-03-20_12_00_00.csv"
     assert "Ensemble Composition" in csv_path.read_text(encoding="utf-8")
     assert "Decision Threshold" in csv_path.read_text(encoding="utf-8")
+
+
+def test_save_confusion_matrix_png_replaces_colab_inline_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MPLBACKEND", COLAB_INLINE_MATPLOTLIB_BACKEND)
+
+    png_path = save_confusion_matrix_png(8, 2, 1, 9, tmp_path / "cm.png")
+
+    assert png_path.exists()
+    assert os.environ["MPLBACKEND"] == HEADLESS_MATPLOTLIB_BACKEND
 
 
 def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:

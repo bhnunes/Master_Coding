@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
@@ -20,6 +19,7 @@ from helpers.ensemble_inference.metrics import (
     mask_to_binary_indices,
     summarize_patient_metrics,
 )
+from helpers.runtime_platform import load_headless_matplotlib_pyplot
 
 _FILENAME_SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 _NEGLIGIBLE_MODEL_WEIGHT = 1e-8
@@ -350,6 +350,7 @@ def _render_visualization_sample(
     rank: int,
     config: VisualizationExportConfig,
 ) -> Path:
+    plt = load_headless_matplotlib_pyplot()
     mean = np.asarray(config.train_mean, dtype=np.float32)
     std = np.asarray(config.train_std, dtype=np.float32)
     image = sample.image.transpose(1, 2, 0)

@@ -10,6 +10,7 @@ from helpers import runtime_platform
 from helpers.runtime_platform import (
     ensure_headless_matplotlib_backend,
     get_openslide_dll_context,
+    load_headless_matplotlib_pyplot,
     load_openslide_module,
     resolve_env_path,
 )
@@ -55,6 +56,17 @@ def test_ensure_headless_matplotlib_backend_keeps_supported_backend() -> None:
     ensure_headless_matplotlib_backend(env)
 
     assert env["MPLBACKEND"] == "svg"
+
+
+def test_load_headless_matplotlib_pyplot_replaces_colab_inline_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MPLBACKEND", runtime_platform.COLAB_INLINE_MATPLOTLIB_BACKEND)
+
+    pyplot = load_headless_matplotlib_pyplot()
+
+    assert os.environ["MPLBACKEND"] == runtime_platform.HEADLESS_MATPLOTLIB_BACKEND
+    assert pyplot.get_backend() == runtime_platform.HEADLESS_MATPLOTLIB_BACKEND
 
 
 def test_resolve_env_path_does_not_treat_non_alpha_drive_prefix_as_windows_path() -> None:
@@ -178,14 +190,20 @@ def test_runtime_platform_namespace_smoke_path() -> None:
         return object()
 
     assert runtime_platform.get_runtime_os("Linux") == "Linux"
-    assert runtime_platform.resolve_env_path(
-        "~/slides",
-        "PROJECTS_BASE_PATH",
-    ) == Path("~/slides").expanduser()
-    assert runtime_platform.load_openslide_module(
-        system_name="Linux",
-        import_module_fn=fake_import_module,
-    ) is not None
+    assert (
+        runtime_platform.resolve_env_path(
+            "~/slides",
+            "PROJECTS_BASE_PATH",
+        )
+        == Path("~/slides").expanduser()
+    )
+    assert (
+        runtime_platform.load_openslide_module(
+            system_name="Linux",
+            import_module_fn=fake_import_module,
+        )
+        is not None
+    )
     assert imported_modules == ["openslide"]
 
 

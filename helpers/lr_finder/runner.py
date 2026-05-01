@@ -18,7 +18,10 @@ from helpers.lr_finder.config import LRFinderConfig, ModelPlan
 from helpers.lr_finder.data import build_train_loader, prepare_training_data
 from helpers.lr_finder.reporting import RunRecord
 from helpers.lr_finder.search_space import BCEDiceParams, sample_bcedice_params
-from helpers.runtime_platform import ensure_headless_matplotlib_backend
+from helpers.runtime_platform import (
+    ensure_headless_matplotlib_backend,
+    load_headless_matplotlib_pyplot,
+)
 from helpers.training.device import require_cuda_device
 from helpers.training.gpu import GPUDownscale, GPUNormalizer
 from helpers.training.losses import BCEDiceHybridLossConfig, BCEDiceHybridLossPaper
@@ -423,17 +426,6 @@ def run_lr_finder_once(config: LRFinderRunConfig) -> dict[str, npt.NDArray[np.fl
     return _extract_lr_finder_history(history)
 
 
-def _load_matplotlib_pyplot() -> Any:
-    ensure_headless_matplotlib_backend()
-
-    import matplotlib
-
-    matplotlib.use("Agg", force=True)
-    from matplotlib import pyplot
-
-    return pyplot
-
-
 def plot_stability_curves(
     all_lrs: list[npt.NDArray[np.float64]],
     all_losses: list[npt.NDArray[np.float64]],
@@ -443,7 +435,7 @@ def plot_stability_curves(
     skip_start: int = 10,
     skip_end: int = 5,
 ) -> None:
-    plt = _load_matplotlib_pyplot()
+    plt = load_headless_matplotlib_pyplot()
     plt.figure(figsize=(10, 6))
     for index, (lrs, losses) in enumerate(zip(all_lrs, all_losses, strict=True)):
         lower_bound = skip_start
