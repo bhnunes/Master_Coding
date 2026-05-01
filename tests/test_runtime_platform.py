@@ -13,6 +13,7 @@ from helpers.runtime_platform import (
     load_headless_matplotlib_pyplot,
     load_openslide_module,
     resolve_env_path,
+    suppress_native_stderr,
 )
 
 
@@ -56,6 +57,20 @@ def test_ensure_headless_matplotlib_backend_keeps_supported_backend() -> None:
     ensure_headless_matplotlib_backend(env)
 
     assert env["MPLBACKEND"] == "svg"
+
+
+def test_suppress_native_stderr_redirects_fd_two_temporarily(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    os.write(2, b"visible before\n")
+    assert "visible before" in capfd.readouterr().err
+
+    with suppress_native_stderr():
+        os.write(2, b"hidden native warning\n")
+    assert "hidden native warning" not in capfd.readouterr().err
+
+    os.write(2, b"visible after\n")
+    assert "visible after" in capfd.readouterr().err
 
 
 def test_load_headless_matplotlib_pyplot_replaces_colab_inline_backend(

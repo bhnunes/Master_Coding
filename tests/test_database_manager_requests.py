@@ -72,6 +72,7 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
         openslide_cache_bytes=134217728,
         hdf5_compression="gzip",
         preload_scan_area_max_bytes=0,
+        suppress_native_tiff_warnings=True,
     )
 
     request = build_slide_request(
@@ -85,6 +86,7 @@ def test_build_slide_request_includes_stage2_hdf5_shard_output(tmp_path: Path) -
     assert request.hiesd_xml_coord_level == HIESD_XML_COORD_LEVEL
     assert request.hdf5_compression == "gzip"
     assert request.preload_scan_area_max_bytes == 0
+    assert request.suppress_native_tiff_warnings is True
 
 
 def test_build_slide_request_requires_annotation_path(tmp_path: Path) -> None:
@@ -139,6 +141,7 @@ def test_build_slide_request_requires_annotation_path(tmp_path: Path) -> None:
         openslide_cache_bytes=134217728,
         hdf5_compression="gzip",
         preload_scan_area_max_bytes=0,
+        suppress_native_tiff_warnings=True,
     )
 
     with pytest.raises(ValueError, match="missing an annotation path"):

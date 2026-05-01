@@ -17,7 +17,7 @@ from helpers.extraction.data_handlers import (
 )
 from helpers.extraction.hdf5_manifest import update_stage2_shard_manifest
 from helpers.extraction.hdf5_storage import write_slide_patch_dataset_hdf5
-from helpers.runtime_platform import load_openslide_module
+from helpers.runtime_platform import load_openslide_module, suppress_native_stderr
 
 HANDLER_MAPPING: dict[tuple[str, str], type[BaseHandler]] = {
     (".svs", ".xml"): SVS_XML_Handler,
@@ -41,6 +41,7 @@ class SlideRuntimeSettings:
     openslide_cache_bytes: int
     hdf5_compression: str | None
     preload_scan_area_max_bytes: int
+    suppress_native_tiff_warnings: bool
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class SlideProcessingRequest:
     openslide_cache_bytes: int
     hdf5_compression: str | None
     preload_scan_area_max_bytes: int
+    suppress_native_tiff_warnings: bool
     artifacts_geojson_path: Path | None = None
     profile_output_path: Path | None = None
     hdf5_output_path: Path | None = None
@@ -125,7 +127,17 @@ def load_slide_runtime_settings(
             0,
             int(values.get("STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES") or 0),
         ),
+        suppress_native_tiff_warnings=_parse_bool(
+            values.get("STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS"),
+            default=True,
+        ),
     )
+
+
+def _parse_bool(value: str | None, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"true", "1", "t", "yes", "y"}
 
 
 def get_handler_for_files(image_path: str, annotation_path: str) -> BaseHandler:
@@ -162,30 +174,32 @@ def run_slide_processing(request: SlideProcessingRequest) -> SlideProcessingResu
     logging.info("Script started for image: %s", request.image_path.name)
 
     try:
-        cancer_count, not_cancer_count, artifact_patch_records = patch_engine.run_extraction(
-            handler=handler,
-            path_Image=str(request.image_path),
-            annotation_path=str(request.annotation_path),
-            target_level=request.target_level,
-            window_size=request.window_size,
-            stride=request.stride,
-            tissue_percentage_req=request.tissue_percentage,
-            match_percentage_req=request.match_percentage,
-            dataset_tag=request.dataset_tag,
-            hiesd_xml_coord_level=request.hiesd_xml_coord_level,
-            patient=request.patient,
-            path_artifacts_geojson=str(request.artifacts_geojson_path)
-            if request.artifacts_geojson_path is not None
-            else None,
-            profile_output_path=str(request.profile_output_path)
-            if request.profile_output_path is not None
-            else None,
-            use_artifact_filter=request.use_advanced_artifact_filtering,
-            num_workers=request.num_workers,
-            openslide_cache_bytes=request.openslide_cache_bytes,
-            hdf5_compression=request.hdf5_compression,
-            preload_scan_area_max_bytes=request.preload_scan_area_max_bytes,
-        )
+        with suppress_native_stderr(request.suppress_native_tiff_warnings):
+            cancer_count, not_cancer_count, artifact_patch_records = patch_engine.run_extraction(
+                handler=handler,
+                path_Image=str(request.image_path),
+                annotation_path=str(request.annotation_path),
+                target_level=request.target_level,
+                window_size=request.window_size,
+                stride=request.stride,
+                tissue_percentage_req=request.tissue_percentage,
+                match_percentage_req=request.match_percentage,
+                dataset_tag=request.dataset_tag,
+                hiesd_xml_coord_level=request.hiesd_xml_coord_level,
+                patient=request.patient,
+                path_artifacts_geojson=str(request.artifacts_geojson_path)
+                if request.artifacts_geojson_path is not None
+                else None,
+                profile_output_path=str(request.profile_output_path)
+                if request.profile_output_path is not None
+                else None,
+                use_artifact_filter=request.use_advanced_artifact_filtering,
+                num_workers=request.num_workers,
+                openslide_cache_bytes=request.openslide_cache_bytes,
+                hdf5_compression=request.hdf5_compression,
+                preload_scan_area_max_bytes=request.preload_scan_area_max_bytes,
+                suppress_native_tiff_warnings=request.suppress_native_tiff_warnings,
+            )
         artifact_patch_records = cast(list[dict[str, Any]], artifact_patch_records)
         if request.hdf5_output_path is not None:
             shard_output = write_slide_patch_dataset_hdf5(

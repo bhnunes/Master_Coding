@@ -32,7 +32,7 @@ from helpers.extraction.profiling import (
     record_phase,
     write_profile_summary,
 )
-from helpers.runtime_platform import load_openslide_module
+from helpers.runtime_platform import load_openslide_module, suppress_native_stderr
 
 cv2 = ensure_cv2_compat(cv2)
 
@@ -67,6 +67,7 @@ _WORKER_CONTEXT = {}
 _WORKER_SLIDE = None
 _WORKER_SLIDE_CACHE = None
 _WORKER_CLEANUP_REGISTERED = False
+_WORKER_NATIVE_STDERR_SUPPRESSION = None
 WINDOW_PROFILE_PHASES = (
     "artifact_coverage",
     "read_region",
@@ -661,31 +662,42 @@ def _configure_slide_cache(openslide_module, slide, cache_bytes):
 
 def _initialize_worker(worker_context):
     global _WORKER_CONTEXT, _WORKER_SLIDE, _WORKER_SLIDE_CACHE, _WORKER_CLEANUP_REGISTERED
+    global _WORKER_NATIVE_STDERR_SUPPRESSION
     close_worker_resources()
     _WORKER_CONTEXT = worker_context
-    artifact_geometry_index = _WORKER_CONTEXT.get("artifact_geometry_index")
-    if artifact_geometry_index:
-        _WORKER_CONTEXT["artifact_geometry_index"] = prepare_artifact_geometry_index(
-            artifact_geometry_index
+    if worker_context.get("suppress_native_tiff_warnings"):
+        _WORKER_NATIVE_STDERR_SUPPRESSION = suppress_native_stderr()
+        _WORKER_NATIVE_STDERR_SUPPRESSION.__enter__()
+    try:
+        artifact_geometry_index = _WORKER_CONTEXT.get("artifact_geometry_index")
+        if artifact_geometry_index:
+            _WORKER_CONTEXT["artifact_geometry_index"] = prepare_artifact_geometry_index(
+                artifact_geometry_index
+            )
+        openslide_module = load_openslide_module()
+        _WORKER_SLIDE = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
+        _WORKER_SLIDE_CACHE = _configure_slide_cache(
+            openslide_module,
+            _WORKER_SLIDE,
+            _WORKER_CONTEXT.get("openslide_cache_bytes", 0),
         )
-    openslide_module = load_openslide_module()
-    _WORKER_SLIDE = openslide_module.OpenSlide(_WORKER_CONTEXT["path_Image"])
-    _WORKER_SLIDE_CACHE = _configure_slide_cache(
-        openslide_module,
-        _WORKER_SLIDE,
-        _WORKER_CONTEXT.get("openslide_cache_bytes", 0),
-    )
+    except Exception:
+        close_worker_resources()
+        raise
     if not _WORKER_CLEANUP_REGISTERED:
         atexit.register(close_worker_resources)
         _WORKER_CLEANUP_REGISTERED = True
 
 
 def close_worker_resources():
-    global _WORKER_SLIDE, _WORKER_SLIDE_CACHE
+    global _WORKER_SLIDE, _WORKER_SLIDE_CACHE, _WORKER_NATIVE_STDERR_SUPPRESSION
     if _WORKER_SLIDE is not None:
         _WORKER_SLIDE.close()
         _WORKER_SLIDE = None
     _WORKER_SLIDE_CACHE = None
+    if _WORKER_NATIVE_STDERR_SUPPRESSION is not None:
+        _WORKER_NATIVE_STDERR_SUPPRESSION.__exit__(None, None, None)
+        _WORKER_NATIVE_STDERR_SUPPRESSION = None
 
 
 def _window_profile_stats(context):
@@ -1283,6 +1295,10 @@ def _build_worker_setup(request):
             "use_artifact_filter": request.kwargs.get("use_artifact_filter"),
             "profile_output_path": request.profile_output_path,
             "openslide_cache_bytes": request.kwargs.get("openslide_cache_bytes", 0),
+            "suppress_native_tiff_warnings": request.kwargs.get(
+                "suppress_native_tiff_warnings",
+                True,
+            ),
             "preloaded_region": preloaded_region,
             "preloaded_region_x": request.region.x_start,
             "preloaded_region_y": request.region.y_start,

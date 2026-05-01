@@ -745,6 +745,42 @@ def test_initialize_worker_opens_slide_once_and_reuses_it_across_batches(
     assert closed == ["closed"]
 
 
+def test_initialize_worker_suppresses_native_tiff_warnings_until_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeSuppression:
+        def __enter__(self) -> None:
+            events.append("enter")
+
+        def __exit__(self, *args: object) -> None:
+            events.append("exit")
+
+    class FakeSlide:
+        def close(self) -> None:
+            events.append("close")
+
+    class FakeOpenSlideModule:
+        def OpenSlide(self, path: str) -> FakeSlide:
+            events.append(path)
+            return FakeSlide()
+
+    monkeypatch.setattr(patch_engine, "load_openslide_module", lambda: FakeOpenSlideModule())
+    monkeypatch.setattr(patch_engine, "suppress_native_stderr", lambda: FakeSuppression())
+    monkeypatch.setattr("helpers.extraction.patch_engine.atexit.register", lambda callback: None)
+
+    patch_engine._initialize_worker(
+        {
+            "path_Image": "/tmp/slide.svs",
+            "suppress_native_tiff_warnings": True,
+        }
+    )
+    patch_engine.close_worker_resources()
+
+    assert events == ["enter", "/tmp/slide.svs", "close", "exit"]
+
+
 def test_initialize_worker_raises_when_slide_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeOpenSlideModule:
         def OpenSlide(self, path: str) -> object:

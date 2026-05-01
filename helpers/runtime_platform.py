@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import platform
-from collections.abc import MutableMapping
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Iterator, MutableMapping
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -157,6 +157,26 @@ def load_openslide_module(
         is_dir_fn=is_dir_fn,
     ):
         return importer("openslide")
+
+
+@contextmanager
+def suppress_native_stderr(enabled: bool = True) -> Iterator[None]:
+    """Temporarily redirect process-level stderr to the platform null device."""
+
+    if not enabled:
+        yield
+        return
+
+    saved_stderr_fd: int | None = None
+    try:
+        saved_stderr_fd = os.dup(2)
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            os.dup2(devnull.fileno(), 2)
+            yield
+    finally:
+        if saved_stderr_fd is not None:
+            os.dup2(saved_stderr_fd, 2)
+            os.close(saved_stderr_fd)
 
 
 def _is_windows_style_path(value: str) -> bool:

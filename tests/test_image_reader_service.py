@@ -25,6 +25,13 @@ def test_load_slide_runtime_settings_defaults_artifact_filtering_to_true() -> No
     settings = load_slide_runtime_settings({})
 
     assert settings.use_advanced_artifact_filtering is True
+    assert settings.suppress_native_tiff_warnings is True
+
+
+def test_load_slide_runtime_settings_allows_native_tiff_warnings() -> None:
+    settings = load_slide_runtime_settings({"STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS": "false"})
+
+    assert settings.suppress_native_tiff_warnings is False
 
 
 def test_run_slide_processing_returns_patch_engine_counts(
@@ -74,6 +81,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
         openslide_cache_bytes=OPENSLIDE_CACHE_BYTES,
         hdf5_compression="gzip",
         preload_scan_area_max_bytes=0,
+        suppress_native_tiff_warnings=True,
         artifacts_geojson_path=None,
         profile_output_path=tmp_path / "profile.json",
         hdf5_output_path=tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",
@@ -93,6 +101,7 @@ def test_run_slide_processing_returns_patch_engine_counts(
     assert captured["profile_output_path"] == str(tmp_path / "profile.json")
     assert captured["openslide_cache_bytes"] == OPENSLIDE_CACHE_BYTES
     assert captured["preload_scan_area_max_bytes"] == 0
+    assert captured["suppress_native_tiff_warnings"] is True
     assert hdf5_calls == [
         (
             tmp_path / "PATCHES" / "HDF5_SHARDS" / "slide.h5",

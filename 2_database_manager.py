@@ -192,6 +192,7 @@ def build_slide_request(
         openslide_cache_bytes=runtime_settings.openslide_cache_bytes,
         hdf5_compression=runtime_settings.hdf5_compression,
         preload_scan_area_max_bytes=runtime_settings.preload_scan_area_max_bytes,
+        suppress_native_tiff_warnings=runtime_settings.suppress_native_tiff_warnings,
         artifacts_geojson_path=artifacts_geojson_path,
         hdf5_output_path=hdf5_output_path,
     )
