@@ -178,6 +178,10 @@ def _append_patient_stats(
             "plateau_trigger_step": result.plateau_trigger_step,
             "plateau_stop_reason": result.plateau_stop_reason,
             "plateau_evaluation_mode": result.plateau_evaluation_mode,
+            "gist_candidate_pool_original_size": result.gist_candidate_pool_original_size,
+            "gist_candidate_pool_size": result.gist_candidate_pool_size,
+            "gist_candidate_pool_method": result.gist_candidate_pool_method,
+            "gist_landmark_cluster_count": result.gist_landmark_cluster_count,
             "runtime_sec": round(runtime_sec, 2),
             "stability_trace": str(result.stability_history),
             "retention_trace": str(result.retention_history),
@@ -226,6 +230,7 @@ def _summary_payload(
         "master_manifest_path": str(config.master_manifest_path),
         "model_name": config.model_name,
         "use_gist": config.use_gist,
+        "gist_candidate_pool_limit": config.gist_candidate_pool_limit,
     }
 
 
@@ -457,6 +462,10 @@ def _build_patient_selection_manifest_rows(
                 "plateau_trigger_step": result.plateau_trigger_step,
                 "plateau_stop_reason": result.plateau_stop_reason,
                 "plateau_evaluation_mode": result.plateau_evaluation_mode,
+                "gist_candidate_pool_original_size": result.gist_candidate_pool_original_size,
+                "gist_candidate_pool_size": result.gist_candidate_pool_size,
+                "gist_candidate_pool_method": result.gist_candidate_pool_method,
+                "gist_landmark_cluster_count": result.gist_landmark_cluster_count,
             }
         )
     sampled_bucket = "gist_sampled" if "gist" in str(result.selection_method) else "legacy_sampled"
@@ -484,6 +493,10 @@ def _build_patient_selection_manifest_rows(
                 "plateau_trigger_step": result.plateau_trigger_step,
                 "plateau_stop_reason": result.plateau_stop_reason,
                 "plateau_evaluation_mode": result.plateau_evaluation_mode,
+                "gist_candidate_pool_original_size": result.gist_candidate_pool_original_size,
+                "gist_candidate_pool_size": result.gist_candidate_pool_size,
+                "gist_candidate_pool_method": result.gist_candidate_pool_method,
+                "gist_landmark_cluster_count": result.gist_landmark_cluster_count,
             }
         )
     return manifest_rows

@@ -9,6 +9,8 @@ KEEP_STEP = 64
 KEEP_PATIENCE = 2
 DEFAULT_SEED = 42
 DEFAULT_N_START = 512
+DEFAULT_GIST_CANDIDATE_POOL_LIMIT = 4096
+CUSTOM_GIST_CANDIDATE_POOL_LIMIT = 512
 MASK_FRACTION_ZERO = 0.0
 MASK_FRACTION_THRESHOLD = 0.25
 LOCAL_CACHE_BYTES = 4096
@@ -48,6 +50,7 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.n_start == DEFAULT_N_START
     assert config.device == "cuda"
     assert config.use_gist is False
+    assert config.gist_candidate_pool_limit == DEFAULT_GIST_CANDIDATE_POOL_LIMIT
     assert config.protect_positive_labels is True
     assert config.protect_mask_positive is True
     assert config.positive_mask_fraction_threshold == pytest.approx(MASK_FRACTION_ZERO)
@@ -89,6 +92,41 @@ def test_load_smart_sampler_config_reads_gist_flag_and_legacy_alias(tmp_path: Pa
 
     assert config.use_gist is True
     assert alias_config.use_gist is True
+
+
+def test_load_smart_sampler_config_reads_gist_candidate_pool_limit(tmp_path: Path) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
+
+    config = load_smart_sampler_config(
+        {
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+            "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
+            "SMART_SAMPLER_USE_GIST": "true",
+            "SMART_SAMPLER_M_MAX": "256",
+            "SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT": str(CUSTOM_GIST_CANDIDATE_POOL_LIMIT),
+        }
+    )
+
+    assert config.gist_candidate_pool_limit == CUSTOM_GIST_CANDIDATE_POOL_LIMIT
+
+
+def test_load_smart_sampler_config_rejects_gist_pool_limit_below_m_max(
+    tmp_path: Path,
+) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
+
+    with pytest.raises(ValueError, match="SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT"):
+        load_smart_sampler_config(
+            {
+                "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+                "SMART_SAMPLER_OUTPUT_DIR": str(tmp_path / "out"),
+                "SMART_SAMPLER_USE_GIST": "true",
+                "SMART_SAMPLER_M_MAX": "512",
+                "SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT": "256",
+            }
+        )
 
 
 def test_load_smart_sampler_config_accepts_output_dir_under_manifest_root(tmp_path: Path) -> None:

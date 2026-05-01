@@ -37,6 +37,9 @@ ADAPTIVE_M_MAX = 6
 FULL_SELECTION_EMBED_COUNT = 8
 HELDOUT_PATCH_COUNT = 2
 GIST_SELECTION_BUDGET = 3
+GIST_LANDMARK_POOL_LIMIT = 6
+PATIENT_GIST_LANDMARK_POOL_LIMIT = 5
+PATIENT_GIST_SELECTION_POOL_SIZE = 9
 MASK_PROTECTED_INDEX = 2
 SINGLE_REDUCIBLE_SELECTION = 1
 DOUBLE_REDUCIBLE_SELECTION = 2
@@ -62,6 +65,7 @@ def _selection_config(**overrides: Any) -> Any:
         "m_max": 2,
         "seed": 7,
         "use_gist": False,
+        "gist_candidate_pool_limit": 4096,
         "protect_positive_labels": True,
         "protect_mask_positive": True,
         "positive_mask_fraction_threshold": 0.0,
@@ -425,6 +429,54 @@ def test_select_diverse_samples_gist_is_deterministic_and_respects_budget() -> N
     assert decision_b.retention_history == decision_a.retention_history
 
 
+def test_select_diverse_samples_gist_uses_landmarks_for_large_candidate_pool() -> None:
+    embeddings = np.array(
+        [
+            [0.0, 0.0],
+            [0.05, 0.0],
+            [0.1, 0.0],
+            [4.0, 4.0],
+            [4.1, 4.0],
+            [4.2, 4.0],
+            [8.0, 8.0],
+            [8.1, 8.0],
+            [8.2, 8.0],
+            [12.0, 12.0],
+            [12.1, 12.0],
+            [12.2, 12.0],
+        ],
+        dtype=np.float32,
+    )
+    global_indices = np.arange(len(embeddings), dtype=np.int64) + 100
+    config = SimpleNamespace(
+        K_MIN=SMALL_K_MIN,
+        K_MAX=SMALL_K_MAX,
+        SEED=42,
+        ADAPTIVE_KEEP_ENABLED=True,
+        KEEP_MIN=FULL_RETENTION_COUNT,
+        KEEP_STEP=1,
+        KEEP_IMPROVEMENT_THRESHOLD=0.02,
+        KEEP_PATIENCE=2,
+        GIST_CANDIDATE_POOL_LIMIT=GIST_LANDMARK_POOL_LIMIT,
+    )
+
+    decision = select_diverse_samples_gist(
+        embeddings,
+        global_indices,
+        m_ceiling=GIST_SELECTION_BUDGET,
+        config=config,
+    )
+
+    assert decision.selection_method == "gist_landmark_facility_location"
+    assert "fallback" not in decision.selection_method
+    assert decision.gist_candidate_pool_original_size == len(embeddings)
+    assert decision.gist_candidate_pool_size == GIST_LANDMARK_POOL_LIMIT
+    assert decision.gist_candidate_pool_method == "minibatch_kmeans_centroid_residual_random"
+    assert decision.gist_landmark_cluster_count == GIST_LANDMARK_POOL_LIMIT
+    assert 1 <= len(decision.selected_indices) <= GIST_SELECTION_BUDGET
+    assert set(decision.selected_indices.tolist()).issubset(set(global_indices.tolist()))
+
+
 def test_select_patient_samples_uses_gist_when_enabled(tmp_path: Path) -> None:
     h5_path = tmp_path / "patient.h5"
     _write_patient_h5(
@@ -451,6 +503,45 @@ def test_select_patient_samples_uses_gist_when_enabled(tmp_path: Path) -> None:
     assert result.selection_method == "gist_facility_location"
     assert 1 <= len(result.sampled_indices) <= GIST_SELECTION_BUDGET
     assert result.retention_history
+
+
+def test_select_patient_samples_records_gist_landmark_metadata(tmp_path: Path) -> None:
+    h5_path = tmp_path / "patient.h5"
+    patch_count = 12
+    _write_patient_h5(
+        h5_path,
+        labels=np.zeros(patch_count, dtype=np.uint8),
+        masks=np.zeros((patch_count, PATCH_SIDE, PATCH_SIDE), dtype=np.uint8),
+    )
+
+    class FakeExtractor:
+        def get_embeddings(
+            self, _h5_path: str, indices: np.ndarray[Any, np.dtype[np.int64]]
+        ) -> np.ndarray[Any, np.dtype[np.float32]]:
+            values = indices.astype(np.float32).reshape(-1, 1)
+            return np.concatenate([values, values + 0.5], axis=1)
+
+    result = select_patient_samples(
+        str(h5_path),
+        1,
+        np.arange(patch_count, dtype=np.int64),
+        FakeExtractor(),
+        _selection_config(
+            n_start=20,
+            n_max=20,
+            m_max=3,
+            seed=11,
+            use_gist=True,
+            gist_candidate_pool_limit=PATIENT_GIST_LANDMARK_POOL_LIMIT,
+        ),
+    )
+
+    assert result.selection_method == "gist_landmark_facility_location"
+    assert result.gist_candidate_pool_original_size == PATIENT_GIST_SELECTION_POOL_SIZE
+    assert result.gist_candidate_pool_size == PATIENT_GIST_LANDMARK_POOL_LIMIT
+    assert result.gist_candidate_pool_method == "minibatch_kmeans_centroid_residual_random"
+    assert result.gist_landmark_cluster_count == PATIENT_GIST_LANDMARK_POOL_LIMIT
+    assert 1 <= len(result.sampled_indices) <= GIST_SELECTION_BUDGET
 
 
 def test_select_patient_samples_keeps_positive_label_rows_outside_reducible_budget(

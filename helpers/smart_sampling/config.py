@@ -112,6 +112,7 @@ class SmartSamplerConfig:
     patient_shard_cache_dir: Path | None = None
     patient_shard_cache_bytes: int = 0
     use_gist: bool = False
+    gist_candidate_pool_limit: int = 4096
     protect_positive_labels: bool = True
     protect_mask_positive: bool = True
     positive_mask_fraction_threshold: float = 0.0
@@ -157,6 +158,23 @@ def load_smart_sampler_config(
     if growth_factor <= 1.0:
         raise ValueError(
             "The 'SMART_SAMPLER_GROWTH_FACTOR' environment variable must be greater than 1.0."
+        )
+
+    m_max = _parse_positive_int(values.get("SMART_SAMPLER_M_MAX"), "SMART_SAMPLER_M_MAX", 2000)
+    use_gist = _parse_bool(
+        use_gist_value,
+        "SMART_SAMPLER_USE_GIST",
+        False,
+    )
+    gist_candidate_pool_limit = _parse_positive_int(
+        values.get("SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT"),
+        "SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT",
+        4096,
+    )
+    if use_gist and gist_candidate_pool_limit < m_max:
+        raise ValueError(
+            "SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT must be greater than or equal to "
+            "SMART_SAMPLER_M_MAX when SMART_SAMPLER_USE_GIST is enabled."
         )
 
     return SmartSamplerConfig(
@@ -250,7 +268,7 @@ def load_smart_sampler_config(
             "SMART_SAMPLER_KEEP_PATIENCE",
             2,
         ),
-        m_max=_parse_positive_int(values.get("SMART_SAMPLER_M_MAX"), "SMART_SAMPLER_M_MAX", 2000),
+        m_max=m_max,
         seed=_parse_positive_int(values.get("SMART_SAMPLER_SEED"), "SMART_SAMPLER_SEED", 42),
         num_workers=max(
             0,
@@ -262,11 +280,8 @@ def load_smart_sampler_config(
             "SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES",
             0,
         ),
-        use_gist=_parse_bool(
-            use_gist_value,
-            "SMART_SAMPLER_USE_GIST",
-            False,
-        ),
+        use_gist=use_gist,
+        gist_candidate_pool_limit=gist_candidate_pool_limit,
         protect_positive_labels=_parse_bool(
             values.get("SMART_SAMPLER_PROTECT_POSITIVE_LABELS"),
             "SMART_SAMPLER_PROTECT_POSITIVE_LABELS",

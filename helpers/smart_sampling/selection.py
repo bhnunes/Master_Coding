@@ -15,6 +15,12 @@ from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.gist import select_gist_facility_location
 
 _GIST_MAX_CANDIDATE_POOL = 4096
+_GIST_LANDMARK_METHOD = "minibatch_kmeans_centroid_residual_random"
+_GIST_DIRECT_METHOD = "direct"
+_GIST_CENTROID_FRACTION = 0.7
+_GIST_RESIDUAL_FRACTION = 0.2
+_GIST_MIN_RESIDUAL_QUOTA = 3
+_GIST_LANDMARK_CLUSTER_MULTIPLIER = 4
 MIN_REDUCED_SAMPLE_COUNT = 2
 
 
@@ -53,6 +59,10 @@ class PatientSelectionResult:
     plateau_evaluation_mode: str | None
     selected_reducible_count: int
     rejected_reducible_count: int
+    gist_candidate_pool_original_size: int = 0
+    gist_candidate_pool_size: int = 0
+    gist_candidate_pool_method: str | None = None
+    gist_landmark_cluster_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,20 @@ class SelectionDecision:
     plateau_trigger_step: int | None
     plateau_stop_reason: str | None
     plateau_evaluation_mode: str | None
+    gist_candidate_pool_original_size: int = 0
+    gist_candidate_pool_size: int = 0
+    gist_candidate_pool_method: str | None = None
+    gist_landmark_cluster_count: int | None = None
+
+
+@dataclass(frozen=True)
+class _GistCandidatePool:
+    embeddings: npt.NDArray[np.float32]
+    global_indices: npt.NDArray[np.int64]
+    original_size: int
+    selected_size: int
+    method: str
+    cluster_count: int | None
 
 
 @dataclass(frozen=True)
@@ -301,43 +325,53 @@ def select_diverse_samples_gist(
             plateau_trigger_step=None,
             plateau_stop_reason="keep_all",
             plateau_evaluation_mode=None,
+            gist_candidate_pool_original_size=n_samples,
+            gist_candidate_pool_size=n_samples,
+            gist_candidate_pool_method=_GIST_DIRECT_METHOD,
+            gist_landmark_cluster_count=None,
         )
 
-    if n_samples > _GIST_MAX_CANDIDATE_POOL:
-        logging.warning(
-            "GIST candidate pool size %d exceeds safe limit %d; falling back to legacy selector",
-            n_samples,
-            _GIST_MAX_CANDIDATE_POOL,
-        )
-        fallback_decision = select_diverse_samples(
-            embeddings,
-            global_indices,
-            adaptive_m_target,
-            config,
-            evaluation_embeddings=evaluation_embeddings,
-        )
-        return SelectionDecision(
-            selected_indices=fallback_decision.selected_indices,
-            k_clusters=fallback_decision.k_clusters,
-            adaptive_m_target=fallback_decision.adaptive_m_target,
-            selection_method=f"{fallback_decision.selection_method}_gist_fallback",
-            retention_history=fallback_decision.retention_history,
-            heldout_count=fallback_decision.heldout_count,
-            plateau_threshold=fallback_decision.plateau_threshold,
-            plateau_trigger_improvement=fallback_decision.plateau_trigger_improvement,
-            plateau_trigger_keep_count=fallback_decision.plateau_trigger_keep_count,
-            plateau_trigger_step=fallback_decision.plateau_trigger_step,
-            plateau_stop_reason=fallback_decision.plateau_stop_reason,
-            plateau_evaluation_mode=fallback_decision.plateau_evaluation_mode,
+    candidate_pool_limit = int(
+        getattr(config, "GIST_CANDIDATE_POOL_LIMIT", _GIST_MAX_CANDIDATE_POOL)
+    )
+    if candidate_pool_limit <= 0:
+        raise ValueError("GIST_CANDIDATE_POOL_LIMIT must be greater than zero.")
+    if adaptive_m_target > candidate_pool_limit:
+        raise ValueError(
+            "GIST candidate pool limit must be at least the adaptive keep target "
+            f"({candidate_pool_limit} < {adaptive_m_target})."
         )
 
-    gist_result = select_gist_facility_location(embeddings, max_selected=adaptive_m_target)
-    selected_indices = global_indices[gist_result.selected_positions]
+    candidate_pool = _build_gist_candidate_pool(
+        embeddings=embeddings,
+        global_indices=global_indices,
+        max_candidates=candidate_pool_limit,
+        config=config,
+    )
+    if candidate_pool.method == _GIST_LANDMARK_METHOD:
+        logging.info(
+            ("GIST candidate pool size %d exceeds limit %d; using %d landmark candidates via %s"),
+            candidate_pool.original_size,
+            candidate_pool_limit,
+            candidate_pool.selected_size,
+            candidate_pool.method,
+        )
+
+    gist_result = select_gist_facility_location(
+        candidate_pool.embeddings,
+        max_selected=adaptive_m_target,
+    )
+    selected_indices = candidate_pool.global_indices[gist_result.selected_positions]
+    selection_method = (
+        "gist_landmark_facility_location"
+        if candidate_pool.method == _GIST_LANDMARK_METHOD
+        else "gist_facility_location"
+    )
     return SelectionDecision(
         selected_indices=np.asarray(sorted(selected_indices.tolist()), dtype=np.int64),
         k_clusters=0,
         adaptive_m_target=adaptive_m_target,
-        selection_method="gist_facility_location",
+        selection_method=selection_method,
         retention_history=gist_result.objective_trace,
         heldout_count=0 if evaluation_embeddings is None else len(evaluation_embeddings),
         plateau_threshold=None,
@@ -346,7 +380,263 @@ def select_diverse_samples_gist(
         plateau_trigger_step=None,
         plateau_stop_reason="gist_objective",
         plateau_evaluation_mode=None,
+        gist_candidate_pool_original_size=candidate_pool.original_size,
+        gist_candidate_pool_size=candidate_pool.selected_size,
+        gist_candidate_pool_method=candidate_pool.method,
+        gist_landmark_cluster_count=candidate_pool.cluster_count,
     )
+
+
+def _build_gist_candidate_pool(
+    *,
+    embeddings: npt.NDArray[np.float32],
+    global_indices: npt.NDArray[np.int64],
+    max_candidates: int,
+    config: Any,
+) -> _GistCandidatePool:
+    n_samples = len(embeddings)
+    if n_samples <= max_candidates:
+        return _GistCandidatePool(
+            embeddings=np.asarray(embeddings, dtype=np.float32),
+            global_indices=np.asarray(global_indices, dtype=np.int64),
+            original_size=n_samples,
+            selected_size=n_samples,
+            method=_GIST_DIRECT_METHOD,
+            cluster_count=None,
+        )
+
+    cluster_count = _resolve_gist_landmark_cluster_count(
+        n_samples=n_samples,
+        max_candidates=max_candidates,
+        config=config,
+    )
+    points = np.asarray(embeddings, dtype=np.float32)
+    batch_size = min(n_samples, max(1024, cluster_count * 8))
+    clusterer = MiniBatchKMeans(
+        n_clusters=cluster_count,
+        batch_size=batch_size,
+        n_init=3,
+        random_state=int(getattr(config, "SEED", 0)),
+        max_iter=100,
+    ).fit(points)
+    labels = np.asarray(clusterer.labels_, dtype=np.int64)
+    centers = np.asarray(clusterer.cluster_centers_, dtype=np.float32)
+    quotas = _allocate_gist_landmark_quotas(
+        labels=labels,
+        cluster_count=cluster_count,
+        max_candidates=max_candidates,
+    )
+    rng = np.random.default_rng(int(getattr(config, "SEED", 0)))
+    selected_positions = _select_gist_landmark_positions(
+        points=points,
+        labels=labels,
+        centers=centers,
+        quotas=quotas,
+        rng=rng,
+    )
+    return _GistCandidatePool(
+        embeddings=points[selected_positions],
+        global_indices=np.asarray(global_indices, dtype=np.int64)[selected_positions],
+        original_size=n_samples,
+        selected_size=len(selected_positions),
+        method=_GIST_LANDMARK_METHOD,
+        cluster_count=cluster_count,
+    )
+
+
+def _resolve_gist_landmark_cluster_count(
+    *,
+    n_samples: int,
+    max_candidates: int,
+    config: Any,
+) -> int:
+    k_max = max(1, int(getattr(config, "K_MAX", 1)))
+    heuristic_clusters = max(
+        MIN_REDUCED_SAMPLE_COUNT,
+        int(np.sqrt(n_samples)),
+        k_max * _GIST_LANDMARK_CLUSTER_MULTIPLIER,
+    )
+    return int(min(n_samples, max_candidates, heuristic_clusters))
+
+
+def _allocate_gist_landmark_quotas(
+    *,
+    labels: npt.NDArray[np.int64],
+    cluster_count: int,
+    max_candidates: int,
+) -> npt.NDArray[np.int64]:
+    counts = np.bincount(labels, minlength=cluster_count).astype(np.int64, copy=False)
+    quotas = np.zeros(cluster_count, dtype=np.int64)
+    nonempty_clusters = np.flatnonzero(counts > 0)
+    if len(nonempty_clusters) == 0:
+        return quotas
+
+    raw_quotas = counts[nonempty_clusters].astype(np.float64)
+    raw_quotas *= float(max_candidates) / float(np.sum(raw_quotas))
+    base_quotas = np.maximum(1, np.floor(raw_quotas).astype(np.int64))
+    base_quotas = np.minimum(base_quotas, counts[nonempty_clusters])
+    quotas[nonempty_clusters] = base_quotas
+    remainders = np.zeros(cluster_count, dtype=np.float64)
+    remainders[nonempty_clusters] = raw_quotas - np.floor(raw_quotas)
+
+    total = int(np.sum(quotas))
+    if total > max_candidates:
+        total = _trim_gist_landmark_quotas(
+            quotas=quotas,
+            remainders=remainders,
+            target=max_candidates,
+            current_total=total,
+        )
+    if total < max_candidates:
+        _grow_gist_landmark_quotas(
+            quotas=quotas,
+            counts=counts,
+            remainders=remainders,
+            target=max_candidates,
+            current_total=total,
+        )
+    return quotas
+
+
+def _trim_gist_landmark_quotas(
+    *,
+    quotas: npt.NDArray[np.int64],
+    remainders: npt.NDArray[np.float64],
+    target: int,
+    current_total: int,
+) -> int:
+    total = current_total
+    order = np.argsort(remainders)
+    while total > target:
+        changed = False
+        for cluster_index in order.tolist():
+            if quotas[cluster_index] <= 1:
+                continue
+            quotas[cluster_index] -= 1
+            total -= 1
+            changed = True
+            if total == target:
+                break
+        if not changed:
+            break
+    return total
+
+
+def _grow_gist_landmark_quotas(
+    *,
+    quotas: npt.NDArray[np.int64],
+    counts: npt.NDArray[np.int64],
+    remainders: npt.NDArray[np.float64],
+    target: int,
+    current_total: int,
+) -> None:
+    total = current_total
+    order = np.argsort(-remainders)
+    while total < target:
+        changed = False
+        for cluster_index in order.tolist():
+            if quotas[cluster_index] >= counts[cluster_index]:
+                continue
+            quotas[cluster_index] += 1
+            total += 1
+            changed = True
+            if total == target:
+                break
+        if not changed:
+            break
+
+
+def _select_gist_landmark_positions(
+    *,
+    points: npt.NDArray[np.float32],
+    labels: npt.NDArray[np.int64],
+    centers: npt.NDArray[np.float32],
+    quotas: npt.NDArray[np.int64],
+    rng: np.random.Generator,
+) -> npt.NDArray[np.int64]:
+    selected_positions: list[int] = []
+    for cluster_index, quota_value in enumerate(quotas.tolist()):
+        quota = int(quota_value)
+        if quota <= 0:
+            continue
+        cluster_positions = np.flatnonzero(labels == cluster_index)
+        if len(cluster_positions) <= quota:
+            selected_positions.extend(cluster_positions.astype(int).tolist())
+            continue
+        selected_positions.extend(
+            _select_single_cluster_landmarks(
+                points=points,
+                center=centers[cluster_index],
+                cluster_positions=cluster_positions,
+                quota=quota,
+                rng=rng,
+            )
+        )
+    return np.asarray(sorted(set(selected_positions)), dtype=np.int64)
+
+
+def _select_single_cluster_landmarks(
+    *,
+    points: npt.NDArray[np.float32],
+    center: npt.NDArray[np.float32],
+    cluster_positions: npt.NDArray[np.int64],
+    quota: int,
+    rng: np.random.Generator,
+) -> list[int]:
+    cluster_points = points[cluster_positions]
+    distances = np.linalg.norm(cluster_points - center, axis=1)
+    nearest_order = cluster_positions[np.argsort(distances)]
+    farthest_order = cluster_positions[np.argsort(-distances)]
+
+    centroid_count = min(quota, max(1, int(np.floor(quota * _GIST_CENTROID_FRACTION))))
+    residual_count = min(
+        quota - centroid_count,
+        max(0, int(np.floor(quota * _GIST_RESIDUAL_FRACTION))),
+    )
+    if quota >= _GIST_MIN_RESIDUAL_QUOTA and residual_count == 0:
+        residual_count = 1
+        centroid_count = max(1, centroid_count - 1)
+    random_count = max(0, quota - centroid_count - residual_count)
+
+    selected: list[int] = []
+    selected_set: set[int] = set()
+    _append_unique_positions(selected, selected_set, nearest_order, centroid_count)
+    _append_unique_positions(selected, selected_set, farthest_order, residual_count)
+
+    remaining = np.asarray(
+        [position for position in cluster_positions.tolist() if int(position) not in selected_set],
+        dtype=np.int64,
+    )
+    if random_count > 0 and len(remaining) > 0:
+        random_positions = rng.choice(
+            remaining,
+            size=min(random_count, len(remaining)),
+            replace=False,
+        )
+        _append_unique_positions(selected, selected_set, random_positions, random_count)
+
+    if len(selected) < quota:
+        _append_unique_positions(selected, selected_set, nearest_order, quota - len(selected))
+    return selected[:quota]
+
+
+def _append_unique_positions(
+    selected: list[int],
+    selected_set: set[int],
+    ordered_positions: npt.NDArray[np.int64],
+    requested_count: int,
+) -> None:
+    if requested_count <= 0:
+        return
+    added = 0
+    for position in ordered_positions.astype(int).tolist():
+        if position in selected_set:
+            continue
+        selected.append(position)
+        selected_set.add(position)
+        added += 1
+        if added >= requested_count:
+            break
 
 
 def select_patient_samples(
@@ -638,6 +928,10 @@ def _build_patient_selection_result(
         plateau_evaluation_mode=selection_decision.plateau_evaluation_mode,
         selected_reducible_count=len(request.sampled_indices),
         rejected_reducible_count=counts.reducible_count - len(request.sampled_indices),
+        gist_candidate_pool_original_size=selection_decision.gist_candidate_pool_original_size,
+        gist_candidate_pool_size=selection_decision.gist_candidate_pool_size,
+        gist_candidate_pool_method=selection_decision.gist_candidate_pool_method,
+        gist_landmark_cluster_count=selection_decision.gist_landmark_cluster_count,
     )
 
 
@@ -745,9 +1039,7 @@ def _select_diverse_samples_adaptive(
 
     while selected_count <= max_keep:
         score = (
-            float(np.mean(current_min_distances))
-            if len(current_min_distances)
-            else float("inf")
+            float(np.mean(current_min_distances)) if len(current_min_distances) else float("inf")
         )
         retention_history.append((selected_count, score))
         if previous_score is not None:
@@ -962,5 +1254,6 @@ def _selection_namespace(config: SmartSamplerConfig) -> Any:
         KEEP_STEP = config.keep_step
         KEEP_IMPROVEMENT_THRESHOLD = config.keep_improvement_threshold
         KEEP_PATIENCE = config.keep_patience
+        GIST_CANDIDATE_POOL_LIMIT = config.gist_candidate_pool_limit
 
     return _Namespace()
