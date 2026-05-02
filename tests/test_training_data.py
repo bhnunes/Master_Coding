@@ -14,6 +14,7 @@ import torch
 from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 from helpers.provenance import hash_file_sha256
 from helpers.training import data as training_data
+from helpers.training.compact_train_selected import build_compact_train_selected_from_decisions
 from helpers.training.data import (
     ArtifactAwareDatasetView,
     HybridProstateDataset,
@@ -41,6 +42,7 @@ FIRST_TRAIN_PIXEL = 11
 SECOND_TRAIN_PIXEL = 44
 NORMALIZED_PIXEL = 16
 MANIFEST_ROW_COUNT = 2
+SELECTED_TRAIN_SHARD_COUNT = 2
 
 
 def _write_hdf5(path: Path, patient_ids: list[bytes] | None = None) -> None:
@@ -742,6 +744,63 @@ def test_prepare_training_data_reads_canonical_stage2_rows(
     assert int(second_image[0, 0, 0]) == SECOND_TRAIN_PIXEL
     assert int(first_mask[0, 0]) == 0
     assert int(second_mask[0, 0]) == 1
+
+
+def test_prepare_training_data_reads_compact_train_selected_for_train_only(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, shard_paths = training_manifest_fixture
+    compact_dir = master_manifest_path.parent / "compact"
+    build_compact_train_selected_from_decisions(
+        master_manifest_path=master_manifest_path,
+        decisions=[
+            {
+                "source_hdf5_path": str(shard_paths[0]),
+                "source_row_index": 0,
+                "filename": "p1_0.png",
+                "patient_id": 1,
+                "label": 0,
+                "sampling_decision": "sampled_kept",
+                "is_stage7_selected": True,
+            },
+            {
+                "source_hdf5_path": str(shard_paths[1]),
+                "source_row_index": 1,
+                "filename": "p2_1.png",
+                "patient_id": 2,
+                "label": 1,
+                "sampling_decision": "sampled_kept",
+                "is_stage7_selected": True,
+            },
+        ],
+        compact_dir=compact_dir,
+        compression="none",
+    )
+
+    prepared = prepare_training_data(
+        master_manifest_path=master_manifest_path,
+        local_data_dir=master_manifest_path.parent / "local",
+        smart_sampling=True,
+        use_subset=False,
+        subset_ratio=1.0,
+        seed=24,
+        use_artifact_aware_loss=False,
+        use_compact_train_selected=True,
+        compact_train_selected_dir=compact_dir,
+    )
+    train_dataset = cast(Any, prepared.train_dataset)
+    validation_dataset = cast(Any, prepared.validation_dataset)
+    first_image, _first_mask = prepared.train_dataset[0]
+
+    assert int(first_image[0, 0, 0]) == FIRST_TRAIN_PIXEL
+    assert train_dataset.records[0].source_hdf5_path.parent == compact_dir / "shards"
+    assert train_dataset.layout.local_cache_dir == (
+        master_manifest_path.parent / "local" / "TRAIN_SELECTED_COMPACT"
+    )
+    assert list((master_manifest_path.parent / "local" / "TRAIN_SELECTED_COMPACT").glob("*.h5"))
+    assert validation_dataset.records[0].source_hdf5_path == shard_paths[2]
+    assert prepared.training_provenance["shard_count"] == SELECTED_TRAIN_SHARD_COUNT
+    assert prepared.training_provenance["storage_backend"]["kind"] == "compact_train_selected"
 
 
 def test_prepare_training_data_preserves_patient_separation(

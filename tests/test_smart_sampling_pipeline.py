@@ -163,6 +163,10 @@ def _build_config(tmp_path: Path, **overrides: object) -> SmartSamplerConfig:
         "protect_positive_labels": True,
         "protect_mask_positive": True,
         "positive_mask_fraction_threshold": 0.0,
+        "build_compact_train_selected": True,
+        "compact_train_selected_dir": tmp_path / "compact_train_selected",
+        "compact_local_work_dir": tmp_path / "compact_build",
+        "compact_hdf5_compression": "none",
     }
     values.update(overrides)
     return SmartSamplerConfig(**values)
@@ -198,7 +202,13 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
     assert outputs.kept_fraction == pytest.approx(SELECTED_SAMPLE_COUNT / TOTAL_INPUT_SAMPLES)
     assert outputs.patient_count == PATIENT_COUNT
     assert outputs.patients_reduced_count == PATIENT_COUNT
+    assert outputs.compact_train_selected is not None
+    assert outputs.compact_train_selected["row_count"] == SELECTED_SAMPLE_COUNT
+    assert outputs.compact_train_selected["shard_count"] == PATIENT_COUNT
     assert not (tmp_path / "out" / "TRAIN_FILTERED_shards").exists()
+    assert (tmp_path / "compact_train_selected" / "index.sqlite").exists()
+    assert (tmp_path / "compact_train_selected" / "summary.json").exists()
+    assert not list((tmp_path / "compact_build").glob("*.tmp"))
 
     selection_manifest = pd.read_csv(outputs.selection_csv_path)
     assert set(selection_manifest["selection_bucket"].unique()) == {
@@ -211,6 +221,8 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
 
     summary = json.loads(outputs.summary_json_path.read_text(encoding="utf-8"))
     assert summary["master_manifest_path"] == str(master_manifest_path)
+    assert summary["compact_train_selected"]["row_count"] == SELECTED_SAMPLE_COUNT
+    assert summary["compact_train_selected"]["compression"] == "none"
     assert summary["protected_kept_samples"] == REJECTED_SAMPLE_COUNT
     assert summary["sampled_reducible_samples"] == REJECTED_SAMPLE_COUNT
     assert summary["selected_positive_label_count"] == REJECTED_SAMPLE_COUNT
@@ -251,6 +263,38 @@ def test_run_smart_sampling_pipeline_updates_sqlite_and_writes_sidecars(tmp_path
             ),
         )
     ]
+
+
+def test_run_smart_sampling_pipeline_compaction_failure_leaves_sqlite_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    master_manifest_path = _write_stage2_patient_shards_and_master_manifest(tmp_path)
+
+    def fail_compaction(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("compact failed")
+
+    monkeypatch.setattr(
+        "helpers.smart_sampling.pipeline.build_compact_train_selected_from_decisions",
+        fail_compaction,
+    )
+
+    with pytest.raises(RuntimeError, match="compact failed"):
+        run_smart_sampling_pipeline(
+            _build_config(tmp_path, master_manifest_path=master_manifest_path),
+            extractor_factory=_DummyEmbeddingExtractor,
+        )
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        selected_count = connection.execute(
+            "SELECT COUNT(*) FROM patch_stage_state WHERE is_stage7_selected = 1"
+        ).fetchone()[0]
+        stage6_count = connection.execute(
+            "SELECT COUNT(*) FROM patch_stage_state WHERE last_updated_stage_name = 'STAGE6'"
+        ).fetchone()[0]
+
+    assert selected_count == 0
+    assert stage6_count == 0
 
 
 def test_run_smart_sampling_pipeline_can_stage_inputs_locally_and_publish_sidecars(

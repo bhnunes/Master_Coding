@@ -21,6 +21,7 @@ from torch.utils.data.dataloader import default_collate
 from helpers.provenance import hash_file_sha256, hash_json_payload
 from helpers.runtime_normalization import runtime_vahadane_backend_for_provenance
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
+from helpers.training.compact_train_selected import remap_records_to_compact_train_selected
 from helpers.training.master_manifest_queries import (
     CanonicalRowRecord,
     load_training_records,
@@ -662,6 +663,18 @@ def collect_manifest_split_provenance(
     }
 
 
+def _with_compact_provenance(
+    provenance: dict[str, Any],
+    *,
+    compact_provenance: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if compact_provenance is None:
+        return provenance
+    enriched = dict(provenance)
+    enriched["storage_backend"] = compact_provenance
+    return enriched
+
+
 def _build_manifest_record_source_signature(records: Sequence[CanonicalRowRecord]) -> str:
     return hash_json_payload(
         {
@@ -697,6 +710,8 @@ def prepare_training_data(  # noqa: PLR0913
     runtime_normalization_method: str = "NOT_NORMALIZED",
     runtime_vahadane_backend: str = "fixed_source",
     normalizer_device: torch.device | str = "cpu",
+    use_compact_train_selected: bool = False,
+    compact_train_selected_dir: Path | None = None,
 ) -> PreparedTrainingData:
     if local_data_dir.exists():
         shutil.rmtree(local_data_dir)
@@ -706,6 +721,20 @@ def prepare_training_data(  # noqa: PLR0913
         master_manifest_path,
         smart_sampling=smart_sampling,
     )
+    original_training_records = tuple(training_records)
+    compact_provenance: dict[str, Any] | None = None
+    use_compact_storage = smart_sampling and use_compact_train_selected
+    if use_compact_storage:
+        if compact_train_selected_dir is None:
+            raise ValueError(
+                "TRAINING_USE_COMPACT_TRAIN_SELECTED requires TRAIN_SELECTED_COMPACT_DIR."
+            )
+        compact_result = remap_records_to_compact_train_selected(
+            original_training_records,
+            compact_dir=compact_train_selected_dir,
+        )
+        training_records = list(compact_result.records)
+        compact_provenance = compact_result.provenance
     validation_records = load_validation_records(master_manifest_path)
     source_split_name = "TRAIN_SELECTED" if smart_sampling else "TRAIN"
     artifact_coverage_by_filename = (
@@ -742,14 +771,23 @@ def prepare_training_data(  # noqa: PLR0913
         train_records_for_dataset = tuple(
             training_records[int(index)] for index in list(train_subset.indices)
         )
+        train_records_for_provenance = tuple(
+            original_training_records[int(index)] for index in list(train_subset.indices)
+        )
         validation_records_for_dataset = tuple(
             validation_records[int(index)] for index in list(validation_subset.indices)
         )
+    else:
+        train_records_for_provenance = original_training_records
 
     train_dataset_base = CanonicalRowHDF5Dataset(
         CanonicalDatasetLayout(
             records=train_records_for_dataset,
-            local_cache_dir=local_data_dir / "TRAIN",
+            local_cache_dir=(
+                local_data_dir / "TRAIN_SELECTED_COMPACT"
+                if use_compact_storage
+                else local_data_dir / "TRAIN"
+            ),
         ),
         mode="train",
         mask_mode="raw",
@@ -798,13 +836,16 @@ def prepare_training_data(  # noqa: PLR0913
         validation_dataset=validation_dataset,
         sample_weights=sample_weights,
         source_split_name=source_split_name,
-        training_provenance=collect_manifest_split_provenance(
-            master_manifest_path,
-            records=train_records_for_dataset,
-            split="TRAIN",
-            smart_sampling=smart_sampling,
-            runtime_normalization_method=runtime_normalization_method,
-            runtime_vahadane_backend=runtime_vahadane_backend,
+        training_provenance=_with_compact_provenance(
+            collect_manifest_split_provenance(
+                master_manifest_path,
+                records=train_records_for_provenance,
+                split="TRAIN",
+                smart_sampling=smart_sampling,
+                runtime_normalization_method=runtime_normalization_method,
+                runtime_vahadane_backend=runtime_vahadane_backend,
+            ),
+            compact_provenance=compact_provenance,
         ),
         validation_provenance=collect_manifest_split_provenance(
             master_manifest_path,

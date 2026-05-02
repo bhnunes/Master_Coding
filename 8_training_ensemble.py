@@ -201,6 +201,8 @@ prepared_training_data = prepare_training_data(
     runtime_normalization_method=training_config.runtime_normalization_method,
     runtime_vahadane_backend=training_config.runtime_vahadane_backend,
     normalizer_device=resolve_dataloader_stain_normalizer_device(device, workers=workers),
+    use_compact_train_selected=training_config.use_compact_train_selected,
+    compact_train_selected_dir=training_config.compact_train_selected_dir,
 )
 train_dataset_provenance = prepared_training_data.training_provenance
 validation_dataset_provenance = prepared_training_data.validation_provenance

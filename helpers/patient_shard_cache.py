@@ -4,8 +4,11 @@ import hashlib
 import os
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+_CACHE_PROMOTION_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -23,11 +26,7 @@ class PatientShardCache:
         temp_path = self._reserve_temp_path(cached_path)
         try:
             shutil.copy2(source_path, temp_path)
-            if cached_path.exists():
-                temp_path.unlink(missing_ok=True)
-                cached_path.touch()
-                return cached_path
-            temp_path.replace(cached_path)
+            self._promote_temp_path(temp_path=temp_path, cached_path=cached_path)
         except Exception:
             temp_path.unlink(missing_ok=True)
             raise
@@ -65,3 +64,18 @@ class PatientShardCache:
         )
         os.close(file_descriptor)
         return Path(temp_name)
+
+    @staticmethod
+    def _promote_temp_path(*, temp_path: Path, cached_path: Path) -> None:
+        with _CACHE_PROMOTION_LOCK:
+            if cached_path.exists():
+                temp_path.unlink(missing_ok=True)
+                cached_path.touch()
+                return
+            try:
+                temp_path.replace(cached_path)
+            except PermissionError:
+                if not cached_path.exists():
+                    raise
+                temp_path.unlink(missing_ok=True)
+                cached_path.touch()

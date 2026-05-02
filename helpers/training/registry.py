@@ -25,16 +25,30 @@ class TrainingModelRegistryEntry:
     loss: TrainingLossWeights
 
 
-DEFAULT_MODEL_REGISTRY_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "training_model_registry.json"
-)
+_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent.parent
+_LEGACY_MODEL_REGISTRY_FILE_NAME = "training_model_registry.json"
+DEFAULT_MODEL_REGISTRY_PATH = _REPOSITORY_ROOT / "training_model_registry_NOT_NORMALIZED.json"
 
 
 def get_model_registry_path() -> Path:
     """Return the configured path to the approved training model registry."""
 
     override_path = os.environ.get("TRAINING_MODEL_REGISTRY_PATH", "").strip()
-    return Path(override_path) if override_path else DEFAULT_MODEL_REGISTRY_PATH
+    if not override_path:
+        return DEFAULT_MODEL_REGISTRY_PATH
+    configured_path = Path(override_path)
+    if _is_missing_legacy_default_placeholder(configured_path):
+        return DEFAULT_MODEL_REGISTRY_PATH
+    return configured_path
+
+
+def _is_missing_legacy_default_placeholder(path: Path) -> bool:
+    return (
+        path.parent == Path(".")
+        and path.name == _LEGACY_MODEL_REGISTRY_FILE_NAME
+        and not path.is_file()
+        and not (_REPOSITORY_ROOT / path).is_file()
+    )
 
 
 def load_training_model_registry() -> dict[str, TrainingModelRegistryEntry]:

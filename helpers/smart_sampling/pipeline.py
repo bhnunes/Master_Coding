@@ -24,6 +24,10 @@ from helpers.smart_sampling.writer import (
     write_filter_summary,
     write_sidecar_artifacts,
 )
+from helpers.training.compact_train_selected import (
+    CompactTrainSelectedBuildResult,
+    build_compact_train_selected_from_decisions,
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,7 @@ class SmartSamplingOutputs:
     kept_fraction: float
     patient_count: int
     patients_reduced_count: int
+    compact_train_selected: dict[str, Any] | None = None
 
 
 @dataclass
@@ -234,6 +239,36 @@ def _summary_payload(
     }
 
 
+def _build_compact_train_selected(
+    *,
+    config: SmartSamplerConfig,
+    decisions: list[dict[str, object]],
+) -> CompactTrainSelectedBuildResult | None:
+    if not config.build_compact_train_selected:
+        return None
+    logging.info(
+        "Building compact TRAIN_SELECTED shards in %s before publishing to %s",
+        config.compact_local_work_dir,
+        config.compact_train_selected_dir,
+    )
+    result = build_compact_train_selected_from_decisions(
+        master_manifest_path=config.master_manifest_path,
+        decisions=decisions,
+        compact_dir=config.compact_train_selected_dir,
+        local_work_dir=config.compact_local_work_dir,
+        compression=config.compact_hdf5_compression,
+    )
+    logging.info(
+        ("Compact TRAIN_SELECTED complete: rows=%d shards=%d size=%.2f GiB compression=%s dir=%s"),
+        result.row_count,
+        result.shard_count,
+        result.total_size_bytes / (1024**3),
+        result.compression,
+        result.compact_dir,
+    )
+    return result
+
+
 def _write_sampling_outputs(
     *,
     config: SmartSamplerConfig,
@@ -353,6 +388,12 @@ def run_smart_sampling_pipeline(
         rejected_samples=rejected_samples,
         kept_fraction=kept_fraction,
     )
+    compact_train_selected = _build_compact_train_selected(
+        config=config,
+        decisions=accumulator.sampling_decisions,
+    )
+    if compact_train_selected is not None:
+        summary_payload["compact_train_selected"] = compact_train_selected.to_provenance()
     (
         selection_csv_path,
         stats_csv_path,
@@ -400,6 +441,9 @@ def run_smart_sampling_pipeline(
         kept_fraction=kept_fraction,
         patient_count=len(patient_ids),
         patients_reduced_count=accumulator.patients_reduced_count,
+        compact_train_selected=(
+            compact_train_selected.to_provenance() if compact_train_selected is not None else None
+        ),
     )
 
 

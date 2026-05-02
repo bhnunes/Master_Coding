@@ -14,6 +14,7 @@ CUSTOM_GIST_CANDIDATE_POOL_LIMIT = 512
 MASK_FRACTION_ZERO = 0.0
 MASK_FRACTION_THRESHOLD = 0.25
 LOCAL_CACHE_BYTES = 4096
+COMPACT_DIR_NAME = "train_selected_compact"
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +55,10 @@ def test_load_smart_sampler_config_reads_defaults(tmp_path: Path) -> None:
     assert config.protect_positive_labels is True
     assert config.protect_mask_positive is True
     assert config.positive_mask_fraction_threshold == pytest.approx(MASK_FRACTION_ZERO)
+    assert config.build_compact_train_selected is True
+    assert config.compact_train_selected_dir == Path("temp") / COMPACT_DIR_NAME
+    assert config.compact_local_work_dir == Path("temp/smart_sampling/compact_train_selected_build")
+    assert config.compact_hdf5_compression == "none"
     assert config.log_path == Path("logs/smart_sampler.log")
 
 
@@ -196,3 +201,25 @@ def test_load_smart_sampler_config_reads_local_cache_settings(tmp_path: Path) ->
 
     assert config.patient_shard_cache_dir == tmp_path / "cache"
     assert config.patient_shard_cache_bytes == LOCAL_CACHE_BYTES
+
+
+def test_load_smart_sampler_config_reads_compact_train_selected_settings(
+    tmp_path: Path,
+) -> None:
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_bytes(b"sqlite")
+
+    config = load_smart_sampler_config(
+        {
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+            "SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED": "false",
+            "TRAIN_SELECTED_COMPACT_DIR": str(tmp_path / "compact"),
+            "SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR": str(tmp_path / "compact_build"),
+            "SMART_SAMPLER_COMPACT_HDF5_COMPRESSION": "lzf",
+        }
+    )
+
+    assert config.build_compact_train_selected is False
+    assert config.compact_train_selected_dir == tmp_path / "compact"
+    assert config.compact_local_work_dir == tmp_path / "compact_build"
+    assert config.compact_hdf5_compression == "lzf"

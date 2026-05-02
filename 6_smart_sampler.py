@@ -13,6 +13,22 @@ from helpers.smart_sampling.pipeline import run_smart_sampling_pipeline
 from helpers.training.runtime import seed_everything
 
 
+def _log_compact_train_selected_outputs(compact: dict[str, object] | None) -> None:
+    if compact is None:
+        return
+    size_gib = float(str(compact["total_size_bytes"])) / (1024**3)
+    logging.info("Compact TRAIN_SELECTED dir: %s", compact["compact_dir"])
+    logging.info("Compact TRAIN_SELECTED rows: %s", compact["row_count"])
+    logging.info("Compact TRAIN_SELECTED shards: %s", compact["shard_count"])
+    logging.info("Compact TRAIN_SELECTED size: %.2f GiB", size_gib)
+    logging.info("Compact TRAIN_SELECTED compression: %s", compact["compression"])
+    print(f"- Compact TRAIN_SELECTED dir: {compact['compact_dir']}")
+    print(f"- Compact TRAIN_SELECTED rows: {compact['row_count']}")
+    print(f"- Compact TRAIN_SELECTED shards: {compact['shard_count']}")
+    print(f"- Compact TRAIN_SELECTED size: {size_gib:.2f} GiB")
+    print(f"- Compact TRAIN_SELECTED compression: {compact['compression']}")
+
+
 def main() -> None:
     """Filter TRAIN_shards into TRAIN_FILTERED_shards with patient-wise label-aware sampling."""
 
@@ -68,6 +84,7 @@ def main() -> None:
     if outputs.summary_json_path is not None:
         logging.info("Summary JSON: %s", outputs.summary_json_path)
         print(f"- Summary JSON: {outputs.summary_json_path}")
+    _log_compact_train_selected_outputs(outputs.compact_train_selected)
     if outputs.rejected_sample_count == 0:
         warning_message = (
             "Warning: smart sampling kept every patch in this run; "

@@ -133,6 +133,8 @@ class TrainingEnsembleConfig:
     use_artifact_aware_loss: bool
     runtime_normalization_method: str = "NOT_NORMALIZED"
     runtime_vahadane_backend: str = "fixed_source"
+    use_compact_train_selected: bool = True
+    compact_train_selected_dir: Path = Path("temp/train_selected_compact")
     log_folder: Path = Path("logs")
     log_file_name: str = "training_ensemble.log"
 
@@ -173,6 +175,12 @@ def load_training_ensemble_config(
         values.get("TRAINING_MASTER_MANIFEST_PATH"),
         "TRAINING_MASTER_MANIFEST_PATH",
         system_name=system_name,
+    )
+    compact_train_selected_dir = _parse_required_path(
+        values.get("TRAIN_SELECTED_COMPACT_DIR"),
+        "TRAIN_SELECTED_COMPACT_DIR",
+        system_name=system_name,
+        default="./temp/train_selected_compact",
     )
 
     execution_mode = _parse_choice(
@@ -280,6 +288,11 @@ def load_training_ensemble_config(
         runtime_vahadane_backend=parse_runtime_vahadane_backend(
             values.get(RUNTIME_VAHADANE_BACKEND_ENV_VAR)
         ),
+        use_compact_train_selected=_parse_bool(
+            values.get("TRAINING_USE_COMPACT_TRAIN_SELECTED"),
+            default=True,
+        ),
+        compact_train_selected_dir=compact_train_selected_dir,
         log_folder=resolve_log_folder(
             values,
             system_name=system_name,

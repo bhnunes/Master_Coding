@@ -90,6 +90,8 @@ def test_load_lr_finder_config_builds_model_plan_from_registry(
     assert config.amp_precision == "fp32"
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
+    assert config.use_compact_train_selected is True
+    assert config.compact_train_selected_dir == Path("temp/train_selected_compact")
     assert config.hf_token is None
     assert [(plan.architecture, plan.encoder) for plan in config.model_plans] == [
         ("FPN", "senet154"),
@@ -118,6 +120,30 @@ def test_load_lr_finder_config_reads_stain_matrix_cache_path(
     )
 
     assert config.stain_matrix_cache_path == cache_path
+
+
+def test_load_lr_finder_config_reads_compact_train_selected_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    _write_registry(registry_path)
+    master_manifest_path = tmp_path / "master_manifest.sqlite"
+    master_manifest_path.write_text("", encoding="utf-8")
+    compact_dir = tmp_path / "compact"
+
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", str(registry_path))
+    config = load_lr_finder_config(
+        {
+            "LR_FINDER_MASTER_MANIFEST_PATH": str(master_manifest_path),
+            "LR_FINDER_OUTPUT_DIR": str(tmp_path / "reports"),
+            "LR_FINDER_LOCAL_DATA_DIR": str(tmp_path / "local"),
+            "LR_FINDER_USE_COMPACT_TRAIN_SELECTED": "false",
+            "TRAIN_SELECTED_COMPACT_DIR": str(compact_dir),
+        }
+    )
+
+    assert config.use_compact_train_selected is False
+    assert config.compact_train_selected_dir == compact_dir
 
 
 def test_load_lr_finder_config_reads_huggingface_token_aliases(

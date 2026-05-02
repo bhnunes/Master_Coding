@@ -62,6 +62,8 @@ def _serialize_config(config: LRFinderConfig) -> dict[str, Any]:
         "num_repeats": config.num_repeats,
         "runtime_normalization_method": config.runtime_normalization_method,
         "runtime_vahadane_backend": config.runtime_vahadane_backend,
+        "use_compact_train_selected": config.use_compact_train_selected,
+        "compact_train_selected_dir": str(config.compact_train_selected_dir),
         "optimizer_weight_decay": config.optimizer_weight_decay,
         "optimizer_start_lr": config.optimizer_start_lr,
         "pdf_name": config.pdf_name,

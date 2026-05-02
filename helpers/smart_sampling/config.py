@@ -9,6 +9,7 @@ import torch
 
 from helpers.logging_utils import resolve_log_folder
 from helpers.runtime_platform import resolve_env_path
+from helpers.training.compact_train_selected import normalize_hdf5_compression
 from helpers.training.device import require_cuda_device
 
 
@@ -116,6 +117,10 @@ class SmartSamplerConfig:
     protect_positive_labels: bool = True
     protect_mask_positive: bool = True
     positive_mask_fraction_threshold: float = 0.0
+    build_compact_train_selected: bool = True
+    compact_train_selected_dir: Path = Path("temp/train_selected_compact")
+    compact_local_work_dir: Path = Path("temp/smart_sampling/compact_train_selected_build")
+    compact_hdf5_compression: str = "none"
     log_folder: Path = Path("logs")
     log_file_name: str = "smart_sampler.log"
 
@@ -146,6 +151,27 @@ def load_smart_sampler_config(
         values.get("SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR"),
         "SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR",
     )
+    compact_train_selected_dir = resolve_env_path(
+        values.get("TRAIN_SELECTED_COMPACT_DIR")
+        if values.get("TRAIN_SELECTED_COMPACT_DIR") not in {None, ""}
+        else "./temp/train_selected_compact",
+        "TRAIN_SELECTED_COMPACT_DIR",
+        required=True,
+    )
+    assert compact_train_selected_dir is not None
+    compact_local_work_dir_default = (
+        local_work_dir / "compact_train_selected_build"
+        if local_work_dir is not None
+        else Path("./temp/smart_sampling/compact_train_selected_build")
+    )
+    compact_local_work_dir = resolve_env_path(
+        values.get("SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR")
+        if values.get("SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR") not in {None, ""}
+        else str(compact_local_work_dir_default),
+        "SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR",
+        required=True,
+    )
+    assert compact_local_work_dir is not None
     device = (values.get("SMART_SAMPLER_DEVICE") or "cuda").strip()
     if torch.device(device).type != "cuda":
         raise ValueError("SMART_SAMPLER_DEVICE must be a CUDA device for Stage 6.")
@@ -296,6 +322,16 @@ def load_smart_sampler_config(
             values.get("SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD"),
             "SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD",
             0.0,
+        ),
+        build_compact_train_selected=_parse_bool(
+            values.get("SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED"),
+            "SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED",
+            True,
+        ),
+        compact_train_selected_dir=compact_train_selected_dir,
+        compact_local_work_dir=compact_local_work_dir,
+        compact_hdf5_compression=normalize_hdf5_compression(
+            values.get("SMART_SAMPLER_COMPACT_HDF5_COMPRESSION") or "none"
         ),
         log_folder=resolve_log_folder(
             values,

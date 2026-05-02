@@ -71,6 +71,8 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
             "TRAINING_SMART_SAMPLING": "false",
             "TRAINING_UNLEASHED": "true",
             "TRAINING_USE_ARTIFACT_AWARE_LOSS": "true",
+            "TRAINING_USE_COMPACT_TRAIN_SELECTED": "false",
+            "TRAIN_SELECTED_COMPACT_DIR": str(tmp_path / "compact"),
             "TRAINING_RUN_OHEM": "true",
             "TRAINING_OHEM_START_EPOCH": "3",
             "TRAINING_OHEM_RATIO": "0.4",
@@ -103,6 +105,8 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.ohem_ratio == OHEM_RATIO
     assert config.ohem_min_kept == OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is True
+    assert config.use_compact_train_selected is False
+    assert config.compact_train_selected_dir == tmp_path / "compact"
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
     assert config.log_path == Path("logs/training_ensemble.log")
@@ -130,6 +134,8 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.ohem_ratio == DEFAULT_OHEM_RATIO
     assert config.ohem_min_kept == DEFAULT_OHEM_MIN_KEPT
     assert config.use_artifact_aware_loss is False
+    assert config.use_compact_train_selected is True
+    assert config.compact_train_selected_dir == Path("temp/train_selected_compact")
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
     assert config.master_manifest_path == tmp_path / "dataset" / "master_manifest.sqlite"

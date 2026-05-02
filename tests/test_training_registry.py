@@ -37,6 +37,14 @@ def test_get_model_registry_path_uses_trimmed_override(
     assert get_model_registry_path() == registry_path
 
 
+def test_get_model_registry_path_ignores_missing_legacy_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRAINING_MODEL_REGISTRY_PATH", "./training_model_registry.json")
+
+    assert get_model_registry_path() == DEFAULT_MODEL_REGISTRY_PATH
+
+
 def test_load_training_model_registry_rejects_missing_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

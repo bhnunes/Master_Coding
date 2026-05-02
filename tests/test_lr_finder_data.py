@@ -14,6 +14,7 @@ from torch.utils.data import Dataset
 from helpers.extraction.manifest_paths import build_hdf5_dataset_ref, to_manifest_path_ref
 from helpers.lr_finder import data as lr_data
 from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
+from helpers.training.compact_train_selected import build_compact_train_selected_from_decisions
 
 PATCH_SIDE = 4
 RGB_CHANNELS = 3
@@ -24,6 +25,7 @@ LR_FINDER_NUM_ITER = 5
 WEIGHT_DECAY = 1e-4
 START_LR = 1e-8
 VALIDATION_ROW_COUNT = 2
+SELECTED_TRAIN_SHARD_COUNT = 2
 FIRST_TRAIN_PIXEL = 11
 SECOND_TRAIN_PIXEL = 44
 NORMALIZED_FIRST_PIXEL = 16
@@ -54,6 +56,7 @@ def _build_config(tmp_path: Path, *, smart_sampling: bool = False) -> LRFinderCo
         hf_token=None,
         search_space=BCEDiceSearchSpace(),
         model_plans=[ModelPlan(architecture="FPN", encoder="resnet34")],
+        use_compact_train_selected=False,
     )
 
 
@@ -334,6 +337,57 @@ def test_prepare_training_data_reads_canonical_stage2_rows(
     assert int(second_image[0, 0, 0]) == SECOND_TRAIN_PIXEL
     assert int(first_mask[0, 0]) == 0
     assert int(second_mask[0, 0]) == 1
+
+
+def test_prepare_training_data_reads_compact_train_selected_when_enabled(
+    lr_finder_fixture: tuple[LRFinderConfig, list[Path]],
+) -> None:
+    config, shard_paths = lr_finder_fixture
+    compact_dir = config.master_manifest_path.parent / "compact"
+    build_compact_train_selected_from_decisions(
+        master_manifest_path=config.master_manifest_path,
+        decisions=[
+            {
+                "source_hdf5_path": str(shard_paths[0]),
+                "source_row_index": 0,
+                "filename": "p1_0.png",
+                "patient_id": 1,
+                "label": 0,
+                "sampling_decision": "sampled_kept",
+                "is_stage7_selected": True,
+            },
+            {
+                "source_hdf5_path": str(shard_paths[1]),
+                "source_row_index": 1,
+                "filename": "p2_1.png",
+                "patient_id": 2,
+                "label": 1,
+                "sampling_decision": "sampled_kept",
+                "is_stage7_selected": True,
+            },
+        ],
+        compact_dir=compact_dir,
+        compression="none",
+    )
+    config = LRFinderConfig(
+        **{
+            **config.__dict__,
+            "use_compact_train_selected": True,
+            "compact_train_selected_dir": compact_dir,
+        }
+    )
+
+    prepared = lr_data.prepare_training_data(config)
+    dataset = cast(Any, prepared.dataset)
+    first_image, _first_mask = dataset[0]
+
+    assert int(first_image[0, 0, 0]) == FIRST_TRAIN_PIXEL
+    assert dataset.records[0].source_hdf5_path.parent == compact_dir / "shards"
+    assert dataset.layout.local_cache_dir == config.local_data_dir / "TRAIN_SELECTED_COMPACT"
+    assert list((config.local_data_dir / "TRAIN_SELECTED_COMPACT").glob("*.h5"))
+    assert prepared.training_provenance["shard_count"] == SELECTED_TRAIN_SHARD_COUNT
+    assert prepared.training_provenance["storage_backend"]["kind"] == "compact_train_selected"
+    assert prepared.validation_provenance["split"] == "VALIDATION"
 
 
 def test_prepare_training_data_uses_shared_stain_normalizer(

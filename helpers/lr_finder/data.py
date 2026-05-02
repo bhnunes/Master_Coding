@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from helpers.lr_finder.config import LRFinderConfig
 from helpers.training.canonical_dataset import CanonicalDatasetLayout, CanonicalRowHDF5Dataset
+from helpers.training.compact_train_selected import remap_records_to_compact_train_selected
 from helpers.training.data import collect_manifest_split_provenance
 from helpers.training.master_manifest_queries import (
     load_lr_finder_training_records,
@@ -35,20 +36,37 @@ def prepare_training_data(
     *,
     normalizer_device: torch.device | str = "cpu",
 ) -> PreparedTrainingData:
-    if config.stage_input_locally and config.local_data_dir.exists():
+    use_compact_train_selected = config.smart_sampling and config.use_compact_train_selected
+    use_local_cache = config.stage_input_locally or use_compact_train_selected
+    if use_local_cache and config.local_data_dir.exists():
         import shutil
 
         shutil.rmtree(config.local_data_dir)
-    if config.stage_input_locally:
+    if use_local_cache:
         config.local_data_dir.mkdir(parents=True, exist_ok=True)
 
     training_records = load_lr_finder_training_records(
         config.master_manifest_path,
         smart_sampling=config.smart_sampling,
     )
+    original_training_records = tuple(training_records)
+    compact_provenance: dict[str, Any] | None = None
+    if use_compact_train_selected:
+        compact_result = remap_records_to_compact_train_selected(
+            original_training_records,
+            compact_dir=config.compact_train_selected_dir,
+        )
+        training_records = list(compact_result.records)
+        compact_provenance = compact_result.provenance
     validation_records = load_validation_records(config.master_manifest_path)
     source_split_name = "TRAIN_SELECTED" if config.smart_sampling else "TRAIN"
-    local_cache_dir = config.local_data_dir if config.stage_input_locally else None
+    local_cache_dir = (
+        config.local_data_dir / "TRAIN_SELECTED_COMPACT"
+        if use_compact_train_selected
+        else config.local_data_dir
+        if config.stage_input_locally
+        else None
+    )
     image_normalizer = build_split_stain_normalizer(
         config.master_manifest_path,
         training_records,
@@ -81,8 +99,10 @@ def prepare_training_data(
             mask_mode="raw",
             image_normalizer=image_normalizer,
         )
+        provenance_records = tuple(original_training_records[index] for index in subset_indices)
     else:
         dataset = base_dataset
+        provenance_records = original_training_records
 
     labels = np.asarray(dataset.get_labels())
     class_counts = np.bincount(labels)
@@ -93,13 +113,16 @@ def prepare_training_data(
         source_split_name=source_split_name,
         dataset=dataset,
         sample_weights=sample_weights,
-        training_provenance=collect_manifest_split_provenance(
-            config.master_manifest_path,
-            records=dataset.records,
-            split="TRAIN",
-            smart_sampling=config.smart_sampling,
-            runtime_normalization_method=config.runtime_normalization_method,
-            runtime_vahadane_backend=config.runtime_vahadane_backend,
+        training_provenance=_with_compact_provenance(
+            collect_manifest_split_provenance(
+                config.master_manifest_path,
+                records=provenance_records,
+                split="TRAIN",
+                smart_sampling=config.smart_sampling,
+                runtime_normalization_method=config.runtime_normalization_method,
+                runtime_vahadane_backend=config.runtime_vahadane_backend,
+            ),
+            compact_provenance=compact_provenance,
         ),
         validation_provenance=collect_manifest_split_provenance(
             config.master_manifest_path,
@@ -110,6 +133,18 @@ def prepare_training_data(
             runtime_vahadane_backend=config.runtime_vahadane_backend,
         ),
     )
+
+
+def _with_compact_provenance(
+    provenance: dict[str, Any],
+    *,
+    compact_provenance: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if compact_provenance is None:
+        return provenance
+    enriched = dict(provenance)
+    enriched["storage_backend"] = compact_provenance
+    return enriched
 
 
 def build_train_loader(
