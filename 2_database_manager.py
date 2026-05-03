@@ -395,6 +395,7 @@ def main_process() -> None:
     repository = ExtractionRepository(database_path=config.database_path, tag=config.tag)
     master_manifest = MasterManifest(config.master_manifest_path, source_root=config.source_folder)
     master_manifest.initialize()
+    master_manifest.validate_integrity()
     folders, setup_needed = ensure_project_is_initialized(
         repository,
         config.source_folder,
@@ -445,6 +446,7 @@ def main_process() -> None:
         geojson_lookup=geojson_lookup,
         master_manifest=master_manifest,
     )
+    master_manifest.validate_integrity()
 
 
 if __name__ == "__main__":

@@ -11,7 +11,11 @@ from helpers.extraction.manifest_paths import (
     to_manifest_path_ref,
     to_source_path_ref,
 )
-from helpers.extraction.master_manifest import MasterManifest, Stage2SlideRows
+from helpers.extraction.master_manifest import (
+    MasterManifest,
+    MasterManifestIntegrityError,
+    Stage2SlideRows,
+)
 
 
 def _write_stage2_shard(tmp_path: Path, *, name: str, records: list[dict[str, object]]) -> Path:
@@ -163,6 +167,31 @@ def test_master_manifest_replaces_stage2_slide_rows_with_canonical_source_identi
             "STAGE2",
         ),
     ]
+
+
+def test_master_manifest_validate_integrity_accepts_clean_manifest(tmp_path: Path) -> None:
+    manifest = MasterManifest(tmp_path / "master_manifest.sqlite", source_root=tmp_path)
+    manifest.initialize()
+
+    manifest.validate_integrity()
+
+
+def test_master_manifest_validate_integrity_rejects_orphan_stage_state(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "master_manifest.sqlite"
+    manifest = MasterManifest(manifest_path, source_root=tmp_path)
+    manifest.initialize()
+
+    with sqlite3.connect(manifest_path) as connection:
+        connection.execute(
+            "INSERT INTO patch_stage_state (patch_id, last_updated_stage_name) VALUES (?, ?)",
+            (999, "STAGE2"),
+        )
+        connection.commit()
+
+    with pytest.raises(MasterManifestIntegrityError, match="foreign_key_check"):
+        manifest.validate_integrity()
 
 
 def test_master_manifest_removes_stale_rows_for_rewritten_stage2_shard(tmp_path: Path) -> None:

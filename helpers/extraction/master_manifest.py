@@ -23,6 +23,10 @@ STAGE4_STAGE_NAME = "STAGE4"
 STAGE6_STAGE_NAME = "STAGE6"
 
 
+class MasterManifestIntegrityError(sqlite3.DatabaseError):
+    """Raised when the master manifest fails SQLite integrity validation."""
+
+
 @dataclass(frozen=True)
 class Stage2SlideRows:
     """Canonical Stage 2 slide payload written into the master manifest."""
@@ -345,22 +349,29 @@ class MasterManifest:
                 f"Stage 3 requires an existing master manifest: {self.database_path}"
             )
 
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT filename,
-                       label,
-                       patient_id,
-                       slide_id,
-                       source_hdf5_path,
-                       source_signature,
-                       source_row_index,
-                       source_image_path,
-                       source_mask_path
-                FROM patches
-                ORDER BY source_hdf5_path ASC, source_row_index ASC
-                """
-            ).fetchall()
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT filename,
+                           label,
+                           patient_id,
+                           slide_id,
+                           source_hdf5_path,
+                           source_signature,
+                           source_row_index,
+                           source_image_path,
+                           source_mask_path
+                    FROM patches
+                    ORDER BY source_hdf5_path ASC, source_row_index ASC
+                    """
+                ).fetchall()
+        except sqlite3.DatabaseError as error:
+            try:
+                self.validate_integrity()
+            except MasterManifestIntegrityError as integrity_error:
+                raise integrity_error from error
+            raise
 
         return [
             ManifestPatchRecord(
@@ -858,8 +869,56 @@ class MasterManifest:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=20)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 20000")
+        connection.execute("PRAGMA journal_mode = DELETE")
+        connection.execute("PRAGMA synchronous = FULL")
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
+
+    def validate_integrity(self) -> None:
+        """Fail fast if the SQLite-backed master manifest is malformed."""
+
+        if not self.database_path.is_file():
+            raise FileNotFoundError(
+                f"Stage 2 master manifest integrity check requires an existing file: "
+                f"{self.database_path}"
+            )
+
+        try:
+            with self._connect() as connection:
+                quick_check_rows = [
+                    str(row[0]) for row in connection.execute("PRAGMA quick_check").fetchmany(10)
+                ]
+                if quick_check_rows != ["ok"]:
+                    raise MasterManifestIntegrityError(
+                        "Stage 2 master manifest failed SQLite quick_check for "
+                        f"{self.database_path}: "
+                        f"{self._format_integrity_rows(quick_check_rows)}"
+                    )
+
+                foreign_key_rows = connection.execute("PRAGMA foreign_key_check").fetchmany(10)
+                if foreign_key_rows:
+                    details = [
+                        f"table={row[0]!r}, rowid={row[1]!r}, parent={row[2]!r}, fk={row[3]!r}"
+                        for row in foreign_key_rows
+                    ]
+                    raise MasterManifestIntegrityError(
+                        "Stage 2 master manifest failed SQLite foreign_key_check for "
+                        f"{self.database_path}: {self._format_integrity_rows(details)}"
+                    )
+        except MasterManifestIntegrityError:
+            raise
+        except sqlite3.DatabaseError as error:
+            raise MasterManifestIntegrityError(
+                "Stage 2 master manifest SQLite integrity check could not read "
+                f"{self.database_path}: {error}"
+            ) from error
+
+    @staticmethod
+    def _format_integrity_rows(rows: Sequence[str]) -> str:
+        if not rows:
+            return "no diagnostic rows returned"
+        return " | ".join(row.replace("\n", " ") for row in rows)
 
     def _require_source_root(self) -> Path:
         if self.source_root is None:
