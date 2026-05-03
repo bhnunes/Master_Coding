@@ -21,6 +21,7 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `9_optimizer_ensemble.py`
 - `10_inference_ensemble.py`
 - `helpers/runtime_platform.py`
+- `helpers/runtime_normalization.py`
 - `helpers/logging_utils.py`
 
 ## Stage 1 artifact detection
@@ -41,7 +42,9 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `helpers/extraction/repository.py`
 - `helpers/extraction/image_reader_service.py`
 - `helpers/extraction/data_handlers.py`
+- `helpers/extraction/master_manifest.py`
 - `helpers/extraction/patch_engine.py`
+- `helpers/runtime_platform.py`
 - `.env_example`
 
 ## Stages 3.1--3.3 cleaning workflow
@@ -79,11 +82,12 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `helpers/crossfold/pipeline.py`
 - `helpers/crossfold/provenance.py`
 - `helpers/crossfold/splitting.py`
+- `helpers/runtime_normalization.py`
 - `.env_example`
 
 ## Stage 5 sanity checks
 
-- `7_sanity_checks.py`
+- `5_sanity_checks.py`
 - `helpers/sanity/config.py`
 - `helpers/sanity/contracts.py`
 - `helpers/sanity/disk_checks.py`
@@ -95,14 +99,16 @@ so stage labels here follow the current codebase naming used in orchestration en
 
 ## Stage 6 smart sampling
 
-- `7_smart_sampler.py`
+- `6_smart_sampler.py`
 - `helpers/smart_sampling/config.py`
 - `helpers/smart_sampling/index.py`
 - `helpers/smart_sampling/embeddings.py`
+- `helpers/smart_sampling/gist.py`
 - `helpers/smart_sampling/selection.py`
 - `helpers/smart_sampling/storage.py`
 - `helpers/smart_sampling/writer.py`
 - `helpers/smart_sampling/pipeline.py`
+- `helpers/training/compact_train_selected.py`
 
 ## Stage 7 learning-rate screening
 
@@ -114,13 +120,21 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `helpers/lr_finder/runner.py`
 - `helpers/lr_finder/reporting.py`
 - `helpers/lr_finder/pipeline.py`
-- `training_model_registry.json`
+- `helpers/runtime_normalization.py`
+- `helpers/training/stain_normalization.py`
+- `helpers/training/compact_train_selected.py`
+- `training_model_registry_NOT_NORMALIZED.json`
+- `training_model_registry_MACENKO.json`
+- `training_model_registry_REINHARD.json`
+- `training_model_registry_RUIFROK.json`
+- `training_model_registry_VAHADANE.json`
 
 ## Stage 8 training
 
 - `8_training_ensemble.py`
 - `helpers/training/config.py`
 - `helpers/training/data.py`
+- `helpers/training/compact_train_selected.py`
 - `helpers/training/models.py`
 - `helpers/training/losses.py`
 - `helpers/training/loop.py`
@@ -129,7 +143,13 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `helpers/training/pipeline.py`
 - `helpers/training/runtime.py`
 - `helpers/training/gpu.py`
-- `training_model_registry.json`
+- `helpers/runtime_normalization.py`
+- `helpers/training/stain_normalization.py`
+- `training_model_registry_NOT_NORMALIZED.json`
+- `training_model_registry_MACENKO.json`
+- `training_model_registry_REINHARD.json`
+- `training_model_registry_RUIFROK.json`
+- `training_model_registry_VAHADANE.json`
 
 ## Stages 9--10 ensemble optimization and inference
 
@@ -142,6 +162,7 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `helpers/ensemble_optimizer/pipeline.py`
 - `helpers/ensemble_optimizer/reporting.py`
 - `helpers/ensemble_optimizer/splitting.py`
+- `helpers/runtime_normalization.py`
 - `10_inference_ensemble.py`
 - `helpers/ensemble_inference/config.py`
 - `helpers/ensemble_inference/data.py`
@@ -151,6 +172,7 @@ so stage labels here follow the current codebase naming used in orchestration en
 - `helpers/ensemble_inference/pipeline.py`
 - `helpers/ensemble_inference/recipe.py`
 - `helpers/ensemble_inference/reporting.py`
+- `helpers/runtime_normalization.py`
 
 ## Environment and template constraints
 

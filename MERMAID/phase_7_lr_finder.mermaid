@@ -2,13 +2,13 @@ flowchart LR
     manifest[(master_manifest.sqlite<br/>Split + split bundle references)]
     shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
     phase4_outputs[Input<br/>Stage 4 run config + runtime artifacts]
-    phase6_outputs[Optional input<br/>Sampling sidecars]
-    env[Input<br/>LR finder / auth / model config]
-    p7[Phase 7<br/>7_lr_finder.py<br/>Screen architectures / encoders]
-    reports[Output<br/>LR reports + CSV / JSON sidecars]
+    phase6_outputs[Optional input<br/>Sampling state + compact TRAIN_SELECTED]
+    env[Input<br/>LR finder / auth / registry / normalization config]
+    p7[Phase 7<br/>7_lr_finder.py<br/>Screen architectures / encoders<br/>retry OOM with smaller effective batch]
+    reports[Output<br/>LR reports + CSV / JSON sidecars<br/>including effective batch size]
 
     manifest -. read selected rows + split bundle refs .-> p7
-    shards -. load training pixels .-> p7
+    shards -. load training / validation pixels .-> p7
     phase4_outputs --> p7
     phase6_outputs -. optional .-> p7
     env --> p7

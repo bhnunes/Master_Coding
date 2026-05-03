@@ -136,6 +136,7 @@ Agent guide for coding agents working in this repository.
 - Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
 - Phase 7 LR-finder auth now accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both env vars before model creation.
 - Phase 7 LR-finder AMP now defaults to `fp32`; set `LR_FINDER_AMP_PRECISION` explicitly to override it.
+- Phase 2 native TIFF/OpenSlide warning suppression defaults to `STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS=True`; route suppression through `helpers/runtime_platform.suppress_native_stderr()` rather than Python warning filters.
 - Phase 2 performance-related env vars now include:
   - `STAGE2_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `OPENSLIDE_CACHE_BYTES` with default `0`
@@ -145,9 +146,14 @@ Agent guide for coding agents working in this repository.
   - `CROSSFOLD_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
   - `CROSSFOLD_COPY_BATCH_SIZE` with default `256`
 - Current best-known Phase 4 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
-- Phase 6 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes only sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
-- Phases 7-10 now query `master_manifest.sqlite` once at startup and then load pixels only from canonical Phase 2 patient shards.
+- Phase 6 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
+- Phase 6 can build compact selected-TRAIN HDF5 storage through `SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED=True`, publishing to `TRAIN_SELECTED_COMPACT_DIR` after building on fast scratch via `SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR`.
+- Phases 7 and 8 can read TRAIN rows from compact `TRAIN_SELECTED` storage when smart sampling is enabled and `LR_FINDER_USE_COMPACT_TRAIN_SELECTED` / `TRAINING_USE_COMPACT_TRAIN_SELECTED` are true; VALIDATION and TEST must remain canonical Phase 2 patient-shard reads.
+- Phases 7-10 now query `master_manifest.sqlite` once at startup and then load pixels from canonical Phase 2 patient shards except for the explicit compact TRAIN-only path above.
 - The normalization refactor contract now reserves one shared downstream env var, `RUNTIME_NORMALIZATION_METHOD`, for Phases 7-10. Stage 4 split assignment is normalization-agnostic; do not add new code that hard-couples per-patch split state to one active normalization choice.
+- `RUNTIME_VAHADANE_BACKEND=fixed_source` is the default fast VAHADANE backend for Phases 7-10 and is a fixed-matrix approximation, not canonical per-patch VAHADANE. Use `torch_staintools_exact` only when exact source fitting is scientifically required and report that distinction.
+- Each downstream entrypoint should emit one shared runtime-normalization startup line using `helpers/runtime_normalization.format_runtime_normalization_status(...)`.
+- The default training registry path is `training_model_registry_NOT_NORMALIZED.json`; method-specific registry files exist for `MACENKO`, `REINHARD`, `RUIFROK`, and `VAHADANE`.
 - No backward compatibility is required for the old normalization-specific Stage 4 persisted-state contract during this refactor unless the user explicitly asks for it.
 
 ## Scientific and Data Integrity Rules
@@ -156,6 +162,8 @@ Agent guide for coding agents working in this repository.
 - Preserve filename parity and filename-keyed provenance joins.
 - Preserve label semantics: cancer is positive (`1`), not-cancer is negative (`0`).
 - Do not change stain normalization, sampling semantics, artifact logic, or contamination logic without explicit intent.
+- When describing Stage 6 GIST behavior, call the large-pool path GIST-style or GIST-inspired if it uses landmark preselection before the facility-location selector; do not describe it as paper-exact GIST.
+- Treat `master_manifest.sqlite` corruption or failed SQLite integrity checks as a hard data-integrity failure, not a recoverable warning.
 - For HIESD XML annotations, preserve the hardcoded label policy: cancer colors map to positive, not-cancer colors map to negative, and rejected colors are skipped entirely.
 - In HDF5 workflows, keep canonical dataset names stable: `images`, `masks`, `labels`, `patient_ids`, `filenames`.
 
@@ -180,10 +188,10 @@ Agent guide for coding agents working in this repository.
 - Treat `.env`, credentials files, databases, HDF5 outputs, manifests, logs, checkpoints, and Aim repos as sensitive or generated.
 - Do not delete datasets, logs, or outputs unless explicitly requested.
 - Never use destructive git commands such as `git reset --hard` or `git checkout --` unless explicitly requested.
-- The Elsevier LaTeX class used by `reports/main.tex` is available in `/workspace/latex_template/cas-dc.cls`. When rebuilding `reports/main.pdf`, make sure TeX can resolve that template location (for example via `TEXINPUTS` or by copying the class and its required bundled files into the build-visible path).
-- Mermaid diagrams can be authored as `.mermaid` sources under `/workspace/MERMAID/` and rendered to SVG in the same folder.
-- Preferred Mermaid render flow: generate the diagram source with `mermaid-py` when appropriate, then render with `npx -y @mermaid-js/mermaid-cli -i /workspace/MERMAID/<name>.mermaid -o /workspace/MERMAID/<name>.svg -p /workspace/MERMAID/puppeteer-config.json`.
-- Treat `/workspace/MERMAID/*.svg` as generated artifacts unless the task explicitly says otherwise.
+- The Elsevier LaTeX class used by `reports/main.tex` is available in `latex_template/cas-dc.cls`. When rebuilding `reports/main.pdf`, run from `reports/` with `TEXINPUTS=../latex_template//;` or otherwise make the template folder visible to TeX.
+- Mermaid diagrams can be authored as `.mermaid` sources under `MERMAID/` and rendered to SVG in the same folder.
+- Preferred Mermaid render flow: `npx -y @mermaid-js/mermaid-cli -i MERMAID/<name>.mermaid -o MERMAID/<name>.svg -p MERMAID/puppeteer-config.json`.
+- Treat `MERMAID/*.svg` and `reports/main.pdf` as generated artifacts unless the task explicitly says otherwise.
 
 ## Validation Checklist
 - Relevant tests were added or updated.
@@ -246,6 +254,8 @@ Agent guide for coding agents working in this repository.
 ## Phase 7 Operational Notes
 - Phase 7 loads pretrained weights once per architecture/encoder pair, snapshots the initialized state to CPU, and reuses that state across all sampled loss configurations and repeats instead of re-fetching pretrained weights inside the nested screening loops.
 - Expected LR-range-test divergence now stops the current sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure.
+- CUDA OOM during an LR-range repeat retries at a smaller effective batch size and records the effective batch size in the LR-finder report.
+- Exact MACENKO/VAHADANE runtime normalization can use `LR_FINDER_STAIN_MATRIX_CACHE_PATH` for tiny per-patch stain-matrix cache entries.
 - Console UX for Phase 7 is intentionally compact for notebook environments such as Google Colab: one startup line, periodic snapshot progress lines, and one final summary. Detailed per-run traces stay in `logs/lr_finder.log`.
 - The final Phase 7 summary now reports valid records, completed trials, failed trials, and a per-architecture breakdown.
 

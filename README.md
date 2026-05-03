@@ -8,9 +8,11 @@ A Python research pipeline for pathology whole-slide-image (WSI) processing. It 
 - Annotation handling for multiple formats (XML, NDPA, JSON)
 - Dataset-aware Phase 2 SVS/XML parsing, including HIESD ASAP-style XML support
 - Patch extraction with tissue detection and artifact filtering
+- SQLite integrity validation for the portable `master_manifest.sqlite` contract
 - Patient-level stratified dataset splitting on HDF5 datasets
-- Train-fitted stain normalization support
+- Train-only runtime stain-normalization artifacts for downstream on-the-fly selection
 - Metadata-first downstream data preparation from canonical Phase 2 patient shards
+- Optional compact `TRAIN_SELECTED` HDF5 artifacts for fast smart-sampled training reads
 - Portable `master_manifest.sqlite` lineage across local and Colab-style roots
 - Ensemble model training and inference
 - GPU-accelerated deep learning with PyTorch
@@ -172,7 +174,7 @@ Helper modules are organized by domain under `helpers/<domain>/`. New domain-spe
 | 4 | `4_crossfold.py` | Create one normalization-agnostic Phase 4 split assignment in `master_manifest.sqlite`, emit shared split/template sidecars, and persist runtime normalization artifacts for downstream phases |
 | 5 | `5_sanity_checks.py` | Validate Phase 4 singleton split integrity, provenance, leakage, and mask/label semantics |
 | 6 | `6_smart_sampler.py` | Select informative TRAIN rows in `master_manifest.sqlite` and write lineage sidecars without materializing filtered shards |
-| 7-10 | `7_lr_finder.py` → `8_training_ensemble.py` → `9_optimizer_ensemble.py` → `10_inference_ensemble.py` | Resolve runtime rows from `master_manifest.sqlite` once at startup, then load pixels directly from canonical Phase 2 patient shards |
+| 7-10 | `7_lr_finder.py` → `8_training_ensemble.py` → `9_optimizer_ensemble.py` → `10_inference_ensemble.py` | Resolve runtime rows from `master_manifest.sqlite` once at startup; Phases 7/8 may use compact selected-TRAIN shards, while validation and test paths stay on canonical Phase 2 patient shards |
 
 ## Script Documentation
 
@@ -203,6 +205,8 @@ Current Phase 2 artifact-aware behavior:
 
 - `USE_ADVANCED_ARTIFACT_FILTERING=True` computes per-class artifact coverage for every saved patch instead of rejecting patches by threshold
 - `USE_ADVANCED_ARTIFACT_FILTERING=False` skips artifact geometry work for speed, but still writes the same Parquet schema with zero-valued coverage columns
+- Stage 2 validates the SQLite master manifest with `PRAGMA quick_check` / `PRAGMA integrity_check` before read paths that depend on durable row state
+- Native TIFF/OpenSlide metadata warnings are suppressed by default through `STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS=True` so corrupted-metadata noise does not flood long extraction logs
 - Phase 2 writes compact filename-keyed artifact coverage fields into `master_manifest.sqlite`
 - Phase 2 stores source-file lineage in `master_manifest.sqlite` relative to `SOURCE_FOLDER`
 - Phase 2 stores generated-artifact lineage in `master_manifest.sqlite` relative to the manifest directory instead of persisting machine-specific absolute paths
@@ -294,9 +298,12 @@ Current Phase 5 behavior:
 Current Phase 6 smart-sampling behavior:
 
 - Loads smart-sampling settings from `.env` / `.env_example` through `helpers/smart_sampling/config.py`
-- Builds a TRAIN patient index directly from `master_manifest.sqlite`, extracts embeddings, and selects diverse per-patient rows through `helpers/smart_sampling/*.py`
+- Builds a TRAIN patient index directly from `master_manifest.sqlite`, extracts Phikon-v2 embeddings, and selects diverse per-patient rows through `helpers/smart_sampling/*.py`
 - Updates `sampling_decision` and `is_stage7_selected` in `master_manifest.sqlite` instead of materializing filtered TRAIN shards
 - Supports local staging and shared patient-shard caching for Google Drive + local SSD workflows when reading canonical Phase 2 patient shards
+- Protects positive-label and mask-positive rows from reduction by default, then reduces only the remaining candidate pool
+- Supports an optional GIST-style facility-location selector (`SMART_SAMPLER_USE_GIST=True`); when a patient pool exceeds `SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT`, the selector first builds an embedding-space landmark pool, so this large-pool path should be reported as GIST-style rather than paper-exact GIST
+- Builds a compact `TRAIN_SELECTED` HDF5 artifact when `SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED=True`; the artifact contains only selected TRAIN rows plus `index.sqlite`, `summary.json`, and a marker file under `TRAIN_SELECTED_COMPACT_DIR`
 - Writes `train_filtered_selection.csv`, `patient_filter_stats.csv`, `filter_run_config.json`, and `filter_summary.json` sidecars for lineage and review
 
 ### Phases 7-10: Training & Inference
@@ -311,20 +318,25 @@ Current Phase 6 smart-sampling behavior:
 Current training behavior:
 
 - `7_lr_finder.py` is now orchestration-focused; Phase 7 config loading, manifest-backed data setup, LR screening, curve analysis, and LaTeX reporting live in `helpers/lr_finder/*.py`
-- Phase 7 derives the screened architecture/encoder plan from `training_model_registry.json` instead of hardcoded lists
+- Phase 7 derives the screened architecture/encoder plan from the active registry file instead of hardcoded lists; the default registry is `training_model_registry_NOT_NORMALIZED.json`, and method-specific alternatives live in `training_model_registry_MACENKO.json`, `training_model_registry_REINHARD.json`, `training_model_registry_RUIFROK.json`, and `training_model_registry_VAHADANE.json`
 - Phase 7 loads pretrained weights once per architecture/encoder pair, snapshots the initialized weights to CPU, and reuses that state across sampled loss configurations and repeats instead of reloading pretrained weights inside the nested screening loops
 - Phase 7 accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both environment variables before model creation
 - Phase 7 defaults `LR_FINDER_AMP_PRECISION` to `fp32`; set it explicitly in `.env` when a different precision is desired
 - Expected LR-range-test divergence now stops the active sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure
+- CUDA OOM during an LR-range repeat now retries with a smaller effective batch size and records the effective batch size in the report
+- Exact MACENKO/VAHADANE runtime normalization can use `LR_FINDER_STAIN_MATRIX_CACHE_PATH` to cache tiny per-patch stain matrices
+- When smart sampling and `LR_FINDER_USE_COMPACT_TRAIN_SELECTED=True` are enabled, Phase 7 remaps TRAIN rows to the compact `TRAIN_SELECTED` artifact while leaving VALIDATION rows on canonical Phase 2 shards
 - Phase 7 console UX is notebook-friendly by design: one startup line, compact periodic progress snapshots, and one final summary with valid-record, completed-trial, failed-trial, and per-architecture counts
 - Phase 7 writes both `report.tex` and `report.pdf`, plus `SUMMARY_ALL.csv`, per-architecture CSV summaries, `LHS_SAMPLES.json`, and `lr_finder_run_config.json`
-- Phase 7 resolves TRAIN and VALIDATION rows from `master_manifest.sqlite` at startup, then loads pixels directly from canonical Phase 2 patient shards for runtime screening and provenance recording
+- Phase 7 resolves TRAIN and VALIDATION rows from `master_manifest.sqlite` at startup, then records whether TRAIN pixels came from canonical Phase 2 patient shards or compact selected-TRAIN storage
 - `8_training_ensemble.py` is now orchestration-focused; training runtime, manifest-backed data loading, model factory, losses, checkpointing, metrics, reporting, and epoch loops live in `helpers/training/*.py`
-- Phase 8 resolves TRAIN and VALIDATION rows from `master_manifest.sqlite` at startup, applies shared on-the-fly stain normalization through the canonical dataset path, and loads pixels directly from canonical Phase 2 patient shards
+- Phase 8 resolves TRAIN and VALIDATION rows from `master_manifest.sqlite` at startup, applies shared on-the-fly stain normalization through the canonical dataset path, and can read TRAIN rows from compact `TRAIN_SELECTED` storage when `TRAINING_USE_COMPACT_TRAIN_SELECTED=True`; validation remains on canonical Phase 2 shards
+- Phase 8 supports optional Online Hard Example Mining (OHEM) through `TRAINING_RUN_OHEM`, `TRAINING_OHEM_START_EPOCH`, `TRAINING_OHEM_RATIO`, and `TRAINING_OHEM_MIN_KEPT`; OHEM is disabled during validation
+- Empty or invalid validation metrics are marked explicitly and skipped for checkpoint selection instead of surfacing only as `UNKNOWN`
 - `9_optimizer_ensemble.py` is now orchestration-focused; Phase 9 config, metadata ranking, manifest-backed validation loading, model loading, patient holdout splitting, Optuna optimization, and JSON reporting live in `helpers/ensemble_optimizer/*.py`
 - Phase 9 preserves the `two_stream_spatial_gating` JSON contract used by `10_inference_ensemble.py`, including `roi_config`, `spatial_config`, `model_registry`, and `holdout_metrics`
 - `10_inference_ensemble.py` is now orchestration-focused; Phase 10 config, manifest-backed test-data loading, recipe-model loading, two-stream inference, metrics, and reporting live in `helpers/ensemble_inference/*.py`
-- Architecture and encoder choices are validated against `training_model_registry.json`
+- Architecture and encoder choices are validated against the active method-specific registry
 - Learning-rate and weight-decay defaults are loaded from the registry instead of being hardcoded in the script
 - `TRAINING_MODEL_REGISTRY_PATH` can override the default registry when a controlled experiment needs a different file
 - Only the approved research architecture/encoder pairs documented in `.env_example` are supported
@@ -336,13 +348,18 @@ Current training behavior:
 Copy `.env_example` to `.env` and configure:
 
 ```bash
+# Shared downstream settings
+LOG_FOLDER=/mnt/host_c/logs
+RUNTIME_NORMALIZATION_METHOD=NOT_NORMALIZED
+RUNTIME_VAHADANE_BACKEND=fixed_source
+TRAIN_SELECTED_COMPACT_DIR=./temp/train_selected_compact
+
 # Phase 1 - Artifact detection
 ARTIFACT_IMAGES_ZIP=/path/to/wsi_archive.zip
 ARTIFACT_GEOJSON_OUTPUT=./artifacts/geojson
 ARTIFACT_DATABASE_FOLDER=./databases
 ARTIFACT_DATABASE_NAME=artifact_detection.db
 ARTIFACT_TEMP_FOLDER=./temp/artifact_detection
-ARTIFACT_LOG_FOLDER=./logs
 ARTIFACT_DEVICE=cuda
 ARTIFACT_TD_MODEL_DIR=./models/td
 ARTIFACT_TD_MODEL_NAME=Tissue_Detection_MPP10.pth
@@ -356,11 +373,13 @@ ARTIFACT_OVERWRITE_EXISTING=false
 # Phase 7 - LR Finder
 LR_FINDER_MASTER_MANIFEST_PATH=./data/CAMELYON16/master_manifest.sqlite
 LR_FINDER_OUTPUT_DIR=./reports/lr_finder
+LR_FINDER_USE_COMPACT_TRAIN_SELECTED=True
 LR_FINDER_ARCHITECTURES=FPN,SEGFORMER
 # Optional HF auth for pretrained encoders resolved from the Hugging Face Hub
 HF_TOKEN=
 # HUGGINGFACE_HUB_TOKEN=  # equivalent alias; Phase 7 mirrors either token to both names
 LR_FINDER_AMP_PRECISION=fp32
+LR_FINDER_STAIN_MATRIX_CACHE_PATH=
 
 # Phase 4 - Crossfold
 CROSSFOLD_HDF5_COMPRESSION=none
@@ -374,6 +393,8 @@ TRAINING_MASTER_MANIFEST_PATH=./data/CAMELYON16/master_manifest.sqlite
 TRAINING_ARCHITECTURE=SEGFORMER
 TRAINING_ENCODER=mit_b5
 TRAINING_MODEL_REGISTRY_PATH=
+TRAINING_USE_COMPACT_TRAIN_SELECTED=True
+TRAINING_RUN_OHEM=False
 
 # Phase 9 - Ensemble optimizer
 ENSEMBLE_OPT_MASTER_MANIFEST_PATH=./data/CAMELYON16/master_manifest.sqlite
@@ -387,6 +408,7 @@ STRIDE=112
 TISSUE_PERCENTAGE=0.3
 MATCH_PERCENTAGE=1.0
 OPENSLIDE_PATH=
+STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS=True
 ```
 
 For SVS/XML datasets, use `TAG=HIESD` or `TAG=Chile`. Phase 2 resolves the supported label colors internally and does not require manual SQLite color setup.
@@ -403,7 +425,9 @@ Phase 7 runtime notes:
 
 - Phase 7 accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` and applies the detected token to both environment variables before model creation.
 - The default `LR_FINDER_AMP_PRECISION` is `fp32`.
+- The startup line prints the selected runtime normalization for Phases 7-10; `RUNTIME_VAHADANE_BACKEND` is shown only when `RUNTIME_NORMALIZATION_METHOD=VAHADANE`.
 - Console output is intentionally compact for Colab and other notebook environments: one startup line, periodic snapshot progress lines, and one final summary. Detailed trace logging stays in `logs/lr_finder.log`.
+- Set `RUNTIME_VAHADANE_BACKEND=torch_staintools_exact` only when the experiment requires exact per-patch VAHADANE source fitting; the default `fixed_source` backend is a faster fixed-matrix approximation and is recorded separately in provenance.
 
 For Phase 3 graph cleaning, the current tuning and cleaning benchmark notes live in `analysis/stage4_2_graph_tuning_performance_findings.md` and `analysis/stage4_3_graph_cleaning_performance_findings.md`.
 
@@ -439,6 +463,8 @@ uv run --python 3.12 python 1_artifact_detection.py
 ```
 
 See `colab_setup.md` for the complete Colab workflow, including Google Drive mounting and `.env` configuration.
+
+`setup_colab.sh` also hardens common notebook runtime issues by disabling broken nonessential third-party apt sources before package installation and by relying on shared headless Matplotlib helpers for report/plot generation.
 
 ### Using Native Windows
 
@@ -515,7 +541,7 @@ uv run --python 3.12 python 10_inference_ensemble.py
 
 ### Approved Training Pairs
 
-`8_training_ensemble.py` only supports the following approved research combinations:
+`8_training_ensemble.py` only supports the following approved research combinations. Learning-rate defaults may differ by active normalization registry, so use the current `training_model_registry_*.json` file for the claim-bearing run.
 
 | Architecture | Encoder |
 |--------------|---------|
@@ -528,7 +554,7 @@ uv run --python 3.12 python 10_inference_ensemble.py
 | `DPT` | `tu-vit_large_patch16_224.augreg_in21k_ft_in1k` |
 | `UPERNET` | `tu-hiera_large_224` |
 
-The defaults for learning rate, weight decay, and allowed encoders live in `training_model_registry.json`.
+The default registry path is `training_model_registry_NOT_NORMALIZED.json`; use `TRAINING_MODEL_REGISTRY_PATH` to select one of the method-specific registry files for controlled experiments.
 
 ### Running Tests
 
@@ -539,12 +565,12 @@ uv run pytest
 # Run helper coverage
 uv run pytest --cov=helpers --cov-report=term-missing
 
-# Run linting and typing on the actively maintained surfaces
-uv run ruff check 1_artifact_detection.py 2_database_manager.py 8_training_ensemble.py helpers tests
+# Run linting and typing on the full repository
+uv run ruff check .
 uv run ruff format .
 
-# Run type checking on the same touched scope
-uv run mypy 1_artifact_detection.py 2_database_manager.py 8_training_ensemble.py helpers tests
+# Run type checking on the full repository
+uv run mypy .
 ```
 
 Recent targeted validation highlights:
@@ -552,7 +578,7 @@ Recent targeted validation highlights:
 - Phase 4/5/6 HDF5 migration suites passed (`49 passed` on targeted crossfold/sanity tests)
 - Additional cleanup-focused targeted tests passed (`72 passed` and `9 passed` on focused subsets)
 - `uv run ruff check . --select ARG001,ARG002,F401,F841` passed during the unused-code cleanup pass
-- Ruff and MyPy passed on touched files during the documentation-aligned cleanup wave
+- The compact `TRAIN_SELECTED` implementation was last validated with repo-wide Ruff, MyPy, and Pytest passes (`829` tests)
 
 ## Data Integrity Rules
 
@@ -576,6 +602,7 @@ The pipeline produces these standardized folders and artifacts:
 - `template_selection/`, `template_selection.json`, `aggregate_target.png` - Phase 4 shared template-selection provenance artifacts
 - `runtime_normalization_artifacts/` - Phase 4 runtime-ready normalization state for `REINHARD`, `RUIFROK`, `MACENKO`, and `VAHADANE`
 - `train_filtered_selection.csv`, `patient_filter_stats.csv`, `filter_run_config.json`, `filter_summary.json` - Phase 6 selection and lineage sidecars
+- `TRAIN_SELECTED_COMPACT_DIR/` - optional compact selected-TRAIN HDF5 shards, `index.sqlite`, and `summary.json` for fast Phase 7/8 reads
 
 ## Dependencies
 
@@ -583,9 +610,10 @@ Key dependencies (defined in `pyproject.toml`):
 
 - **Deep Learning**: PyTorch, segmentation_models_pytorch, ScheduleFree
 - **Image Processing**: OpenCV, OpenSlide, Pillow, albumentations
-- **Scientific Computing**: NumPy, Pandas, Scikit-learn
+- **Scientific Computing**: NumPy, Pandas, Scikit-learn, scikit-image, h5py, pyarrow
 - **Stain Normalization**: torch-staintools
-- **Optimization**: Optuna
+- **Model/embedding utilities**: Transformers, xformers, segmentation_models_pytorch
+- **Optimization and reporting**: Optuna, ScheduleFree, matplotlib, mermaid-py
 
 ## License & Attribution
 

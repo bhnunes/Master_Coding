@@ -9,8 +9,8 @@ graph TD
     end
 
     subgraph P2[Phase 2: Patch Extraction]
-        p2[2_database_manager.py<br/>Extract patches from WSIs]
-        p2_out[Canonical patient HDF5 shards<br/>+ master_manifest.sqlite]
+        p2[2_database_manager.py<br/>Extract patches from WSIs<br/>validate manifest integrity]
+        p2_out[Canonical patient HDF5 shards<br/>+ portable master_manifest.sqlite]
     end
 
     subgraph P3[Phase 3: Annotation Cleaning - optional]
@@ -35,19 +35,19 @@ graph TD
     end
 
     subgraph P6[Phase 6: Smart Sampling - optional]
-        p6[6_smart_sampler.py<br/>Select informative TRAIN rows]
-        p6_out[Selection sidecars<br/>+ sampling state in SQLite]
+        p6[6_smart_sampler.py<br/>Select informative TRAIN rows<br/>and optionally compact them]
+        p6_out[Selection sidecars + sampling state in SQLite<br/>+ optional compact TRAIN_SELECTED HDF5]
         p6 --> p6_out
     end
 
     subgraph P7[Phase 7: LR Finder]
-        p7[7_lr_finder.py<br/>Screen approved architectures / encoders]
-        p7_out[LR reports + CSV / JSON sidecars]
+        p7[7_lr_finder.py<br/>Screen approved registry pairs<br/>with runtime normalization]
+        p7_out[LR reports + CSV / JSON sidecars<br/>+ effective batch records]
         p7 --> p7_out
     end
 
     subgraph P8[Phase 8: Training]
-        p8[8_training_ensemble.py<br/>Train one approved model per run]
+        p8[8_training_ensemble.py<br/>Train one approved model per run<br/>optional OHEM]
         p8_out[Checkpoints + metrics + reports]
         p8 --> p8_out
     end
@@ -75,6 +75,7 @@ graph TD
     p4_out --> p5
     p4_out --> p6
     p4_out --> p7
+    p6_out --> p7
     p6_out --> p8
     p4_out --> p8
     p7_out --> p8
