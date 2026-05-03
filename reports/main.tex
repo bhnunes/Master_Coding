@@ -1,10 +1,23 @@
-\documentclass[a4paper,fleqn,longmktitle]{cas-dc}
+\documentclass[a4paper,fleqn]{cas-dc}
 
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
 \usepackage{microtype}
 \usepackage[numbers]{natbib}
 \newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\setlength{\emergencystretch}{2em}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\indicator}[1]{\mathbf{1}_{\{#1\}}}
+\newcommand{\ArtifactPatchIndex}{\texttt{PATCHES/\allowbreak artifact\_\allowbreak patch\_\allowbreak index.parquet}}
+\newcommand{\MasterManifest}{\texttt{master\_\allowbreak manifest.sqlite}}
+\newcommand{\RuntimeNormMethod}{\texttt{RUNTIME\_\allowbreak NORMALIZATION\_\allowbreak METHOD}}
+\newcommand{\RuntimeVahadaneFixedSource}{\texttt{RUNTIME\_\allowbreak VAHADANE\_\allowbreak BACKEND=\allowbreak fixed\_\allowbreak source}}
+\newcommand{\RuntimeVahadaneExact}{\texttt{RUNTIME\_\allowbreak VAHADANE\_\allowbreak BACKEND=\allowbreak torch\_\allowbreak staintools\_\allowbreak exact}}
+\newcommand{\TrainSelectedCompactDir}{\texttt{TRAIN\_\allowbreak SELECTED\_\allowbreak COMPACT\_\allowbreak DIR}}
+\newcommand{\SmartSamplerUseGist}{\texttt{SMART\_\allowbreak SAMPLER\_\allowbreak USE\_\allowbreak GIST}}
+\newcommand{\SamplingDecision}{\texttt{sampling\_\allowbreak decision}}
+\newcommand{\StageSevenSelected}{\texttt{is\_\allowbreak stage7\_\allowbreak selected}}
+\newcommand{\LastHiddenState}{\texttt{last\_\allowbreak hidden\_\allowbreak state[:,0,:]}}
+\newcommand{\RegistryNotNormalized}{\texttt{training\_\allowbreak model\_\allowbreak registry\_\allowbreak NOT\_\allowbreak NORMALIZED.json}}
+\newcommand{\TwoStreamSpatialGating}{\texttt{two\_\allowbreak stream\_\allowbreak spatial\_\allowbreak gating}}
 \ExplSyntaxOn
 \cs_if_exist:NF \vbox_unpack_clear:N
   { \cs_new_eq:NN \vbox_unpack_clear:N \vbox_unpack_drop:N }
@@ -86,7 +99,7 @@ The extraction engine supports heterogeneous annotation inputs, including \textt
 
 Each accepted patch must satisfy three requirements. First, exactly one semantic class must exceed the configured overlap threshold. Second, the image region must satisfy a tissue-content criterion based on HSV saturation, Otsu thresholding, and morphological processing. Third, output identity must match the deterministic filename contract, which encodes label, patient identifier, slide identifier, and pixel coordinates. Cancer patches are stored with binary tumor masks, whereas non-cancer patches are stored with all-zero masks. In the current code path, accepted patch records are written directly into per-slide HDF5 shards together with canonical row metadata, and Stage~2 also updates a shard manifest used later by Stage~3 packaging.
 
-Stage~2 no longer uses artifact estimates as a hard rejection criterion. Instead, when advanced artifact handling is enabled, it computes per-patch coverage fractions for each Stage~1 artifact class and writes them into \texttt{PATCHES/artifact\_patch\_index.parquet}. When the option is disabled, the same schema is preserved with zero-valued coverage fields. This design keeps the training contract stable while allowing artifact-aware learning to be enabled or disabled without changing downstream file interfaces.
+Stage~2 no longer uses artifact estimates as a hard rejection criterion. Instead, when advanced artifact handling is enabled, it computes per-patch coverage fractions for each Stage~1 artifact class and writes them into \ArtifactPatchIndex. When the option is disabled, the same schema is preserved with zero-valued coverage fields. This design keeps the training contract stable while allowing artifact-aware learning to be enabled or disabled without changing downstream file interfaces.
 
 The master manifest is treated as a durable data contract rather than a convenience index. Current read paths validate the SQLite database before consuming manifest-backed row state, and Stage~2 records source-HDF5 signatures so later cleaning and split-generation steps can fail closed when a stale artifact is applied to regenerated data. Operationally, native TIFF/OpenSlide metadata warnings can be suppressed at the runtime boundary to avoid log flooding from non-fatal slide metadata noise while preserving hard failures for unreadable slides or broken database state.
 
@@ -122,7 +135,7 @@ Here, $\hat{y}$ denotes the predicted cleaning label for a patch, $c$ denotes it
 
 For fixed graph parameters $\theta=(T_{\mathrm{bg}},k,m_{\min},e_{\mathrm{roi}})$, the threshold is reselected on each training fold as
 \begin{equation}
-\tau^*(\theta)=\arg\max_{\tau\in\mathcal{T}}
+\tau^*(\theta)=\argmax_{\tau\in\mathcal{T}}
 F1_{\mathrm{Rejected}}(\tau;\theta).
 \end{equation}
 In this expression, $\theta$ collects the graph parameters $T_{\mathrm{bg}}$ (background-intensity threshold), $k$ (Felzenszwalb scale parameter), $m_{\min}$ (minimum segment size), and $e_{\mathrm{roi}}$ (ROI erosion radius in pixels); $\tau^*(\theta)$ is the threshold selected for parameter setting $\theta$; $\mathcal{T}=\{0.05,0.06,\ldots,0.95\}$ is the discrete threshold grid searched by the implementation; and $F1_{\mathrm{Rejected}}(\tau;\theta)$ denotes the F1 score of the \emph{Rejected} class obtained when threshold $\tau$ is applied under parameter setting $\theta$. Bayesian optimization then minimizes the negative mean grouped cross-validated rejected-class F1 score over these fold-wise optima. In other words, the graph parameters and threshold are not fixed from external assumptions; they are selected to maximize agreement with the manual \texttt{REJECTED} labels produced in Stage~3.1 under the grouped cross-validation protocol implemented by the repository.
@@ -141,7 +154,7 @@ Stage~4 reads accepted canonical rows from the Stage~2 master manifest and const
 
 The current Stage~4 design computes entropy on \texttt{TRAIN} once per run, selects one high-entropy template patch per training patient, and aggregates those templates into a shared target image. That shared target is then used to persist runtime-ready artifacts for \texttt{REINHARD}, \texttt{RUIFROK}, \texttt{MACENKO}, and \texttt{VAHADANE}, while \texttt{NOT\_NORMALIZED} is treated as the no-artifact runtime option. This train-only target-building policy is scientifically important because it prevents distributional information from validation or test data from leaking into preprocessing while avoiding redundant Stage~4 split generation across normalization methods.
 
-The stage writes provenance artifacts including \texttt{manifest.csv}, \texttt{split\_stats.csv}, \texttt{run\_config.json}, template-selection sidecars, optional entropy-cache CSV files, and runtime-normalization state JSON files. Downstream stages resolve the selected normalization method at runtime from \texttt{RUNTIME\_NORMALIZATION\_METHOD} and the Stage~4 split-bundle artifact registry recorded in \texttt{master\_manifest.sqlite}, rather than from per-patch persisted normalization state.
+The stage writes provenance artifacts including \texttt{manifest.csv}, \texttt{split\_stats.csv}, \texttt{run\_config.json}, template-selection sidecars, optional entropy-cache CSV files, and runtime-normalization state JSON files. Downstream stages resolve the selected normalization method at runtime from \RuntimeNormMethod{} and the Stage~4 split-bundle artifact registry recorded in \MasterManifest, rather than from per-patch persisted normalization state.
 
 \subsection{Stage 5: scientific sanity checks}
 
@@ -151,19 +164,19 @@ This stage acts as a scientific gate rather than a mere file-existence test. A r
 
 \subsection{Stage 6: embedding-based smart sampling of the training split}
 
-Stage~6 optionally reduces the effective training set while preserving manifest-backed provenance and validation/test semantics. The stage reads \texttt{TRAIN} rows from \texttt{master\_manifest.sqlite}, loads pixels from canonical Phase~2 patient shards, builds a patient-wise patch index, and extracts Phikon-v2 embeddings. Positive-label rows and rows with positive mask pixels are protected from reduction by default, so the diversity selector operates only on reducible candidates while protected rows remain eligible for downstream training. This policy makes the storage optimization explicit: selection changes the training-row subset, but it does not rewrite validation or test rows.
+Stage~6 optionally reduces the effective training set while preserving manifest-backed provenance and validation/test semantics. The stage reads \texttt{TRAIN} rows from \MasterManifest, loads pixels from canonical Phase~2 patient shards, builds a patient-wise patch index, and extracts Phikon-v2 embeddings. Positive-label rows and rows with positive mask pixels are protected from reduction by default, so the diversity selector operates only on reducible candidates while protected rows remain eligible for downstream training. This policy makes the storage optimization explicit: selection changes the training-row subset, but it does not rewrite validation or test rows.
 
 For a patch indexed by $i$, let $H_i\in\mathbb{R}^{T\times D}$ denote the final hidden-state matrix returned by the image model, where $T$ is the number of tokens and $D$ is the hidden dimension. The embedding used for smart sampling is the first-token descriptor
 \[
 z_i = H_i[0,:]\in\mathbb{R}^{D}.
 \]
-Here, $z_i$ is the embedding for patch $i$ and corresponds to the \texttt{last\_hidden\_state[:,0,:]} tensor returned by the model. For each patient, the stage starts from an initial candidate count $n_0$ and iteratively increases the embedding budget according to
+Here, $z_i$ is the embedding for patch $i$ and corresponds to the \LastHiddenState{} tensor returned by the model. For each patient, the stage starts from an initial candidate count $n_0$ and iteratively increases the embedding budget according to
 \[
 n_{t+1}=\min\!\left(n_{\max},\left\lfloor g\,n_t\right\rfloor\right),
 \]
 where $n_t$ is the candidate count at iteration $t$, $n_{t+1}$ is the updated count for the next iteration, $g$ is the configured multiplicative growth factor, $n_{\max}$ is the maximum allowed sample count, and $\lfloor\cdot\rfloor$ denotes the floor operator. At each step, two random subsets of size $n_t$ are clustered and their stability is measured by the adjusted Rand index. Iteration stops once the estimated stability exceeds the configured threshold or the iteration cap is reached.
 
-Once the patch budget for a patient is determined, the default diversity selector uses \texttt{MiniBatchKMeans}. Patches are then sampled approximately uniformly across clusters, and the implementation persists sidecar summaries plus SQLite row-state updates such as \texttt{sampling\_decision} and \texttt{is\_stage7\_selected}. When \texttt{SMART\_SAMPLER\_USE\_GIST} is enabled, the final reducible-candidate selector can instead use a GIST-style facility-location objective. For large patient pools, however, the implementation first constructs a bounded embedding-space landmark pool before running the GIST-style selector. That engineering constraint should be reported as a GIST-inspired or GIST-style large-pool approximation rather than as the paper-exact GIST algorithm, because the objective is no longer optimized over the full reducible candidate set.
+Once the patch budget for a patient is determined, the default diversity selector uses \texttt{MiniBatchKMeans}. Patches are then sampled approximately uniformly across clusters, and the implementation persists sidecar summaries plus SQLite row-state updates such as \SamplingDecision{} and \StageSevenSelected. When \SmartSamplerUseGist{} is enabled, the final reducible-candidate selector can instead use a GIST-style facility-location objective. For large patient pools, however, the implementation first constructs a bounded embedding-space landmark pool before running the GIST-style selector. That engineering constraint should be reported as a GIST-inspired or GIST-style large-pool approximation rather than as the paper-exact GIST algorithm, because the objective is no longer optimized over the full reducible candidate set.
 
 If the final candidate set for a patient contains $n$ embedded patches, the cluster count is chosen adaptively and a target subset size $m$ is allocated approximately uniformly across clusters. With $K$ clusters, the quota-based selection rule is
 \[
@@ -171,7 +184,7 @@ q = \left\lceil \frac{m}{K} \right\rceil,
 \]
 where $q$ is the nominal per-cluster quota, $m$ is the desired number of retained patches for the patient, $K$ is the number of clusters, and $\lceil\cdot\rceil$ denotes the ceiling operator. After this quota is computed, up to $q$ samples are drawn from each cluster and any remaining slots are filled from the residual candidate pool. The resulting policy is therefore diversity-oriented rather than centroid-nearest or density-proportional.
 
-To reduce downstream I/O cost under mounted-drive or small-local-disk constraints, Stage~6 can build a compact \texttt{TRAIN\_SELECTED} artifact after selection. This artifact contains HDF5 shards for selected training rows only, an \texttt{index.sqlite} mapping canonical source rows to compact rows, and a \texttt{summary.json} provenance record. The artifact is built in scratch space and then published to \texttt{TRAIN\_SELECTED\_COMPACT\_DIR}. Stages~7 and~8 may remap selected \texttt{TRAIN} rows to this compact storage, whereas validation and test evaluation continue to use canonical Phase~2 patient shards.
+To reduce downstream I/O cost under mounted-drive or small-local-disk constraints, Stage~6 can build a compact \texttt{TRAIN\_SELECTED} artifact after selection. This artifact contains HDF5 shards for selected training rows only, an \texttt{index.sqlite} mapping canonical source rows to compact rows, and a \texttt{summary.json} provenance record. The artifact is built in scratch space and then published to \TrainSelectedCompactDir. Stages~7 and~8 may remap selected \texttt{TRAIN} rows to this compact storage, whereas validation and test evaluation continue to use canonical Phase~2 patient shards.
 
 \subsection{Stage 7: repeated learning-rate and loss-weight screening}
 
@@ -179,24 +192,24 @@ Stage~7 does not train final models. Instead, it screens approved architecture--
 
 For each sampled loss triplet $(\alpha,\beta,\gamma)$ and model pair, the stage performs repeated learning-rate-range tests using \texttt{AdamW}, configurable automatic mixed precision that defaults to \texttt{fp32}, class rebalancing, and the selected runtime-normalization method. If smart sampling and compact storage are enabled, \texttt{TRAIN} rows are remapped to the compact \texttt{TRAIN\_SELECTED} artifact, while \texttt{VALIDATION} rows remain canonical Phase~2 patient-shard reads. Expected divergence or non-finite loss terminates only the active range test and preserves partial LR/loss history. CUDA out-of-memory failures within a repeat trigger smaller-batch retries, and the effective batch size is reported with the screening output. The summary criterion is the median minimum smoothed loss across repeated runs. Outputs include per-model summaries, run configuration files, sampled loss settings, effective-batch records, and a LaTeX/PDF report. This stage therefore serves as a structured hyperparameter-screening process rather than a source of final claim-bearing model performance.
 
-Runtime normalization is intentionally selected downstream rather than encoded into the Stage~4 split itself. The shared selector \texttt{RUNTIME\_NORMALIZATION\_METHOD} chooses among \texttt{NOT\_NORMALIZED}, \texttt{REINHARD}, \texttt{RUIFROK}, \texttt{MACENKO}, and \texttt{VAHADANE}. When \texttt{VAHADANE} is selected, \texttt{RUNTIME\_VAHADANE\_BACKEND=fixed\_source} uses the Stage~4 target stain matrix as a fixed-source proxy and is therefore an approximation to canonical per-patch VAHADANE. Setting \texttt{RUNTIME\_VAHADANE\_BACKEND=torch\_staintools\_exact} restores per-patch source fitting at substantially higher runtime cost. This distinction is recorded in provenance and should be preserved in any scientific reporting of VAHADANE experiments.
+Runtime normalization is intentionally selected downstream rather than encoded into the Stage~4 split itself. The shared selector \RuntimeNormMethod{} chooses among \texttt{NOT\_NORMALIZED}, \texttt{REINHARD}, \texttt{RUIFROK}, \texttt{MACENKO}, and \texttt{VAHADANE}. When \texttt{VAHADANE} is selected, \RuntimeVahadaneFixedSource{} uses the Stage~4 target stain matrix as a fixed-source proxy and is therefore an approximation to canonical per-patch VAHADANE. Setting \RuntimeVahadaneExact{} restores per-patch source fitting at substantially higher runtime cost. This distinction is recorded in provenance and should be preserved in any scientific reporting of VAHADANE experiments.
 
 \subsection{Stage 8: single-model segmentation training}
 
-Stage~8 trains one segmentation model per execution. The training stage resolves \texttt{TRAIN} and \texttt{VALIDATION} rows from \texttt{master\_manifest.sqlite}, optionally respecting Stage~6 smart-sampling row state for the training split. When compact selected-TRAIN storage is enabled, the training split is remapped to the compact artifact created by Stage~6; validation remains tied to canonical Phase~2 patient shards. Before optimization, the stage verifies that training and validation patients are disjoint. Class imbalance is addressed with a \texttt{WeightedRandomSampler} based on inverse class frequencies at the patch level.
+Stage~8 trains one segmentation model per execution. The training stage resolves \texttt{TRAIN} and \texttt{VALIDATION} rows from \MasterManifest, optionally respecting Stage~6 smart-sampling row state for the training split. When compact selected-TRAIN storage is enabled, the training split is remapped to the compact artifact created by Stage~6; validation remains tied to canonical Phase~2 patient shards. Before optimization, the stage verifies that training and validation patients are disjoint. Class imbalance is addressed with a \texttt{WeightedRandomSampler} based on inverse class frequencies at the patch level.
 
 Training uses a two-channel segmentation network instantiated through the approved model registry. Optimization is performed with \texttt{AdamWScheduleFree} in the current code path, while learning-rate defaults remain architecture-specific in the registry. The loss is a weighted binary cross-entropy plus Dice hybrid,
 \begin{equation}
-\mathcal{L} = \alpha\,\mathcal{L}_{\mathrm{BCE,fg}}
-+ \beta\,\mathcal{L}_{\mathrm{Dice,bg}}
-+ \gamma\,\mathcal{L}_{\mathrm{Dice,fg}}.
+\mathcal{L} = \alpha\,\mathcal{L}_{\mathrm{BCE},\mathrm{fg}}
++ \beta\,\mathcal{L}_{\mathrm{Dice},\mathrm{bg}}
++ \gamma\,\mathcal{L}_{\mathrm{Dice},\mathrm{fg}}.
 \end{equation}
-In this expression, $\mathcal{L}$ is the total training loss, $\mathcal{L}_{\mathrm{BCE,fg}}$ is the foreground binary cross-entropy term, $\mathcal{L}_{\mathrm{Dice,bg}}$ is the Dice loss for the background channel, $\mathcal{L}_{\mathrm{Dice,fg}}$ is the Dice loss for the foreground channel, and $\alpha$, $\beta$, and $\gamma$ are scalar mixing weights with default values $\alpha=0.125$, $\beta=0.157$, and $\gamma=0.173$. The BCE term is applied to the foreground probability after softmax, whereas Dice terms are computed separately for the background and foreground channels. When artifact-aware loss is enabled, the per-sample loss is discounted according to the maximum filename-keyed artifact coverage stored in \texttt{master\_manifest.sqlite}.
+In this expression, $\mathcal{L}$ is the total training loss, $\mathcal{L}_{\mathrm{BCE},\mathrm{fg}}$ is the foreground binary cross-entropy term, $\mathcal{L}_{\mathrm{Dice},\mathrm{bg}}$ is the Dice loss for the background channel, $\mathcal{L}_{\mathrm{Dice},\mathrm{fg}}$ is the Dice loss for the foreground channel, and $\alpha$, $\beta$, and $\gamma$ are scalar mixing weights with default values $\alpha=0.125$, $\beta=0.157$, and $\gamma=0.173$. The BCE term is applied to the foreground probability after softmax, whereas Dice terms are computed separately for the background and foreground channels. When artifact-aware loss is enabled, the per-sample loss is discounted according to the maximum filename-keyed artifact coverage stored in \MasterManifest.
 
 Let $p_{c,h,w}$ and $g_{c,h,w}$ denote the predicted class probability and one-hot target, respectively, for class $c\in\{\mathrm{bg},\mathrm{fg}\}$ at spatial location $(h,w)$, where $\mathrm{bg}$ denotes background, $\mathrm{fg}$ denotes foreground, and $H$ and $W$ denote the mask height and width. The foreground BCE term is
 \begin{equation}
 \begin{aligned}
-\mathcal{L}_{\mathrm{BCE,fg}} = -\frac{1}{HW}\sum_{h,w}\Bigl[
+\mathcal{L}_{\mathrm{BCE},\mathrm{fg}} = -\frac{1}{HW}\sum_{h,w}\Bigl[
 &g_{\mathrm{fg},h,w}\log p_{\mathrm{fg},h,w} \\
 &+ (1-g_{\mathrm{fg},h,w})\log(1-p_{\mathrm{fg},h,w})\Bigr].
 \end{aligned}
@@ -246,19 +259,19 @@ D_t ={}&(TP_t+FP_t)(TP_t+FN_t) \\
 \end{equation}
 where $D_t$ is the denominator term of the MCC expression and $\varepsilon$ is the numerical-stability constant. The corresponding MCC is
 \begin{multline}
-\mathrm{MCC}(t) = \frac{TP_tTN_t-FP_tFN_t}{\sqrt{D_t}}.
+\mathrm{MCC}(t) = \frac{TP_t\,TN_t-FP_t\,FN_t}{\sqrt{D_t}}.
 \end{multline}
 The implementation also computes the foreground prevalence at threshold $0.5$,
 \[
-\hat{\pi}_{0.5}=\frac{1}{N_{\mathrm{pix}}}\sum_i 1[p_i\geq 0.5],
+\hat{\pi}_{0.5}=\frac{1}{N_{\mathrm{pix}}}\sum_i \indicator{p_i\geq 0.5},
 \]
-where $\hat{\pi}_{0.5}$ is the predicted foreground prevalence at threshold $0.5$, $N_{\mathrm{pix}}$ is the total number of evaluated pixels, $p_i$ is the predicted foreground probability for pixel $i$, and $1[\cdot]$ denotes the indicator function. The implementation rejects validation epochs when $\hat{\pi}_{0.5}<0.001$ or $\hat{\pi}_{0.5}>0.99$, thereby preventing collapsed predictions from being selected as best checkpoints.
+where $\hat{\pi}_{0.5}$ is the predicted foreground prevalence at threshold $0.5$, $N_{\mathrm{pix}}$ is the total number of evaluated pixels, $p_i$ is the predicted foreground probability for pixel $i$, and $\indicator{\cdot}$ denotes the indicator function. The implementation rejects validation epochs when $\hat{\pi}_{0.5}<0.001$ or $\hat{\pi}_{0.5}>0.99$, thereby preventing collapsed predictions from being selected as best checkpoints.
 
 \subsection{Stage 9: validation-only optimization of a two-stream ensemble recipe}
 
 Stage~9 aggregates multiple trained models into a two-stream ensemble. Before any optimization occurs, model metadata sidecars are loaded and grouped by provenance compatibility so that models produced from incompatible upstream data lineages cannot be mixed silently. The stage then partitions the \texttt{VALIDATION} patients into three disjoint subsets: an optimization subset, a calibration subset, and an optional development holdout subset. This internal holdout is used only for development-oriented reporting and should not be interpreted as a claim-bearing test evaluation. The configured calibration and holdout fractions act as nominal targets; for small validation cohorts, the implementation uses a heuristic non-empty subset allocation instead of exact proportional splitting.
 
-The ensemble strategy is explicitly declared as \texttt{two\_stream\_spatial\_gating}. Semantic-stream models produce a coarse region-of-interest mask by weighted averaging their probabilities, downsampling by a configurable context scale, thresholding at an optimized region-of-interest threshold, and then upsampling back to full patch resolution. Spatial-stream models produce finer-grained predictions that are multiplicatively gated by the semantic region of interest. Importantly, the region-of-interest threshold and the final hard-decision threshold are optimized as separate quantities.
+The ensemble strategy is explicitly declared as \TwoStreamSpatialGating. Semantic-stream models produce a coarse region-of-interest mask by weighted averaging their probabilities, downsampling by a configurable context scale, thresholding at an optimized region-of-interest threshold, and then upsampling back to full patch resolution. Spatial-stream models produce finer-grained predictions that are multiplicatively gated by the semantic region of interest. Importantly, the region-of-interest threshold and the final hard-decision threshold are optimized as separate quantities.
 
 Let $\mathcal{M}_{\mathrm{sem}}$ and $\mathcal{M}_{\mathrm{spa}}$ denote the semantic and spatial model sets, respectively, and let $P_m(x)$ be the test-time-augmented foreground probability from model $m$ at pixel $x$. The weighted stream predictions are
 \begin{equation}
@@ -269,15 +282,15 @@ P_{\mathrm{spa}}(x) &= \sum_{m\in\mathcal{M}_{\mathrm{spa}}} w_m^{\mathrm{spa}} 
 \end{equation}
 Here, $P_{\mathrm{sem}}(x)$ and $P_{\mathrm{spa}}(x)$ are the semantic-stream and spatial-stream foreground probabilities at pixel $x$, while $w_m^{\mathrm{sem}}$ and $w_m^{\mathrm{spa}}$ are the normalized non-negative weights assigned to model $m$ in the semantic and spatial streams, respectively. The semantic region of interest is generated by downsampling $P_{\mathrm{sem}}$ by context scale $s$, thresholding at $\tau_{\mathrm{roi}}$, and upsampling back to the original grid:
 \[
-R(x)=\mathrm{Up}\!\left(1\left[\mathrm{Down}(P_{\mathrm{sem}};s) > \tau_{\mathrm{roi}}\right]\right)(x).
+R(x)=\mathrm{Up}\!\left(\indicator{\mathrm{Down}(P_{\mathrm{sem}};s) > \tau_{\mathrm{roi}}}\right)(x).
 \]
-In this expression, $R(x)\in\{0,1\}$ is the semantic region-of-interest mask at pixel $x$, $\mathrm{Down}(\cdot;s)$ denotes downsampling by scale factor $s$, $\mathrm{Up}(\cdot)$ denotes upsampling back to the original patch resolution, $\tau_{\mathrm{roi}}$ is the semantic region-of-interest threshold, and $1[\cdot]$ denotes the indicator function.
+In this expression, $R(x)\in\{0,1\}$ is the semantic region-of-interest mask at pixel $x$, $\mathrm{Down}(\cdot;s)$ denotes downsampling by scale factor $s$, $\mathrm{Up}(\cdot)$ denotes upsampling back to the original patch resolution, $\tau_{\mathrm{roi}}$ is the semantic region-of-interest threshold, and $\indicator{\cdot}$ denotes the indicator function.
 
 The final gated prediction is then
 \begin{equation}
 \begin{aligned}
 P_{\mathrm{final}}(x) &= P_{\mathrm{spa}}(x)R(x), \\
-\hat{Y}(x) &= 1\left[P_{\mathrm{final}}(x)>\tau_{\mathrm{dec}}\right].
+\hat{Y}(x) &= \indicator{P_{\mathrm{final}}(x)>\tau_{\mathrm{dec}}}.
 \end{aligned}
 \end{equation}
 Here, $P_{\mathrm{final}}(x)$ is the gated ensemble foreground probability, $\hat{Y}(x)\in\{0,1\}$ is the final binary prediction at pixel $x$, and $\tau_{\mathrm{dec}}$ is the final hard-decision threshold. This formulation is central to the repository design because $\tau_{\mathrm{roi}}$ and $\tau_{\mathrm{dec}}$ have distinct semantics and are optimized separately.
@@ -300,7 +313,7 @@ J_{\mathrm{spa}} =
 \end{equation}
 Here, $J_{\mathrm{spa}}$ is the spatial-stream optimization objective, $\mathcal{P}_+$ and $\mathcal{P}_-$ denote the positive and negative patient sets in the optimization subset, $P_{\mathrm{spa},i}$ is the spatial-stream probability map for positive patient $i$, $Y_i[R_i=1]$ and $P_{\mathrm{spa},i}[R_i=1]$ denote restriction of the mask and probabilities to pixels inside the region of interest, $S_i$ is the fraction of predicted probability mass spilled outside the region of interest for positive patient $i$, $F_j$ is the mean false-positive mass on negative patient $j$, and $\lambda$ is the configured spill-penalty coefficient. The final threshold calibration step searches over a fixed threshold grid and selects
 \begin{equation}
-\tau_{\mathrm{dec}}^* = \arg\max_t \; \overline{\mathrm{MCC}}_{\mathrm{cal}}(t),
+\tau_{\mathrm{dec}}^* = \argmax_t \; \overline{\mathrm{MCC}}_{\mathrm{cal}}(t),
 \end{equation}
 where $\tau_{\mathrm{dec}}^*$ is the calibrated decision threshold, $t\in\{0.05,0.10,\ldots,0.95\}$ is the threshold candidate, and $\overline{\mathrm{MCC}}_{\mathrm{cal}}(t)$ denotes the mean per-patient pixel-level MCC evaluated on the calibration subset at threshold $t$.
 
@@ -329,9 +342,9 @@ For pooled pixel counts $(TP,FP,FN,TN)$, where $TP$, $FP$, $FN$, and $TN$ denote
 \]
 Micro-averaged scores are obtained by pooling pixel counts across patients before evaluating the metric. Macro-averaged scores are obtained by first aggregating patch counts within each patient, computing the patient-level metric, and then averaging across patients. In addition, the implementation reports a rule-based decomposition consisting of macro Dice over positive-ground-truth patients and the negative clean rate,
 \[
-\mathrm{NCR}=\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-} 1[FP_j=0],
+\mathrm{NCR}=\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-} \indicator{FP_j=0},
 \]
-where $\mathcal{P}_-$ is the set of negative patients, $FP_j$ is the number of false-positive pixels for negative patient $j$, and $1[FP_j=0]$ is the indicator that patient $j$ is completely free of false-positive pixels. Bootstrap confidence intervals are computed by patient-wise resampling only when at least 20 patients are available.
+where $\mathcal{P}_-$ is the set of negative patients, $FP_j$ is the number of false-positive pixels for negative patient $j$, and $\indicator{FP_j=0}$ is the indicator that patient $j$ is completely free of false-positive pixels. Bootstrap confidence intervals are computed by patient-wise resampling only when at least 20 patients are available.
 
 \section{Experimental Setup and Reproducibility}
 
@@ -341,7 +354,7 @@ The repository targets Python~3.12 and is configured through \texttt{pyproject.t
 
 \subsection{Approved model search space}
 
-The code constrains model selection to approved registry files rather than permitting arbitrary architectures at runtime. The default registry is \texttt{training\_model\_registry\_NOT\_NORMALIZED.json}; method-specific registries are also maintained for \texttt{MACENKO}, \texttt{REINHARD}, \texttt{RUIFROK}, and \texttt{VAHADANE}. All inspected registries use weight decay $10^{-4}$, while architecture-specific learning rates vary by normalization method. Table~\ref{tab:model-registry} summarizes the default \texttt{NOT\_NORMALIZED} registry and the current Stage~9 role assignments.
+The code constrains model selection to approved registry files rather than permitting arbitrary architectures at runtime. The default registry is \RegistryNotNormalized; method-specific registries are also maintained for \texttt{MACENKO}, \texttt{REINHARD}, \texttt{RUIFROK}, and \texttt{VAHADANE}. All inspected registries use weight decay $10^{-4}$, while architecture-specific learning rates vary by normalization method. Table~\ref{tab:model-registry} summarizes the default \texttt{NOT\_NORMALIZED} registry and the current Stage~9 role assignments.
 
 \begin{table*}[t]
 \caption{Approved architecture--encoder search space and default optimization settings extracted from the model registry and Stage~9 role assignments.}
@@ -394,7 +407,7 @@ Stage & Setting group & Default values & Purpose \\
 
 The downstream stages implement reproducibility controls beyond fixed seeds alone. Training and learning-rate screening default to a \texttt{PAPER} execution profile that disables CuDNN benchmarking, enables deterministic settings where possible, and records execution metadata. Content signatures are stored for packaged HDF5 datasets, Stage~4 runtime-normalization artifacts, compact selected-TRAIN storage, and other persisted lineage sidecars. Training checkpoints carry metadata sidecars describing upstream packaging, split-bundle identity, runtime normalization, smart-sampling, compact-storage use, OHEM settings, and artifact-aware-loss lineage, and Stage~9 refuses to combine models from incompatible provenance groups. Stage~10 further validates recipe signatures and checkpoint hashes before running final inference.
 
-The repository also applies fail-closed provenance checks at multiple dataset boundaries. Stage~2 refuses to continue when previously completed slides become stale with respect to changed extraction settings and validates the master-manifest SQLite database before manifest-backed reads. Stage~3 binds accepted-manifest filtering to immutable source-file identity, preventing stale review decisions from being silently reused after source-HDF5 regeneration. Stage~4 records source-dataset provenance, template-selection metadata, generated normalization artifacts, and split-bundle lineage in \texttt{run\_config.json} and \texttt{master\_manifest.sqlite}, and Stage~10 validates recipe and checkpoint compatibility before test-time execution. These mechanisms are methodologically important because they reduce the risk of reporting results from silently mixed experimental lineages.
+The repository also applies fail-closed provenance checks at multiple dataset boundaries. Stage~2 refuses to continue when previously completed slides become stale with respect to changed extraction settings and validates the master-manifest SQLite database before manifest-backed reads. Stage~3 binds accepted-manifest filtering to immutable source-file identity, preventing stale review decisions from being silently reused after source-HDF5 regeneration. Stage~4 records source-dataset provenance, template-selection metadata, generated normalization artifacts, and split-bundle lineage in \texttt{run\_config.json} and \MasterManifest, and Stage~10 validates recipe and checkpoint compatibility before test-time execution. These mechanisms are methodologically important because they reduce the risk of reporting results from silently mixed experimental lineages.
 
 \subsection{Known limits of code-grounded reporting}
 
