@@ -71,6 +71,8 @@ because they still support the training-augmentation section.
 | Stage 8 manifest-backed training provenance and compact TRAIN_SELECTED reads | `wilkinson2016fair`, `piccolo2016tools`, `folk2011hdf5`, `roberts2017crossvalidation`, `dawood2026confounding` | Cite FAIR/Piccolo for executable provenance and metadata sidecars, HDF5 for canonical and compact row storage, and Roberts/Dawood for patient-level split isolation and leakage/confounding caution. |
 | Stage 9 two-stream ensemble recipe optimization | `dietterich2000ensemble`, `caruana2004ensemble`, `akiba2019optuna`, `bergstra2011algorithms`, `saito2015precision`, `matthews1975comparison` | Cite ensemble-method and ensemble-selection papers for combining trained model candidates, Optuna/TPE for semantic/spatial weight and ROI-threshold search, Saito/Rehmsmeier for AUPRC objectives under imbalance, and Matthews for MCC-based decision-threshold calibration. The two-stream ROI-gating objective is repository-specific. |
 | Stage 9 prediction caching, TTA, validation split, and recipe provenance | `moshkov2020test`, `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools`, `roberts2017crossvalidation`, `dawood2026confounding` | Cite Moshkov et al. for test-time augmentation in segmentation, HDF5/FAIR/Piccolo for cached prediction and recipe provenance, and Roberts/Dawood for patient-level optimization/calibration/holdout splitting. |
+| Stage 10 fixed-recipe held-out ensemble inference | `dietterich2000ensemble`, `caruana2004ensemble`, `moshkov2020test`, `fawcett2006roc`, `sokolova2009performance`, `seghier2024dice` | Cite ensemble-method papers for evaluating a selected model library as a fixed ensemble, Moshkov et al. for horizontal/vertical flip test-time augmentation, Fawcett for ROC/AUC reporting, Sokolova/Lapalme for confusion-matrix-derived rates, and Seghier for Dice reporting caveats. The semantic ROI gate and two-stream recipe are repository-specific and are fixed before Stage 10. |
+| Stage 10 inference reporting, uncertainty, and provenance | `efron1979bootstrap`, `wilkinson2016fair`, `piccolo2016tools`, `folk2011hdf5`, `roberts2017crossvalidation`, `dawood2026confounding` | Cite Efron for nonparametric bootstrap confidence intervals, FAIR/Piccolo for run/report provenance and reproducible artifacts, HDF5 for canonical patient-shard access, and Roberts/Dawood for preserving patient-level TEST isolation and cautious interpretation. |
 | Training loss implementation | `khened2021generalized` | Cite Khened et al. as the direct source for the weighted BCE-plus-Dice loss implemented in Stage 8. |
 | Dice reporting and segmentation metric caveats | `seghier2024dice` | Cite when explaining Dice as an overlap metric, when warning that Dice is sensitive to reporting choices, and when justifying transparent metric definitions. |
 | Confounding, leakage, and cautious interpretation in computational pathology | `dawood2026confounding` | Cite for the broader warning that histology models can learn confounded correlational signals. This supports patient-level splitting, provenance validation, and cautious claims. |
@@ -216,6 +218,21 @@ Use these as citation anchors when updating `reports/main.tex`.
   FAIR/Piccolo (`wilkinson2016fair`, `piccolo2016tools`) for the recipe JSON,
   run config, compatibility signature, selected-model metadata, and validation
   provenance.
+- Stage 10 fixed-recipe TEST inference: cite Dietterich
+  (`dietterich2000ensemble`) and Caruana et al. (`caruana2004ensemble`) when
+  framing the final model library as an ensemble evaluated with fixed weights,
+  Moshkov et al. (`moshkov2020test`) for the original/horizontal/vertical
+  flip-averaged prediction path, Fawcett (`fawcett2006roc`) for pixel-level
+  ROC/AUC reporting, Sokolova/Lapalme (`sokolova2009performance`) for
+  confusion-matrix-derived rates, and Seghier (`seghier2024dice`) for Dice and
+  Dice-reporting caveats.
+- Stage 10 final-report provenance and intervals: cite Efron
+  (`efron1979bootstrap`) for patient-bootstrap confidence intervals, HDF5
+  (`folk2011hdf5`) for canonical TEST patient-shard reads, Roberts/Dawood
+  (`roberts2017crossvalidation`, `dawood2026confounding`) for patient-level
+  held-out TEST isolation, and FAIR/Piccolo (`wilkinson2016fair`,
+  `piccolo2016tools`) for copied recipe payloads, checkpoint hashes, run
+  configuration, runtime environment capture, metrics JSON, and reports.
 - Dataset provenance: cite the dataset paper associated with each active
   dataset cohort: CAMELYON16 (`bejnordi2017diagnostic`), CATCH
   (`wilm2022catch`), DiagSet (`koziarski2024diagset`), and HiESD
@@ -363,6 +380,15 @@ Use these as citation anchors when updating `reports/main.tex`.
 - Do not cite test-time augmentation unless the flip-averaged prediction path is
   discussed. Stage 9 averages the original, horizontal-flip, and vertical-flip
   probabilities; it does not perform a larger TTA policy search.
+- Do not describe Stage 10 as optimizing, calibrating, or selecting ensemble
+  weights. It consumes the signed Stage 9 recipe, validates lineage/checkpoint
+  hashes, and evaluates the fixed recipe on TEST rows.
+- Do not treat Stage 10 bootstrap intervals as external validation or as full
+  model uncertainty. They are empirical resampling intervals over the available
+  TEST patients and are only emitted when enough patients are present.
+- Do not conflate Stage 10 pixel-level ROC/AUC with Stage 8/9 AUPRC objectives.
+  The Stage 10 code builds a histogram-based ROC AUC from final probabilities
+  and reports thresholded confusion-matrix metrics separately.
 - Do not cite Reinhard, Ruifrok, Macenko, or Vahadane as if the repository
   exactly reproduces every implementation detail of the original papers. Cite
   them for the normalization/deconvolution families and then describe the actual
@@ -605,6 +631,26 @@ the Stage 8 model metadata sidecars consumed from `ENSEMBLE_OPT_METADATA_DIR`.
 | Decision threshold calibration | Stage 9 sweeps thresholds from 0.05 to 0.95 on calibration patients and selects the threshold maximizing mean patient MCC after ROI gating. | `matthews1975comparison`; threshold sweep granularity is repository-specific |
 | Development holdout recipe check | The optimized semantic weights, spatial weights, ROI threshold, and calibrated decision threshold are evaluated on the holdout validation patients with macro AUPRC, spill, negative-FP, and composite objective summaries. | `saito2015precision`; `matthews1975comparison`; holdout is validation-internal, not final TEST evidence |
 | Recipe and run-config provenance | Stage 9 writes `ENSEMBLE_TWO_STREAM_*.json` and `ensemble_optimizer_run_config.json` with selected model metadata, checkpoint hashes, stream weights, thresholds, calibration metrics, holdout metrics, validation lineage, split fingerprint, and recipe signature. | `wilkinson2016fair`; `piccolo2016tools` |
+
+## Stage 10 Ensemble Inference Notes
+
+Suggested code boundary: `10_inference_ensemble.py`,
+`helpers/ensemble_inference/config.py`, `helpers/ensemble_inference/pipeline.py`,
+`helpers/ensemble_inference/recipe.py`, `helpers/ensemble_inference/data.py`,
+`helpers/ensemble_inference/models.py`, `helpers/ensemble_inference/inference.py`,
+`helpers/ensemble_inference/metrics.py`, and
+`helpers/ensemble_inference/reporting.py`.
+
+| Stage 10 decision | Code behavior to document | Suggested citation |
+| --- | --- | --- |
+| Fixed Stage 9 recipe consumption | Stage 10 loads the `two_stream_spatial_gating` recipe, validates its payload signature, copies it into the output folder, validates checkpoint SHA256 hashes, and does not tune thresholds or weights. | `dietterich2000ensemble`; `caruana2004ensemble`; `wilkinson2016fair`; `piccolo2016tools`; optimization itself belongs to Stage 9 |
+| Fail-closed TEST lineage validation | The pipeline compares recipe validation lineage against observed TEST manifest lineage for master manifest hash, Stage 4 split bundle, runtime-normalization method/backend, and normalization artifact id before inference proceeds. | `wilkinson2016fair`; `roberts2017crossvalidation`; `dawood2026confounding` |
+| Manifest-backed TEST dataset | Stage 10 loads TEST rows from `master_manifest.sqlite`, optionally stages patient shards locally, preserves row order, uses canonical HDF5 patient-shard records, and applies the selected runtime stain-normalization method on the fly. | `folk2011hdf5`; `roberts2017crossvalidation`; `dawood2026confounding`; normalization citations as in Stage 4 |
+| Two-stream gated ensemble inference | Each recipe model is loaded with its recorded architecture/encoder/checkpoint; semantic-stream probabilities define a coarse ROI mask, spatial-stream probabilities are multiplied by that mask, and the Stage 9 decision threshold binarizes the final probability map. | `dietterich2000ensemble`; `caruana2004ensemble`; ROI gating is repository-specific |
+| Flip-averaged TTA at inference | For each model, Stage 10 averages probabilities from the original image, horizontal flip, and vertical flip before weighted stream aggregation. | `moshkov2020test`; this is a three-view flip TTA policy, not a general TTA search |
+| Final metrics and confusion matrix | Stage 10 reports micro pixel-level and macro patient-level Dice, IoU, accuracy, TPR, TNR, precision, FPR, and FNR; it also builds a row-normalized confusion-matrix figure and a histogram-based pixel-level ROC AUC. | `seghier2024dice`; `sokolova2009performance`; `fawcett2006roc` |
+| Patient bootstrap intervals | When at least 20 TEST patients are available, Stage 10 uses 10,000 patient-level bootstrap resamples to report 95% intervals for micro/macro metrics and Rule-6 Dice/negative-clean-rate summaries. | `efron1979bootstrap`; interval policy and 20-patient threshold are repository-specific |
+| Final report and run provenance | Stage 10 writes metrics JSON, markdown/CSV/LaTeX/PDF reports, confusion-matrix PNG, optional worst-Dice visualizations, copied recipe, checkpoint hashes, runtime environment, and sanitized project configuration. | `wilkinson2016fair`; `piccolo2016tools`; `seghier2024dice` for worst-Dice visualization ranking |
 
 ## BibTeX
 
@@ -939,6 +985,18 @@ the Stage 8 model metadata sidecars consumed from `ENSEMBLE_OPT_METADATA_DIR`.
   url = {https://doi.org/10.1371/journal.pone.0118432}
 }
 
+@article{fawcett2006roc,
+  title = {An Introduction to {ROC} Analysis},
+  author = {Fawcett, Tom},
+  journal = {Pattern Recognition Letters},
+  volume = {27},
+  number = {8},
+  pages = {861--874},
+  year = {2006},
+  doi = {10.1016/j.patrec.2005.10.010},
+  url = {https://doi.org/10.1016/j.patrec.2005.10.010}
+}
+
 @article{matthews1975comparison,
   title = {Comparison of the Predicted and Observed Secondary Structure of {T4} Phage Lysozyme},
   author = {Matthews, Brian W.},
@@ -1137,6 +1195,18 @@ the Stage 8 model metadata sidecars consumed from `ENSEMBLE_OPT_METADATA_DIR`.
   year = {2009},
   doi = {10.1016/j.ipm.2009.03.002},
   url = {https://doi.org/10.1016/j.ipm.2009.03.002}
+}
+
+@article{efron1979bootstrap,
+  title = {Bootstrap Methods: Another Look at the Jackknife},
+  author = {Efron, Bradley},
+  journal = {The Annals of Statistics},
+  volume = {7},
+  number = {1},
+  pages = {1--26},
+  year = {1979},
+  doi = {10.1214/aos/1176344552},
+  url = {https://doi.org/10.1214/aos/1176344552}
 }
 
 @article{he2009imbalanced,
