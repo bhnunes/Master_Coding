@@ -83,7 +83,7 @@ class EpochRunConfig:
     gpu_normalizer: torch.nn.Module
     gpu_downscale: torch.nn.Module
     use_artifact_aware_loss: bool = False
-    profile_validation_timing: bool = False
+    profile_timing: bool = False
     run: Any | None = None
 
 
@@ -304,6 +304,7 @@ def run_training_epochs(
                     accumulation_steps=config.accumulation_steps,
                     amp_precision=config.amp_precision,
                     use_artifact_aware_loss=config.use_artifact_aware_loss,
+                    profile_timing=config.profile_timing,
                 ),
             )
         except Exception as error:
@@ -325,7 +326,7 @@ def run_training_epochs(
                     device=config.device,
                     architecture=config.architecture,
                     amp_precision=config.amp_precision,
-                    profile_timing=config.profile_validation_timing,
+                    profile_timing=config.profile_timing,
                 ),
             )
             if val_results is None:

@@ -16,6 +16,7 @@ SINGLE_CHANNEL_COUNT = 1
 FOREGROUND_CHANNEL_INDEX = 1
 SINGLE_CHANNEL_INDEX = 0
 DEFAULT_PROBABILITY_THRESHOLD = 0.5
+MIN_METRIC_BINS = 2
 
 
 class TrainingHealthTracker:
@@ -157,12 +158,12 @@ class AdvancedMetricTracker:
         from_logits: bool = True,
     ) -> None:
         ensure_headless_matplotlib_backend()
-        from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 
         self.device = device
         self.from_logits = from_logits
-        self.auprc = BinaryAveragePrecision(thresholds=metric_bins).to(device)
-        self.auroc = BinaryAUROC(thresholds=metric_bins).to(device)
+        self.metric_bins = int(metric_bins)
+        if self.metric_bins < MIN_METRIC_BINS:
+            raise ValueError("metric_bins must be at least 2.")
 
         if mcc_thresholds is None:
             mcc_thresholds = torch.arange(0.1, 1.0, 0.1)
@@ -173,16 +174,10 @@ class AdvancedMetricTracker:
         self.reset()
 
     def reset(self) -> None:
-        self.auprc.reset()
-        self.auroc.reset()
-        self._pred_pos_at_05 = 0
+        self._positive_hist = torch.zeros(self.metric_bins, dtype=torch.int64, device=self.device)
+        self._negative_hist = torch.zeros(self.metric_bins, dtype=torch.int64, device=self.device)
+        self._pred_pos_at_05 = torch.zeros((), dtype=torch.int64, device=self.device)
         self._total_pixels = 0
-
-        threshold_count = int(self.mcc_thresholds.numel())
-        self._tp = torch.zeros(threshold_count, dtype=torch.int64, device=self.device)
-        self._fp = torch.zeros(threshold_count, dtype=torch.int64, device=self.device)
-        self._tn = torch.zeros(threshold_count, dtype=torch.int64, device=self.device)
-        self._fn = torch.zeros(threshold_count, dtype=torch.int64, device=self.device)
 
     @staticmethod
     def _extract_probs_fg(pred_logits: torch.Tensor) -> torch.Tensor:
@@ -279,17 +274,12 @@ class AdvancedMetricTracker:
         self,
         auprc_tensor: torch.Tensor,
         auroc_tensor: torch.Tensor,
+        mcc_values: torch.Tensor,
         fg_prevalence: float,
         health: TrainingHealthTracker | None,
     ) -> dict[str, float] | None:
         val_auprc = float(auprc_tensor.item())
         val_auroc = float(auroc_tensor.item())
-        mcc_values = self._mcc_from_counts(
-            self._tp.cpu(),
-            self._fp.cpu(),
-            self._tn.cpu(),
-            self._fn.cpu(),
-        )
         if not self._validate_metric_tensor(mcc_values, "MCC*", health):
             return None
 
@@ -330,19 +320,85 @@ class AdvancedMetricTracker:
         denominator = torch.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn) + eps)
         return (numerator / denominator).to(torch.float32)
 
-    def _update_from_flat_probs(self, probabilities: torch.Tensor, targets: torch.Tensor) -> None:
-        self.auprc.update(probabilities, targets)
-        self.auroc.update(probabilities, targets)
-
-        self._pred_pos_at_05 += int((probabilities >= DEFAULT_PROBABILITY_THRESHOLD).sum().item())
+    def _update_score_histograms(self, probabilities: torch.Tensor, targets: torch.Tensor) -> None:
+        probabilities = probabilities.to(device=self.device, dtype=torch.float32).clamp(0.0, 1.0)
+        targets = targets.to(device=self.device, dtype=torch.bool)
+        bin_indices = torch.clamp(
+            (probabilities * self.metric_bins).to(torch.int64),
+            max=self.metric_bins - 1,
+        )
+        combined_indices = bin_indices + targets.to(torch.int64) * self.metric_bins
+        counts = torch.bincount(combined_indices, minlength=self.metric_bins * 2)
+        self._negative_hist += counts[: self.metric_bins]
+        self._positive_hist += counts[self.metric_bins :]
+        self._pred_pos_at_05 += torch.count_nonzero(probabilities >= DEFAULT_PROBABILITY_THRESHOLD)
         self._total_pixels += int(probabilities.numel())
 
-        preds_k = probabilities.unsqueeze(0) >= self.mcc_thresholds.unsqueeze(1)
-        targets_k = targets.unsqueeze(0)
-        self._tp += (preds_k & targets_k).sum(dim=1)
-        self._fp += (preds_k & ~targets_k).sum(dim=1)
-        self._tn += (~preds_k & ~targets_k).sum(dim=1)
-        self._fn += (~preds_k & targets_k).sum(dim=1)
+    def _counts_at_or_above_thresholds(self) -> tuple[torch.Tensor, torch.Tensor]:
+        positive_at_or_above = torch.flip(
+            torch.cumsum(torch.flip(self._positive_hist, dims=(0,)), dim=0),
+            dims=(0,),
+        )
+        negative_at_or_above = torch.flip(
+            torch.cumsum(torch.flip(self._negative_hist, dims=(0,)), dim=0),
+            dims=(0,),
+        )
+        threshold_bins = torch.clamp(
+            torch.floor(self.mcc_thresholds * self.metric_bins).to(torch.int64),
+            min=0,
+            max=self.metric_bins - 1,
+        )
+        return positive_at_or_above[threshold_bins], negative_at_or_above[threshold_bins]
+
+    def _compute_mcc_values_from_histograms(self) -> torch.Tensor:
+        tp, fp = self._counts_at_or_above_thresholds()
+        total_positive = torch.sum(self._positive_hist)
+        total_negative = torch.sum(self._negative_hist)
+        fn = total_positive - tp
+        tn = total_negative - fp
+        return self._mcc_from_counts(tp, fp, tn, fn)
+
+    def _compute_auroc_from_histograms(self) -> torch.Tensor:
+        total_positive = torch.sum(self._positive_hist)
+        total_negative = torch.sum(self._negative_hist)
+        if int(total_positive.item()) == 0 or int(total_negative.item()) == 0:
+            return torch.tensor(float("nan"), device=self.device)
+
+        positive_desc = torch.flip(self._positive_hist, dims=(0,)).to(torch.float64)
+        negative_desc = torch.flip(self._negative_hist, dims=(0,)).to(torch.float64)
+        true_positive_rate = torch.cumsum(positive_desc, dim=0) / total_positive.to(torch.float64)
+        false_positive_rate = torch.cumsum(negative_desc, dim=0) / total_negative.to(torch.float64)
+        zero = torch.zeros(1, dtype=torch.float64, device=self.device)
+        curve_tpr = torch.cat((zero, true_positive_rate))
+        curve_fpr = torch.cat((zero, false_positive_rate))
+        return torch.trapezoid(curve_tpr, curve_fpr).to(torch.float32)
+
+    def _compute_auprc_from_histograms(self) -> torch.Tensor:
+        total_positive = torch.sum(self._positive_hist)
+        if int(total_positive.item()) == 0:
+            return torch.tensor(float("nan"), device=self.device)
+
+        positive_desc = torch.flip(self._positive_hist, dims=(0,)).to(torch.float64)
+        negative_desc = torch.flip(self._negative_hist, dims=(0,)).to(torch.float64)
+        true_positive = torch.cumsum(positive_desc, dim=0)
+        false_positive = torch.cumsum(negative_desc, dim=0)
+        precision = true_positive / torch.clamp(true_positive + false_positive, min=1.0)
+        recall = true_positive / total_positive.to(torch.float64)
+        previous_recall = torch.cat(
+            (torch.zeros(1, dtype=torch.float64, device=self.device), recall[:-1])
+        )
+        recall_delta = recall - previous_recall
+        return torch.sum(recall_delta * precision).to(torch.float32)
+
+    def _compute_threshold_metrics(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return (
+            self._compute_auprc_from_histograms(),
+            self._compute_auroc_from_histograms(),
+            self._compute_mcc_values_from_histograms(),
+        )
+
+    def _update_from_flat_probs(self, probabilities: torch.Tensor, targets: torch.Tensor) -> None:
+        self._update_score_histograms(probabilities, targets)
 
     @torch.no_grad()
     def update(self, pred_logits: torch.Tensor, target: torch.Tensor) -> None:
@@ -364,15 +420,23 @@ class AdvancedMetricTracker:
             self.reset()
             return None
 
-        fg_prevalence = self._pred_pos_at_05 / float(self._total_pixels)
+        fg_prevalence = int(self._pred_pos_at_05.detach().cpu().item()) / float(self._total_pixels)
         if not self._check_fg_prevalence(fg_prevalence, health):
             return None
 
-        auprc_tensor = self.auprc.compute().detach().cpu()
-        auroc_tensor = self.auroc.compute().detach().cpu()
+        auprc_tensor, auroc_tensor, mcc_values = self._compute_threshold_metrics()
+        auprc_tensor = auprc_tensor.detach().cpu()
+        auroc_tensor = auroc_tensor.detach().cpu()
+        mcc_values = mcc_values.detach().cpu()
         if not self._validate_metric_tensor(auprc_tensor, "AUPRC", health):
             return None
         if not self._validate_metric_tensor(auroc_tensor, "AUROC", health):
             return None
 
-        return self._build_final_metrics(auprc_tensor, auroc_tensor, fg_prevalence, health)
+        return self._build_final_metrics(
+            auprc_tensor,
+            auroc_tensor,
+            mcc_values,
+            fg_prevalence,
+            health,
+        )

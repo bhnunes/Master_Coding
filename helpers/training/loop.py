@@ -41,6 +41,7 @@ class TrainEpochConfig:
     accumulation_steps: int
     amp_precision: str
     use_artifact_aware_loss: bool = False
+    profile_timing: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,16 +68,36 @@ class ValidationEpochRuntime:
 
 
 @dataclass
-class _ValidationTimingStats:
+class _EpochTimingStats:
     started_at: float
     dataloader_wait_seconds: float = 0.0
     prepare_seconds: float = 0.0
     forward_loss_seconds: float = 0.0
+    backward_seconds: float = 0.0
+    optimizer_step_seconds: float = 0.0
     metric_update_seconds: float = 0.0
     finalize_seconds: float = 0.0
     yielded_batches: int = 0
     processed_batches: int = 0
     processed_samples: int = 0
+
+
+@dataclass(frozen=True)
+class _TrainBatchResult:
+    real_loss: float
+    batch_size: int
+    current_accumulation_steps: int
+
+
+@dataclass(frozen=True)
+class _TrainBatchContext:
+    model: torch.nn.Module
+    optimizer: Any
+    scaler: Any | None
+    amp_dtype: torch.dtype
+    config: TrainEpochConfig
+    runtime: TrainEpochRuntime
+    timing: _EpochTimingStats | None
 
 
 def _unpack_batch(
@@ -243,9 +264,27 @@ def _prepare_validation_batch(
     return images, masks, batch_size
 
 
-def _synchronize_validation_timing(config: ValidationEpochConfig) -> None:
-    if config.device.type == "cuda" and torch.cuda.is_available():
-        torch.cuda.synchronize(config.device)
+def _synchronize_timing(device: torch.device) -> None:
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+
+
+def _time_prepare_train_batch(
+    batch_data: Any,
+    *,
+    config: TrainEpochConfig,
+    runtime: TrainEpochRuntime,
+    timing: _EpochTimingStats | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] | None:
+    if timing is None:
+        return _prepare_train_batch(batch_data, config=config, runtime=runtime)
+
+    _synchronize_timing(config.device)
+    started_at = time.perf_counter()
+    prepared = _prepare_train_batch(batch_data, config=config, runtime=runtime)
+    _synchronize_timing(config.device)
+    timing.prepare_seconds += time.perf_counter() - started_at
+    return prepared
 
 
 def _time_prepare_validation_batch(
@@ -253,17 +292,51 @@ def _time_prepare_validation_batch(
     *,
     config: ValidationEpochConfig,
     runtime: ValidationEpochRuntime,
-    timing: _ValidationTimingStats | None,
+    timing: _EpochTimingStats | None,
 ) -> tuple[torch.Tensor, torch.Tensor, int] | None:
     if timing is None:
         return _prepare_validation_batch(batch_data, config=config, runtime=runtime)
 
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     started_at = time.perf_counter()
     prepared = _prepare_validation_batch(batch_data, config=config, runtime=runtime)
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     timing.prepare_seconds += time.perf_counter() - started_at
     return prepared
+
+
+def _time_compute_train_loss(
+    images: torch.Tensor,
+    masks: torch.Tensor,
+    artifact_covariates: torch.Tensor | None,
+    *,
+    context: _TrainBatchContext,
+) -> torch.Tensor | None:
+    if context.timing is None:
+        return _compute_train_loss(
+            context.model,
+            images,
+            masks,
+            artifact_covariates,
+            amp_dtype=context.amp_dtype,
+            config=context.config,
+            runtime=context.runtime,
+        )
+
+    _synchronize_timing(context.config.device)
+    started_at = time.perf_counter()
+    loss = _compute_train_loss(
+        context.model,
+        images,
+        masks,
+        artifact_covariates,
+        amp_dtype=context.amp_dtype,
+        config=context.config,
+        runtime=context.runtime,
+    )
+    _synchronize_timing(context.config.device)
+    context.timing.forward_loss_seconds += time.perf_counter() - started_at
+    return loss
 
 
 def _compute_validation_outputs(
@@ -300,7 +373,7 @@ def _time_compute_validation_outputs(
     amp_dtype: torch.dtype,
     config: ValidationEpochConfig,
     runtime: ValidationEpochRuntime,
-    timing: _ValidationTimingStats | None,
+    timing: _EpochTimingStats | None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
     if timing is None:
         return _compute_validation_outputs(
@@ -312,7 +385,7 @@ def _time_compute_validation_outputs(
             runtime=runtime,
         )
 
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     started_at = time.perf_counter()
     outputs = _compute_validation_outputs(
         model,
@@ -322,7 +395,7 @@ def _time_compute_validation_outputs(
         config=config,
         runtime=runtime,
     )
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     timing.forward_loss_seconds += time.perf_counter() - started_at
     return outputs
 
@@ -334,20 +407,129 @@ def _time_validation_metric_update(
     loss: torch.Tensor,
     tracker: AdvancedMetricTracker,
     config: ValidationEpochConfig,
-    timing: _ValidationTimingStats | None,
+    timing: _EpochTimingStats | None,
 ) -> float:
     if timing is None:
         batch_loss = loss.item()
         tracker.update(outputs, masks)
         return float(batch_loss)
 
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     started_at = time.perf_counter()
     batch_loss = loss.item()
     tracker.update(outputs, masks)
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     timing.metric_update_seconds += time.perf_counter() - started_at
     return float(batch_loss)
+
+
+def _time_backward_loss(
+    loss: torch.Tensor,
+    scaler: Any | None,
+    *,
+    config: TrainEpochConfig,
+    timing: _EpochTimingStats | None,
+) -> None:
+    if timing is None:
+        _backward_loss(loss, scaler)
+        return
+
+    _synchronize_timing(config.device)
+    started_at = time.perf_counter()
+    _backward_loss(loss, scaler)
+    _synchronize_timing(config.device)
+    timing.backward_seconds += time.perf_counter() - started_at
+
+
+def _time_maybe_step_optimizer(
+    *,
+    optimizer: Any,
+    scaler: Any | None,
+    current_accumulation_steps: int,
+    accumulation_steps: int,
+    config: TrainEpochConfig,
+    timing: _EpochTimingStats | None,
+) -> int:
+    should_step = current_accumulation_steps % accumulation_steps == 0
+    if timing is None or not should_step:
+        return _maybe_step_optimizer(
+            optimizer=optimizer,
+            scaler=scaler,
+            current_accumulation_steps=current_accumulation_steps,
+            accumulation_steps=accumulation_steps,
+        )
+
+    _synchronize_timing(config.device)
+    started_at = time.perf_counter()
+    updated_accumulation_steps = _maybe_step_optimizer(
+        optimizer=optimizer,
+        scaler=scaler,
+        current_accumulation_steps=current_accumulation_steps,
+        accumulation_steps=accumulation_steps,
+    )
+    _synchronize_timing(config.device)
+    timing.optimizer_step_seconds += time.perf_counter() - started_at
+    return updated_accumulation_steps
+
+
+def _process_train_batch(
+    batch_data: Any,
+    *,
+    context: _TrainBatchContext,
+    current_accumulation_steps: int,
+) -> _TrainBatchResult | None:
+    if batch_data is None:
+        context.runtime.health.train_skip("dataloader_none_batch")
+        return None
+    prepared = _time_prepare_train_batch(
+        batch_data,
+        config=context.config,
+        runtime=context.runtime,
+        timing=context.timing,
+    )
+    if prepared is None:
+        return None
+    images, masks, artifact_covariates = prepared
+    loss = _time_compute_train_loss(
+        images,
+        masks,
+        artifact_covariates,
+        context=context,
+    )
+    if loss is None:
+        return None
+
+    if not torch.isfinite(loss):
+        context.runtime.health.train_naninf_loss()
+        context.runtime.health.train_skip("naninf_loss")
+        return None
+
+    loss = loss / context.config.accumulation_steps
+    _time_backward_loss(
+        loss,
+        context.scaler,
+        config=context.config,
+        timing=context.timing,
+    )
+    real_loss = loss.item() * context.config.accumulation_steps
+    batch_size = int(images.shape[0])
+    current_accumulation_steps += 1
+    current_accumulation_steps = _time_maybe_step_optimizer(
+        optimizer=context.optimizer,
+        scaler=context.scaler,
+        current_accumulation_steps=current_accumulation_steps,
+        accumulation_steps=context.config.accumulation_steps,
+        config=context.config,
+        timing=context.timing,
+    )
+    if context.timing is not None:
+        context.timing.processed_batches += 1
+        context.timing.processed_samples += batch_size
+    return _TrainBatchResult(
+        real_loss=real_loss,
+        batch_size=batch_size,
+        current_accumulation_steps=current_accumulation_steps,
+    )
 
 
 def _process_validation_batch(
@@ -358,7 +540,7 @@ def _process_validation_batch(
     config: ValidationEpochConfig,
     runtime: ValidationEpochRuntime,
     tracker: AdvancedMetricTracker,
-    timing: _ValidationTimingStats | None,
+    timing: _EpochTimingStats | None,
 ) -> tuple[float, int] | None:
     if batch_data is None:
         runtime.health.val_skip("dataloader_none_batch")
@@ -474,7 +656,7 @@ def _finalize_validation_epoch_with_timing(
     running_loss: float,
     tracker: AdvancedMetricTracker,
     config: ValidationEpochConfig,
-    timing: _ValidationTimingStats | None,
+    timing: _EpochTimingStats | None,
 ) -> tuple[float, dict[str, float] | None]:
     if timing is None:
         return _finalize_validation_epoch(
@@ -484,7 +666,7 @@ def _finalize_validation_epoch_with_timing(
             tracker=tracker,
         )
 
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     started_at = time.perf_counter()
     result = _finalize_validation_epoch(
         health=health,
@@ -492,7 +674,7 @@ def _finalize_validation_epoch_with_timing(
         running_loss=running_loss,
         tracker=tracker,
     )
-    _synchronize_validation_timing(config)
+    _synchronize_timing(config.device)
     timing.finalize_seconds += time.perf_counter() - started_at
     _print_validation_timing(timing)
     return result
@@ -503,7 +685,35 @@ def _format_timing_component(name: str, seconds: float, total_seconds: float) ->
     return f"{name}={seconds:.2f}s ({pct:.1f}%)"
 
 
-def _print_validation_timing(timing: _ValidationTimingStats) -> None:
+def _print_train_timing(timing: _EpochTimingStats) -> None:
+    total_seconds = max(time.perf_counter() - timing.started_at, 1e-9)
+    measured_seconds = (
+        timing.dataloader_wait_seconds
+        + timing.prepare_seconds
+        + timing.forward_loss_seconds
+        + timing.backward_seconds
+        + timing.optimizer_step_seconds
+    )
+    other_seconds = max(total_seconds - measured_seconds, 0.0)
+    samples_per_second = timing.processed_samples / total_seconds
+    components = [
+        _format_timing_component("wait", timing.dataloader_wait_seconds, total_seconds),
+        _format_timing_component("prepare", timing.prepare_seconds, total_seconds),
+        _format_timing_component("forward_loss", timing.forward_loss_seconds, total_seconds),
+        _format_timing_component("backward", timing.backward_seconds, total_seconds),
+        _format_timing_component("optimizer_step", timing.optimizer_step_seconds, total_seconds),
+        _format_timing_component("other", other_seconds, total_seconds),
+    ]
+    print(
+        "[Train timing] "
+        f"total={total_seconds:.2f}s "
+        f"samples={timing.processed_samples} "
+        f"batches={timing.processed_batches}/{timing.yielded_batches} "
+        f"samples_per_second={samples_per_second:.2f} | " + " | ".join(components)
+    )
+
+
+def _print_validation_timing(timing: _EpochTimingStats) -> None:
     total_seconds = max(time.perf_counter() - timing.started_at, 1e-9)
     measured_seconds = (
         timing.dataloader_wait_seconds
@@ -556,6 +766,16 @@ def train_epoch(
     optimizer.zero_grad(set_to_none=True)
     current_accumulation_steps = 0
     total_batches = len(dataloader) if isinstance(dataloader, Sized) else None
+    timing = _EpochTimingStats(time.perf_counter()) if config.profile_timing else None
+    batch_context = _TrainBatchContext(
+        model=model,
+        optimizer=optimizer,
+        scaler=scaler,
+        amp_dtype=amp_dtype,
+        config=config,
+        runtime=runtime,
+        timing=timing,
+    )
 
     pbar = tqdm(
         enumerate(dataloader),
@@ -568,51 +788,34 @@ def train_epoch(
         file=_progress_file(),
     )
 
+    last_batch_finished_at = time.perf_counter()
     for _, batch_data in pbar:
-        if batch_data is None:
-            runtime.health.train_skip("dataloader_none_batch")
-            continue
-        prepared = _prepare_train_batch(
-            batch_data,
-            config=config,
-            runtime=runtime,
-        )
-        if prepared is None:
-            continue
-        images, masks, artifact_covariates = prepared
-        loss = _compute_train_loss(
-            model,
-            images,
-            masks,
-            artifact_covariates,
-            amp_dtype=amp_dtype,
-            config=config,
-            runtime=runtime,
-        )
-        if loss is None:
-            continue
+        if timing is not None:
+            timing.yielded_batches += 1
+            batch_ready_at = time.perf_counter()
+            timing.dataloader_wait_seconds += batch_ready_at - last_batch_finished_at
+        try:
+            processed = _process_train_batch(
+                batch_data,
+                context=batch_context,
+                current_accumulation_steps=current_accumulation_steps,
+            )
+            if processed is None:
+                continue
+            tracker_loss.update(
+                processed.real_loss * processed.batch_size,
+                processed.batch_size,
+            )
+            current_accumulation_steps = processed.current_accumulation_steps
+            if current_accumulation_steps == 0:
+                pbar.set_postfix(loss=f"{tracker_loss.get_average():.4f}")
+        finally:
+            if timing is not None:
+                _synchronize_timing(config.device)
+                last_batch_finished_at = time.perf_counter()
 
-        if not torch.isfinite(loss):
-            runtime.health.train_naninf_loss()
-            runtime.health.train_skip("naninf_loss")
-            continue
-
-        loss = loss / config.accumulation_steps
-        _backward_loss(loss, scaler)
-
-        real_loss = loss.item() * config.accumulation_steps
-        tracker_loss.update(real_loss * images.shape[0], images.shape[0])
-        current_accumulation_steps += 1
-
-        current_accumulation_steps = _maybe_step_optimizer(
-            optimizer=optimizer,
-            scaler=scaler,
-            current_accumulation_steps=current_accumulation_steps,
-            accumulation_steps=config.accumulation_steps,
-        )
-        if current_accumulation_steps == 0:
-            pbar.set_postfix(loss=f"{tracker_loss.get_average():.4f}")
-
+    if timing is not None:
+        _print_train_timing(timing)
     return tracker_loss.get_average(), precision_log
 
 
@@ -640,7 +843,7 @@ def validate_epoch(
     tracker = AdvancedMetricTracker(device=config.device, metric_bins=2048)
     running_loss = 0.0
     num_samples_processed = 0
-    timing = _ValidationTimingStats(time.perf_counter()) if config.profile_timing else None
+    timing = _EpochTimingStats(time.perf_counter()) if config.profile_timing else None
 
     pbar = tqdm(
         dataloader,
@@ -684,7 +887,7 @@ def validate_epoch(
                 )
             finally:
                 if timing is not None:
-                    _synchronize_validation_timing(config)
+                    _synchronize_timing(config.device)
                     last_batch_finished_at = time.perf_counter()
 
     try:

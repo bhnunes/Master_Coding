@@ -124,6 +124,45 @@ def test_train_epoch_resolves_precision_once_per_epoch(monkeypatch: pytest.Monke
     assert calls == [("FPN", "fp32")]
 
 
+def test_train_epoch_can_emit_timing_summary(capsys: pytest.CaptureFixture[str]) -> None:
+    loss_fn = _TrackingLoss()
+    model = _ConstantModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    dataloader = [
+        (
+            torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+            torch.zeros((1, 2, 2), dtype=torch.long),
+        )
+    ]
+
+    train_epoch(
+        model=model,
+        optimizer=optimizer,
+        dataloader=dataloader,
+        runtime=TrainEpochRuntime(
+            loss_fn=loss_fn,
+            health=TrainingHealthTracker(name="train"),
+            gpu_normalizer=torch.nn.Identity(),
+            gpu_downscale=torch.nn.Identity(),
+        ),
+        config=TrainEpochConfig(
+            device=torch.device("cpu"),
+            current_epoch=3,
+            architecture="FPN",
+            accumulation_steps=1,
+            amp_precision="fp32",
+            profile_timing=True,
+        ),
+    )
+
+    captured = capsys.readouterr()
+    assert "[Train timing]" in captured.out
+    assert "wait=" in captured.out
+    assert "forward_loss=" in captured.out
+    assert "backward=" in captured.out
+    assert "optimizer_step=" in captured.out
+
+
 def test_validate_epoch_disables_ohem_and_clears_epoch() -> None:
     loss_fn = _TrackingLoss()
     model = _ConstantModel()

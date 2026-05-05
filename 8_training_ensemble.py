@@ -457,7 +457,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
             gpu_normalizer=gpu_normalizer,
             gpu_downscale=gpu_downscale,
             use_artifact_aware_loss=use_artifact_aware_loss,
-            profile_validation_timing=training_config.profile_validation_timing,
+            profile_timing=training_config.profile_timing,
             run=run,
         ),
     )

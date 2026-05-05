@@ -16,6 +16,8 @@ WEIGHTED_SCORE = 3.0
 COLLAPSE_PATIENCE = 2
 PROBABILITY_THRESHOLD = 0.5
 LOGIT_PROBABILITY_CUTOFF = 0.5
+HISTOGRAM_TEST_BINS = 8
+HISTOGRAM_TEST_CLASS_PIXELS = 2
 
 
 def test_advanced_metric_tracker_replaces_colab_inline_backend(
@@ -186,7 +188,29 @@ def test_advanced_metric_tracker_marks_invalid_metrics(monkeypatch: pytest.Monke
         torch.tensor([[[0.9, 0.1], [0.8, 0.2]]], dtype=torch.float32),
         torch.tensor([[[1, 0], [1, 0]]], dtype=torch.int64),
     )
-    monkeypatch.setattr(tracker.auprc, "compute", lambda: torch.tensor(float("nan")))
+    monkeypatch.setattr(
+        tracker,
+        "_compute_threshold_metrics",
+        lambda: (
+            torch.tensor(float("nan")),
+            torch.tensor(1.0),
+            torch.tensor([1.0]),
+        ),
+    )
 
     assert tracker.compute_and_reset(health=health) is None
     assert health.run["val_invalid_metric_epochs"] == 1
+
+
+def test_advanced_metric_tracker_uses_fixed_size_histograms() -> None:
+    tracker = AdvancedMetricTracker(device=torch.device("cpu"), metric_bins=HISTOGRAM_TEST_BINS)
+
+    tracker.update_from_probs_fg(
+        torch.tensor([[[0.95, 0.75], [0.25, 0.05]]], dtype=torch.float32),
+        torch.tensor([[[1, 1], [0, 0]]], dtype=torch.int64),
+    )
+
+    assert int(tracker._positive_hist.sum().item()) == HISTOGRAM_TEST_CLASS_PIXELS
+    assert int(tracker._negative_hist.sum().item()) == HISTOGRAM_TEST_CLASS_PIXELS
+    assert tracker._positive_hist.numel() == HISTOGRAM_TEST_BINS
+    assert tracker._negative_hist.numel() == HISTOGRAM_TEST_BINS

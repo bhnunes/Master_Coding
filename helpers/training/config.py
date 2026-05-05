@@ -127,7 +127,7 @@ class TrainingEnsembleConfig:
     ohem_start_epoch: int
     ohem_ratio: float
     ohem_min_kept: int
-    profile_validation_timing: bool
+    profile_timing: bool
     architecture: str
     encoder: str
     resume_checkpoint: Path | None
@@ -279,8 +279,8 @@ def load_training_ensemble_config(
         ohem_start_epoch=ohem_start_epoch,
         ohem_ratio=ohem_ratio,
         ohem_min_kept=ohem_min_kept,
-        profile_validation_timing=_parse_bool(
-            values.get("TRAINING_PROFILE_VALIDATION_TIMING"),
+        profile_timing=_parse_bool(
+            values.get("PROFILE_TIMING"),
             default=False,
         ),
         architecture=architecture,
