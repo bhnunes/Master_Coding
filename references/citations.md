@@ -64,6 +64,8 @@ because they still support the training-augmentation section.
 | Stage 6 embedding-based smart sampling | `campanella2025clinical`, `oquab2024dinov2`, `he2009imbalanced` | Cite Campanella et al. for the clinical benchmarking context around public self-supervised pathology foundation models, Oquab et al. for DINOv2-style self-supervised visual features, and He/Garcia for the class-imbalance rationale behind protecting positive rows before sampling. |
 | Stage 6 stability, clustering, and optional GIST-style selection | `hubert1985comparing`, `sculley2010webscale`, `fahrbach2025gist` | Cite Hubert and Arabie for the adjusted Rand index stability score, Sculley for MiniBatchKMeans, and Fahrbach et al. for GIST. The repository's adaptive budget, cluster-balanced order, and large-pool landmark preselection are implementation-specific. |
 | Stage 6 compact TRAIN_SELECTED storage and sampling provenance | `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools` | Cite HDF5 for compact selected-TRAIN shards and FAIR/Piccolo for preserving sidecars, run configuration, row mappings, summary JSON, and manifest-backed sampling decisions. |
+| Stage 7 learning-rate and loss-weight screening | `smith2017cyclical`, `mckay1979comparison`, `khened2021generalized`, `loshchilov2019decoupled` | Cite Smith for the learning-rate range-test idea, McKay et al. for Latin-hypercube sampling of loss weights, Khened et al. for the weighted BCE-plus-Dice loss family, and AdamW for the optimizer. The repository's median-minimum-loss ranking is a screening heuristic. |
+| Stage 7 runtime, precision, and data-provenance controls | `micikevicius2018mixed`, `he2009imbalanced`, `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools` | Cite mixed-precision training only when AMP is enabled or discussed, He/Garcia for weighted sampling under class imbalance, HDF5 for compact TRAIN_SELECTED reads, and FAIR/Piccolo for run configuration, runtime environment, and provenance sidecars. |
 | Training loss implementation | `khened2021generalized` | Cite Khened et al. as the direct source for the weighted BCE-plus-Dice loss implemented in Stage 8. |
 | Dice reporting and segmentation metric caveats | `seghier2024dice` | Cite when explaining Dice as an overlap metric, when warning that Dice is sensitive to reporting choices, and when justifying transparent metric definitions. |
 | Confounding, leakage, and cautious interpretation in computational pathology | `dawood2026confounding` | Cite for the broader warning that histology models can learn confounded correlational signals. This supports patient-level splitting, provenance validation, and cautious claims. |
@@ -144,6 +146,24 @@ Use these as citation anchors when updating `reports/main.tex`.
   compact HDF5 shards and FAIR/Piccolo (`wilkinson2016fair`,
   `piccolo2016tools`) for sidecars, row mappings, summary JSON, run
   configuration, and manifest-backed row-state updates.
+- Stage 7 LR finder: cite Smith (`smith2017cyclical`) for the learning-rate
+  range-test rationale, McKay et al. (`mckay1979comparison`) for
+  Latin-hypercube sampling over the loss-weight space, Khened et al.
+  (`khened2021generalized`) for the weighted BCE-plus-Dice loss being screened,
+  and Loshchilov/Hutter (`loshchilov2019decoupled`) for AdamW.
+- Stage 7 runtime controls: cite Micikevicius et al.
+  (`micikevicius2018mixed`) only when discussing enabled mixed precision or AMP
+  configuration; the current LR-finder default is `fp32`. Cite He/Garcia
+  (`he2009imbalanced`) for the inverse-frequency `WeightedRandomSampler`, and
+  cite FAIR/Piccolo (`wilkinson2016fair`, `piccolo2016tools`) for the LR-finder
+  run config, environment capture, summary CSVs, plots, and LaTeX/PDF report.
+- Stage 7 compact and normalization provenance: cite HDF5 (`folk2011hdf5`) for
+  compact TRAIN_SELECTED storage when used, and reuse the Stage 4 normalization
+  citations for the selected runtime-normalization method: Reinhard
+  (`reinhard2001color`), Ruifrok (`ruifrok2001quantification`), Macenko
+  (`macenko2009method`), Vahadane (`vahadane2016structure`), plus
+  Tellez/Duenweg (`tellez2019augmentation`, `duenweg2023scanner`) for
+  stain/scanner variability motivation.
 - Dataset provenance: cite the dataset paper associated with each active
   dataset cohort: CAMELYON16 (`bejnordi2017diagnostic`), CATCH
   (`wilm2022catch`), DiagSet (`koziarski2024diagset`), and HiESD
@@ -238,6 +258,23 @@ Use these as citation anchors when updating `reports/main.tex`.
 - Do not describe compact `TRAIN_SELECTED` storage as a new validation or test
   dataset. It is a TRAIN-only I/O artifact derived from Stage 6 selected rows;
   validation and test remain tied to canonical Phase 2 patient shards.
+- Do not present Stage 7 outputs as final model performance, final model
+  selection, or validation/test evidence. Stage 7 runs repeated training-range
+  probes on TRAIN or TRAIN_SELECTED rows and records validation-split provenance,
+  but the ranking criterion is median minimum smoothed training loss.
+- Do not describe the Stage 7 exponential LR sweep as a full cyclical learning
+  rate schedule. Smith supports the LR range-test idea; the repository's start
+  LR, end LR, smoothing, divergence stop, and partial-history behavior are local
+  implementation choices.
+- Do not claim Latin-hypercube sampling optimizes the BCE/Dice weights. McKay et
+  al. support stratified space-filling sampling; the selected bounds and
+  number of samples are repository configuration.
+- Do not cite mixed-precision training when Stage 7 is run with the default
+  `LR_FINDER_AMP_PRECISION=fp32`, except to explain why AMP was available but
+  disabled for stability.
+- Do not imply compact TRAIN_SELECTED changes validation or test semantics in
+  Stage 7. Compact storage can remap the training rows only; validation
+  provenance remains canonical.
 - Do not cite Reinhard, Ruifrok, Macenko, or Vahadane as if the repository
   exactly reproduces every implementation detail of the original papers. Cite
   them for the normalization/deconvolution families and then describe the actual
@@ -391,6 +428,28 @@ Suggested code boundary: `6_smart_sampler.py`, `helpers/smart_sampling/config.py
 | Compact TRAIN_SELECTED artifact | When enabled, Stage 6 builds compact HDF5 shards containing only selected TRAIN rows, validates filename/label/patient parity against the canonical source rows, writes `index.sqlite` and `summary.json`, and publishes the completed artifact for Stage 7/8 TRAIN reads. | `folk2011hdf5`; `wilkinson2016fair` |
 | Disk-constrained staging controls | Input staging, sidecar staging, local cache size, compact-build scratch path, and cleanup flags are operational controls for storage pressure. They should be reported for reproducibility when used, but they are not independent scientific-method citations. | `piccolo2016tools` for reproducibility reporting only |
 
+## Stage 7 LR Finder Notes
+
+Suggested code boundary: `7_lr_finder.py`, `helpers/lr_finder/config.py`,
+`helpers/lr_finder/search_space.py`, `helpers/lr_finder/data.py`,
+`helpers/lr_finder/runner.py`, `helpers/lr_finder/analysis.py`,
+`helpers/lr_finder/pipeline.py`, `helpers/lr_finder/reporting.py`,
+`helpers/training/losses.py`, `helpers/training/compact_train_selected.py`,
+and `helpers/training/stain_normalization.py`.
+
+| Stage 7 decision | Code behavior to document | Suggested citation |
+| --- | --- | --- |
+| Registry-bounded architecture screening | Stage 7 builds model plans from the approved training-model registry and can filter architectures, but it does not open arbitrary model choices at runtime. | Cite architecture papers separately only when describing the actual model families; registry gating itself is repository-specific and mainly a reproducibility control (`piccolo2016tools`). |
+| Latin-hypercube loss-weight search | The stage samples `alpha`, `beta`, and `gamma` for the BCE/background-Dice/foreground-Dice hybrid loss with a fixed-seed Latin-hypercube design over configured bounds. | `mckay1979comparison`; `khened2021generalized` |
+| Direct exponential LR range test | For each architecture, encoder, loss-weight sample, and repeat, Stage 7 initializes AdamW at `LR_FINDER_OPTIMIZER_START_LR`, exponentially increases LR to `LR_FINDER_END_LR`, smooths the loss, stops on divergence or non-finite loss, and records partial history. | `smith2017cyclical`; `loshchilov2019decoupled`; the exact smoothing and divergence rules are repository-specific |
+| Repeated screening and ranking criterion | The same sampled loss configuration is repeated with deterministic seed offsets, and valid repeats are summarized by the median of the minimum smoothed loss after trimming early/late curve points. | `smith2017cyclical`; repeated-median ranking is a local screening heuristic, not final validation evidence |
+| Pretrained-state reuse across loss configurations | For each architecture/encoder pair, Stage 7 loads the pretrained model once, snapshots its initial state to CPU, and reloads that same state for every loss sample and repeat. | `piccolo2016tools` for reproducible screening discipline; exact state-snapshot implementation is repository-specific |
+| Weighted sampling under class imbalance | Stage 7 computes inverse class-frequency sample weights from the selected training dataset and uses PyTorch `WeightedRandomSampler` with replacement for the LR-range batches. | `he2009imbalanced`; sampler implementation is library-specific |
+| Smart-sampling and compact TRAIN_SELECTED consumption | If smart sampling is enabled, Stage 7 queries only Stage 6 selected TRAIN rows; if compact storage is enabled, it remaps those rows to compact TRAIN_SELECTED HDF5 shards while keeping validation provenance canonical. | `folk2011hdf5`; `wilkinson2016fair`; see Stage 6 notes for compact artifact generation |
+| Runtime stain normalization during screening | Stage 7 constructs the dataset with the selected runtime-normalization method and records the active method/backend in provenance; MACENKO/VAHADANE may still estimate per-patch source stain information at runtime. | `tellez2019augmentation`; `duenweg2023scanner`; method-specific citations `reinhard2001color`, `ruifrok2001quantification`, `macenko2009method`, `vahadane2016structure` |
+| Precision and CUDA-OOM controls | The LR finder supports AMP precision choices, defaults to `fp32`, retries CUDA OOM repeats with smaller effective batch sizes, and reports the effective batch size. | `micikevicius2018mixed` only if AMP is enabled/discussed; OOM retry is repository-specific engineering |
+| Reproducibility outputs and reporting | Stage 7 writes `LHS_SAMPLES.json`, `SUMMARY_ALL.csv`, per-architecture summaries, LR/loss plots, `lr_finder_run_config.json`, runtime environment metadata, and a LaTeX/PDF report. | `wilkinson2016fair`; `piccolo2016tools` |
+
 ## BibTeX
 
 ```bibtex
@@ -475,6 +534,44 @@ Suggested code boundary: `6_smart_sampler.py`, `helpers/smart_sampling/config.py
   year = {2021},
   doi = {10.1038/s41598-021-90444-8},
   url = {https://doi.org/10.1038/s41598-021-90444-8}
+}
+
+@inproceedings{smith2017cyclical,
+  title = {Cyclical Learning Rates for Training Neural Networks},
+  author = {Smith, Leslie N.},
+  booktitle = {2017 IEEE Winter Conference on Applications of Computer Vision (WACV)},
+  pages = {464--472},
+  year = {2017},
+  doi = {10.1109/WACV.2017.58},
+  url = {https://doi.org/10.1109/WACV.2017.58}
+}
+
+@article{mckay1979comparison,
+  title = {A Comparison of Three Methods for Selecting Values of Input Variables in the Analysis of Output from a Computer Code},
+  author = {McKay, M. D. and Beckman, R. J. and Conover, W. J.},
+  journal = {Technometrics},
+  volume = {21},
+  number = {2},
+  pages = {239--245},
+  year = {1979},
+  doi = {10.1080/00401706.1979.10489755},
+  url = {https://doi.org/10.1080/00401706.1979.10489755}
+}
+
+@inproceedings{loshchilov2019decoupled,
+  title = {Decoupled Weight Decay Regularization},
+  author = {Loshchilov, Ilya and Hutter, Frank},
+  booktitle = {International Conference on Learning Representations},
+  year = {2019},
+  url = {https://openreview.net/forum?id=Bkg6RiCqY7}
+}
+
+@inproceedings{micikevicius2018mixed,
+  title = {Mixed Precision Training},
+  author = {Micikevicius, Paulius and Narang, Sharan and Alben, Jonah and Diamos, Gregory and Elsen, Erich and Garcia, David and Ginsburg, Boris and Houston, Michael and Kuchaiev, Oleksii and Venkatesh, Ganesh and Wu, Hao},
+  booktitle = {International Conference on Learning Representations},
+  year = {2018},
+  url = {https://openreview.net/forum?id=r1gs9JgRZ}
 }
 
 @article{bandi2019resolution,
