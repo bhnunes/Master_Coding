@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _CACHE_PROMOTION_LOCK = threading.Lock()
@@ -15,12 +15,21 @@ _CACHE_PROMOTION_LOCK = threading.Lock()
 class PatientShardCache:
     cache_dir: Path
     size_cap_bytes: int
+    _resolved_paths: dict[Path, Path] = field(default_factory=dict, init=False, repr=False)
 
     def fetch(self, source_path: Path) -> Path:
+        resolved_path = self._resolved_paths.get(source_path)
+        if resolved_path is not None and (self.size_cap_bytes <= 0 or resolved_path.exists()):
+            return resolved_path
+        if resolved_path is not None:
+            self._resolved_paths.pop(source_path, None)
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cached_path = self.cache_dir / self._cache_file_name(source_path)
         if cached_path.exists():
-            cached_path.touch()
+            if self.size_cap_bytes > 0:
+                cached_path.touch()
+            self._resolved_paths[source_path] = cached_path
             return cached_path
 
         temp_path = self._reserve_temp_path(cached_path)
@@ -30,8 +39,10 @@ class PatientShardCache:
         except Exception:
             temp_path.unlink(missing_ok=True)
             raise
-        cached_path.touch()
+        if self.size_cap_bytes > 0:
+            cached_path.touch()
         self._evict_if_needed(protected_path=cached_path)
+        self._resolved_paths[source_path] = cached_path
         return cached_path
 
     def _evict_if_needed(self, *, protected_path: Path) -> None:

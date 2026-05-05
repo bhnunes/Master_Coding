@@ -79,7 +79,6 @@ class CanonicalRowHDF5Dataset(Dataset[Any]):
         if self.image_normalizer is not None:
             image = self.image_normalizer.normalize_image(image, cache_key=record.filename)
         mask = self._prepare_mask(self.masks_dset[record.source_row_index])
-        filename = _decode_filename(self.filenames_dset[record.source_row_index])
         augmented = self.transform(image=image, mask=mask)
         final_mask = self._finalize_mask(augmented["mask"])
 
@@ -87,6 +86,7 @@ class CanonicalRowHDF5Dataset(Dataset[Any]):
         if self.include_patient_id:
             output.append(record.patient_id)
         if self.include_filename:
+            filename = _decode_filename(self.filenames_dset[record.source_row_index])
             output.append(filename)
         return tuple(output)
 

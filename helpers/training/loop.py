@@ -176,10 +176,10 @@ def _compute_train_loss(
     masks: torch.Tensor,
     artifact_covariates: torch.Tensor | None,
     *,
+    amp_dtype: torch.dtype,
     config: TrainEpochConfig,
     runtime: TrainEpochRuntime,
 ) -> torch.Tensor | None:
-    amp_dtype, _, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
     with autocast_ctx(images, amp_dtype):
         outputs = _extract_model_output(model(images), health=runtime.health, phase="train")
         if outputs is None:
@@ -234,10 +234,10 @@ def _compute_validation_outputs(
     images: torch.Tensor,
     masks: torch.Tensor,
     *,
+    amp_dtype: torch.dtype,
     config: ValidationEpochConfig,
     runtime: ValidationEpochRuntime,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
-    amp_dtype, _, _ = setup_precision(config.architecture, amp_precision=config.amp_precision)
     with autocast_ctx(images, amp_dtype):
         outputs = _extract_model_output(model(images), health=runtime.health, phase="val")
         if outputs is None:
@@ -335,7 +335,7 @@ def train_epoch(
     if hasattr(runtime.loss_fn, "set_ohem_enabled"):
         runtime.loss_fn.set_ohem_enabled(True)
 
-    _, scaler, precision_log = setup_precision(
+    amp_dtype, scaler, precision_log = setup_precision(
         config.architecture,
         amp_precision=config.amp_precision,
     )
@@ -372,6 +372,7 @@ def train_epoch(
             images,
             masks,
             artifact_covariates,
+            amp_dtype=amp_dtype,
             config=config,
             runtime=runtime,
         )
@@ -419,6 +420,10 @@ def validate_epoch(
     if hasattr(runtime.loss_fn, "set_epoch"):
         runtime.loss_fn.set_epoch(None)
 
+    amp_dtype, _, _ = setup_precision(
+        config.architecture,
+        amp_precision=config.amp_precision,
+    )
     tracker = AdvancedMetricTracker(device=config.device, metric_bins=2048)
     running_loss = 0.0
     num_samples_processed = 0
@@ -450,6 +455,7 @@ def validate_epoch(
                 model,
                 images,
                 masks,
+                amp_dtype=amp_dtype,
                 config=config,
                 runtime=runtime,
             )

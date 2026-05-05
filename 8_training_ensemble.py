@@ -245,7 +245,7 @@ try:
     sampler_generator.manual_seed(seed)
 
     sampler = WeightedRandomSampler(
-        weights=torch.from_numpy(samples_weights).double().tolist(),
+        weights=prepared_training_data.sample_weights.double(),
         num_samples=len(samples_weights),
         replacement=True,
         generator=sampler_generator,

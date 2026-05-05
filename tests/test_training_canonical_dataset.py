@@ -331,6 +331,26 @@ def test_canonical_dataset_reads_rows_without_sqlite_after_startup(
     assert filename == "p1_0.png"
 
 
+def test_canonical_dataset_skips_filename_decode_when_not_requested(
+    canonical_dataset_fixture: tuple[Path, list[Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    master_manifest_path, _shard_paths = canonical_dataset_fixture
+    records = load_training_records(master_manifest_path, smart_sampling=False)
+    layout = CanonicalDatasetLayout(records=tuple(records), local_cache_dir=None)
+    dataset = CanonicalRowHDF5Dataset(layout, mode="validation", mask_mode="raw")
+
+    def fail_decode(_value: object) -> str:
+        raise AssertionError("Filename decode should only run when filename output is requested")
+
+    monkeypatch.setattr("helpers.training.canonical_dataset._decode_filename", fail_decode)
+
+    image, mask = dataset[0]
+
+    assert tuple(image.shape) == (3, 4, 4)
+    assert tuple(mask.shape) == (4, 4)
+
+
 def test_canonical_dataset_reopens_handles_for_new_shards_and_processes(
     canonical_dataset_fixture: tuple[Path, list[Path]],
     monkeypatch: pytest.MonkeyPatch,
