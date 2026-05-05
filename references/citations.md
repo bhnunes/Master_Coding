@@ -59,6 +59,8 @@ because they still support the training-augmentation section.
 | Stage 4 split balance verification and provenance | `pearson1900criterion`, `wilkinson2016fair` | Cite Pearson only for the chi-square statistic used as a raw split-balance verification value. Cite FAIR for manifest, run-config, split-stats, and SQLite-linked provenance. |
 | Stage 4 entropy-guided template selection | `shannon1948mathematical`, `tellez2019augmentation` | Cite Shannon for the entropy measure and Tellez et al. for stain/color variability motivation. The highest-entropy-per-TRAIN-patient template choice is a repository heuristic. |
 | Stage 4 runtime stain-normalization artifacts | `reinhard2001color`, `ruifrok2001quantification`, `macenko2009method`, `vahadane2016structure`, `tellez2019augmentation`, `duenweg2023scanner` | Cite the original method papers for the persisted runtime-normalizer state and Tellez/Duenweg for why stain/scanner variability matters. Stage 4 persists target/reference state; it does not normalize all split pixels eagerly. |
+| Stage 5 fail-closed sanity gate and provenance consistency | `piccolo2016tools`, `wilkinson2016fair` | Cite Piccolo and Frampton for computational reproducibility practices around preserving executable workflows, software context, and analysis traceability. Cite FAIR for rich metadata/provenance. The exact checks and verdict names are repository-specific. |
+| Stage 5 split, storage, and label-integrity checks | `roberts2017crossvalidation`, `dawood2026confounding`, `folk2011hdf5`, `yu2020noisy`, `he2009imbalanced` | Cite Roberts/Dawood for patient-level leakage and structured-data caution, Folk et al. for HDF5 as the storage substrate, Yu et al. for noisy annotation/mask-label risks, and He/Garcia for documenting class imbalance. |
 | Training loss implementation | `khened2021generalized` | Cite Khened et al. as the direct source for the weighted BCE-plus-Dice loss implemented in Stage 8. |
 | Dice reporting and segmentation metric caveats | `seghier2024dice` | Cite when explaining Dice as an overlap metric, when warning that Dice is sensitive to reporting choices, and when justifying transparent metric definitions. |
 | Confounding, leakage, and cautious interpretation in computational pathology | `dawood2026confounding` | Cite for the broader warning that histology models can learn confounded correlational signals. This supports patient-level splitting, provenance validation, and cautious claims. |
@@ -117,6 +119,15 @@ Use these as citation anchors when updating `reports/main.tex`.
   states: Reinhard (`reinhard2001color`), Ruifrok
   (`ruifrok2001quantification`), Macenko (`macenko2009method`), and Vahadane
   (`vahadane2016structure`).
+- Stage 5 sanity checks: cite Piccolo and Frampton (`piccolo2016tools`) and
+  FAIR (`wilkinson2016fair`) for manifest/run-config/split-stats provenance and
+  the fail-closed reproducibility gate. Cite Roberts et al.
+  (`roberts2017crossvalidation`) and Dawood et al. (`dawood2026confounding`)
+  for patient-level leakage checks, Folk et al. (`folk2011hdf5`) when
+  describing HDF5-backed row parity and decodability, Yu et al.
+  (`yu2020noisy`) for mask-label semantic integrity, and He/Garcia
+  (`he2009imbalanced`) for reporting class imbalance across patches and
+  patients.
 - Dataset provenance: cite the dataset paper associated with each active
   dataset cohort: CAMELYON16 (`bejnordi2017diagnostic`), CATCH
   (`wilm2022catch`), DiagSet (`koziarski2024diagset`), and HiESD
@@ -183,6 +194,18 @@ Use these as citation anchors when updating `reports/main.tex`.
 - Do not claim that Stage 4 writes normalized TRAIN/VALIDATION/TEST pixel
   datasets. Current Stage 4 manifests are `NOT_NORMALIZED`; the stage persists
   runtime target/reference artifacts that later stages consume on the fly.
+- Do not claim Stage 5 proves clinical validity or eliminates every possible
+  hidden confounder. It validates declared repository contracts: manifests,
+  run-configs, split statistics, patient isolation, HDF5 row parity, mask values,
+  and mask-label semantics.
+- Do not cite Piccolo and Frampton or FAIR as if they specify the repository's exact
+  `manifest.csv`, `run_config.json`, `split_stats.csv`, HDF5 schema, or final
+  verdict names. They support the reproducibility/provenance rationale only.
+- Do not describe Stage 5 sampled path/shape/mask scans as exhaustive unless the
+  corresponding full-scan flags were enabled for that run.
+- Do not cite He and Garcia as prescribing the repository's patch-per-patient
+  skew threshold. They support documenting class imbalance; the `max > 20x
+  median` warning is a local heuristic.
 - Do not cite Reinhard, Ruifrok, Macenko, or Vahadane as if the repository
   exactly reproduces every implementation detail of the original papers. Cite
   them for the normalization/deconvolution families and then describe the actual
@@ -296,6 +319,24 @@ Suggested code boundary: `4_crossfold.py`, `helpers/crossfold/config.py`,
 | Runtime-normalization artifact generation | Stage 4 fits and saves JSON runtime state for REINHARD, RUIFROK, MACENKO, and VAHADANE under `runtime_normalization_artifacts/<method>/normalization_stats.json`, then links each artifact to the split bundle in SQLite. | `reinhard2001color`; `ruifrok2001quantification`; `macenko2009method`; `vahadane2016structure`; `wilkinson2016fair` for the artifact linkage |
 | Normalization-agnostic split outputs | Stage 4 writes split manifests as `NOT_NORMALIZED` and persists runtime artifacts for later on-the-fly normalization; it does not eagerly rewrite every split row into normalized pixel storage. | `tellez2019augmentation` for normalization motivation; implementation contract is repository-specific |
 | Reproducibility artifacts | Stage 4 writes `manifest.csv`, `split_stats.csv`, `run_config.json`, template-selection metadata, runtime environment versions, git commit, and SQLite split assignments. | `wilkinson2016fair` |
+
+## Stage 5 Sanity Checks Notes
+
+Suggested code boundary: `5_sanity_checks.py`, `helpers/sanity/config.py`,
+`helpers/sanity/pipeline.py`, `helpers/sanity/manifest_checks.py`,
+`helpers/sanity/contracts.py`, `helpers/sanity/disk_checks.py`,
+`helpers/sanity/semantic_checks.py`, `helpers/sanity/provenance.py`, and
+`helpers/sanity/reporting.py`.
+
+| Stage 5 decision | Code behavior to document | Suggested citation |
+| --- | --- | --- |
+| Fail-closed scientific QA gate | Stage 5 loads `manifest.csv`, `run_config.json`, and `split_stats.csv`, runs dataset-wide and split-level checks, prints a scientific integrity report, returns `SPLITS PASSED` only when no check has status `FAIL`, and exits with code 2 on failed verdicts or fatal errors. | `piccolo2016tools`; `wilkinson2016fair` |
+| Manifest, run-config, and split-stats contracts | The stage validates required manifest columns, split names, labels, nonnegative source rows, duplicate rows, canonical `source_hdf5_path`/`source_row_index`, paired logical HDF5 image/mask references, run-config patient lists and constraints, recomputed split-stat parity, and Stage 3.3 cleaning lineage. | `wilkinson2016fair`; `piccolo2016tools` |
+| Patient-level leakage check | Stage 5 fails if a `patient_id` appears in more than one of TRAIN, VALIDATION, and TEST, and cross-checks the manifest patient sets against `run_config.json` when available. | `roberts2017crossvalidation`; `dawood2026confounding` |
+| HDF5 row parity and decodability | For each split, Stage 5 verifies referenced HDF5 files, row bounds, filename/label/patient-id parity between manifest and HDF5 datasets, image/mask shape agreement, and decodability of sampled or full-scan rows. | `folk2011hdf5`; `wilkinson2016fair` |
+| Binary mask and label semantics | Stage 5 checks that masks contain only binary values, that cancer-labeled rows have positive mask pixels, and that not-cancer-labeled rows do not contain positive mask pixels, with fail/warn behavior controlled by sanity configuration. | `yu2020noisy`; exact binary semantics are repository-specific |
+| Class and patient-distribution visibility | Stage 5 reports patch-level class counts, patient-level class counts, split class presence, and patches-per-patient summaries, warning when patch counts are extremely skewed by patient. | `he2009imbalanced`; `roberts2017crossvalidation`; the `max > 20x median` threshold is repository-specific |
+| Sampled versus full-scan integrity policy | The default path samples path/shape/mask checks with fixed seeds and exposes `SANITY_FULL_MASK_SCAN` and `SANITY_FULL_SHAPE_SCAN` when exhaustive scanning is required. | `piccolo2016tools` for reproducibility reporting; the sampling policy itself is repository-specific |
 
 ## BibTeX
 
@@ -454,6 +495,30 @@ Suggested code boundary: `4_crossfold.py`, `helpers/crossfold/config.py`,
   url = {https://doi.org/10.1038/sdata.2016.18}
 }
 
+@article{piccolo2016tools,
+  title = {Tools and Techniques for Computational Reproducibility},
+  author = {Piccolo, Stephen R. and Frampton, Michael B.},
+  journal = {GigaScience},
+  volume = {5},
+  number = {1},
+  pages = {30},
+  year = {2016},
+  doi = {10.1186/s13742-016-0135-4},
+  url = {https://doi.org/10.1186/s13742-016-0135-4}
+}
+
+@inproceedings{folk2011hdf5,
+  title = {An Overview of the HDF5 Technology Suite and Its Applications},
+  author = {Folk, Mike and Heber, Gerd and Koziol, Quincey and Pourmal, Elena and Robinson, Dana},
+  booktitle = {Proceedings of the 2011 EDBT/ICDT Workshop on Array Databases},
+  series = {AD '11},
+  pages = {36--47},
+  year = {2011},
+  publisher = {Association for Computing Machinery},
+  doi = {10.1145/1966895.1966900},
+  url = {https://doi.org/10.1145/1966895.1966900}
+}
+
 @article{charan2013sample,
   title = {How to Calculate Sample Size for Different Study Designs in Medical Research?},
   author = {Charan, Jaykaran and Biswas, Tamoghna},
@@ -509,6 +574,18 @@ Suggested code boundary: `4_crossfold.py`, `helpers/crossfold/config.py`,
   year = {2009},
   doi = {10.1016/j.ipm.2009.03.002},
   url = {https://doi.org/10.1016/j.ipm.2009.03.002}
+}
+
+@article{he2009imbalanced,
+  title = {Learning from Imbalanced Data},
+  author = {He, Haibo and Garcia, Edwardo A.},
+  journal = {IEEE Transactions on Knowledge and Data Engineering},
+  volume = {21},
+  number = {9},
+  pages = {1263--1284},
+  year = {2009},
+  doi = {10.1109/TKDE.2008.239},
+  url = {https://doi.org/10.1109/TKDE.2008.239}
 }
 
 @inproceedings{akiba2019optuna,
