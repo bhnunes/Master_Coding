@@ -66,6 +66,9 @@ because they still support the training-augmentation section.
 | Stage 6 compact TRAIN_SELECTED storage and sampling provenance | `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools` | Cite HDF5 for compact selected-TRAIN shards and FAIR/Piccolo for preserving sidecars, run configuration, row mappings, summary JSON, and manifest-backed sampling decisions. |
 | Stage 7 learning-rate and loss-weight screening | `smith2017cyclical`, `mckay1979comparison`, `khened2021generalized`, `loshchilov2019decoupled` | Cite Smith for the learning-rate range-test idea, McKay et al. for Latin-hypercube sampling of loss weights, Khened et al. for the weighted BCE-plus-Dice loss family, and AdamW for the optimizer. The repository's median-minimum-loss ranking is a screening heuristic. |
 | Stage 7 runtime, precision, and data-provenance controls | `micikevicius2018mixed`, `he2009imbalanced`, `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools` | Cite mixed-precision training only when AMP is enabled or discussed, He/Garcia for weighted sampling under class imbalance, HDF5 for compact TRAIN_SELECTED reads, and FAIR/Piccolo for run configuration, runtime environment, and provenance sidecars. |
+| Stage 8 registered segmentation architectures and encoders | `ronneberger2015unet`, `liu2021swin`, `chen2018deeplabv3plus`, `zhang2022resnest`, `zhou2020unetpp`, `tan2019efficientnet`, `lin2017fpn`, `hu2018senet`, `xie2021segformer`, `fan2020manet`, `he2016resnet`, `ranftl2021dpt`, `dosovitskiy2021vit`, `xiao2018upernet`, `ryali2023hiera`, `russakovsky2015imagenet` | Cite the original decoder and encoder/backbone papers for the active registry pairs. The registry gates approved model/encoder combinations; the exact implementation is through `segmentation_models_pytorch` and `timm`, not a from-scratch reimplementation. |
+| Stage 8 training loop, optimization, and validation selection | `khened2021generalized`, `loshchilov2019decoupled`, `defazio2024road`, `micikevicius2018mixed`, `shrivastava2016ohem`, `prechelt1998automatic`, `saito2015precision`, `matthews1975comparison`, `he2009imbalanced` | Cite Khened for the implemented BCE-plus-Dice loss, AdamW/Schedule-Free for the optimizer families, mixed precision when AMP is enabled, OHEM only when `TRAINING_RUN_OHEM=True`, early stopping for validation-based stopping, AUPRC/MCC papers for validation metrics, and He/Garcia for inverse-frequency sampling. |
+| Stage 8 manifest-backed training provenance and compact TRAIN_SELECTED reads | `wilkinson2016fair`, `piccolo2016tools`, `folk2011hdf5`, `roberts2017crossvalidation`, `dawood2026confounding` | Cite FAIR/Piccolo for executable provenance and metadata sidecars, HDF5 for canonical and compact row storage, and Roberts/Dawood for patient-level split isolation and leakage/confounding caution. |
 | Training loss implementation | `khened2021generalized` | Cite Khened et al. as the direct source for the weighted BCE-plus-Dice loss implemented in Stage 8. |
 | Dice reporting and segmentation metric caveats | `seghier2024dice` | Cite when explaining Dice as an overlap metric, when warning that Dice is sensitive to reporting choices, and when justifying transparent metric definitions. |
 | Confounding, leakage, and cautious interpretation in computational pathology | `dawood2026confounding` | Cite for the broader warning that histology models can learn confounded correlational signals. This supports patient-level splitting, provenance validation, and cautious claims. |
@@ -164,6 +167,34 @@ Use these as citation anchors when updating `reports/main.tex`.
   (`macenko2009method`), Vahadane (`vahadane2016structure`), plus
   Tellez/Duenweg (`tellez2019augmentation`, `duenweg2023scanner`) for
   stain/scanner variability motivation.
+- Stage 8 registered architectures: cite the architecture/backbone source for
+  the selected registry pair. Current active registry pairs are U-Net plus Swin
+  (`ronneberger2015unet`, `liu2021swin`), DeepLabv3+ plus ResNeSt
+  (`chen2018deeplabv3plus`, `zhang2022resnest`), UNet++ plus EfficientNet
+  (`zhou2020unetpp`, `tan2019efficientnet`), FPN plus SENet
+  (`lin2017fpn`, `hu2018senet`), SegFormer/MiT (`xie2021segformer`),
+  MA-Net plus ResNet (`fan2020manet`, `he2016resnet`), DPT plus ViT
+  (`ranftl2021dpt`, `dosovitskiy2021vit`), and UPerNet plus Hiera
+  (`xiao2018upernet`, `ryali2023hiera`). Cite ImageNet/ILSVRC
+  (`russakovsky2015imagenet`) when explaining pretrained encoder weights or
+  ImageNet normalization.
+- Stage 8 training procedure: cite Khened et al. (`khened2021generalized`) for
+  the BCE-plus-Dice loss, He/Garcia (`he2009imbalanced`) for inverse-frequency
+  weighted sampling, AdamW (`loshchilov2019decoupled`) and Schedule-Free
+  learning (`defazio2024road`) for the optimizer choices, Micikevicius et al.
+  (`micikevicius2018mixed`) for AMP/mixed precision, Shrivastava et al.
+  (`shrivastava2016ohem`) only when OHEM is enabled, and Prechelt
+  (`prechelt1998automatic`) for validation-based early stopping.
+- Stage 8 validation and checkpointing: cite Saito/Rehmsmeier
+  (`saito2015precision`) for emphasizing AUPRC/precision-recall under class
+  imbalance, Matthews (`matthews1975comparison`) for MCC, and FAIR/Piccolo
+  (`wilkinson2016fair`, `piccolo2016tools`) for run metadata, compatibility
+  signatures, runtime environment capture, checkpoint sidecars, and Aim logs.
+- Stage 8 manifest and normalization provenance: cite Roberts/Dawood
+  (`roberts2017crossvalidation`, `dawood2026confounding`) for patient-level
+  train/validation isolation, HDF5 (`folk2011hdf5`) for canonical and compact
+  row storage, and reuse the Stage 4 runtime-normalization citations for the
+  selected on-the-fly normalization method.
 - Dataset provenance: cite the dataset paper associated with each active
   dataset cohort: CAMELYON16 (`bejnordi2017diagnostic`), CATCH
   (`wilm2022catch`), DiagSet (`koziarski2024diagset`), and HiESD
@@ -275,6 +306,26 @@ Use these as citation anchors when updating `reports/main.tex`.
 - Do not imply compact TRAIN_SELECTED changes validation or test semantics in
   Stage 7. Compact storage can remap the training rows only; validation
   provenance remains canonical.
+- Do not cite the architecture papers as evidence that a registry pair is
+  superior on this pathology task. They support the model-family descriptions;
+  performance claims must come from repository experiments.
+- Do not describe each Stage 8 registry key as a full standalone paper
+  implementation. For example, `SWIN` is built as an SMP U-Net decoder with a
+  Swin encoder, and `DPT`, `SEGFORMER`, and `UPERNET` are instantiated through
+  the library wrappers and configured encoders.
+- Do not cite ImageNet/ILSVRC as pathology evidence. Use
+  `russakovsky2015imagenet` only for pretrained weights, transfer-learning
+  context, or ImageNet normalization assumptions.
+- Do not present Stage 8 validation metrics as final held-out TEST evidence.
+  Stage 8 uses VALIDATION AUPRC for best-checkpoint selection and early
+  stopping; final test/inference reporting belongs downstream.
+- Do not cite Schedule-Free learning unless `TRAINING_OPTIMIZER_NAME` is
+  `AdamWScheduleFree`, and do not claim the repository reproduces all
+  benchmark settings from Defazio et al. Cite AdamW separately for decoupled
+  weight decay.
+- Do not cite OHEM unless `TRAINING_RUN_OHEM=True`. Shrivastava et al. support
+  the online hard-example-mining idea; this repository applies a pixel-level
+  segmentation-loss variant, not the original region-based detector pipeline.
 - Do not cite Reinhard, Ruifrok, Macenko, or Vahadane as if the repository
   exactly reproduces every implementation detail of the original papers. Cite
   them for the normalization/deconvolution families and then describe the actual
@@ -450,6 +501,50 @@ and `helpers/training/stain_normalization.py`.
 | Precision and CUDA-OOM controls | The LR finder supports AMP precision choices, defaults to `fp32`, retries CUDA OOM repeats with smaller effective batch sizes, and reports the effective batch size. | `micikevicius2018mixed` only if AMP is enabled/discussed; OOM retry is repository-specific engineering |
 | Reproducibility outputs and reporting | Stage 7 writes `LHS_SAMPLES.json`, `SUMMARY_ALL.csv`, per-architecture summaries, LR/loss plots, `lr_finder_run_config.json`, runtime environment metadata, and a LaTeX/PDF report. | `wilkinson2016fair`; `piccolo2016tools` |
 
+## Stage 8 Training Ensemble Notes
+
+Suggested code boundary: `8_training_ensemble.py`, `helpers/training/config.py`,
+`helpers/training/registry.py`, `helpers/training/models.py`,
+`helpers/training/data.py`, `helpers/training/loop.py`,
+`helpers/training/losses.py`, `helpers/training/pipeline.py`,
+`helpers/training/checkpointing.py`, `helpers/training/metrics.py`,
+`helpers/training/runtime.py`, `helpers/training/gpu.py`,
+`helpers/training/reporting.py`, `helpers/training/compact_train_selected.py`,
+and the active `training_model_registry_*.json` files.
+
+Active architecture and encoder papers:
+
+| Registry key | Current SMP/model behavior and approved encoder | Suggested citation |
+| --- | --- | --- |
+| `SWIN` | Builds an SMP `Unet` decoder with `tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k`. | `ronneberger2015unet`; `liu2021swin`; `russakovsky2015imagenet` for pretrained weights |
+| `DEEPLABV3PLUS` | Builds SMP `DeepLabV3Plus` with `tu-resnest101e`. | `chen2018deeplabv3plus`; `zhang2022resnest`; `russakovsky2015imagenet` |
+| `UNET++` | Builds SMP `UnetPlusPlus` with `efficientnet-b7`. | `zhou2020unetpp`; `tan2019efficientnet`; `russakovsky2015imagenet` |
+| `FPN` | Builds SMP `FPN` with `senet154`. | `lin2017fpn`; `hu2018senet`; `russakovsky2015imagenet` |
+| `SEGFORMER` | Builds SMP `Segformer` with `mit_b5`. | `xie2021segformer`; `russakovsky2015imagenet` when discussing pretrained weights |
+| `MANET` | Builds SMP `MAnet` with `resnet152`. | `fan2020manet`; `he2016resnet`; `russakovsky2015imagenet` |
+| `DPT` | Builds SMP `DPT` with `tu-vit_large_patch16_224.augreg_in21k_ft_in1k`. | `ranftl2021dpt`; `dosovitskiy2021vit`; `russakovsky2015imagenet` |
+| `UPERNET` | Builds SMP `UPerNet` with `tu-hiera_large_224`. | `xiao2018upernet`; `ryali2023hiera`; `russakovsky2015imagenet` |
+
+Training and provenance decisions:
+
+| Stage 8 decision | Code behavior to document | Suggested citation |
+| --- | --- | --- |
+| Registry-gated architecture/encoder selection | `TRAINING_ARCHITECTURE` and `TRAINING_ENCODER` must match the configured registry; the checked-in method-specific registries share the same eight architecture keys and approved encoders while varying LR by normalization method. | Architecture citations above; `piccolo2016tools` for reproducible configuration discipline |
+| ImageNet-pretrained encoder initialization | `create_model()` uses ImageNet/pretrained weights for non-validation runs, with `encoder_weights=True` for `timm` encoders and `"imagenet"` for SMP encoders. | `russakovsky2015imagenet`; architecture/backbone citations for the selected pair |
+| Manifest-backed TRAIN/VALIDATION datasets | Stage 8 queries `master_manifest.sqlite` once, loads TRAIN rows or Stage 6 selected TRAIN rows, loads canonical VALIDATION rows, prefetches patient shards to local fast storage, and checks train/validation patient separation before training. | `wilkinson2016fair`; `roberts2017crossvalidation`; `dawood2026confounding`; `folk2011hdf5` |
+| Compact TRAIN_SELECTED consumption | When smart sampling and compact storage are enabled, TRAIN rows are remapped to the compact Stage 6 HDF5 artifact; VALIDATION remains canonical. | `folk2011hdf5`; `wilkinson2016fair`; see Stage 6 compact-artifact notes |
+| Runtime stain normalization during training | The train and validation datasets are constructed with the selected runtime-normalization method/backend and record normalization artifact lineage in metadata. | `tellez2019augmentation`; `duenweg2023scanner`; method-specific citations `reinhard2001color`, `ruifrok2001quantification`, `macenko2009method`, `vahadane2016structure` |
+| Weighted sampling under class imbalance | Stage 8 computes inverse class-frequency sample weights and uses a seeded PyTorch `WeightedRandomSampler` with replacement for training. | `he2009imbalanced`; sampler implementation is repository/library-specific |
+| Training augmentation and ImageNet normalization | Stage 8 applies Albumentations flips, affine transforms, color/noise/blur, coarse dropout, then GPU ImageNet mean/std normalization and stochastic downscale/upscale. | `buslaev2020albumentations`; `dossantos2023augmentation`; `tellez2019augmentation`; `shorten2019survey`; `zhong2020random`; `devries2017cutout`; `russakovsky2015imagenet` |
+| BCE-plus-Dice segmentation loss | Stage 8 uses `BCEDiceHybridLossPaper`, a direct implementation of Khened et al.'s weighted BCE/background-Dice/foreground-Dice family with registry-provided weights. | `khened2021generalized` |
+| Optional pixel-level OHEM | If enabled, Stage 8 starts OHEM after the configured epoch, ranks pixels by BCE error, keeps the hardest pixels subject to ratio and minimum-count controls, and disables OHEM during validation. | `shrivastava2016ohem`; repository implementation is pixel-level segmentation OHEM, not paper-exact detector OHEM |
+| Optional artifact-aware sample discount | If enabled, Stage 8 appends filename-keyed artifact coverage covariates from the manifest and discounts per-sample loss by maximum artifact coverage. | `weng2024grandqc` for artifact/QC motivation; exact discount rule is repository-specific |
+| Optimizer choice and weight decay | Stage 8 supports `AdamW` and `AdamWScheduleFree`; LR and WD come from the selected registry entry and are recorded in Aim and metadata. | `loshchilov2019decoupled`; `defazio2024road` when `AdamWScheduleFree` is used |
+| AMP and accumulation controls | Stage 8 resolves `fp16`, `bf16`, `fp32`, or `auto` precision, forces DPT to `fp32`, uses gradient scaling for `fp16`, and supports gradient accumulation. | `micikevicius2018mixed`; exact architecture-specific precision rules are repository-specific |
+| Validation metrics and best checkpoint | Validation accumulates pixel histograms for AUPRC, AUROC, and MCC*, guards against collapsed foreground prevalence, and saves the best checkpoint by validation AUPRC with early stopping. | `saito2015precision`; `matthews1975comparison`; `prechelt1998automatic`; `sokolova2009performance` |
+| Checkpoint resume compatibility and metadata | Resume requires matching provenance signatures for split, packaging, normalization, smart-sampling, artifact-aware loss, and OHEM settings; final metadata captures runtime environment, dataset lineage, optimizer/loss settings, and metrics. | `wilkinson2016fair`; `piccolo2016tools` |
+| Aim logging and completion reporting | Stage 8 logs hparams and epoch metrics to Aim when available and writes completion metadata/email summaries. | `piccolo2016tools`; `wilkinson2016fair` |
+
 ## BibTeX
 
 ```bibtex
@@ -572,6 +667,227 @@ and `helpers/training/stain_normalization.py`.
   booktitle = {International Conference on Learning Representations},
   year = {2018},
   url = {https://openreview.net/forum?id=r1gs9JgRZ}
+}
+
+@inproceedings{ronneberger2015unet,
+  title = {{U-Net}: Convolutional Networks for Biomedical Image Segmentation},
+  author = {Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
+  booktitle = {Medical Image Computing and Computer-Assisted Intervention -- MICCAI 2015},
+  series = {Lecture Notes in Computer Science},
+  volume = {9351},
+  pages = {234--241},
+  year = {2015},
+  publisher = {Springer},
+  doi = {10.1007/978-3-319-24574-4_28},
+  url = {https://doi.org/10.1007/978-3-319-24574-4_28}
+}
+
+@inproceedings{liu2021swin,
+  title = {Swin Transformer: Hierarchical Vision Transformer Using Shifted Windows},
+  author = {Liu, Ze and Lin, Yutong and Cao, Yue and Hu, Han and Wei, Yixuan and Zhang, Zheng and Lin, Stephen and Guo, Baining},
+  booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+  pages = {10012--10022},
+  year = {2021},
+  doi = {10.1109/ICCV48922.2021.00986},
+  url = {https://doi.org/10.1109/ICCV48922.2021.00986}
+}
+
+@inproceedings{chen2018deeplabv3plus,
+  title = {Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation},
+  author = {Chen, Liang-Chieh and Zhu, Yukun and Papandreou, George and Schroff, Florian and Adam, Hartwig},
+  booktitle = {Proceedings of the European Conference on Computer Vision (ECCV)},
+  pages = {801--818},
+  year = {2018},
+  url = {https://openaccess.thecvf.com/content_ECCV_2018/html/Liang-Chieh_Chen_Encoder-Decoder_with_Atrous_ECCV_2018_paper.html}
+}
+
+@inproceedings{zhang2022resnest,
+  title = {{ResNeSt}: Split-Attention Networks},
+  author = {Zhang, Hang and Wu, Chongruo and Zhang, Zhongyue and Zhu, Yi and Lin, Haibin and Zhang, Zhi and Sun, Yue and He, Tong and Mueller, Jonas and Manmatha, R. and Li, Mu and Smola, Alexander},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)},
+  pages = {2735--2745},
+  year = {2022},
+  doi = {10.1109/CVPRW56347.2022.00309},
+  url = {https://doi.org/10.1109/CVPRW56347.2022.00309}
+}
+
+@article{zhou2020unetpp,
+  title = {{UNet++}: Redesigning Skip Connections to Exploit Multiscale Features in Image Segmentation},
+  author = {Zhou, Zongwei and Siddiquee, Md Mahfuzur Rahman and Tajbakhsh, Nima and Liang, Jianming},
+  journal = {IEEE Transactions on Medical Imaging},
+  volume = {39},
+  number = {6},
+  pages = {1856--1867},
+  year = {2020},
+  doi = {10.1109/TMI.2019.2959609},
+  url = {https://doi.org/10.1109/TMI.2019.2959609}
+}
+
+@inproceedings{tan2019efficientnet,
+  title = {{EfficientNet}: Rethinking Model Scaling for Convolutional Neural Networks},
+  author = {Tan, Mingxing and Le, Quoc V.},
+  booktitle = {Proceedings of the 36th International Conference on Machine Learning},
+  series = {Proceedings of Machine Learning Research},
+  volume = {97},
+  pages = {6105--6114},
+  year = {2019},
+  url = {https://proceedings.mlr.press/v97/tan19a.html}
+}
+
+@inproceedings{lin2017fpn,
+  title = {Feature Pyramid Networks for Object Detection},
+  author = {Lin, Tsung-Yi and Doll{\'a}r, Piotr and Girshick, Ross and He, Kaiming and Hariharan, Bharath and Belongie, Serge},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages = {936--944},
+  year = {2017},
+  doi = {10.1109/CVPR.2017.106},
+  url = {https://doi.org/10.1109/CVPR.2017.106}
+}
+
+@inproceedings{hu2018senet,
+  title = {Squeeze-and-Excitation Networks},
+  author = {Hu, Jie and Shen, Li and Sun, Gang},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages = {7132--7141},
+  year = {2018},
+  doi = {10.1109/CVPR.2018.00745},
+  url = {https://doi.org/10.1109/CVPR.2018.00745}
+}
+
+@inproceedings{xie2021segformer,
+  title = {{SegFormer}: Simple and Efficient Design for Semantic Segmentation with Transformers},
+  author = {Xie, Enze and Wang, Wenhai and Yu, Zhiding and Anandkumar, Anima and Alvarez, Jose M. and Luo, Ping},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume = {34},
+  pages = {12077--12090},
+  year = {2021},
+  url = {https://papers.nips.cc/paper/2021/hash/64f1f27bf1b4ec22924fd0acb550c235-Abstract.html}
+}
+
+@article{fan2020manet,
+  title = {{MA-Net}: A Multi-Scale Attention Network for Liver and Tumor Segmentation},
+  author = {Fan, Tongle and Wang, Guanglei and Li, Yan and Wang, Hongrui},
+  journal = {IEEE Access},
+  volume = {8},
+  pages = {179656--179665},
+  year = {2020},
+  doi = {10.1109/ACCESS.2020.3025372},
+  url = {https://doi.org/10.1109/ACCESS.2020.3025372}
+}
+
+@inproceedings{he2016resnet,
+  title = {Deep Residual Learning for Image Recognition},
+  author = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages = {770--778},
+  year = {2016},
+  doi = {10.1109/CVPR.2016.90},
+  url = {https://doi.org/10.1109/CVPR.2016.90}
+}
+
+@inproceedings{ranftl2021dpt,
+  title = {Vision Transformers for Dense Prediction},
+  author = {Ranftl, Ren{\'e} and Bochkovskiy, Alexey and Koltun, Vladlen},
+  booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+  pages = {12179--12188},
+  year = {2021},
+  url = {https://openaccess.thecvf.com/content/ICCV2021/html/Ranftl_Vision_Transformers_for_Dense_Prediction_ICCV_2021_paper.html}
+}
+
+@inproceedings{dosovitskiy2021vit,
+  title = {An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale},
+  author = {Dosovitskiy, Alexey and Beyer, Lucas and Kolesnikov, Alexander and Weissenborn, Dirk and Zhai, Xiaohua and Unterthiner, Thomas and Dehghani, Mostafa and Minderer, Matthias and Heigold, Georg and Gelly, Sylvain and Uszkoreit, Jakob and Houlsby, Neil},
+  booktitle = {International Conference on Learning Representations},
+  year = {2021},
+  url = {https://openreview.net/forum?id=YicbFdNTTy}
+}
+
+@inproceedings{xiao2018upernet,
+  title = {Unified Perceptual Parsing for Scene Understanding},
+  author = {Xiao, Tete and Liu, Yingcheng and Zhou, Bolei and Jiang, Yuning and Sun, Jian},
+  booktitle = {Proceedings of the European Conference on Computer Vision (ECCV)},
+  pages = {418--434},
+  year = {2018},
+  url = {https://openaccess.thecvf.com/content_ECCV_2018/html/Tete_Xiao_Unified_Perceptual_Parsing_ECCV_2018_paper.html}
+}
+
+@inproceedings{ryali2023hiera,
+  title = {Hiera: A Hierarchical Vision Transformer without the Bells-and-Whistles},
+  author = {Ryali, Chaitanya and Hu, Yuan-Ting and Bolya, Daniel and Wei, Chen and Fan, Haoqi and Huang, Po-Yao and Aggarwal, Vaibhav and Chowdhury, Arkabandhu and Poursaeed, Omid and Hoffman, Judy and Malik, Jitendra and Li, Yanghao and Feichtenhofer, Christoph},
+  booktitle = {Proceedings of the 40th International Conference on Machine Learning},
+  series = {Proceedings of Machine Learning Research},
+  volume = {202},
+  pages = {29441--29454},
+  year = {2023},
+  url = {https://proceedings.mlr.press/v202/ryali23a.html}
+}
+
+@article{russakovsky2015imagenet,
+  title = {{ImageNet} Large Scale Visual Recognition Challenge},
+  author = {Russakovsky, Olga and Deng, Jia and Su, Hao and Krause, Jonathan and Satheesh, Sanjeev and Ma, Sean and Huang, Zhiheng and Karpathy, Andrej and Khosla, Aditya and Bernstein, Michael and Berg, Alexander C. and Fei-Fei, Li},
+  journal = {International Journal of Computer Vision},
+  volume = {115},
+  number = {3},
+  pages = {211--252},
+  year = {2015},
+  doi = {10.1007/s11263-015-0816-y},
+  url = {https://doi.org/10.1007/s11263-015-0816-y}
+}
+
+@inproceedings{defazio2024road,
+  title = {The Road Less Scheduled},
+  author = {Defazio, Aaron and Yang, Xingyu and Mehta, Harsh and Mishchenko, Konstantin and Khaled, Ahmed and Cutkosky, Ashok},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume = {37},
+  year = {2024},
+  doi = {10.52202/079017-0320},
+  url = {https://proceedings.neurips.cc/paper_files/paper/2024/hash/136b9a13861308c8948cd308ccd02658-Abstract-Conference.html}
+}
+
+@inproceedings{shrivastava2016ohem,
+  title = {Training Region-Based Object Detectors with Online Hard Example Mining},
+  author = {Shrivastava, Abhinav and Gupta, Abhinav and Girshick, Ross},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages = {761--769},
+  year = {2016},
+  doi = {10.1109/CVPR.2016.89},
+  url = {https://doi.org/10.1109/CVPR.2016.89}
+}
+
+@article{prechelt1998automatic,
+  title = {Automatic Early Stopping Using Cross Validation: Quantifying the Criteria},
+  author = {Prechelt, Lutz},
+  journal = {Neural Networks},
+  volume = {11},
+  number = {4},
+  pages = {761--767},
+  year = {1998},
+  doi = {10.1016/S0893-6080(98)00010-0},
+  url = {https://doi.org/10.1016/S0893-6080(98)00010-0}
+}
+
+@article{saito2015precision,
+  title = {The Precision-Recall Plot Is More Informative than the {ROC} Plot When Evaluating Binary Classifiers on Imbalanced Datasets},
+  author = {Saito, Takaya and Rehmsmeier, Marc},
+  journal = {PLOS ONE},
+  volume = {10},
+  number = {3},
+  pages = {e0118432},
+  year = {2015},
+  doi = {10.1371/journal.pone.0118432},
+  url = {https://doi.org/10.1371/journal.pone.0118432}
+}
+
+@article{matthews1975comparison,
+  title = {Comparison of the Predicted and Observed Secondary Structure of {T4} Phage Lysozyme},
+  author = {Matthews, Brian W.},
+  journal = {Biochimica et Biophysica Acta (BBA) - Protein Structure},
+  volume = {405},
+  number = {2},
+  pages = {442--451},
+  year = {1975},
+  doi = {10.1016/0005-2795(75)90109-9},
+  url = {https://doi.org/10.1016/0005-2795(75)90109-9}
 }
 
 @article{bandi2019resolution,
