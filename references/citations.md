@@ -69,6 +69,8 @@ because they still support the training-augmentation section.
 | Stage 8 registered segmentation architectures and encoders | `ronneberger2015unet`, `liu2021swin`, `chen2018deeplabv3plus`, `zhang2022resnest`, `zhou2020unetpp`, `tan2019efficientnet`, `lin2017fpn`, `hu2018senet`, `xie2021segformer`, `fan2020manet`, `he2016resnet`, `ranftl2021dpt`, `dosovitskiy2021vit`, `xiao2018upernet`, `ryali2023hiera`, `russakovsky2015imagenet` | Cite the original decoder and encoder/backbone papers for the active registry pairs. The registry gates approved model/encoder combinations; the exact implementation is through `segmentation_models_pytorch` and `timm`, not a from-scratch reimplementation. |
 | Stage 8 training loop, optimization, and validation selection | `khened2021generalized`, `loshchilov2019decoupled`, `defazio2024road`, `micikevicius2018mixed`, `shrivastava2016ohem`, `prechelt1998automatic`, `saito2015precision`, `matthews1975comparison`, `he2009imbalanced` | Cite Khened for the implemented BCE-plus-Dice loss, AdamW/Schedule-Free for the optimizer families, mixed precision when AMP is enabled, OHEM only when `TRAINING_RUN_OHEM=True`, early stopping for validation-based stopping, AUPRC/MCC papers for validation metrics, and He/Garcia for inverse-frequency sampling. |
 | Stage 8 manifest-backed training provenance and compact TRAIN_SELECTED reads | `wilkinson2016fair`, `piccolo2016tools`, `folk2011hdf5`, `roberts2017crossvalidation`, `dawood2026confounding` | Cite FAIR/Piccolo for executable provenance and metadata sidecars, HDF5 for canonical and compact row storage, and Roberts/Dawood for patient-level split isolation and leakage/confounding caution. |
+| Stage 9 two-stream ensemble recipe optimization | `dietterich2000ensemble`, `caruana2004ensemble`, `akiba2019optuna`, `bergstra2011algorithms`, `saito2015precision`, `matthews1975comparison` | Cite ensemble-method and ensemble-selection papers for combining trained model candidates, Optuna/TPE for semantic/spatial weight and ROI-threshold search, Saito/Rehmsmeier for AUPRC objectives under imbalance, and Matthews for MCC-based decision-threshold calibration. The two-stream ROI-gating objective is repository-specific. |
+| Stage 9 prediction caching, TTA, validation split, and recipe provenance | `moshkov2020test`, `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools`, `roberts2017crossvalidation`, `dawood2026confounding` | Cite Moshkov et al. for test-time augmentation in segmentation, HDF5/FAIR/Piccolo for cached prediction and recipe provenance, and Roberts/Dawood for patient-level optimization/calibration/holdout splitting. |
 | Training loss implementation | `khened2021generalized` | Cite Khened et al. as the direct source for the weighted BCE-plus-Dice loss implemented in Stage 8. |
 | Dice reporting and segmentation metric caveats | `seghier2024dice` | Cite when explaining Dice as an overlap metric, when warning that Dice is sensitive to reporting choices, and when justifying transparent metric definitions. |
 | Confounding, leakage, and cautious interpretation in computational pathology | `dawood2026confounding` | Cite for the broader warning that histology models can learn confounded correlational signals. This supports patient-level splitting, provenance validation, and cautious claims. |
@@ -195,6 +197,25 @@ Use these as citation anchors when updating `reports/main.tex`.
   train/validation isolation, HDF5 (`folk2011hdf5`) for canonical and compact
   row storage, and reuse the Stage 4 runtime-normalization citations for the
   selected on-the-fly normalization method.
+- Stage 9 ensemble optimizer: cite Dietterich (`dietterich2000ensemble`) for
+  the general ensemble-learning framing and Caruana et al.
+  (`caruana2004ensemble`) for validation-set ensemble selection from a library
+  of trained models. Cite Optuna (`akiba2019optuna`) and TPE
+  (`bergstra2011algorithms`) for the semantic/spatial weight and ROI-threshold
+  searches, while describing the two-stream semantic ROI gate plus spatial
+  spill-penalized objective as repository-specific.
+- Stage 9 TTA and validation metrics: cite Moshkov et al. (`moshkov2020test`)
+  when describing horizontal/vertical flip test-time augmentation for
+  segmentation probabilities. Cite Saito/Rehmsmeier (`saito2015precision`) for
+  AUPRC under class imbalance and Matthews (`matthews1975comparison`) for the
+  MCC criterion used to calibrate the final decision threshold.
+- Stage 9 validation splitting and recipe provenance: cite Roberts/Dawood
+  (`roberts2017crossvalidation`, `dawood2026confounding`) for keeping
+  optimization, calibration, and holdout groups patient-disjoint within the
+  validation set; cite HDF5 (`folk2011hdf5`) for cached prediction storage and
+  FAIR/Piccolo (`wilkinson2016fair`, `piccolo2016tools`) for the recipe JSON,
+  run config, compatibility signature, selected-model metadata, and validation
+  provenance.
 - Dataset provenance: cite the dataset paper associated with each active
   dataset cohort: CAMELYON16 (`bejnordi2017diagnostic`), CATCH
   (`wilm2022catch`), DiagSet (`koziarski2024diagset`), and HiESD
@@ -326,6 +347,22 @@ Use these as citation anchors when updating `reports/main.tex`.
 - Do not cite OHEM unless `TRAINING_RUN_OHEM=True`. Shrivastava et al. support
   the online hard-example-mining idea; this repository applies a pixel-level
   segmentation-loss variant, not the original region-based detector pipeline.
+- Do not present Stage 9 optimization/calibration/holdout metrics as final TEST
+  evidence. Stage 9 partitions VALIDATION patients to produce an ensemble recipe
+  for Stage 10; the held-out TEST evaluation remains downstream.
+- Do not cite Caruana et al. as if Stage 9 implements their exact greedy
+  forward ensemble-selection algorithm. Stage 9 performs library-based model
+  selection and Optuna-optimized continuous weights, so the citation supports
+  the ensemble-selection motivation rather than a paper-exact algorithm.
+- Do not cite the ROI gate or spill penalty as a published method. The semantic
+  low-pass ROI mask, empty/permissive ROI pruning, and spatial spill penalty are
+  repository-specific design choices.
+- Do not describe the decision threshold as probability calibration. Stage 9
+  sweeps thresholds from 0.05 to 0.95 and selects the value with the best mean
+  patient MCC on calibration patients.
+- Do not cite test-time augmentation unless the flip-averaged prediction path is
+  discussed. Stage 9 averages the original, horizontal-flip, and vertical-flip
+  probabilities; it does not perform a larger TTA policy search.
 - Do not cite Reinhard, Ruifrok, Macenko, or Vahadane as if the repository
   exactly reproduces every implementation detail of the original papers. Cite
   them for the normalization/deconvolution families and then describe the actual
@@ -544,6 +581,30 @@ Training and provenance decisions:
 | Validation metrics and best checkpoint | Validation accumulates pixel histograms for AUPRC, AUROC, and MCC*, guards against collapsed foreground prevalence, and saves the best checkpoint by validation AUPRC with early stopping. | `saito2015precision`; `matthews1975comparison`; `prechelt1998automatic`; `sokolova2009performance` |
 | Checkpoint resume compatibility and metadata | Resume requires matching provenance signatures for split, packaging, normalization, smart-sampling, artifact-aware loss, and OHEM settings; final metadata captures runtime environment, dataset lineage, optimizer/loss settings, and metrics. | `wilkinson2016fair`; `piccolo2016tools` |
 | Aim logging and completion reporting | Stage 8 logs hparams and epoch metrics to Aim when available and writes completion metadata/email summaries. | `piccolo2016tools`; `wilkinson2016fair` |
+
+## Stage 9 Ensemble Optimizer Notes
+
+Suggested code boundary: `9_optimizer_ensemble.py`,
+`helpers/ensemble_optimizer/config.py`, `helpers/ensemble_optimizer/pipeline.py`,
+`helpers/ensemble_optimizer/metadata.py`, `helpers/ensemble_optimizer/models.py`,
+`helpers/ensemble_optimizer/data.py`, `helpers/ensemble_optimizer/splitting.py`,
+`helpers/ensemble_optimizer/optimization.py`,
+`helpers/ensemble_optimizer/reporting.py`, `helpers/provenance.py`, and
+the Stage 8 model metadata sidecars consumed from `ENSEMBLE_OPT_METADATA_DIR`.
+
+| Stage 9 decision | Code behavior to document | Suggested citation |
+| --- | --- | --- |
+| Metadata-driven model-library selection | Stage 9 loads `*_meta.json` files, requires compatible fail-closed provenance signatures, ranks candidates on the optimization subset, and selects the best valid model per requested architecture. | `caruana2004ensemble`; `dietterich2000ensemble`; `wilkinson2016fair`; `piccolo2016tools` |
+| Semantic and spatial architecture streams | The default semantic stream is `SWIN,DPT,SEGFORMER,UPERNET`; the default spatial stream is `DEEPLABV3PLUS,UNET++,FPN,MANET`. The stream split is a repository design over the Stage 8 registry families. | Cite the Stage 8 architecture papers for each selected model; stream assignment itself is repository-specific |
+| Manifest-backed VALIDATION source contract | Stage 9 resolves canonical VALIDATION rows from `master_manifest.sqlite`, optionally stages patient shards locally, applies the selected runtime normalization, and records validation provenance. | `wilkinson2016fair`; `folk2011hdf5`; `roberts2017crossvalidation`; `dawood2026confounding`; normalization citations as in Stage 4 |
+| Patient-level optimization/calibration/holdout split | Validation patients are split into disjoint optimization, calibration, and optional development holdout groups with a fixed seed and positive/negative patient awareness. | `roberts2017crossvalidation`; `dawood2026confounding`; exact split-count policy is repository-specific |
+| Batched TTA prediction cache | Each selected model is evaluated on validation patches with original, horizontal-flip, and vertical-flip predictions averaged; foreground probabilities are cached as uint16 memmaps with truth masks and patient ids. | `moshkov2020test`; `folk2011hdf5`; cache quantization and storage layout are repository-specific |
+| Optuna/TPE semantic stream optimization | The semantic stream optimizes normalized model weights and an ROI threshold with `TPESampler`; trials are pruned if ROIs are too empty, miss positive tissue, or become too permissive. | `akiba2019optuna`; `bergstra2011algorithms`; ROI constraints are repository-specific |
+| Low-pass ROI gate | The semantic probability ensemble is downsampled, thresholded, and upsampled to form a coarse ROI mask that gates the spatial stream. | Cite `akiba2019optuna` only for the threshold search machinery; the low-pass ROI gate is repository-specific |
+| Optuna/TPE spatial stream optimization | With the semantic ROI fixed, Stage 9 optimizes spatial model weights for a composite objective: macro positive-patient AUPRC inside ROI minus spill and negative false-positive penalties. | `akiba2019optuna`; `bergstra2011algorithms`; `saito2015precision`; penalty terms are repository-specific |
+| Decision threshold calibration | Stage 9 sweeps thresholds from 0.05 to 0.95 on calibration patients and selects the threshold maximizing mean patient MCC after ROI gating. | `matthews1975comparison`; threshold sweep granularity is repository-specific |
+| Development holdout recipe check | The optimized semantic weights, spatial weights, ROI threshold, and calibrated decision threshold are evaluated on the holdout validation patients with macro AUPRC, spill, negative-FP, and composite objective summaries. | `saito2015precision`; `matthews1975comparison`; holdout is validation-internal, not final TEST evidence |
+| Recipe and run-config provenance | Stage 9 writes `ENSEMBLE_TWO_STREAM_*.json` and `ensemble_optimizer_run_config.json` with selected model metadata, checkpoint hashes, stream weights, thresholds, calibration metrics, holdout metrics, validation lineage, split fingerprint, and recipe signature. | `wilkinson2016fair`; `piccolo2016tools` |
 
 ## BibTeX
 
@@ -888,6 +949,42 @@ Training and provenance decisions:
   year = {1975},
   doi = {10.1016/0005-2795(75)90109-9},
   url = {https://doi.org/10.1016/0005-2795(75)90109-9}
+}
+
+@inproceedings{dietterich2000ensemble,
+  title = {Ensemble Methods in Machine Learning},
+  author = {Dietterich, Thomas G.},
+  booktitle = {Multiple Classifier Systems},
+  series = {Lecture Notes in Computer Science},
+  volume = {1857},
+  pages = {1--15},
+  year = {2000},
+  publisher = {Springer},
+  doi = {10.1007/3-540-45014-9_1},
+  url = {https://doi.org/10.1007/3-540-45014-9_1}
+}
+
+@inproceedings{caruana2004ensemble,
+  title = {Ensemble Selection from Libraries of Models},
+  author = {Caruana, Rich and Niculescu-Mizil, Alexandru and Crew, Geoff and Ksikes, Alex},
+  booktitle = {Proceedings of the Twenty-First International Conference on Machine Learning},
+  pages = {18},
+  year = {2004},
+  publisher = {Association for Computing Machinery},
+  doi = {10.1145/1015330.1015432},
+  url = {https://doi.org/10.1145/1015330.1015432}
+}
+
+@article{moshkov2020test,
+  title = {Test-Time Augmentation for Deep Learning-Based Cell Segmentation on Microscopy Images},
+  author = {Moshkov, Nikita and Mathe, Botond and Kertesz-Farkas, Attila and Hollandi, Reka and Horvath, Peter},
+  journal = {Scientific Reports},
+  volume = {10},
+  number = {1},
+  pages = {5068},
+  year = {2020},
+  doi = {10.1038/s41598-020-61808-3},
+  url = {https://doi.org/10.1038/s41598-020-61808-3}
 }
 
 @article{bandi2019resolution,
