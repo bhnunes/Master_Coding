@@ -55,6 +55,7 @@ def prepare_training_data(
         compact_result = remap_records_to_compact_train_selected(
             original_training_records,
             compact_dir=config.compact_train_selected_dir,
+            master_manifest_path=config.master_manifest_path,
         )
         training_records = list(compact_result.records)
         compact_provenance = compact_result.provenance

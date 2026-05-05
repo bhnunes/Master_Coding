@@ -746,6 +746,7 @@ def prepare_training_data(  # noqa: PLR0913
         compact_result = remap_records_to_compact_train_selected(
             original_training_records,
             compact_dir=compact_train_selected_dir,
+            master_manifest_path=master_manifest_path,
         )
         training_records = list(compact_result.records)
         compact_provenance = compact_result.provenance

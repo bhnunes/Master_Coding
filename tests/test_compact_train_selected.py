@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import h5py
@@ -87,6 +88,11 @@ def test_compact_train_selected_copies_only_selected_rows(tmp_path: Path) -> Non
 
     assert result.row_count == SELECTED_ROW_COUNT
     assert result.shard_count == 1
+    with sqlite3.connect(compact_dir / "index.sqlite") as connection:
+        stored_source_key = connection.execute(
+            "SELECT original_source_hdf5_path FROM row_mapping LIMIT 1"
+        ).fetchone()[0]
+    assert stored_source_key == "MANIFEST::source/patient_7.h5"
     compact_shard = next((compact_dir / "shards").glob("*.h5"))
     with h5py.File(compact_shard, "r") as handle:
         assert handle["images"].shape[0] == SELECTED_ROW_COUNT
@@ -172,3 +178,51 @@ def test_compact_train_selected_remaps_records_and_fails_when_missing(
     )
     with pytest.raises(FileNotFoundError, match="Rerun Stage 6"):
         remap_records_to_compact_train_selected([missing_record], compact_dir=compact_dir)
+
+
+def test_compact_train_selected_remaps_legacy_absolute_index_after_path_relocation(
+    tmp_path: Path,
+) -> None:
+    old_source_path = (
+        tmp_path / "old_account" / "DIAGSET_OUTPUT" / "PATCHES" / "HDF5_SHARDS" / "patient_7.h5"
+    )
+    new_source_path = (
+        tmp_path / "new_account" / "DIAGSET_OUTPUT" / "PATCHES" / "HDF5_SHARDS" / "patient_7.h5"
+    )
+    compact_dir = tmp_path / "compact"
+    _write_source_shard(old_source_path)
+    build_compact_train_selected_from_decisions(
+        master_manifest_path=old_source_path.parents[2] / "master_manifest.sqlite",
+        decisions=_selected_decisions(old_source_path),
+        compact_dir=compact_dir,
+        compression="none",
+    )
+    legacy_absolute_key = str(old_source_path.expanduser().resolve(strict=False))
+    with sqlite3.connect(compact_dir / "index.sqlite") as connection:
+        connection.execute(
+            "UPDATE row_mapping SET original_source_hdf5_path = ?",
+            (legacy_absolute_key,),
+        )
+        connection.commit()
+    relocated_record = CanonicalRowRecord(
+        source_hdf5_path=new_source_path,
+        source_row_index=2,
+        patient_id="7",
+        label=0,
+        filename="p7_2.png",
+        split="TRAIN",
+        normalization_method=None,
+        normalization_artifact_id=None,
+        sampling_decision="protected_kept",
+        is_stage7_selected=True,
+    )
+
+    remapped = remap_records_to_compact_train_selected(
+        [relocated_record],
+        compact_dir=compact_dir,
+        master_manifest_path=new_source_path.parents[2] / "master_manifest.sqlite",
+    )
+
+    assert remapped.records[0].source_hdf5_path.parent == compact_dir / "shards"
+    assert remapped.records[0].source_row_index == 1
+    assert remapped.provenance["portable_path_fallback_count"] == 1

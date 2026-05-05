@@ -15,6 +15,7 @@ from typing import Any, Literal, cast
 import h5py
 import numpy as np
 
+from helpers.extraction.manifest_paths import to_manifest_path_ref
 from helpers.training.master_manifest_queries import CanonicalRowRecord
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ COPY_BATCH_ROWS = 512
 VALID_HDF5_COMPRESSIONS = frozenset({"none", "lzf", "gzip"})
 
 CompressionName = Literal["none", "lzf", "gzip"]
+type _PortableKey = tuple[str, int, str, str, int]
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,24 @@ class _SelectedDecision:
     filename: str
     patient_id: str
     label: int
+
+
+@dataclass(frozen=True)
+class _CompactRowMapping:
+    original_source_hdf5_path: str
+    original_source_row_index: int
+    compact_path: Path
+    compact_row_index: int
+    filename: str
+    patient_id: str
+    label: int
+
+
+@dataclass(frozen=True)
+class _CompactIndexLookup:
+    exact: dict[tuple[str, int], _CompactRowMapping]
+    portable: dict[_PortableKey, _CompactRowMapping]
+    ambiguous_portable: frozenset[_PortableKey]
 
 
 def normalize_hdf5_compression(value: str) -> CompressionName:
@@ -121,30 +141,36 @@ def remap_records_to_compact_train_selected(
     records: Sequence[CanonicalRowRecord],
     *,
     compact_dir: Path,
+    master_manifest_path: Path | None = None,
 ) -> CompactTrainSelectedLoadResult:
     """Return records remapped from canonical TRAIN rows to compact local shards."""
 
     compact_dir = compact_dir.expanduser()
     _validate_compact_artifact_present(compact_dir)
     index_path = compact_dir / INDEX_FILE_NAME
-    mappings = _load_index_mappings(index_path, compact_dir=compact_dir)
+    lookup = _load_index_mappings(index_path, compact_dir=compact_dir)
     remapped_records: list[CanonicalRowRecord] = []
     missing_keys: list[str] = []
     used_compact_paths: set[Path] = set()
+    portable_path_fallback_count = 0
 
     for record in records:
-        key = (_path_key(record.source_hdf5_path), record.source_row_index)
-        mapping = mappings.get(key)
+        mapping, used_portable_fallback = _lookup_compact_mapping(
+            record,
+            lookup=lookup,
+            master_manifest_path=master_manifest_path,
+        )
         if mapping is None:
             missing_keys.append(f"{record.source_hdf5_path}::{record.source_row_index}")
             continue
-        compact_path, compact_row_index = mapping
-        used_compact_paths.add(compact_path)
+        if used_portable_fallback:
+            portable_path_fallback_count += 1
+        used_compact_paths.add(mapping.compact_path)
         remapped_records.append(
             replace(
                 record,
-                source_hdf5_path=compact_path,
-                source_row_index=compact_row_index,
+                source_hdf5_path=mapping.compact_path,
+                source_row_index=mapping.compact_row_index,
             )
         )
 
@@ -178,6 +204,8 @@ def remap_records_to_compact_train_selected(
         "total_size_bytes": summary.get("total_size_bytes"),
         "compression": summary.get("compression"),
         "created_at": summary.get("created_at"),
+        "path_key_policy": "manifest_relative_with_absolute_path_compatibility",
+        "portable_path_fallback_count": portable_path_fallback_count,
     }
     return CompactTrainSelectedLoadResult(
         records=tuple(remapped_records),
@@ -253,7 +281,10 @@ def _build_into_temp_dir(
         for decision in shard_decisions:
             mapping_rows.append(
                 (
-                    _path_key(decision.source_hdf5_path),
+                    _source_storage_key(
+                        decision.source_hdf5_path,
+                        master_manifest_path=master_manifest_path,
+                    ),
                     decision.source_row_index,
                     compact_relative_path.as_posix(),
                     compact_row_by_source_index[decision.source_row_index],
@@ -485,6 +516,7 @@ def _write_index(
             [
                 ("schema_version", str(INDEX_SCHEMA_VERSION)),
                 ("artifact", "train_selected_compact"),
+                ("source_path_key_policy", "manifest_relative_with_absolute_path_fallback"),
             ],
         )
         connection.executemany(
@@ -508,7 +540,7 @@ def _load_index_mappings(
     index_path: Path,
     *,
     compact_dir: Path,
-) -> dict[tuple[str, int], tuple[Path, int]]:
+) -> _CompactIndexLookup:
     with closing(sqlite3.connect(index_path)) as connection:
         connection.row_factory = sqlite3.Row
         metadata = {
@@ -522,17 +554,90 @@ def _load_index_mappings(
         rows = connection.execute(
             """
             SELECT original_source_hdf5_path, original_source_row_index,
-                   compact_hdf5_path, compact_row_index
+                   compact_hdf5_path, compact_row_index, filename, patient_id, label
             FROM row_mapping
             """
         ).fetchall()
-    mappings: dict[tuple[str, int], tuple[Path, int]] = {}
+    mappings: list[_CompactRowMapping] = []
     for row in rows:
-        mappings[(str(row["original_source_hdf5_path"]), int(row["original_source_row_index"]))] = (
-            compact_dir / Path(str(row["compact_hdf5_path"])),
-            int(row["compact_row_index"]),
+        mappings.append(
+            _CompactRowMapping(
+                original_source_hdf5_path=str(row["original_source_hdf5_path"]),
+                original_source_row_index=int(row["original_source_row_index"]),
+                compact_path=compact_dir / Path(str(row["compact_hdf5_path"])),
+                compact_row_index=int(row["compact_row_index"]),
+                filename=str(row["filename"]),
+                patient_id=str(row["patient_id"]),
+                label=int(row["label"]),
+            )
         )
-    return mappings
+    return _build_index_lookup(mappings)
+
+
+def _build_index_lookup(mappings: Sequence[_CompactRowMapping]) -> _CompactIndexLookup:
+    exact: dict[tuple[str, int], _CompactRowMapping] = {}
+    portable: dict[_PortableKey, _CompactRowMapping] = {}
+    ambiguous_portable: set[_PortableKey] = set()
+
+    for mapping in mappings:
+        exact[(mapping.original_source_hdf5_path, mapping.original_source_row_index)] = mapping
+        for portable_key in _portable_mapping_keys(mapping):
+            if portable_key in ambiguous_portable:
+                continue
+            existing = portable.get(portable_key)
+            if existing is None:
+                portable[portable_key] = mapping
+            elif existing != mapping:
+                ambiguous_portable.add(portable_key)
+                portable.pop(portable_key, None)
+
+    return _CompactIndexLookup(
+        exact=exact,
+        portable=portable,
+        ambiguous_portable=frozenset(ambiguous_portable),
+    )
+
+
+def _lookup_compact_mapping(
+    record: CanonicalRowRecord,
+    *,
+    lookup: _CompactIndexLookup,
+    master_manifest_path: Path | None,
+) -> tuple[_CompactRowMapping | None, bool]:
+    for source_key in _exact_record_lookup_keys(
+        record.source_hdf5_path,
+        master_manifest_path=master_manifest_path,
+    ):
+        mapping = lookup.exact.get((source_key, record.source_row_index))
+        if mapping is not None:
+            return mapping, False
+
+    portable_matches: list[_CompactRowMapping] = []
+    ambiguous_key_seen = False
+    for portable_key in _portable_record_keys(
+        record.source_hdf5_path,
+        record.source_row_index,
+        record.filename,
+        record.patient_id,
+        record.label,
+        master_manifest_path=master_manifest_path,
+    ):
+        if portable_key in lookup.ambiguous_portable:
+            ambiguous_key_seen = True
+            continue
+        mapping = lookup.portable.get(portable_key)
+        if mapping is not None and mapping not in portable_matches:
+            portable_matches.append(mapping)
+
+    if len(portable_matches) == 1:
+        return portable_matches[0], True
+    if len(portable_matches) > 1 or ambiguous_key_seen:
+        raise ValueError(
+            "Compact TRAIN_SELECTED artifact has ambiguous portable mappings for "
+            f"{record.source_hdf5_path} row {record.source_row_index}. Rebuild the compact "
+            "artifact from the current master manifest before training."
+        )
+    return None, False
 
 
 def _validate_temp_artifact(temp_dir: Path, *, expected_row_count: int) -> None:
@@ -655,6 +760,127 @@ def _compact_shard_name(source_path: Path, shard_number: int) -> str:
         for character in source_path.stem
     )
     return f"{shard_number:05d}_{safe_stem}.h5"
+
+
+def _source_storage_key(path: Path, *, master_manifest_path: Path) -> str:
+    try:
+        return to_manifest_path_ref(path, manifest_path=master_manifest_path)
+    except ValueError:
+        return _path_key(path)
+
+
+def _exact_record_lookup_keys(
+    path: Path,
+    *,
+    master_manifest_path: Path | None,
+) -> tuple[str, ...]:
+    candidates: list[str] = []
+    if master_manifest_path is not None:
+        candidates.append(_source_storage_key(path, master_manifest_path=master_manifest_path))
+    candidates.extend((_path_key(path), str(path.expanduser())))
+    return _unique_strings(candidates)
+
+
+def _portable_mapping_keys(mapping: _CompactRowMapping) -> tuple[_PortableKey, ...]:
+    return _portable_row_keys(
+        mapping.original_source_hdf5_path,
+        mapping.original_source_row_index,
+        mapping.filename,
+        mapping.patient_id,
+        mapping.label,
+        master_manifest_path=None,
+    )
+
+
+def _portable_record_keys(
+    path: Path,
+    row_index: int,
+    filename: str,
+    patient_id: str,
+    label: int,
+    *,
+    master_manifest_path: Path | None,
+) -> tuple[_PortableKey, ...]:
+    source_values = [str(path.expanduser())]
+    if master_manifest_path is not None:
+        source_values.insert(
+            0, _source_storage_key(path, master_manifest_path=master_manifest_path)
+        )
+    keys: list[_PortableKey] = []
+    for source_value in _unique_strings(source_values):
+        keys.extend(
+            _portable_row_keys(
+                source_value,
+                row_index,
+                filename,
+                patient_id,
+                label,
+                master_manifest_path=None,
+            )
+        )
+    return tuple(dict.fromkeys(keys))
+
+
+def _portable_row_keys(
+    source_value: str | Path,
+    row_index: int,
+    filename: str,
+    patient_id: str,
+    label: int,
+    *,
+    master_manifest_path: Path | None,
+) -> tuple[_PortableKey, ...]:
+    source_values = [str(source_value)]
+    if master_manifest_path is not None:
+        source_values.insert(
+            0,
+            _source_storage_key(Path(source_value), master_manifest_path=master_manifest_path),
+        )
+    keys: list[_PortableKey] = []
+    for value in _unique_strings(source_values):
+        keys.extend(
+            (
+                source_candidate,
+                row_index,
+                filename,
+                str(patient_id),
+                int(label),
+            )
+            for source_candidate in _portable_source_candidates(value)
+        )
+    return tuple(dict.fromkeys(keys))
+
+
+def _portable_source_candidates(source_value: str | Path) -> tuple[str, ...]:
+    raw_value = str(source_value)
+    candidates: list[str] = []
+    path_text = raw_value
+    if raw_value.startswith(("MANIFEST::", "SOURCE::")):
+        candidates.append(raw_value)
+        path_text = raw_value.split("::", maxsplit=1)[1]
+        candidates.append(path_text)
+
+    normalized = path_text.replace("\\", "/")
+    parts = tuple(part for part in normalized.split("/") if part not in {"", "."})
+    for anchor in ("PATCHES", "HDF5_SHARDS"):
+        anchor_index = _find_path_anchor(parts, anchor)
+        if anchor_index is not None:
+            candidates.append("/".join(parts[anchor_index:]))
+    if parts:
+        candidates.append(parts[-1])
+    return _unique_strings(candidates)
+
+
+def _find_path_anchor(parts: Sequence[str], anchor: str) -> int | None:
+    normalized_anchor = anchor.lower()
+    for index, part in enumerate(parts):
+        if part.lower() == normalized_anchor:
+            return index
+    return None
+
+
+def _unique_strings(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(value for value in values if value))
 
 
 def _path_key(path: Path) -> str:
