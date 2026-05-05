@@ -1,0 +1,88 @@
+\prefacesection{Lista de Símbolos}
+
+% \begin{center} % Remova o \centering aqui se estava usando com \begin{table}
+\begin{longtable}{p{2.5cm} p{12.5cm}} % Ajuste larguras conforme necessário
+    \caption[Lista de Símbolos Matemáticos e Notações]{Lista dos principais símbolos matemáticos e notações utilizados na dissertação e suas respectivas descrições. Esta tabela continua na próxima página.} \label{tab:lista_de_simbolos} \\ 
+
+    % --- CABEÇALHO DA TABELA - Aparecerá na primeira página ---
+    \toprule
+    \textbf{Símbolo} & \textbf{Descrição} \\
+    \midrule
+    \endfirsthead
+
+    % --- CABEÇALHO PARA PÁGINAS DE CONTINUAÇÃO ---
+    \multicolumn{2}{c}%
+    {{\tablename\ \thetable{} -- Continuação da página anterior}} \\
+    \toprule
+    \textbf{Símbolo} & \textbf{Descrição} \\
+    \midrule
+    \endhead
+
+    % --- RODAPÉ PARA TODAS AS PÁGINAS, EXCETO A ÚLTIMA ---
+    \midrule
+    \multicolumn{2}{r}{{Continua na próxima página}} \\
+    \endfoot
+
+    % --- RODAPÉ APENAS NA ÚLTIMA PÁGINA DA TABELA ---
+    \bottomrule
+    \endlastfoot
+
+    % --- CONTEÚDO DA TABELA ---
+    $\alpha$  & Peso do termo de Entropia Cruzada Binária (BCE) na função de perda combinada. \\
+    $\beta$   & Peso do termo de Dice Loss para a classe "câncer" na função de perda combinada. \\
+    $\gamma$  & Peso do termo de Dice Loss para a classe "não câncer" na função de perda combinada. \\
+    $A$       & Imagem binária de entrada para operações morfológicas. \\
+    $B$       & Elemento estruturante (kernel) para operações morfológicas. \\
+    $d_k$     & Dimensão dos vetores de chave (\textit{keys}) utilizada para normalização no mecanismo de atenção. \\
+    $\text{Dice}(th_k)$ & Coeficiente de Dice calculado para um limiar específico $th_k$. \\
+    $Dif(C_1, C_2)$ & Diferença entre dois componentes $C_1$ e $C_2$, o menor peso de aresta que os conecta. \\
+    FN        & Falsos Negativos: Número de pixels incorretamente classificados como não pertencentes à classe de interesse. \\
+    $\text{FN}(th_k)$ & Contagem de Falsos Negativos para um limiar específico $th_k$. \\
+    FP        & Falsos Positivos: Número de pixels incorretamente classificados como pertencentes à classe de interesse. \\
+    $\text{FP}(th_k)$ & Contagem de Falsos Positivos para um limiar específico $th_k$. \\
+    $g_i$     & Rótulo verdadeiro (\textit{ground truth}) para o pixel $i$ (1 para classe positiva, 0 para negativa). \\
+    $\hat{g}_{i}(th_k)$ & Predição binária para o pixel $i$ utilizando o limiar $th_k$. \\
+    $G=(V, E)$ & Grafo que representa a imagem, com vértices $V$ (pixels) e arestas $E$. \\
+    $H$       & Matriz de concentração/densidade de corantes. \\
+    $I$       & Intensidade da luz transmitida (após a amostra). \\
+    $I_0$     & Intensidade da luz incidente (antes da amostra). \\
+    $\mathbb{I}(\cdot)$ & Função Indicadora (1 se a condição é verdadeira, 0 caso contrário). \\
+    $Int(C)$ & Diferença interna de um componente $C$, o maior peso de aresta em sua árvore geradora mínima. \\
+    $k$       & Parâmetro de escala que controla a preferência por componentes maiores na segmentação por grafos. \\
+    $K$       & Número de limiares candidatos para otimização. \\
+    $K$       & Matriz de Chaves (\textit{Keys}) no mecanismo de atenção do Transformer. \\
+    $L*, a*, b*$ & Componentes do espaço de cor CIE LAB (Luminosidade, cromaticidade a, cromaticidade b). \\
+    $MInt(C_1, C_2)$ & Limiar de diferença interna mínima para decidir a fusão de componentes. \\
+    $N$       & Número total de pixels em uma imagem ou \textit{patch} analisado. \\
+    $N_V$     & Número de \textit{patches} no conjunto de validação $V$. \\
+    $OD$      & Densidade Óptica, medida logarítmica da absorbância da luz. \\
+    $p_i$     & Probabilidade predita pelo modelo para o pixel $i$ pertencer à classe positiva. \\
+    $P_{LAB, origem}$ & Valor de um pixel no espaço LAB da imagem original (antes da normalização). \\
+    $P_{LAB, norm}$ & Valor de um pixel no espaço LAB após a normalização de cor de Reinhard. \\
+    $Q$       & Matriz de Consultas (\textit{Queries}) no mecanismo de atenção do Transformer. \\
+    $t$       & Limiar (threshold) calculado pelo Método de Otsu para binarização de imagem. \\
+    $th_k$    & $k$-ésimo limiar candidato no processo de otimização de limiar. \\
+    $th^*$    & Limiar de decisão ótimo encontrado após otimização. \\
+    $Th$      & Conjunto de todos os limiares candidatos $\{th_1, ..., th_K\}$. \\
+    TN        & Verdadeiros Negativos: Número de pixels corretamente classificados como não pertencentes à classe de interesse. \\
+    TP        & Verdadeiros Positivos: Número de pixels corretamente classificados como pertencentes à classe de interesse. \\
+    $\text{TP}(th_k)$ & Contagem de Verdadeiros Positivos para um limiar específico $th_k$. \\
+    $V$       & Conjunto de validação utilizado para otimização de limiar. \\
+    $V$       & Matriz de Densidade Óptica (no contexto de separação de corantes). \\
+    $V$       & Matriz de Valores (\textit{Values}) no mecanismo de atenção do Transformer. \\
+    $w(v_i, v_j)$ & Peso de uma aresta, medindo a dissimilaridade entre os pixels $v_i$ e $v_j$. \\
+    $W$       & Matriz de vetores de cor (base de cores dos corantes). \\
+    $|C|$     & Tamanho (número de pixels) de um componente $C$. \\
+    $\epsilon$ & Pequeno fator de suavização (epsilon) para estabilidade numérica. \\
+    $\mu_{origem}$ & Média dos valores dos pixels da imagem de origem em um canal LAB. \\
+    $\sigma_{origem}$ & Desvio padrão dos valores dos pixels da imagem de origem em um canal LAB. \\
+    $\mu_{ref}$ & Média de referência em um canal LAB para normalização de cor. \\
+    $\sigma_{ref}$ & Desvio padrão de referência em um canal LAB para normalização de cor. \\
+    $\tau(C)$ & Função de limiar adaptativa, baseada no tamanho do componente $C$. \\
+    $\lambda$ & Parâmetro de regularização que controla a esparsidade na separação de corantes. \\
+    $\ominus$  & Operador de Erosão morfológica. \\
+    $\oplus$  & Operador de Dilatação morfológica. \\
+    $\circ$   & Operador de Abertura morfológica. \\
+    $\bullet$ & Operador de Fechamento morfológico. \\
+
+\end{longtable}

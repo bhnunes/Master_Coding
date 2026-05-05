@@ -1,0 +1,345 @@
+% Capítulo 4
+\chapter{Resultados Preliminares e Discussão}\label{chp:resultados_preliminares} 
+
+Este capítulo apresenta os resultados preliminares obtidos durante as fases exploratória e de treinamento do \textit{ensemble} do \textit{framework} proposto. Inicialmente, detalha-se o resultado quantitativo do processo de geração de dados. Em seguida, são descritos os experimentos realizados com diferentes arquiteturas de \textit{DL} em configurações de validação cruzada sobre uma subamostra dos dados. Posteriormente, são apresentados os resultados do treinamento e avaliação do \textit{ensemble} de modelos utilizando o conjunto de dados completo. Por fim, discute-se o desenvolvimento de uma aplicação para inferência, demonstrando a operacionalização do \textit{framework}.
+
+% Nova seção para apresentar o resultado geral do patching
+\section{Geração do Conjunto de Dados Base}\label{sec:res_dataset_base}
+
+Após a aplicação das etapas de pré-processamento descrito na \Secao{sec:met_aquisicao_dados} e \Secao{sec:met_preproc_conjuntos}, que incluiu a leitura das WSIs, extração de \textit{patches}, filtragem por conteúdo tecidual e correspondência com anotações, e geração de máscaras binárias, obteve-se o conjunto de dados base para este trabalho. A \Tabela{tab:distribuicao_patches_mascaras} sumariza a quantidade total de \textit{patches} de imagem e suas respectivas máscaras geradas, segregadas por classe (Câncer e Não Câncer).
+
+% Tabela de Distribuição Total de Patches e Máscaras
+\begin{table}[!htb] 
+    \centering 
+    \caption[Distribuição Total de \textit{Patches} e Máscaras Gerados]{Quantidade total de \textit{patches} de imagem e suas máscaras de segmentação correspondentes geradas pelo processo de pré-processamento, separadas por classe, compondo o conjunto de dados base.} 
+    \label{tab:distribuicao_patches_mascaras} 
+    \begin{tabular}{l c c} 
+        \toprule 
+        \textbf{Tipo} & \textbf{Imagens} & \textbf{Máscaras} \\ 
+        \midrule 
+        Câncer      & 31519 & 31519 \\ 
+        Não Câncer  & 33672 & 33672 \\ 
+        \bottomrule 
+    \end{tabular}
+\end{table}
+
+Este conjunto total de 65.191 pares de imagem/máscara representa a totalidade dos dados extraídos das 104 WSIs originais e 54 pacientes. Os principais parâmetros utilizados durante a etapa de \textit{patching} e seleção de ROI estão detalhados na \Tabela{tab:parametros_preproc_patches}.
+
+% NOVA Tabela de Parâmetros de Pré-processamento/Patching
+\begin{table}[!htb]
+\centering
+\caption[Parâmetros chave do pré-processamento e geração de \textit{patches}.]{Parâmetros principais que definiram a extração e seleção de \textit{patches} a partir das WSIs.}
+\label{tab:parametros_preproc_patches}
+\begin{tabular}{l p{0.2\textwidth}} % A primeira coluna 'l' (left), a segunda é uma parbox
+\toprule
+\textbf{Parâmetro de Pré-processamento} & \textbf{Valor/Descrição} \\
+\midrule
+Tamanho do Patch (\texttt{WINDOW\_SIZE}) & 224x224 pixels \\
+Passo de Corte (\texttt{STRIDE}) & 112 pixels (50\% de sobreposição) \\
+Limiar de Correspondência com Anotação (\texttt{MATCH\_PERCENTAGE}) & 0.95 (95\%) \\
+Limiar de Conteúdo Tecidual (\texttt{TISSUE\_PERCENTAGE}) & 0.3 (30\%) \\
+Nível de Magnificação para Extração (\texttt{TARGET\_LEVEL}) & 0 (20X) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% Seção anterior renomeada e adaptada
+\section{Configuração Experimental e Treinamento Exploratório (Subamostra)}\label{sec:res_config_exp_exploratoria_subamostra} 
+
+Para a fase inicial de exploração de arquiteturas e hiperparâmetros, cujo objetivo principal era a rápida iteração e identificação de modelos promissores, optou-se por utilizar uma subamostra representativa do conjunto total de dados detalhado na \Secao{sec:res_dataset_base}. Esta subamostra foi selecionada com base em um subconjunto dos pacientes disponíveis ($\approx 50\%$), garantindo que a validação cruzada subsequente mantivesse a separação por paciente. Esta abordagem visou agilizar a experimentação e otimizar o uso de recursos computacionais nesta etapa preliminar.
+
+Os principais hiperparâmetros e configurações de treinamento utilizados como base para esta fase exploratória estão sumarizados na \Tabela{tab:sumario_hiperparametros_treino_exploratorio}. Variações em alguns destes, como Taxa de Aprendizado (LR) e uso de \textit{dropout}, foram investigadas e estão detalhadas nos resultados completos apresentados no apêndice \ref{ap:resultados_exploratorios_detalhados_rev}.
+
+% Tabela de Sumário de Hiperparâmetros de TREINAMENTO (Modificada)
+\begin{table}[!htb]
+\centering
+\caption[Sumário dos principais hiperparâmetros de treinamento da fase exploratória.]{Principais hiperparâmetros e configurações base utilizados durante o treinamento dos modelos na fase exploratória.}
+\label{tab:sumario_hiperparametros_treino_exploratorio} 
+% Ajuste a largura de p{...} conforme necessário para sua página
+\begin{tabular}{l p{0.4\textwidth}} % Mantive 0.6\textwidth, ajuste se a nova linha causar problemas
+\toprule
+\textbf{Parâmetro/Configuração de Treinamento} & \textbf{Valor/Descrição} \\
+\midrule
+Taxa de Aprendizado (LR) Base & 1E-5 (0,00001) \\
+Decaimento de Peso (\textit{Weight Decay}) & 1E-5 (0,00001) \\
+Dropout (aplicado no encoder) & 0.2 (para a maioria dos testes iniciais) \\
+Tamanho do Lote (\textit{Batch Size}) & 32 \\ % <<< LINHA ADICIONADA
+Peso $\alpha$ (BCE) da Função de Perda & 0.5 \\
+Peso $\beta$ (Dice Câncer) da Função de Perda & 0.25 \\
+Peso $\gamma$ (Dice Não Câncer) da Função de Perda & 0.25 \\
+Otimizador & AdamW \\
+Scheduler de Taxa de Aprendizado & ScheduleFree \\
+Política de Parada Antecipada (\textit{Early Stopping}) & Paciência de 5 épocas (monitorando \textit{loss} de validação) \\
+Pré-treinamento dos Encoders & ImageNet \\
+Número de \textit{Folds} (Validação Cruzada) & 5 \\
+Divisão Treino/Validação/Teste (por \textit{fold}) & Aproximadamente 80\% / 10\% / 10\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Este subconjunto de dados foi então dividido em 5 grupos (folds) distintos para validação cruzada, conforme detalhado na \Secao{subsec:met_geracao_amostras}, utilizando a estratégia de \textit{StratifiedGroupKFold}. A \Tabela{tab:distribuicao_folds_exploratorio} apresenta a distribuição resultante do número de \textit{patches} de imagem para câncer (C) e para não-câncer (NC) nos conjuntos de Treino (1), Validação (2) e Teste (3) para cada \textit{fold}.
+
+% Tabela tab:distribuicao_folds_exploratorio (distribuição de IMAGENS por fold)
+\begin{table}[!htp] 
+\centering
+\caption[Distribuição de imagens nos folds exploratórios (subamostra).]{Distribuição do número de \textit{patches} de imagem de Câncer (C) e Não Câncer (NC) para os conjuntos de treino (1), validação (2) e teste (3) nos 5 \textit{folds} utilizados na fase exploratória, derivados de uma subamostra de pacientes.}
+\label{tab:distribuicao_folds_exploratorio}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Grupo} & \textbf{C (1)} & \textbf{NC (1)} & \textbf{C (2)} & \textbf{NC (2)} & \textbf{C (3)} & \textbf{NC (3)} \\ \midrule
+fold\_1 & 12662 & 12662 & 723  & 3972 & 1627 & 3052 \\
+fold\_2 & 13012 & 13012 & 1074 & 3756 & 865  & 2918 \\
+fold\_3 & 10739 & 10739 & 1199 & 2961 & 1432 & 5986 \\
+fold\_4 & 10504 & 10504 & 514  & 3222 & 4014 & 5960 \\
+fold\_5 & 13872 & 13872 & 1087 & 4044 & 359  & 1770 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+Para esta fase exploratória, a estratégia de \textit{augmentation} (\Secao{sec:metodologia_augmentation}) foi aplicada com o objetivo de equilibrar a representação das classes de câncer e não câncer nos conjuntos de treinamento de cada \textit{fold}. As técnicas de \textit{augmentation} empregadas incluíram uma combinação de transformações geométricas (rotação horizontal, rotação vertical, rotação aleatória), adição de ruído gaussiano, e variação aleatória de contraste, brilho e saturação (\textit{color jittering}), aplicadas uniformemente em todos os \textit{folds} onde a \textit{augmentation} foi necessária para a classe minoritária. 
+
+A \Tabela{tab:distribuicao_pixels_augmentation_folds} detalha, para cada \textit{fold} de treinamento, o percentual de \textit{augmentation} aplicado a cada classe (Câncer ou Não Câncer, o que fosse minoritário naquele \textit{fold} específico) para alcançar um equilíbrio no número de \textit{patches} de treinamento, e também apresenta a distribuição percentual média de pixels de Câncer e Não Câncer resultantes nesses conjuntos de treinamento já aumentados.
+
+
+% Defina a cor para a linha da média (opcional)
+\definecolor{meanrowcolor}{HTML}{E2F0D9} % Um verde claro, por exemplo
+
+\begin{table}[!htb]
+\centering
+\caption[Distribuição de pixels e percentual de augmentation por fold.]{Distribuição percentual média de pixels de Câncer e Não Câncer e o percentual de \textit{image augmentation} aplicado a cada classe nos conjuntos de treinamento dos 5 \textit{folds} da fase exploratória.}
+\label{tab:distribuicao_pixels_augmentation_folds}
+\sisetup{output-decimal-marker={,}} % Usar vírgula como separador decimal
+\begin{tabular}{l S[table-format=2.2] S[table-format=2.2] S[table-format=2.4] S[table-format=2.4]}
+\toprule
+\textbf{Grupo} & {\textbf{Augmentation}} & {\textbf{Augmentation}} & {\textbf{Pixels}} & {\textbf{Pixels}} \\
+               & {\textbf{Câncer (\%)}} & {\textbf{Não Câncer (\%)}} & {\textbf{(Câncer)}} & {\textbf{(Não Câncer)}} \\
+\midrule
+fold\_1 & 53,03 & 0,00 & 49,8765 & 50,1235 \\
+fold\_2 & 51,14 & 0,00 & 49,8613 & 50,1387 \\
+fold\_3 & 47,24 & 0,00 & 49,8479 & 50,1521 \\
+fold\_4 & 64,12 & 0,00 & 49,8318 & 50,1682 \\
+fold\_5 & 50,61 & 0,00 & 49,8681 & 50,1319 \\
+\midrule
+\rowcolor{meanrowcolor} % Cor para a linha da média
+\textbf{Média} & \textbf{53,228} & \textbf{0,00} & \textbf{49,85712} & \textbf{50,14288} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Observa-se na \Tabela{tab:distribuicao_pixels_augmentation_folds} que, após a \textit{augmentation} dos \textit{patches}, a distribuição média de pixels expostos ao modelo durante o treinamento é relativamente equilibrada, com aproximadamente 49,86\% de pixels de câncer e 50,14\% de pixels de não câncer. Esse equilíbrio em nível de pixel é um fator importante para mitigar o viés do modelo em aprender a distinguir apenas uma classe majoritária. Um desbalanceamento severo poderia, por exemplo, exigir funções de perda mais especializadas, como a \textit{Focal Loss} \cite{Lin2017FocalLoss} em substituição à BCE para lidar com a dificuldade de aprendizado em classes raras, ou a \textit{Tversky Loss} \cite{Salehi2017Tversky} em vez da Dice Loss para penalizar de forma assimétrica os falsos positivos e falsos negativos. A manutenção de um relativo equilíbrio, portanto, suporta a escolha das funções de perda BCE e Dice Loss combinadas, conforme detalhado na \Secao{subsec:met_arq_treino_exp}.
+
+Os resultados médios (sobre os 5 \textit{folds}) para as diversas arquiteturas e configurações de hiperparâmetros testadas nesta fase exploratória, utilizando as métricas de avaliação descritas na \Secao{subsec:metricas_avaliacao}, são apresentados de forma detalhada no apêndice \ref{ap:resultados_exploratorios_detalhados_rev} (ver \Tabela{tab:ap_resultados_exploratorios_completos_rev}). A referida tabela no apêndice detalha os valores de \textit{dropout}, LR, se houve congelamento inicial de épocas do \textit{encoder} (coluna "Frozen?") e o número de parâmetros treináveis ("PARAMETERS (M)") para cada combinação de modelo e \textit{encoder}.
+
+Observando os resultados completos no apêndice \ref{ap:resultados_exploratorios_detalhados_rev}, nota-se que não existem diferenças de desempenho gritantes que desqualifiquem a maioria dos modelos testados, o que sugere uma certa robustez do processo de pré-processamento e treinamento proposto. No entanto, percebe-se uma correlação positiva geral entre o número de parâmetros do modelo e seu desempenho em métricas de sobreposição como Dice e IoU, uma vez que modelos maiores, em geral, tenderam a apresentar melhores resultados nessas métricas.
+
+Uma análise interessante, e consistente entre os diversos modelos, diz respeito à detecção de verdadeiros positivos (TPR, tecido canceroso) versus verdadeiros negativos (TNR, tecido não canceroso). Consistentemente, o valor de TNR foi superior ao de TPR, indicando uma maior facilidade dos modelos em identificar corretamente regiões sem câncer em comparação com regiões cancerígenas. Duas hipóteses principais podem explicar este fenômeno. Primeiramente, mesmo com um esforço para equilibrar as classes no nível de \textit{patch} através de \textit{augmentation} e utilizando um limiar de \texttt{MATCH\_PERCENTAGE} de 95\% para a seleção de \textit{patches}, pode persistir um leve \textbf{desbalanceamento em nível de pixel}. Os \textit{patches} de "não câncer" (ou mesmo os de "câncer") podem ainda conter uma pequena proporção de pixels da classe oposta ou de fundo de lâmina não perfeitamente filtrado, levando os modelos a serem expostos a uma quantidade ligeiramente maior de exemplos de "não câncer" em nível de pixel. A segunda hipótese, e talvez mais impactante, relaciona-se à \textbf{qualidade e precisão das anotações médicas}. A tarefa de delinear com exatidão as fronteiras do tecido canceroso é inerentemente complexa e sujeita à variabilidade interobservador. Se as anotações de "câncer" contiverem inadvertidamente pequenas porções de tecido não cancerígeno, ou se as fronteiras não forem perfeitamente precisas, o modelo pode aprender padrões confusos, dificultando a correta identificação de todo o tecido canceroso (resultando em menor TPR). Por outro lado, regiões amplas e homogêneas de tecido benigno podem ser mais fáceis de anotar e, consequentemente, de o modelo aprender.
+
+Analisando a influência dos hiperparâmetros no apêndice \ref{ap:resultados_exploratorios_detalhados_rev}, observa-se que diferentes combinações de taxa de aprendizado, uso de \textit{dropout} (0 ou 0.2) e a estratégia de congelamento do \textit{encoder} foram exploradas. Um achado notável é que os modelos que alcançaram os melhores desempenhos nas principais métricas de segmentação, como Dice e IoU (as primeiras ~14 linhas da tabela no apêndice, por exemplo), foram predominantemente aqueles treinados sem o congelamento inicial das camadas do \textit{encoder}. \textbf{Isso sugere que permitir que todas as camadas da rede, incluindo as do \textit{encoder} pré-treinado na ImageNet, se ajustem desde o início ao domínio específico das imagens histológicas de próstata foi benéfico para esta tarefa}. Embora o \textit{transfer learning} seja valioso, o ajuste fino completo parece ter sido mais eficaz do que manter o \textit{encoder} congelado, mesmo que por poucas épocas, para os modelos de melhor performance. Os pesos da função de perda combinada ($\alpha, \beta, \gamma$) foram mantidos em 0.5, 0.25 e 0.25, respectivamente, e o decaimento de peso no otimizador AdamW em 1E-5 para a maioria das configurações exploratórias iniciais.
+
+\section{Treinamento e Avaliação do Ensemble de Modelos}\label{sec:res_treino_ensemble}
+
+ Para o treinamento do \textit{ensemble}, utilizou-se o conjunto de dados completo (todos os pacientes). Este conjunto foi distribuído em um \textit{fold} único para as etapas de treino, validação e teste dos modelos finais do \textit{ensemble}, conforme detalhado na \Tabela{tab:distribuicao_ensemble}, que apresenta o número de \textit{patches} por classe em cada um desses conjuntos.
+
+\begin{table}[!htp] % Exemplo de como você inseriria a Tabela 5
+\centering
+\caption[Distribuição de imagens para treinamento e avaliação do ensemble.]{Distribuição de imagens (\textit{patches}) de Câncer (C) e Não Câncer (NC) para os conjuntos de treino (1), validação(2) e teste (3) utilizados no treinamento do ensemble final.}
+\label{tab:distribuicao_ensemble}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Grupo} & \textbf{C (1)} & \textbf{NC (1)} & \textbf{C (2)} & \textbf{NC (2)} & \textbf{C (3)} & \textbf{NC (3)} \\ \midrule
+fold\_1 (Ensemble) & 20213 & 20213 & 3009 & 6022 & 8297 & 19686 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+Similarmente à fase exploratória, a estratégia de \textit{augmentation} (\Secao{sec:metodologia_augmentation}), utilizando uma combinação de transformações geométricas (rotação horizontal, vertical, aleatória), adição de ruído gaussiano e variação aleatória de contraste, brilho e saturação (\textit{color jittering}), foi aplicada à classe minoritária no conjunto de treinamento do \textit{ensemble} para equilibrar o número de \textit{patches}. A \Tabela{tab:distribuicao_pixels_augmentation_ensemble} detalha o percentual de \textit{augmentation} aplicado e a distribuição percentual média de pixels de Câncer e Não Câncer resultante no conjunto de treinamento do \textit{ensemble}.
+
+\begin{table}[!htb]
+\centering
+\caption[Distribuição de pixels e percentual de augmentation para o fold do ensemble.]{Distribuição percentual de pixels de Câncer e Não Câncer e o percentual de \textit{image augmentation} aplicado à classe minoritária em número de \textit{patches} antes da \textit{augmentation}.}
+\label{tab:distribuicao_pixels_augmentation_ensemble}
+\sisetup{output-decimal-marker={,}} % Usar vírgula como separador decimal
+\begin{tabular}{l S[table-format=1.0] S[table-format=2.1] S[table-format=2.4] S[table-format=2.4]}
+\toprule
+\textbf{Grupo} & {\textbf{Augmentation}} & {\textbf{Augmentation}} & {\textbf{Pixels}} & {\textbf{Pixels}} \\
+               & {\textbf{Câncer (\%)}} & {\textbf{Não Câncer (\%)}} & {\textbf{(Câncer)}} & {\textbf{(Não Câncer)}} \\
+\midrule
+fold\_1 (Ensemble) & 0 & 60,6 & 49,8971 & 50,1029 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Conforme observado na \Tabela{tab:distribuicao_pixels_augmentation_ensemble}, mesmo após o balanceamento do número de \textit{patches} de cada classe através da \textit{augmentation} da classe "Não Câncer" (que neste \textit{fold} específico era minoritária em número de \textit{patches} antes do aumento), a distribuição final de pixels expostos aos modelos durante o treinamento do \textit{ensemble} permaneceu razoavelmente equilibrada, com aproximadamente 49,90\% de pixels de câncer e 50,10\% de pixels de não câncer. 
+
+A seleção dos modelos para compor o \textit{ensemble} final baseou-se primariamente no critério de utilizar o \textit{checkpoint} com o \textbf{menor valor de \textit{loss} obtida no conjunto de validação} durante a fase exploratória (detalhada no apêndice  \ref{ap:resultados_exploratorios_detalhados_rev}).
+Adicionalmente a este critério quantitativo, buscou-se garantir uma diversidade arquitetural no \textit{ensemble}. Para isso, caso múltiplas configurações de uma mesma arquitetura base (e.g., diferentes \textit{encoders} para DeepLabV3+) estivessem entre as melhores, optou-se por selecionar apenas a configuração com o menor \textit{validation loss} para representar aquela família de arquiteturas. Esta abordagem visa combinar modelos com diferentes princípios de funcionamento, potencializando a capacidade do \textit{ensemble} de capturar um espectro mais amplo de características e de compensar os erros individuais de cada modelo. O \textit{ranking} resultante dos 8 modelos selecionados sob estes critérios é apresentado na 
+\Tabela{tab:ranking_modelos_ensemble}.
+
+\begin{table}[!htb]
+\centering
+\caption[Ranking dos modelos selecionados para o ensemble.]{Modelos selecionados para compor o \textit{ensemble} final, ordenados pelo menor valor da \textit{loss} de validação (\textit{best\_model\_val\_loss}) obtida durante a fase exploratória. A seleção priorizou a diversidade arquitetural, escolhendo-se a melhor configuração para cada tipo de arquitetura principal.}
+\label{tab:ranking_modelos_ensemble}
+\begin{tabular}{r l l S[table-format=1.4]} 
+\toprule
+\textbf{Rank} & \textbf{Arquitetura (Arch)} & \textbf{Encoder (Enc)} & {\textbf{Val Loss}} \\ 
+\midrule
+1 & DEEPLABV3PLUS & resnet152 & 0,4513 \\
+2 & FPN & resnet152 & 0,4585 \\
+3 & SWIN & Swin-L (P4W7-224)\tablefootnote{Nome completo do encoder: \texttt{swin\_large\_patch4\_window7\_224}} & 0,4586 \\
+4 & UNET++ & resnet152 & 0,4610 \\
+5 & MANET & resnet152 & 0,4624 \\
+6 & SEGFORMER & mit\_b5 & 0,4680 \\
+7 & UNET & inceptionresnetv2 & 0,4852 \\ 
+8 & DPT & ViT-Base (P16-224, AugReg)\tablefootnote{Nome completo do encoder: \texttt{tu-vit\_base\_patch16\_224.augreg\_in21k}} & 0,4949 \\ % Ajustei a abreviação para caber melhor
+\bottomrule
+\end{tabular}
+\end{table}
+
+A \Figura{fig:curvas_treino_validacao_ensemble} ilustra as curvas médias de treinamento (para as métricas Dice e \textit{Loss}) ao longo das épocas para os 8 modelos que compuseram o \textit{ensemble} final. As curvas representam os valores médios e a área sombreada indica um desvio padrão em torno da média, fornecendo uma visão da variabilidade entre os modelos. Durante o treinamento de cada modelo individual do \textit{ensemble}, os \textit{checkpoints} foram salvos com base no menor valor da \textit{loss} de validação. Adotou-se uma política de parada antecipada (\textit{early stopping}) com uma paciência de 5 épocas: se a \textit{loss} no conjunto de validação não apresentasse melhora (diminuição) por 5 épocas consecutivas, o treinamento daquele modelo era encerrado, e o \textit{checkpoint} com a menor \textit{loss} de validação era retido.
+
+% Figura das Curvas de Treinamento e Validação do Ensemble
+\begin{figure}[!htb]
+    \centering
+    % Substitua 'figuras/aim_loss.png' pelo nome correto do seu arquivo de imagem, se este não for o correto.
+    % O nome 'aim_loss.png' sugere que pode ser apenas a curva de loss, 
+    % mas a legenda menciona Dice e Loss. Verifique se a imagem contém ambos os gráficos.
+    \includegraphics[width=\textwidth]{figuras/aim_loss.png} 
+    \caption[Curvas Médias de Treinamento e Validação do Ensemble]{Curvas médias de Dice (gráfico 1, à esquerda) e Loss (gráfico 2, à direita) para os conjuntos de treinamento (curva rosa/magenta) e validação (curva laranja) durante o treinamento dos 8 modelos que compõem o \textit{ensemble} final. A linha sólida em cada curva representa a média das métricas entre os modelos ao longo das épocas, enquanto a área sombreada ao redor de cada linha indica a dispersão dos valores, correspondendo a $\pm$ um desvio padrão em relação à média. Esta área sombreada, portanto, ilustra a variabilidade no comportamento de treinamento entre os diferentes modelos do \textit{ensemble}.}
+    \label{fig:curvas_treino_validacao_ensemble} 
+\end{figure}
+
+Analisando as curvas na \Figura{fig:curvas_treino_validacao_ensemble}, observa-se que, para a métrica Dice, tanto a curva de treino quanto a de validação apresentam uma tendência ascendente, estabilizando em valores altos, o que é desejável. Para a \textit{Loss}, a curva de validação (laranja, no gráfico 2) é consistentemente um pouco superior à curva de treino (rosa/magenta), um comportamento típico que sugere que o modelo está generalizando bem, sem apresentar \textit{overfitting} significativo (onde a perda de treino continuaria caindo enquanto a de validação aumentaria). 
+Um padrão interessante, particularmente na curva de \textit{loss} de validação, é uma tendência de aumento ou platô inicial nas primeiras épocas, seguida por uma diminuição gradual. Este comportamento pode ser atribuído ao uso de \textit{Transfer Learning} com pesos pré-treinados da \textit{ImageNet}. Inicialmente, esses pesos fornecem um bom ponto de partida para características genéricas de imagem. As primeiras épocas de treinamento são então dedicadas à adaptação desses pesos ao domínio específico e mais complexo das imagens histológicas de próstata, onde o modelo aprende a discernir os padrões sutis de câncer versus não câncer. Como resultado, os melhores \textit{checkpoints} (menor \textit{loss} de validação) são frequentemente alcançados após algumas épocas de ajuste, e não necessariamente na primeira época. Em nenhum dos treinamentos foi utilizada a estratégia de congelamento de camadas nos modelos (\textit{freezing layers}), para encoder ou decoder.
+
+Os resultados quantitativos dos testes realizados com diferentes configurações de \textit{ensemble}, variando o número de melhores modelos incluídos (conforme o \textit{ranking} da \Tabela{tab:ranking_modelos_ensemble}), são apresentados na \Tabela{tab:resultados_ensemble_teste}. Para todos os testes, foi utilizado um modelo de votação equitativa, onde cada modelo no \textit{ensemble} recebeu a mesma ponderação (1/N, onde N é o número de modelos). As células destacadas indicam os melhores valores obtidos para as respectivas métricas entre as configurações de \textit{ensemble} testadas.
+
+\begin{table}[!htp]
+\centering
+\caption[Resultados quantitativos para diferentes configurações do ensemble no conjunto de teste.]{Desempenho do \textit{ensemble} no conjunto de teste utilizando diferentes números de modelos. A coluna "Contribution" indica que todos os modelos tiveram peso igual. Células destacadas indicam o melhor valor para a respectiva métrica entre as configurações.}
+\label{tab:resultados_ensemble_teste}
+\resizebox{\textwidth}{!}{% Para ajustar a largura da tabela à largura do texto, se necessário
+\begin{tabular}{l S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] l l c}
+\toprule
+\textbf{Accuracy} & \textbf{Dice} & \textbf{IoU} & \textbf{TPR} & \textbf{TNR} & \textbf{Precisão} & \textbf{AUC} & \textbf{MODEL} & \textbf{ENCODER} & \textbf{Contribution} \\ 
+\midrule
+0,8884 & \cellcolor{highlightcolor}0,8151 & \cellcolor{highlightcolor}0,6879 & \cellcolor{highlightcolor}0,832  & \cellcolor{highlightcolor}0,912  & \cellcolor{highlightcolor}0,7988 & \cellcolor{highlightcolor}0,9457 & Ensemble & 8 best models & EQUAL \\
+0,8839 & 0,809  & 0,6792 & 0,8312 & 0,9061 & 0,7879 & 0,9424 & Ensemble & 7 best models & EQUAL \\
+\cellcolor{highlightcolor}0,8986 & 0,8024 & 0,6701 & 0,8319 & 0,8986 & 0,775  & 0,9401 & Ensemble & 6 best models & EQUAL \\
+0,8756 & 0,7962 & 0,6614 & 0,8218 & 0,8962 & 0,7722 & 0,9317 & Ensemble & 5 best models & EQUAL \\
+0,8737 & 0,7954 & 0,6603 & 0,8306 & 0,8917 & 0,763  & 0,9316 & Ensemble & 4 best models & EQUAL \\
+0,8738 & 0,7947 & 0,6593 & 0,8300 & 0,8937 & 0,7654 & 0,9307 & Ensemble & 3 best models & EQUAL \\
+0,8605 & 0,7788 & 0,6377 & 0,8304 & 0,8732 & 0,7332 & 0,922  & Ensemble & 1 best model  & EQUAL \\ % Ajustado para "1 best model"
+0,8571 & 0,7727 & 0,6296 & 0,8216 & 0,872  & 0,7293 & 0,921  & Ensemble & 2 best models & EQUAL \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+Analisando a \Tabela{tab:resultados_ensemble_teste}, observa-se uma tendência de melhoria nas métricas de sobreposição Dice e IoU com o aumento do número de modelos no \textit{ensemble}, culminando no melhor desempenho para estas métricas com a combinação dos 8 melhores modelos (Dice de 0,8151 e IoU de 0,6879). Este resultado ressalta o poder da combinação de modelos diversos para mitigar erros individuais e melhorar a capacidade de generalização. O \textit{ensemble} com 6 modelos apresentou a maior acurácia (0,8986), enquanto o \textit{ensemble} com 8 modelos obteve os melhores valores para TNR (0,912) e Precisão (0,7988). É importante notar que o valor da AUC manteve-se consistentemente alto (acima de 0,92 para todas as configurações de \textit{ensemble}), indicando que os modelos estão, de fato, aprendendo a discernir entre exemplares de câncer e não câncer de forma eficaz, superando significativamente um classificador aleatório (AUC = 0.5).
+
+Para complementar a avaliação quantitativa do \textit{ensemble} com os 8 melhores modelos, que apresentou o melhor Coeficiente de Dice, a \Figura{fig:matriz_confusao_ensemble8} apresenta a matriz de confusão normalizada em porcentagem. Esta visualização demonstra a capacidade do modelo em classificar corretamente as regiões de "Não Câncer" (91,20\% de TNR) e "Câncer" (83,20\% de TPR), com uma taxa de falsos positivos para câncer de 8,80\% (pixels de "Não Câncer" classificados como "Câncer") e uma taxa de falsos negativos de 16,80\% (pixels de "Câncer" classificados como "Não Câncer").
+
+% Figura da Matriz de Confusão
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figuras/confusion_matrix.png} % Substitua pelo nome do seu arquivo
+    \caption[Matriz de Confusão do Ensemble com 8 Modelos]{Matriz de confusão normalizada em porcentagem para o \textit{ensemble} composto pelos 8 melhores modelos, avaliado no conjunto de teste. Os eixos "True" indicam a classe verdadeira e os eixos "Predicted" indicam a classe predita.}
+    \label{fig:matriz_confusao_ensemble8}
+\end{figure}
+
+Adicionalmente, a \Figura{fig:exemplos_segmentacao_ensemble8} exibe exemplos qualitativos da segmentação semântica realizada pelo \textit{ensemble} de 8 modelos em diferentes \textit{patches} de WSIs. Para cada exemplo (Imagens de 1 a 5), são apresentados o \textit{patch} original, a máscara de predição gerada pelo \textit{ensemble} (\textit{Ensemble Pred Mask}) e a máscara do \textit{ground truth} (\textit{True Mask}). Estas visualizações permitem uma análise da qualidade da delineação das regiões cancerosas (geralmente representadas por uma cor distinta na máscara de predição, sobreposta ao tecido) em comparação com as anotações dos patologistas. Observa-se uma boa concordância geral, embora casos mais desafiadores, com texturas complexas ou fronteiras sutis, possam apresentar variações.
+
+% Figura dos Exemplos Qualitativos
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=\textwidth]{figuras/inference_results.png} % Substitua pelo nome do seu arquivo
+    \caption[Exemplos Qualitativos da Segmentação pelo Ensemble de 8 Modelos]{Resultados qualitativos da segmentação semântica em cinco \textit{patches} de exemplo (Image 1 a Image 5) utilizando o \textit{ensemble} dos 8 melhores modelos. Para cada exemplo, são mostrados: o \textit{patch} original da WSI (coluna 1), a máscara de predição gerada pelo \textit{ensemble} (coluna 2) e a máscara do \textit{ground truth} correspondente (coluna 3).}
+    \label{fig:exemplos_segmentacao_ensemble8}
+\end{figure}
+
+Estes resultados quantitativos e qualitativos, embora preliminares no sentido de que o \textit{ensemble} em si não passou por uma nova rodada de validação cruzada completa, demonstram a robustez do \textit{framework} proposto e o potencial da abordagem de \textit{ensemble} para a tarefa de segmentação de câncer de próstata em patologia digital.
+
+\section{Aplicação para Inferência}\label{sec:res_aplicacao_inferencia} 
+
+Com os \textit{checkpoints} dos modelos do \textit{ensemble} treinados e os respectivos arquivos de metadados contendo os parâmetros de normalização de cor e os \textit{thresholds} de corte otimizados para cada modelo, foi desenvolvida uma aplicação de prova de conceito para inferência em WSIs. Esta aplicação web interativa, construída com a biblioteca Streamlit \cite{Streamlit}, permite ao usuário submeter uma WSI (nos formatos suportados, \eg, .svs, .tif). A imagem é então processada pelo \textit{ensemble} de modelos pré-treinados, que gera a máscara de segmentação semântica identificando as regiões de câncer. 
+
+A \Figura{fig:app_streamlit_inferencia} ilustra a interface da aplicação. Nela, o usuário pode realizar o upload do arquivo WSI. A interface exibe informações sobre o \textit{ensemble} ativo (modelos constituintes, limiar ótimo de decisão global) e, após o processamento, apresenta lado a lado uma miniatura da WSI original e a mesma imagem com a sobreposição (\textit{overlay}) da máscara de segmentação gerada (indicando as áreas classificadas como câncer). A aplicação também informa o tempo de processamento e permite o download da imagem com a sobreposição.
+
+% Figura da Aplicação Streamlit
+\begin{figure}[H] % Requer \usepackage{float} no preâmbulo
+    \centering
+    \includegraphics[width=\textwidth]{figuras/app.png} 
+    \caption[Interface da Aplicação \textit{Streamlit} para Inferência]{Interface da aplicação web de prova de conceito desenvolvida com Streamlit para inferência do \textit{ensemble} em WSIs. A interface permite o upload de uma WSI, exibe informações do modelo \textit{ensemble} ativo, mostra a WSI original e o resultado da segmentação como uma sobreposição (\textit{overlay}), e informa o tempo de processamento.}
+    \label{fig:app_streamlit_inferencia} 
+\end{figure}
+
+Para seu funcionamento, a aplicação de inferência carrega um conjunto de parâmetros e configurações pré-definidos, derivados das etapas anteriores de pré-processamento e treinamento do \textit{ensemble}. Estes incluem as estatísticas para normalização de cor e os detalhes da configuração do \textit{ensemble} de 8 modelos, conforme sumarizado na \Tabela{tab:parametros_inferencia_framework}.
+
+% Tabela de Parâmetros de Inferência do Framework (SIMPLIFICADA)
+\begin{table}[!htb]
+\centering
+\caption[Parâmetros e Configurações para Inferência do \textit{framework}.]{Principais parâmetros e configurações carregados pela aplicação \textit{Streamlit} para realizar a inferência em novas WSIs. Inclui estatísticas de normalização de cor e configurações globais do \textit{ensemble} de 8 modelos.}
+\label{tab:parametros_inferencia_framework}
+\begin{tabular}{l p{0.1\textwidth}} % Ajuste p{width} conforme necessário
+\toprule
+\textbf{Parâmetro/Configuração} & \textbf{Valor/Descrição} \\
+\midrule
+\multicolumn{2}{l}{\textbf{Parâmetros de Normalização de Cor (Reinhard - Espaço CIE LAB)}} \\
+\quad Média de Referência L\* ($\mu_{ref, L}$) & 161,11 \\
+\quad Média de Referência a\* ($\mu_{ref, a}$) & 146,34 \\
+\quad Média de Referência b\* ($\mu_{ref, b}$) & 114,23 \\
+\quad Desvio Padrão de Referência L\* ($\sigma_{ref, L}$) & 39,59 \\
+\quad Desvio Padrão de Referência a\* ($\sigma_{ref, a}$) & 5,76 \\
+\quad Desvio Padrão de Referência b\* ($\sigma_{ref, b}$) & 5,90 \\
+\midrule
+\multicolumn{2}{l}{\textbf{Configuração Global do Ensemble para Inferência (8 Melhores Modelos)}} \\
+Limiar Ótimo Global do Ensemble (\textit{ensemble\_optimal\_threshold}) & 0.61 \\
+Métrica de Ajuste do Limiar Global & Dice \\
+Melhor Dice Score na Validação (do ajuste do limiar global do ensemble) & 0,8517 \\
+Ponderação dos Modelos no Ensemble (\textit{ensemble\_weights}) & Equitativa (1/8 para cada) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A aplicação utiliza as estatísticas de normalização de cor para pré-processar a WSI submetida, garantindo consistência com os dados de treinamento. Em seguida, cada um dos 8 modelos constituintes do \textit{ensemble} (listados na \Tabela{tab:ranking_modelos_ensemble}) processa a imagem, e suas predições são binarizadas utilizando seus respectivos limiares ótimos individuais. Finalmente, as máscaras binárias dos 8 modelos são combinadas por votação majoritária (devido à ponderação equitativa) e a máscara resultante é binarizada pelo limiar ótimo global do \textit{ensemble} (0.61) para produzir a segmentação final. Este processo demonstra a operacionalização completa do \textit{framework}.
+
+
+Para contextualizar o desempenho da aplicação, a \Figura{fig:wsi_ground_truth_app_exemplo} apresenta a mesma WSI utilizada como exemplo na \Figura{fig:app_streamlit_inferencia}, mas desta vez exibindo as anotações de referência (\textit{ground truth}) realizadas por patologistas, onde os contornos em vermelho delimitam as regiões originalmente identificadas como cancerosas. A comparação visual entre a saída da aplicação (\Figura{fig:app_streamlit_inferencia}, painel direito com o \textit{overlay} da segmentação) e o \textit{ground truth} (\Figura{fig:wsi_ground_truth_app_exemplo}) permite uma avaliação qualitativa da acurácia da segmentação do \textit{ensemble}. Esta etapa demonstra a capacidade do \textit{framework} de ser traduzido em uma ferramenta utilizável para análise visual, completando o ciclo \textit{end-to-end} proposto.
+
+% Figura do Ground Truth correspondente ao exemplo do App
+\begin{figure}[H] % Requer \usepackage{float} no preâmbulo
+    \centering
+    % Substitua 'figuras/wsi_exemplo_ground_truth.png' pelo nome do seu arquivo de imagem
+    \includegraphics[width=1.0\textwidth]{figuras/image_doctor.png} 
+    \caption[Anotação de referência (ground truth) para o exemplo da aplicação.]{WSI utilizada como exemplo na aplicação \textit{Streamlit} (\Figura{fig:app_streamlit_inferencia}), exibindo as anotações de referência (\textit{ground truth}) realizadas por patologistas. Os contornos em vermelho delimitam as regiões identificadas como cancerosas, servindo como base para a avaliação visual do resultado da segmentação do \textit{ensemble}. \textbf{A imagem de inferência não foi usada no treinamento do modelo}.}
+    \label{fig:wsi_ground_truth_app_exemplo} 
+\end{figure}
+
+% (Após a Seção 4.4 Aplicação para Inferência e sua Figura)
+
+\section{Trabalhos Futuros e Perspectivas}\label{sec:trabalhos_futuros}
+
+Com o desenvolvimento e a validação prática inicial do \textit{framework} computacional \textit{end-to-end} propostos nesta dissertação, uma série de direções futuras emerge para aprofundar a investigação e expandir a aplicabilidade da metodologia. O foco principal dos próximos passos concentrar-se-á em duas vertentes principais: estudos ablativos para otimização de parâmetros e a avaliação da generalização do \textit{framework} em diferentes contextos e bases de dados.
+
+\subsection{Estudos Ablativos e Otimização de Hiperparâmetros}\label{subsec:futuros_ablativos}
+Embora o \textit{framework} tenha demonstrado resultados promissores, uma investigação sistemática do impacto de diversos hiperparâmetros e escolhas metodológicas pode levar a otimizações adicionais e a um entendimento mais profundo de suas interdependências. Os estudos ablativos planejados buscarão responder às seguintes questões-chave:
+\begin{itemize}
+    \item \textbf{Impacto das Técnicas de \textit{Image Augmentation}:} Qual a relação entre os diferentes tipos de \textit{augmentation} (geométricas, fotométricas, adição de ruído) e suas intensidades com as métricas finais de segmentação do \textit{ensemble}? Existe uma combinação ótima ou um tipo de \textit{augmentation} mais impactante para este domínio específico?
+    \item \textbf{Influência do Dropout:} Variações na taxa de \textit{dropout} aplicada aos \textit{encoders} ou mesmo a introdução de \textit{dropout} em outras partes da arquitetura (como o \textit{decoder}) podem levar a uma melhor generalização e desempenho?
+    \item \textbf{Ponderação no Ensemble:} A atual abordagem de votação equitativa para o \textit{ensemble} é a ideal, ou uma ponderação diferenciada dos modelos (e.g., baseada no desempenho individual na validação ou na diversidade das predições) poderia resultar em métricas finais superiores?
+    \item \textbf{Sensibilidade aos Parâmetros de Pré-processamento e \textit{Patching}:} Qual o impacto de variações nos parâmetros definidos na etapa de geração de dados, como \texttt{MATCH\_PERCENTAGE}, \texttt{TISSUE\_PERCENTAGE}, \texttt{TARGET\_LEVEL} (nível de magnificação), \texttt{STRIDE} e \texttt{WINDOW\_SIZE}, no desempenho final e na eficiência computacional do \textit{framework}?
+    \item \textbf{Otimização da Taxa de Aprendizado e Schedulers:} A utilização da biblioteca ScheduleFree foi uma decisão que visou simplificar a configuração. No entanto, uma exploração mais aprofundada de outros \textit{schedulers} de taxa de aprendizado e estratégias de otimização poderia refinar ainda mais o processo de treinamento?
+    \item \textbf{Efeito do Tamanho do Lote (\textit{Batch Size}):} Considerando as limitações de memória de GPU, investigou-se um tamanho de lote específico. Qual seria o impacto nas métricas de desempenho ao se variar o tamanho do lote?
+\end{itemize}
+A resposta a essas perguntas permitirá um ajuste fino do \textit{framework}, potencialmente elevando seu desempenho e eficiência.
+
+\subsection{Avaliação da Generalização e Transferibilidade do \textit{framework}}\label{subsec:futuros_generalizacao}
+Uma hipótese fundamental deste trabalho é que o \textit{framework} metodológico proposto seja, em grande medida, agnóstico ao tipo específico de imagem histológica utilizada, desde que se disponha de uma base de dados devidamente anotada. Para validar esta hipótese e avaliar a capacidade de generalização e transferibilidade do \textit{framework}, planeja-se testar seu desempenho em outras bases de dados, preferencialmente aquelas com resultados já consolidados na literatura para fins comparativos.
+
+Duas bases de dados candidatas iniciais para esta avaliação são:
+\begin{enumerate}
+    \item \textbf{DiagSet:} Conforme descrito por \textcite{Koziarski2024DiagSet}, esta é uma base de dados composta por imagens histopatológicas de biópsias de próstata anotadas para classificação de câncer. A aplicação e teste do presente \textit{framework} nesta base permitiria uma comparação direta de desempenho dentro do mesmo domínio patológico (câncer de próstata), mas utilizando um conjunto de dados de origem e características potencialmente distintas, o que seria valioso para avaliar a robustez a variações inter-datasets.
+    \item \textbf{CATCH (\textit{CAnine cuTaneous Cancer Histology dataset}):} Apresentada por \textcite{Wilm2022CATCH}, esta base de dados é focada em imagens histopatológicas anotadas para diversos tipos de câncer de pele em caninos. A aplicação do \textit{framework} a este domínio distinto – abrangendo outra patologia (câncer de pele), outra espécie (canina) e possivelmente diferentes protocolos de preparação de amostras – representaria um teste robusto para a sua generalidade e capacidade de adaptação a contextos além do câncer de próstata humano.
+\end{enumerate}
+
+Os resultados obtidos nessas novas bases de dados fornecerão \textit{insights} valiosos sobre a flexibilidade do \textit{framework} e sua potencial aplicação em uma gama mais ampla de problemas em patologia digital computacional.
+
+Estes trabalhos futuros visam não apenas otimizar a solução atual, mas também solidificar a contribuição metodológica da dissertação, oferecendo um \textit{framework} cada vez mais robusto, eficiente e generalizável para a comunidade científica. Ao final da pesquisa, todo o código-fonte será disponibilizado através da plataforma \textit{Github} do autor \cite{nunes2025mastercoding}.
