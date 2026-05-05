@@ -61,6 +61,9 @@ because they still support the training-augmentation section.
 | Stage 4 runtime stain-normalization artifacts | `reinhard2001color`, `ruifrok2001quantification`, `macenko2009method`, `vahadane2016structure`, `tellez2019augmentation`, `duenweg2023scanner` | Cite the original method papers for the persisted runtime-normalizer state and Tellez/Duenweg for why stain/scanner variability matters. Stage 4 persists target/reference state; it does not normalize all split pixels eagerly. |
 | Stage 5 fail-closed sanity gate and provenance consistency | `piccolo2016tools`, `wilkinson2016fair` | Cite Piccolo and Frampton for computational reproducibility practices around preserving executable workflows, software context, and analysis traceability. Cite FAIR for rich metadata/provenance. The exact checks and verdict names are repository-specific. |
 | Stage 5 split, storage, and label-integrity checks | `roberts2017crossvalidation`, `dawood2026confounding`, `folk2011hdf5`, `yu2020noisy`, `he2009imbalanced` | Cite Roberts/Dawood for patient-level leakage and structured-data caution, Folk et al. for HDF5 as the storage substrate, Yu et al. for noisy annotation/mask-label risks, and He/Garcia for documenting class imbalance. |
+| Stage 6 embedding-based smart sampling | `campanella2025clinical`, `oquab2024dinov2`, `he2009imbalanced` | Cite Campanella et al. for the clinical benchmarking context around public self-supervised pathology foundation models, Oquab et al. for DINOv2-style self-supervised visual features, and He/Garcia for the class-imbalance rationale behind protecting positive rows before sampling. |
+| Stage 6 stability, clustering, and optional GIST-style selection | `hubert1985comparing`, `sculley2010webscale`, `fahrbach2025gist` | Cite Hubert and Arabie for the adjusted Rand index stability score, Sculley for MiniBatchKMeans, and Fahrbach et al. for GIST. The repository's adaptive budget, cluster-balanced order, and large-pool landmark preselection are implementation-specific. |
+| Stage 6 compact TRAIN_SELECTED storage and sampling provenance | `folk2011hdf5`, `wilkinson2016fair`, `piccolo2016tools` | Cite HDF5 for compact selected-TRAIN shards and FAIR/Piccolo for preserving sidecars, run configuration, row mappings, summary JSON, and manifest-backed sampling decisions. |
 | Training loss implementation | `khened2021generalized` | Cite Khened et al. as the direct source for the weighted BCE-plus-Dice loss implemented in Stage 8. |
 | Dice reporting and segmentation metric caveats | `seghier2024dice` | Cite when explaining Dice as an overlap metric, when warning that Dice is sensitive to reporting choices, and when justifying transparent metric definitions. |
 | Confounding, leakage, and cautious interpretation in computational pathology | `dawood2026confounding` | Cite for the broader warning that histology models can learn confounded correlational signals. This supports patient-level splitting, provenance validation, and cautious claims. |
@@ -128,6 +131,19 @@ Use these as citation anchors when updating `reports/main.tex`.
   (`yu2020noisy`) for mask-label semantic integrity, and He/Garcia
   (`he2009imbalanced`) for reporting class imbalance across patches and
   patients.
+- Stage 6 smart sampling: cite Campanella et al. (`campanella2025clinical`)
+  for peer-reviewed context on public self-supervised pathology foundation
+  models and Oquab et al. (`oquab2024dinov2`) for DINOv2-style feature
+  extraction. Cite He/Garcia (`he2009imbalanced`) when explaining why positive
+  label or mask-positive rows are protected before sampling the reducible pool.
+- Stage 6 adaptive selection: cite Hubert and Arabie (`hubert1985comparing`) for
+  the adjusted Rand index used in the stability loop, Sculley
+  (`sculley2010webscale`) for MiniBatchKMeans, and Fahrbach et al.
+  (`fahrbach2025gist`) only when `SMART_SAMPLER_USE_GIST=True`.
+- Stage 6 outputs and compact TRAIN_SELECTED: cite HDF5 (`folk2011hdf5`) for
+  compact HDF5 shards and FAIR/Piccolo (`wilkinson2016fair`,
+  `piccolo2016tools`) for sidecars, row mappings, summary JSON, run
+  configuration, and manifest-backed row-state updates.
 - Dataset provenance: cite the dataset paper associated with each active
   dataset cohort: CAMELYON16 (`bejnordi2017diagnostic`), CATCH
   (`wilm2022catch`), DiagSet (`koziarski2024diagset`), and HiESD
@@ -206,6 +222,22 @@ Use these as citation anchors when updating `reports/main.tex`.
 - Do not cite He and Garcia as prescribing the repository's patch-per-patient
   skew threshold. They support documenting class imbalance; the `max > 20x
   median` warning is a local heuristic.
+- Do not cite the exact default model string `owkin/phikon-v2` as if the model
+  card or arXiv preprint is a peer-reviewed method paper. For peer-reviewed
+  manuscript support, cite Campanella et al. for the public pathology
+  foundation-model benchmark and Oquab et al. for DINOv2-style self-supervised
+  visual features; separately report the exact model identifier for
+  reproducibility.
+- Do not claim Stage 6 is a published smart-sampling algorithm. The protected
+  retention policy, adaptive budget, holdout coverage plateau, and compact
+  artifact flow are repository-specific decisions.
+- Do not describe the large-pool GIST path as paper-exact GIST. The code first
+  builds a bounded landmark pool with MiniBatchKMeans and then applies the
+  GIST-style facility-location selector, so the full search space and theoretical
+  guarantee from Fahrbach et al. no longer apply.
+- Do not describe compact `TRAIN_SELECTED` storage as a new validation or test
+  dataset. It is a TRAIN-only I/O artifact derived from Stage 6 selected rows;
+  validation and test remain tied to canonical Phase 2 patient shards.
 - Do not cite Reinhard, Ruifrok, Macenko, or Vahadane as if the repository
   exactly reproduces every implementation detail of the original papers. Cite
   them for the normalization/deconvolution families and then describe the actual
@@ -337,6 +369,27 @@ Suggested code boundary: `5_sanity_checks.py`, `helpers/sanity/config.py`,
 | Binary mask and label semantics | Stage 5 checks that masks contain only binary values, that cancer-labeled rows have positive mask pixels, and that not-cancer-labeled rows do not contain positive mask pixels, with fail/warn behavior controlled by sanity configuration. | `yu2020noisy`; exact binary semantics are repository-specific |
 | Class and patient-distribution visibility | Stage 5 reports patch-level class counts, patient-level class counts, split class presence, and patches-per-patient summaries, warning when patch counts are extremely skewed by patient. | `he2009imbalanced`; `roberts2017crossvalidation`; the `max > 20x median` threshold is repository-specific |
 | Sampled versus full-scan integrity policy | The default path samples path/shape/mask checks with fixed seeds and exposes `SANITY_FULL_MASK_SCAN` and `SANITY_FULL_SHAPE_SCAN` when exhaustive scanning is required. | `piccolo2016tools` for reproducibility reporting; the sampling policy itself is repository-specific |
+
+## Stage 6 Smart Sampler Notes
+
+Suggested code boundary: `6_smart_sampler.py`, `helpers/smart_sampling/config.py`,
+`helpers/smart_sampling/pipeline.py`, `helpers/smart_sampling/index.py`,
+`helpers/smart_sampling/embeddings.py`, `helpers/smart_sampling/selection.py`,
+`helpers/smart_sampling/gist.py`, `helpers/smart_sampling/storage.py`,
+`helpers/smart_sampling/writer.py`, and
+`helpers/training/compact_train_selected.py`.
+
+| Stage 6 decision | Code behavior to document | Suggested citation |
+| --- | --- | --- |
+| Manifest-backed TRAIN-only source contract | Stage 6 builds its patient index from `master_manifest.sqlite`, using rows where `split = TRAIN` and `is_stage4_accepted = 1`, and requires each patient to map to one canonical source HDF5 shard. | `wilkinson2016fair`; optionally `roberts2017crossvalidation` when explaining patient-wise structure |
+| Pathology foundation-model embeddings | The default extractor loads `owkin/phikon-v2` through Hugging Face, runs CUDA inference, and uses the first-token descriptor from `last_hidden_state` as the embedding for patch selection. | `campanella2025clinical`; `oquab2024dinov2`; report the exact model identifier separately because the Phikon-v2 source paper/model card is not the peer-reviewed anchor here |
+| Protected retention before negative/reducible sampling | Rows with positive labels and, by default, any mask-positive rows are retained before the reducer samples the remaining patient-specific pool. | `he2009imbalanced`; optionally `yu2020noisy` when framing this as label/mask integrity protection |
+| Adaptive embedding budget and stability stop | For each patient, Stage 6 starts with a configurable subset size, repeatedly samples two subsets, clusters both with MiniBatchKMeans, scores agreement with adjusted Rand index, and grows the subset until the stability threshold, maximum count, or step cap is reached. | `hubert1985comparing`; `sculley2010webscale`; thresholds and growth policy are repository-specific |
+| Default cluster-balanced diversity selector | The default reducer clusters embeddings with MiniBatchKMeans, builds a cluster-balanced candidate order, optionally evaluates a within-patient holdout by mean nearest-selected embedding distance, and stops when coverage improvement plateaus. | `sculley2010webscale`; the quota/order/plateau policy is repository-specific |
+| Optional GIST-style selector | When `SMART_SAMPLER_USE_GIST=True`, the reducer selects a diverse subset with a facility-location plus diversity objective over embeddings. If the candidate pool exceeds the configured limit, Stage 6 first constructs a MiniBatchKMeans landmark pool and then applies the GIST-style selector. | `fahrbach2025gist`; call the large-pool mode GIST-style or GIST-inspired, not paper-exact GIST |
+| Sidecars before manifest updates | Stage 6 writes `train_filtered_selection.csv`, `patient_filter_stats.csv`, `filter_run_config.json`, and `filter_summary.json`, then records the run and writes `sampling_decision` / `is_stage7_selected` row states to `master_manifest.sqlite`. | `wilkinson2016fair`; `piccolo2016tools` |
+| Compact TRAIN_SELECTED artifact | When enabled, Stage 6 builds compact HDF5 shards containing only selected TRAIN rows, validates filename/label/patient parity against the canonical source rows, writes `index.sqlite` and `summary.json`, and publishes the completed artifact for Stage 7/8 TRAIN reads. | `folk2011hdf5`; `wilkinson2016fair` |
+| Disk-constrained staging controls | Input staging, sidecar staging, local cache size, compact-build scratch path, and cleanup flags are operational controls for storage pressure. They should be reported for reproducibility when used, but they are not independent scientific-method citations. | `piccolo2016tools` for reproducibility reporting only |
 
 ## BibTeX
 
@@ -586,6 +639,56 @@ Suggested code boundary: `5_sanity_checks.py`, `helpers/sanity/config.py`,
   year = {2009},
   doi = {10.1109/TKDE.2008.239},
   url = {https://doi.org/10.1109/TKDE.2008.239}
+}
+
+@article{campanella2025clinical,
+  title = {A Clinical Benchmark of Public Self-Supervised Pathology Foundation Models},
+  author = {Campanella, Gabriele and Chen, Shengjia and Singh, Manbir and others},
+  journal = {Nature Communications},
+  volume = {16},
+  pages = {3640},
+  year = {2025},
+  doi = {10.1038/s41467-025-58796-1},
+  url = {https://doi.org/10.1038/s41467-025-58796-1}
+}
+
+@article{oquab2024dinov2,
+  title = {DINOv2: Learning Robust Visual Features without Supervision},
+  author = {Oquab, Maxime and Darcet, Timoth{\'e}e and Moutakanni, Th{\'e}o and Vo, Huy V. and Szafraniec, Marc and Khalidov, Vasil and Fernandez, Pierre and Haziza, Daniel and Massa, Francisco and El-Nouby, Alaaeldin and Assran, Mahmoud and Ballas, Nicolas and Galuba, Wojciech and Howes, Russell and Huang, Po-Yao and Li, Shang-Wen and Misra, Ishan and Rabbat, Michael and Sharma, Vasu and Synnaeve, Gabriel and Xu, Hu and J{\'e}gou, Herv{\'e} and Mairal, Julien and Labatut, Patrick and Joulin, Armand and Bojanowski, Piotr},
+  journal = {Transactions on Machine Learning Research},
+  year = {2024},
+  url = {https://openreview.net/forum?id=a68SUt6zFt}
+}
+
+@article{hubert1985comparing,
+  title = {Comparing Partitions},
+  author = {Hubert, Lawrence and Arabie, Phipps},
+  journal = {Journal of Classification},
+  volume = {2},
+  number = {1},
+  pages = {193--218},
+  year = {1985},
+  doi = {10.1007/BF01908075},
+  url = {https://doi.org/10.1007/BF01908075}
+}
+
+@inproceedings{sculley2010webscale,
+  title = {Web-Scale K-Means Clustering},
+  author = {Sculley, D.},
+  booktitle = {Proceedings of the 19th International Conference on World Wide Web},
+  pages = {1177--1178},
+  year = {2010},
+  publisher = {Association for Computing Machinery},
+  doi = {10.1145/1772690.1772862},
+  url = {https://doi.org/10.1145/1772690.1772862}
+}
+
+@inproceedings{fahrbach2025gist,
+  title = {GIST: Greedy Independent Set Thresholding for Max-Min Diversification with Submodular Utility},
+  author = {Fahrbach, Matthew and Ramalingam, Srikumar and Zadimoghaddam, Morteza and Ahmadian, Sara and Citovsky, Gui and DeSalvo, Giulia},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year = {2025},
+  url = {https://research.google/pubs/gist-greedy-independent-set-thresholding-for-max-min-diversification-with-submodular-utility/}
 }
 
 @inproceedings{akiba2019optuna,
