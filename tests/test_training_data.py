@@ -43,6 +43,7 @@ SECOND_TRAIN_PIXEL = 44
 NORMALIZED_PIXEL = 16
 MANIFEST_ROW_COUNT = 2
 SELECTED_TRAIN_SHARD_COUNT = 2
+VALIDATION_SHARD_COUNT = 2
 
 
 def _write_hdf5(path: Path, patient_ids: list[bytes] | None = None) -> None:
@@ -790,17 +791,26 @@ def test_prepare_training_data_reads_compact_train_selected_for_train_only(
     )
     train_dataset = cast(Any, prepared.train_dataset)
     validation_dataset = cast(Any, prepared.validation_dataset)
-    first_image, _first_mask = prepared.train_dataset[0]
+    train_cache_files = list(
+        (master_manifest_path.parent / "local" / "TRAIN_SELECTED_COMPACT").glob("*.h5")
+    )
+    validation_cache_files = list(
+        (master_manifest_path.parent / "local" / "VALIDATION").glob("*.h5")
+    )
 
-    assert int(first_image[0, 0, 0]) == FIRST_TRAIN_PIXEL
+    assert len(train_cache_files) == SELECTED_TRAIN_SHARD_COUNT
+    assert len(validation_cache_files) == VALIDATION_SHARD_COUNT
     assert train_dataset.records[0].source_hdf5_path.parent == compact_dir / "shards"
     assert train_dataset.layout.local_cache_dir == (
         master_manifest_path.parent / "local" / "TRAIN_SELECTED_COMPACT"
     )
-    assert list((master_manifest_path.parent / "local" / "TRAIN_SELECTED_COMPACT").glob("*.h5"))
     assert validation_dataset.records[0].source_hdf5_path == shard_paths[2]
     assert prepared.training_provenance["shard_count"] == SELECTED_TRAIN_SHARD_COUNT
     assert prepared.training_provenance["storage_backend"]["kind"] == "compact_train_selected"
+
+    first_image, _first_mask = prepared.train_dataset[0]
+
+    assert int(first_image[0, 0, 0]) == FIRST_TRAIN_PIXEL
 
 
 def test_prepare_training_data_preserves_patient_separation(

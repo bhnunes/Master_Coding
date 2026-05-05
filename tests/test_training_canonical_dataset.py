@@ -26,6 +26,7 @@ TRAIN_ROW_VALUE = 1
 MASK_CHANNEL_VALUE = 1
 TRAIN_RECORD_COUNT = 4
 NORMALIZED_ROW_VALUE = 2
+TRAIN_SHARD_COUNT = 2
 
 
 def _write_stage2_shard(
@@ -349,6 +350,21 @@ def test_canonical_dataset_skips_filename_decode_when_not_requested(
 
     assert tuple(image.shape) == (3, 4, 4)
     assert tuple(mask.shape) == (4, 4)
+
+
+def test_canonical_dataset_prefetches_all_required_local_shards(
+    canonical_dataset_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = canonical_dataset_fixture
+    records = load_training_records(master_manifest_path, smart_sampling=False)
+    cache_dir = master_manifest_path.parent / "local_cache"
+    layout = CanonicalDatasetLayout(records=tuple(records), local_cache_dir=cache_dir)
+    dataset = CanonicalRowHDF5Dataset(layout, mode="validation", mask_mode="raw")
+
+    copied_count = dataset.prefetch_cached_shards()
+
+    assert copied_count == TRAIN_SHARD_COUNT
+    assert len(list(cache_dir.glob("*.h5"))) == TRAIN_SHARD_COUNT
 
 
 def test_canonical_dataset_reopens_handles_for_new_shards_and_processes(

@@ -594,6 +594,20 @@ class ArtifactAwareDatasetView(Dataset[Any]):
         return self.base_dataset.records
 
 
+def _prefetch_cached_shards(dataset: CanonicalRowHDF5Dataset, *, split_name: str) -> None:
+    cache_dir = dataset.layout.local_cache_dir
+    if cache_dir is None:
+        return
+
+    start = time.perf_counter()
+    shard_count = dataset.prefetch_cached_shards()
+    elapsed = time.perf_counter() - start
+    print(
+        f"Cached {shard_count} {split_name} shard(s) to local fast storage "
+        f"({cache_dir}) in {elapsed:.2f}s."
+    )
+
+
 def verify_patient_separation(train_dataset: Any, val_dataset: Any) -> None:
     """Ensure train and validation splits do not share patients."""
 
@@ -814,6 +828,10 @@ def prepare_training_data(  # noqa: PLR0913
             device=normalizer_device,
         ),
     )
+
+    _prefetch_cached_shards(train_dataset_base, split_name=source_split_name)
+    _prefetch_cached_shards(validation_dataset_base, split_name="VALIDATION")
+
     train_dataset: Dataset[Any]
     validation_dataset: Dataset[Any]
     if artifact_coverage_by_filename is None:

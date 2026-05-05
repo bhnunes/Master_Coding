@@ -96,6 +96,17 @@ class CanonicalRowHDF5Dataset(Dataset[Any]):
     def get_patient_ids(self) -> np.ndarray[Any, np.dtype[np.str_]]:
         return np.asarray(self.patient_ids)
 
+    def prefetch_cached_shards(self) -> int:
+        """Copy all required source shards into the local cache before iteration."""
+
+        if self.cache is None:
+            return 0
+
+        unique_source_paths = sorted({record.source_hdf5_path for record in self.records})
+        for source_path in unique_source_paths:
+            self.cache.fetch(source_path)
+        return len(unique_source_paths)
+
     def close(self) -> None:
         if self.h5_file is not None:
             try:
