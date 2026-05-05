@@ -245,7 +245,7 @@ try:
     sampler_generator.manual_seed(seed)
 
     sampler = WeightedRandomSampler(
-        weights=prepared_training_data.sample_weights.double(),
+        weights=cast(Any, prepared_training_data.sample_weights.double()),
         num_samples=len(samples_weights),
         replacement=True,
         generator=sampler_generator,
@@ -457,6 +457,7 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
             gpu_normalizer=gpu_normalizer,
             gpu_downscale=gpu_downscale,
             use_artifact_aware_loss=use_artifact_aware_loss,
+            profile_validation_timing=training_config.profile_validation_timing,
             run=run,
         ),
     )

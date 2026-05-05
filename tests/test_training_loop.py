@@ -200,6 +200,41 @@ def test_validate_epoch_resolves_precision_once_per_epoch(
     assert calls == [("FPN", "fp32")]
 
 
+def test_validate_epoch_can_emit_timing_summary(capsys: pytest.CaptureFixture[str]) -> None:
+    loss_fn = _TrackingLoss()
+    model = _ConstantModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    dataloader = [
+        (
+            torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+            torch.zeros((1, 2, 2), dtype=torch.long),
+        )
+    ]
+
+    validate_epoch(
+        model=model,
+        optimizer=optimizer,
+        dataloader=dataloader,
+        runtime=ValidationEpochRuntime(
+            loss_fn=loss_fn,
+            health=TrainingHealthTracker(name="val"),
+            gpu_normalizer=torch.nn.Identity(),
+        ),
+        config=ValidationEpochConfig(
+            device=torch.device("cpu"),
+            architecture="FPN",
+            amp_precision="fp32",
+            profile_timing=True,
+        ),
+    )
+
+    captured = capsys.readouterr()
+    assert "[Validation timing]" in captured.out
+    assert "wait=" in captured.out
+    assert "forward_loss=" in captured.out
+    assert "metrics=" in captured.out
+
+
 def test_finalize_validation_epoch_marks_empty_validation_as_invalid() -> None:
     health = TrainingHealthTracker(name="val")
     tracker = AdvancedMetricTracker(device=torch.device("cpu"), metric_bins=8)

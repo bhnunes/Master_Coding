@@ -77,6 +77,7 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
             "TRAINING_OHEM_START_EPOCH": "3",
             "TRAINING_OHEM_RATIO": "0.4",
             "TRAINING_OHEM_MIN_KEPT": "2048",
+            "TRAINING_PROFILE_VALIDATION_TIMING": "true",
         }
     )
 
@@ -104,6 +105,7 @@ def test_load_training_ensemble_config_reads_expected_environment(tmp_path: Path
     assert config.ohem_start_epoch == OHEM_START_EPOCH
     assert config.ohem_ratio == OHEM_RATIO
     assert config.ohem_min_kept == OHEM_MIN_KEPT
+    assert config.profile_validation_timing is True
     assert config.use_artifact_aware_loss is True
     assert config.use_compact_train_selected is False
     assert config.compact_train_selected_dir == tmp_path / "compact"
@@ -133,6 +135,7 @@ def test_load_training_ensemble_config_uses_portable_defaults(tmp_path: Path) ->
     assert config.ohem_start_epoch == DEFAULT_OHEM_START_EPOCH
     assert config.ohem_ratio == DEFAULT_OHEM_RATIO
     assert config.ohem_min_kept == DEFAULT_OHEM_MIN_KEPT
+    assert config.profile_validation_timing is False
     assert config.use_artifact_aware_loss is False
     assert config.use_compact_train_selected is True
     assert config.compact_train_selected_dir == Path("temp/train_selected_compact")
