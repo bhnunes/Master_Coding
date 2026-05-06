@@ -1,4 +1,9 @@
 \chapter{Conclusões}\label{chp:conclusoes}
-% O comando a seguir gera um "dummy text". 
-% Elimine-o quando escrever sua dissertação.
-\lipsum[19-24]
+
+Esta versão inicial da dissertação consolida o trabalho como uma contribuição metodológica para patologia digital computacional. O repositório implementa um fluxo de trabalho de ponta a ponta para detecção de câncer em WSI, cobrindo detecção de artefatos, extração HDF5 de \textit{patches}, curadoria de amostras, particionamento por identificador de paciente, normalização de cor em tempo de execução, verificações de sanidade, amostragem inteligente, treinamento supervisionado, otimização de ensemble e inferência final.
+
+A principal contribuição documentada é a explicitação dos contratos que tornam o fluxo reprodutível. Cada fronteira crítica do pipeline registra estado, configuração ou proveniência, reduzindo a chance de reutilizar artefatos incompatíveis ou misturar linhagens experimentais. Esse desenho é especialmente importante em patologia digital, onde uma métrica final depende não apenas do modelo escolhido, mas também de decisões anteriores de extração, limpeza, divisão de dados, normalização e calibração.
+
+As conclusões quantitativas permanecem pendentes. A dissertação ainda precisa incorporar estatísticas completas das coortes, resultados dos modelos individuais, receita final do ensemble, métricas no conjunto de teste, intervalos de confiança e exemplos qualitativos. Até que esses artefatos estejam fechados, não é cientificamente adequado afirmar desempenho clínico, generalização entre domínios ou superioridade sobre métodos alternativos.
+
+Como próximos passos, a versão final deve preencher o \Capitulo{chp:resultados} a partir dos artefatos consolidados das Fases 8 a 10, revisar a discussão à luz das métricas observadas e auditar se todos os resultados relatados possuem rastreabilidade para configurações, checkpoints e manifestos. Também será necessário substituir placeholders administrativos, como data definitiva de defesa, ficha catalográfica, membros da banca e agradecimentos pessoais.

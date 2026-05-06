@@ -1,0 +1,152 @@
+\chapter{Resultados e discussão}\label{chp:resultados}
+
+Este capítulo reserva a estrutura da análise final. Como os artefatos
+consolidados das Fases 8 a 10 ainda serão atualizados, os resultados numéricos
+permanecem como campos explícitos de preenchimento. Essa escolha evita atribuir
+desempenho, robustez ou superioridade clínica antes da execução final
+auditável. O objetivo desta versão é garantir que, quando os resultados forem
+gerados, eles tenham lugar claro no texto, nas tabelas e nas figuras.
+
+\section{Estatísticas das coortes}\label{sec:res_coortes}
+
+A primeira análise quantitativa deverá descrever o volume de dados processado em
+cada base: número de lâminas, identificadores de paciente, \textit{patches}
+aceitos, \textit{patches} rejeitados e distribuição entre treino, validação e
+teste. A \Tabela{tab:coortes_placeholder} apresenta a estrutura mínima esperada.
+
+\begin{table}[!htb]
+\centering
+\caption{Estrutura provisória para estatísticas de coorte e particionamento.}
+\label{tab:coortes_placeholder}
+\begin{tabular}{p{3.2cm}p{1.7cm}p{1.6cm}p{2.2cm}p{3.6cm}}
+\toprule
+Base & WSIs & IDs & \textit{Patches} & Observação \\
+\midrule
+CAMELYON16 & -- & -- & -- & A preencher com manifesto final. \\
+CATCH & -- & -- & -- & A preencher com manifesto final. \\
+DiagSet & -- & -- & -- & A preencher com manifesto final. \\
+HiESD & -- & -- & -- & A preencher com manifesto final. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Além das contagens globais, a versão final deve relatar quantas amostras foram
+removidas por baixo conteúdo tecidual, por ambiguidade de anotação, por falha de
+leitura ou por regra de limpeza por grafos. Esses números são necessários para
+avaliar se a curadoria alterou substancialmente a distribuição dos dados.
+
+\section{Extração, limpeza e particionamento}\label{sec:res_preprocessamento}
+
+Os resultados de pré-processamento deverão mostrar se o fluxo preservou os
+contratos definidos na metodologia: alinhamento entre imagem e máscara,
+separação de pacientes, existência de artefatos de normalização e ausência de
+linhas inválidas. A discussão deve separar três dimensões. A primeira é
+operacional, relacionada a tempo de execução, tamanho dos HDF5 e possibilidade de
+retomada. A segunda é científica, relacionada a vazamento, rótulos ambíguos e
+qualidade da supervisão. A terceira é prática, relacionada ao custo de disco e ao
+uso de armazenamento compacto de treino.
+
+\begin{figure}[!htb]
+    \centering
+    \fbox{\begin{minipage}{0.82\textwidth}
+        \centering
+        \vspace{2.5em}
+        Figura qualitativa pendente: exemplos de \textit{patches} aceitos,
+        rejeitados por artefato e rejeitados por ambiguidade.
+        \vspace{2.5em}
+    \end{minipage}}
+    \caption[Placeholder para exemplos de curadoria]{Local reservado para exemplos qualitativos da curadoria de dados. As imagens finais devem ser extraídas dos artefatos atuais, não do rascunho antigo.}
+    \label{fig:placeholder-curadoria}
+\end{figure}
+
+\section{Triagem e treinamento de modelos}\label{sec:res_treinamento}
+
+A triagem da Fase 7 deverá ser relatada como seleção de configurações, não como
+desempenho final. A Fase 8 deverá apresentar os modelos efetivamente treinados,
+as configurações de perda e normalização, o melhor checkpoint selecionado por
+validação e as métricas de validação correspondentes. A \Tabela{tab:modelos_placeholder}
+define uma estrutura inicial para esse relato.
+
+\begin{table}[!htb]
+\centering
+\caption{Estrutura provisória para modelos treinados na Fase 8.}
+\label{tab:modelos_placeholder}
+\begin{tabular}{p{2.5cm}p{2.8cm}p{2.6cm}p{2.4cm}p{2.4cm}}
+\toprule
+Arquitetura & Encoder & Normalização & Critério de seleção & Status \\
+\midrule
+A preencher & A preencher & A preencher & AUPRC validação & Pendente \\
+A preencher & A preencher & A preencher & AUPRC validação & Pendente \\
+A preencher & A preencher & A preencher & AUPRC validação & Pendente \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As curvas de treinamento deverão ser discutidas com cautela. Uma curva de perda
+decrescente indica otimização, mas não garante generalização. Divergência,
+colapso de predição, métricas não finitas e instabilidade entre épocas devem ser
+reportadas como evidência metodológica, mesmo quando não produzirem o melhor
+modelo.
+
+\begin{figure}[!htb]
+    \centering
+    \fbox{\begin{minipage}{0.82\textwidth}
+        \centering
+        \vspace{2.5em}
+        Figura pendente: curvas finais de perda, AUPRC, AUROC e MCC por época.
+        \vspace{2.5em}
+    \end{minipage}}
+    \caption[Placeholder para curvas de treinamento]{Local reservado para curvas finais de treinamento e validação exportadas dos logs atuais.}
+    \label{fig:placeholder-curvas}
+\end{figure}
+
+\section{Otimização do ensemble e inferência final}\label{sec:res_ensemble}
+
+Os resultados da Fase 9 deverão descrever a composição do \textit{ensemble}, os
+pesos atribuídos a cada modelo, o limiar calibrado e as assinaturas de
+compatibilidade verificadas antes da inferência. A Fase 10 deverá apresentar
+somente a avaliação da receita congelada no teste.
+
+\begin{table}[!htb]
+\centering
+\caption{Estrutura provisória para métricas finais de inferência.}
+\label{tab:metricas_finais_placeholder}
+\small
+\begin{tabular}{p{3.1cm}p{1.5cm}p{1.5cm}p{2.7cm}p{2.8cm}}
+\toprule
+Agregação & Dice & IoU & Sensibilidade & Especificidade \\
+\midrule
+Micro & -- & -- & -- & -- \\
+Macro por paciente & -- & -- & -- & -- \\
+Bootstrap por paciente & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!htb]
+    \centering
+    \fbox{\begin{minipage}{0.82\textwidth}
+        \centering
+        \vspace{2.5em}
+        Figura qualitativa pendente: WSI ou \textit{patches} com máscara real,
+        probabilidade do ensemble e máscara binarizada.
+        \vspace{2.5em}
+    \end{minipage}}
+    \caption[Placeholder para inferência qualitativa]{Local reservado para exemplos qualitativos da inferência final.}
+    \label{fig:placeholder-inferencia}
+\end{figure}
+
+\section{Discussão provisória}\label{sec:discussao_provisoria}
+
+A discussão final deverá responder a quatro perguntas. Primeiro, o fluxo
+preservou isolamento por paciente e rastreabilidade suficiente para sustentar as
+métricas? Segundo, as etapas de controle de qualidade removeram ruído sem
+eliminar de forma desproporcional regiões relevantes? Terceiro, a normalização
+de cor e a amostragem inteligente alteraram estabilidade de treinamento ou
+desempenho? Quarto, o \textit{ensemble} congelado melhorou a avaliação de teste
+em relação aos modelos individuais?
+
+Enquanto essas perguntas não forem respondidas pelos artefatos finais, a tese
+deve permanecer metodológica. Qualquer afirmação de superioridade, robustez
+clínica ou generalização externa será adicionada apenas se estiver diretamente
+apoiada por resultados, intervalos de incerteza e análise qualitativa.

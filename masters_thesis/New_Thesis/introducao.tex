@@ -1,88 +1,117 @@
-% Aqui começa o capítulo de Introdução.
-% Use o comando \label para definir um rótulo, 
-% caso seja necessário referenciar esse capítulo
-% posteriormente.
 \chapter{Introdução}\label{chp:Introducao}
 
-Esse é um texto de exemplo para o modelo de teses e dissertações da Faculdade de Tecnologia (FT) da UNICAMP. Esse modelo se aplica às teses de doutorado, dissertações de mestrado e Trabalhos de Conclusão de Curso, para a graduação (dos cursos de informática da FT).
+O uso de imagens histopatológicas digitais transformou a forma como lâminas
+microscópicas podem ser armazenadas, revisadas e analisadas computacionalmente.
+Em vez de restringir o exame ao microscópio físico, a digitalização de lâminas
+inteiras produz \Sigla{\textit{Whole Slide Images}}{WSI}: arquivos de alta
+resolução que preservam a estrutura do tecido em múltiplas escalas. Essa
+representação permite colaboração remota, criação de bases de pesquisa e
+desenvolvimento de métodos quantitativos de apoio à patologia. Ao mesmo tempo,
+ela introduz um desafio computacional central: uma única WSI pode conter bilhões
+de pixels, tornando inviável tratar a lâmina inteira como uma imagem comum de
+visão computacional.
 
-A seguir, estão alguns exemplos para os elementos mais comuns em textos acadêmicos, \ie tabelas, equações e figuras. 
+Esse cenário motivou o uso de aprendizagem profunda em patologia digital. Redes
+neurais convolucionais e arquiteturas baseadas em atenção têm sido empregadas em
+tarefas como detecção, classificação e segmentação de regiões tumorais, com
+resultados relevantes em desafios públicos de câncer e em estudos de fluxo
+diagnóstico assistido por computador \cite{bejnordi2017diagnostic,bandi2019resolution,campanella2025clinical}. Ainda assim, bons modelos isolados não
+resolvem, por si só, o problema metodológico. Para que um resultado seja
+interpretável e reproduzível, é necessário explicitar como as lâminas foram
+lidas, como as anotações foram convertidas em máscaras, quais regiões foram
+rejeitadas, como pacientes foram separados entre treino e teste, que
+normalização foi aplicada, como os modelos foram selecionados e como a inferência
+final foi congelada antes da avaliação.
 
-\section{Exemplos de Tabelas e Equações}\label{sec:exemplostabelas}
-Aqui um exemplo de como referenciar a \Tabela{tab:tabela_1}. Note que é preciso definir um rótulo (\textit{label}) dentro do comando de definição da tabela.
+A dificuldade aumenta porque WSIs não são apenas grandes: elas são heterogêneas.
+Diferenças de scanner, coloração, preparo histológico e protocolo de anotação
+alteram o aspecto visual das imagens e podem induzir modelos a aprenderem
+atalhos espúrios. Artefatos como dobras, marcas de caneta, regiões fora de foco
+e bolhas também podem introduzir sinais não biológicos. Por isso, o controle de
+qualidade, a rastreabilidade de dados e a separação rigorosa por paciente são
+partes essenciais da metodologia, não detalhes de implementação
+\cite{weng2024grandqc,dawood2026confounding,wilkinson2016fair}.
 
-% Veja a seguir um exemplo de Tabela.
-% Você pode usar o site http://www.tablesgenerator.com
-% para gerar as tabelas em LaTeX.
-\begin{table}[!htp]
-\caption[Legenda curta da tabela]{Legenda longa e mais detalhada da tabela.}
-\label{tab:tabela_1}
-\begin{center}
-\begin{tabular}{cc}
-\toprule % Linha superior
-Coluna 1 & Coluna2 \\ \midrule % Linha do meio 
-a & b \\
-c & d \\
-e & f \\\bottomrule % Linha inferior
-\end{tabular}
-\end{center}
-\end{table}
+Esta dissertação parte dessa lacuna. O objetivo não é propor uma nova arquitetura
+neural isolada, mas organizar e documentar um fluxo de trabalho computacional
+reprodutível para detecção e segmentação de câncer em WSIs. O projeto integra
+etapas de ingestão, extração de \textit{patches}, controle de qualidade,
+normalização de cor, particionamento por paciente, amostragem inteligente,
+triagem de hiperparâmetros, treinamento supervisionado, otimização de
+\textit{ensemble} e inferência final. A ênfase recai sobre a consistência do
+processo completo: cada artefato intermediário deve poder ser associado à sua
+origem, às configurações usadas e às fases downstream que o consomem.
 
-As tabelas mais complexas podem ser feitas com ajuda no site \href{http://www.tablesgenerator.com}{http://www.tables\-ge\-ne\-ra\-tor.com}.
+\section{Objetivos}\label{sec:objetivos}
 
-Veja um exemplo de equação no próprio texto, \eg, $x=\frac{\sqrt{a^{2}+b^{2}}}{\sigma}$.  Se você preferir, pode escrever a equação de forma estendida, conforme a \Equacao{eq:teste} a seguir. Note que o rótulo é colocado automaticamente.
+O objetivo geral desta dissertação é desenvolver e documentar um fluxo de
+trabalho reprodutível para detecção e segmentação de câncer em WSIs, com
+separação explícita entre dados, configurações, artefatos intermediários,
+treinamento de modelos e inferência final.
 
-\begin{equation}
-x=\frac{\sqrt{a^{2}+b^{2}}}{\sigma}
-\label{eq:teste}
-\end{equation}
+Para atingir esse objetivo, foram definidos os seguintes objetivos específicos:
+\begin{itemize}
+    \item estruturar uma etapa de ingestão capaz de transformar lâminas e
+    anotações poligonais em \textit{patches}, máscaras binárias e metadados
+    rastreáveis;
 
+    \item incorporar controle de qualidade e regras de integridade para reduzir
+    o uso de regiões ambíguas, artefatuais ou geometricamente incompatíveis com
+    a tarefa supervisionada;
 
-Você também pode obter ajudar para escrever as equações em \LaTeX no site \url{http://www.codecogs.com/latex/eqneditor.php}.
+    \item preservar isolamento entre pacientes durante particionamento,
+    treinamento, validação e teste, reduzindo risco de vazamento experimental;
 
-% Note que podemos incluir automaticamente alguns termos na lista de abreviaturas e siglas no pré-texto. Veja exemplos a seguir no código fonte. 
+    \item comparar famílias de normalização de cor e arquiteturas de
+    segmentação sem atribuir superioridade antes da consolidação dos resultados
+    finais;
 
-% A sigla \Sigla{abêcê}{ABC} aparecerá automaticamente na lista de abreviaturas e siglas no pré-texto. Do mesmo modo, podemos usar o comando \SiglaHifen{xisipsilonzê}{XYZ} separado por hífen ao invés de aparecer entre parênteses.
+    \item definir uma rotina de treinamento, seleção de checkpoints,
+    otimização de \textit{ensemble} e inferência que seja executável a partir de
+    artefatos versionáveis e configurações explícitas;
 
-Veja na \Secao{sec:exemplo_secao} a seguir como referenciar uma seção. Também será preciso definir um rótulo (\textit{label}) logo após o comando \texttt{\textbackslash section}.
+    \item manter um registro textual rastreável entre metodologia, código-fonte,
+    artefatos produzidos e citações científicas.
+\end{itemize}
 
-% Aqui começa uma Seção.
-% Use o comando \label para definir um rótulo, 
-% caso seja necessário referenciar essa seção
-% posteriormente.
-\section{Exemplo de seção}\label{sec:exemplo_secao} 
-Agora observe como se faz uma citação de artigo científico em periódico \cite{Gradvohl2014c}. De acordo com \textcite{Gradvohl2016}, essa é uma citação direta. Se for citar mais de um trabalho, faça da seguinte forma \cite{Caldana2017,Gradvohl2015}. As referências bibliográficas estão no arquivo \texttt{bibliografia.bib}. Outros exemplos de citações também se encontram nesse arquivo.
+\section{Justificativa}\label{sec:justificativa}
 
-Veja a seguir o comando para criar uma figura e o resultado, na \Figura{fig:xwing}. Note, no código fonte, que no comando \texttt{caption} podemos estabelecer uma \enquote{legenda curta} para aparecer na Lista de Figuras. A legenda curta é opcional.
+A justificativa clínica e científica deste trabalho está na necessidade de
+processos confiáveis para análise computacional de câncer em patologia digital.
+Modelos de aprendizagem profunda podem auxiliar na triagem e quantificação de
+regiões suspeitas, mas sua utilidade depende da qualidade do fluxo que produz os
+dados de treinamento e da forma como os resultados são avaliados. Em bases
+histopatológicas, pequenos descuidos metodológicos podem produzir estimativas
+otimistas: por exemplo, quando \textit{patches} do mesmo paciente aparecem em
+conjuntos diferentes, quando anotações contraditórias são tratadas como verdade
+absoluta, ou quando limiares são ajustados indiretamente sobre dados de teste.
 
-\begin{figure}[!htb]
-\centering
-% As figuras estão na pasta figuras.
-% Se seu texto estiver demorando muito para compilar, use figuras no formato PDF ou PNG.
-% Observe, no comando includegraphics que você pode estabelecer uma proporção para a figura.
-% Nesse caso, a figura tem uma proporção equivalente à metade (0.5) da largura do texto (\textwidth)
-\includegraphics[width=0.5\textwidth]{starwars21280.jpg}
-\caption[Legenda curta de figura]{Legenda mais extensa de figura. Fonte: \cite{lucas1997}.}
-\label{fig:xwing}
-\end{figure}
+Do ponto de vista computacional, o trabalho também se justifica pela necessidade
+de transformar uma sequência complexa de operações em um processo auditável.
+Lâminas inteiras exigem leitura especializada, manipulação eficiente de imagens,
+armazenamento estruturado, bancos de progresso, manifestos, checagens de
+integridade e execução em ambientes com restrição de disco e GPU. Ao documentar
+esses contratos, a dissertação busca tornar o projeto mais fácil de reproduzir,
+criticar e estender.
 
-Dica importante: sempre que possível, use figuras no formato PDF. De acordo com o Overleaf, isso acelera a compilação do texto, sem perder a qualidade da figura. 
+Por fim, a contribuição metodológica está em tratar o fluxo completo como objeto
+de pesquisa. Em vez de relatar apenas a métrica final de um modelo, o texto
+explicita as decisões que conectam a lâmina original à máscara prevista. Essa
+posição é compatível com recomendações de reprodutibilidade computacional e com
+princípios FAIR para preservação de metadados e artefatos científicos
+\cite{wilkinson2016fair,piccolo2016tools}.
 
-\subsection{Exemplo de subseção}\label{subsec:exemploSubsec}
-É importante evitar chegar a esse nível de subseção. Dois níveis são suficientes. Use essa opção em último caso, apenas.
+\section{Estrutura do documento}\label{sec:estrutura_documento}
 
-
-\subsection{Exemplo de adição de siglas}\label{subsec:siglas}
-Para adicionar uma sigla ou abreviatura na lista de siglas e abreviaturas, use o comando ``\texttt{\textbackslash{}Sigla\{nome por extenso\}\{abreviatura\}}'' ou ``\texttt{\textbackslash{}SiglaHifen\{nome por} \texttt{ex\-ten\-so\}\{abreviatura\}}'' para adicionar a sigla com hífen. 
-Por exemplo, respectivamente, \Sigla{Ácido Desoxirribonucleico}{DNA} ou \SiglaHifen{Ácido Ribonucleico}{RNA}. A lista de siglas é adicionada automaticamente.
-
-\section{Comandos opcionais para facilitar}\label{sec:comandosOpc}
-Este modelo também criou alguns comandos adicionais não apenas para facilitar o trabalho de quem escreve, mas também para manter uma formatação mais consistente.
-
-Entre esses comandos estão o \texttt{\textbackslash{}ie} que inclui a abreviatura ``\ie'' no texto (equivalente ao ``isto é''). Usar esse comando vai garantir que a abreviatura não se separe entre linhas e que o espaço entre o `.' e a próxima letra seja fixo. O mesmo vale para os comandos \texttt{\textbackslash{}eg} que inclui a abreviatura ``\eg'' e \texttt{\textbackslash{}pex} que inclui a abreviatura ``\pex''.
-
-Também existem os comandos \texttt{\textbackslash{}Capitulo\{rótulo do capítulo\}}, \texttt{\textbackslash{}Equacao\{ró\-tu\-lo da equação\}}, \texttt{\textbackslash{}Figura\{rótulo da figura\}}, \texttt{\textbackslash{}Secao\{rótulo da seção\}} e \texttt{\textbackslash{}Tabela\{rótulo da tabela\}}. Esses comandos inserem referências para os respectivos elementos. Além disso, no próprio texto aparece a \textit{string} (``Capítulo'', ``Equação'', ``Figura'' etc) seguida da referência já com o link. Por exemplo, \Secao{sec:exemplo_secao}. Sugere-se a utilização desses comandos para referenciar os respectivos elementos ao invés do comando \texttt{\textbackslash{}ref\{rótulo\}}. Assim, o texto ficará mais uniforme. 
-
-É possível também usar esses comandos nas versões no plural para conjuntos de referências. Por exemplo, para referenciar várias seções, você pode utilizar o comando \texttt{\textbackslash{}secoes\{ró\-tu\-lo\_1, rótulo\_2, rótulo\_3\}}.
-
-Por exemplo, suponha que queiramos referenciar as \secoes{sec:exemplostabelas,sec:exemplo_secao,subsec:siglas}.
+O restante desta dissertação está organizado da seguinte forma. O
+\Capitulo{chp:levantamento} apresenta os conceitos de patologia digital,
+WSIs, pré-processamento, normalização, segmentação semântica, métricas,
+particionamento e \textit{ensembles}. O \Capitulo{chp:desenvolvimento}
+descreve a metodologia implementada, conectando as fases executáveis do
+repositório aos seus contratos científicos. O \Capitulo{chp:resultados}
+reserva a estrutura para estatísticas de coorte, resultados de treinamento,
+otimização do \textit{ensemble}, inferência final e ablações, sem preencher
+métricas ainda não consolidadas. O \Capitulo{chp:conclusoes} apresenta uma
+conclusão provisória restrita às contribuições metodológicas verificáveis. Por
+fim, os apêndices registram pendências, mapa entre texto e código, e
+configurações que deverão ser reportadas na versão final.
