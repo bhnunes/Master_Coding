@@ -1,13 +1,52 @@
-\chapter*{Apêndice: Dados Suplementares}%
-\addcontentsline{toc}{chapter}{Apêndice: Dados Suplementares} %
-% O comando a seguir gera um "dummy text". 
-% Elimine-o quando escrever sua dissertação.
-\lipsum[9]
+\chapter{Artefatos pendentes para a versão final}\label{ap:artefatos_pendentes}
 
+Este apêndice lista os artefatos que devem ser preenchidos antes da entrega final da dissertação. A lista evita que a versão inicial transforme placeholders em conclusões.
 
+\begin{itemize}
+    \item Estatísticas finais por base: lâminas, pacientes ou identificadores operacionais, \textit{patches}, máscaras positivas, linhas aceitas e linhas rejeitadas.
+    \item Configurações finais de execução: variáveis de ambiente relevantes, normalização selecionada, backend VAHADANE, uso de amostragem inteligente, uso de HDF5 compacto, OHEM e perda sensível a artefatos.
+    \item Artefatos de treinamento: registros da Fase 7, checkpoints da Fase 8, metadados de compatibilidade e logs de validação.
+    \item Receita final de ensemble: modelos selecionados, pesos, limiares, configuração de TTA, hashes de checkpoint e assinatura de proveniência.
+    \item Resultados de teste: métricas finais, intervalos de confiança, matriz de confusão, figuras qualitativas e relatório gerado pela Fase 10.
+    \item Itens administrativos: data final de defesa, banca definitiva, ficha catalográfica, dedicatória e agradecimentos pessoais.
+\end{itemize}
 
-\chapter*{Apêndice: Hiperparâmetros}
-\addcontentsline{toc}{chapter}{Apêndice: Hiperparâmetros} %
-% O comando a seguir gera um "dummy text". 
-% Elimine-o quando escrever sua dissertação.
-\lipsum[10]
+\chapter{Mapa entre texto e implementação}\label{ap:mapa_codigo_texto}
+
+A \Tabela{tab:mapa_codigo_texto} resume as principais fontes de código que sustentam cada parte metodológica da dissertação. O mapa foi derivado do arquivo \texttt{reports/method\_sources.md} e deve ser atualizado se a implementação mudar substancialmente.
+
+\begin{table}[!ht]
+\centering
+\caption{Mapa resumido entre capítulos metodológicos e fontes de implementação.}
+\label{tab:mapa_codigo_texto}
+\scriptsize
+\begin{tabular}{>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{10.1cm}}
+\toprule
+Tema & Fontes principais \\
+\midrule
+Visão geral & Scripts \texttt{1\_artifact\_detection.py} a \texttt{10\_inference\_ensemble.py}; \texttt{helpers/runtime\_platform.py}; \texttt{helpers/runtime\_normalization.py}. \\
+Artefatos & Módulos em \texttt{helpers/artifact/*}. \\
+Extração & Módulos em \texttt{helpers/extraction/*}, incluindo leitura, anotações, HDF5 e manifesto. \\
+Limpeza & Módulos em \texttt{helpers/optimization\_sampling/*} e \texttt{helpers/graph/*}. \\
+Particionamento & Módulos em \texttt{helpers/crossfold/*} e \texttt{helpers/runtime\_normalization.py}. \\
+Sanidade & Módulos em \texttt{helpers/sanity/*}. \\
+Amostragem & Módulos em \texttt{helpers/smart\_sampling/*} e \texttt{helpers/training/compact\_train\_selected.py}. \\
+Treinamento & \texttt{helpers/lr\_finder/*}, \texttt{helpers/training/*} e registros \texttt{training\_model\_registry\_*}. \\
+Ensemble e inferência & Módulos em \texttt{helpers/ensemble\_optimizer/*} e \texttt{helpers/ensemble\_inference/*}. \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{table}
+
+\chapter{Configurações a reportar}\label{ap:configs_reportar}
+
+As configurações abaixo devem ser registradas junto aos resultados finais porque afetam a interpretação do experimento:
+
+\begin{itemize}
+    \item \texttt{RUNTIME\_NORMALIZATION\_METHOD} e, se aplicável, \texttt{RUNTIME\_VAHADANE\_BACKEND};
+    \item configurações de compressão HDF5 e uso de armazenamento local temporário nas fases de extração e particionamento;
+    \item flags de smart sampling e compactação de \texttt{TRAIN\_SELECTED};
+    \item arquitetura, encoder, taxa de aprendizado, decaimento de peso, pesos da função de perda e precisão numérica de cada modelo treinado;
+    \item parâmetros de ensemble, TTA, limiar final e número de amostras bootstrap;
+    \item versão do código, ambiente Python, dependências principais, hardware e local de execução.
+\end{itemize}

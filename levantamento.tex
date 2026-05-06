@@ -1,4 +1,428 @@
 \chapter{Levantamento bibliográfico}\label{chp:levantamento}
-% O comando a seguir gera um "dummy text". 
-% Elimine-o quando escrever sua dissertação.
-\lipsum[6-12]
+
+Este capítulo apresenta a base conceitual necessária para compreender o fluxo de
+trabalho desenvolvido nesta dissertação. A revisão não busca cobrir toda a
+literatura de patologia computacional; ela prioriza os conceitos que determinam
+a validade metodológica do projeto: imagens de lâminas inteiras, anotações
+supervisionadas, controle de qualidade, extração de \textit{patches},
+normalização de cor, segmentação semântica, arquiteturas de aprendizagem
+profunda, métricas, particionamento por paciente, reprodutibilidade e
+\textit{ensembles}.
+
+\section{Patologia digital e imagens de lâminas inteiras}\label{sec:patologia_digital_wsi}
+
+Patologia digital é o uso de lâminas histológicas digitalizadas para
+visualização, armazenamento, compartilhamento e análise computacional. O produto
+central desse processo é a \Sigla{\textit{Whole Slide Image}}{WSI}, uma imagem
+em múltiplas resoluções que representa a lâmina inteira em escala microscópica.
+Diferentemente de imagens convencionais de visão computacional, uma WSI pode
+atingir dimensões de \textit{gigapixel}; por isso, raramente é processada como
+um único tensor. A prática comum é dividir a lâmina em recortes menores,
+denominados \textit{patches}, preservando metadados que permitam reconstruir sua
+origem espacial e biológica \cite{khened2021generalized,munozaguirre2020pyhist}.
+
+A \Figura{fig:wsi-patching} ilustra essa ideia. A lâmina inteira fornece o
+contexto anatômico, enquanto os \textit{patches} permitem treinar modelos em
+unidades compatíveis com memória de GPU. Essa divisão, entretanto, cria uma
+responsabilidade metodológica: cada recorte precisa manter relação consistente
+com a máscara, o identificador de paciente, o arquivo de origem e o conjunto
+experimental ao qual pertence.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figuras/WSI_schema.png}
+    \caption[Estrutura de uma WSI e extração de \textit{patches}]{Representação conceitual de uma WSI e do processo de extração de \textit{patches}. A imagem completa preserva o contexto da lâmina, enquanto os recortes permitem processamento por modelos de aprendizagem profunda. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \label{fig:wsi-patching}
+\end{figure}
+
+\section{Aprendizagem profunda em patologia digital}\label{sec:ia_dl_patologia}
+
+\Sigla{Inteligência Artificial}{IA}, \Sigla{\textit{Machine Learning}}{ML} e
+\Sigla{\textit{Deep Learning}}{DL} formam uma hierarquia conceitual. IA é o
+campo amplo de métodos computacionais para tarefas associadas a comportamento
+inteligente; ML trata de algoritmos que aprendem padrões a partir de dados; DL é
+uma família de modelos com múltiplas camadas capazes de aprender representações
+hierárquicas diretamente de imagens. Essa relação é resumida na
+\Figura{fig:ia-ml-dl}.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.58\textwidth]{figuras/AI_ML_DL.png}
+    \caption[Hierarquia conceitual entre IA, ML e DL]{Relação hierárquica entre Inteligência Artificial, Aprendizado de Máquina e Aprendizado Profundo. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \label{fig:ia-ml-dl}
+\end{figure}
+
+O treinamento de uma rede neural supervisionada pode ser entendido como um ciclo
+iterativo. Primeiro, os dados de entrada atravessam a rede e produzem uma
+predição. Em seguida, a predição é comparada com o \textit{ground truth} por uma
+função de perda. O erro é retropropagado, gradientes são calculados e o
+otimizador atualiza os pesos. Esse ciclo, representado na
+\Figura{fig:ciclo-dl}, é repetido por múltiplas épocas até que a função de perda
+e as métricas de validação indiquem uma configuração adequada.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.78\textwidth]{figuras/DL_pipeline.png}
+    \caption[Ciclo de treinamento de uma rede neural]{Fluxo conceitual de treinamento em aprendizagem profunda: passagem direta, cálculo de perda, retropropagação e atualização de pesos. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \label{fig:ciclo-dl}
+\end{figure}
+
+Em patologia digital, o aprendizado supervisionado depende de anotações
+realizadas por especialistas. Essas anotações podem delimitar tumores, tecido
+normal, fundo, necrose, artefatos ou outras classes. No escopo desta
+dissertação, as anotações são convertidas para uma tarefa binária de câncer
+versus não câncer quando a base de dados permite essa interpretação. Esse
+mapeamento simplifica a formulação, mas torna indispensável documentar que
+classes originais foram fundidas, ignoradas ou rejeitadas.
+
+\section{Bases públicas consideradas}\label{sec:bases_publicas}
+
+O projeto atual não depende de dados proprietários antigos. As bases citadas
+nesta dissertação servem como fontes públicas de proveniência e como exemplos de
+heterogeneidade em patologia digital. A \Tabela{tab:datasets_ativos} resume os
+conjuntos de dados considerados no escopo metodológico.
+
+\begin{table}[!htb]
+\centering
+\caption{Bases públicas ativas no escopo metodológico da dissertação.}
+\label{tab:datasets_ativos}
+\begin{tabular}{p{3.1cm}p{4.1cm}p{6.4cm}}
+\toprule
+Base & Domínio & Papel no texto \\
+\midrule
+CAMELYON16 & Metástases de câncer de mama em linfonodos & Referência de desafio público em patologia digital e proveniência de WSIs anotadas \cite{bejnordi2017diagnostic}. \\
+CATCH & Tumores cutâneos caninos & Exemplo de patologia comparativa com anotações poligonais detalhadas \cite{wilm2022catch}. \\
+DiagSet & Histopatologia de câncer de próstata & Base pública de um domínio humano específico; aparece como proveniência, não como foco exclusivo da dissertação \cite{koziarski2024diagset}. \\
+HiESD & Câncer gástrico precoce e lesões pré-cancerosas & Fonte de amostras e regiões anotadas de espécimes ESD \cite{wang2025hiesd}. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Essas bases têm protocolos, scanners, classes e granularidade de anotação
+distintos. Essa diversidade é relevante porque um fluxo de trabalho
+reprodutível precisa registrar a origem de cada amostra e as regras usadas para
+converter anotações específicas em contratos comuns de treinamento.
+
+\section{Pré-processamento, tecido e artefatos}\label{sec:preprocessamento_patologia}
+
+Antes de alimentar modelos de segmentação, é necessário separar regiões
+informativas de fundo, vidro e áreas visualmente inválidas. Uma estratégia
+clássica para detectar tecido consiste em trabalhar no espaço HSV e aplicar um
+limiar no canal de saturação, seguido de operações morfológicas. De forma
+abstrata, uma limiarização binária pode ser escrita como:
+\begin{equation}\label{eq:otsu-threshold}
+    g(x,y) =
+    \begin{cases}
+        1, & \text{se } f(x,y) > t,\\
+        0, & \text{se } f(x,y) \leq t,
+    \end{cases}
+\end{equation}
+em que $f(x,y)$ é a intensidade do pixel em uma representação escolhida, $t$ é
+o limiar e $g(x,y)$ é a máscara binária resultante. No fluxo desta dissertação,
+essa família de procedimentos fundamenta a rejeição de janelas com baixo
+conteúdo tecidual antes da persistência em HDF5
+\cite{khened2021generalized,munozaguirre2020pyhist}.
+
+Máscaras binárias obtidas por limiarização podem conter ruídos, buracos ou
+pequenas regiões desconectadas. Operações morfológicas tratam esse problema por
+meio de um elemento estruturante $B$. A abertura remove componentes pequenos e é
+definida por $A \circ B = (A \ominus B) \oplus B$, enquanto o fechamento preenche
+lacunas pequenas e é definido por $A \bullet B = (A \oplus B) \ominus B$. A
+\Figura{fig:morfologia} mostra visualmente esse refinamento.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.78\textwidth]{figuras/morphological_operation.PNG}
+    \caption[Operações morfológicas de abertura e fechamento]{Exemplo conceitual do efeito de abertura e fechamento sobre uma máscara binária. A abertura reduz ruído externo e o fechamento torna a região mais coesa. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \label{fig:morfologia}
+\end{figure}
+
+Além de fundo e ruído geométrico, WSIs podem conter dobras, bolhas, marcas de
+caneta, regiões fora de foco e corpos estranhos. Esses artefatos podem criar
+sinais não biológicos e prejudicar o treinamento. Trabalhos de controle de
+qualidade, como o GrandQC, motivam a detecção explícita dessas regiões
+\cite{weng2024grandqc}. Nesta dissertação, a informação de artefatos é tratada
+como proveniência e possível variável experimental, não como evidência clínica.
+
+\section{Segmentação baseada em grafos e limpeza de amostras}\label{sec:grafos_limpeza}
+
+Segmentação por grafos oferece uma forma complementar de caracterizar regiões em
+uma imagem. Na formulação de \textcite{felzenszwalb2004efficient}, a imagem é
+representada por um grafo não direcionado $G=(V,E)$, no qual vértices
+representam pixels ou regiões elementares, e arestas recebem pesos que medem
+dissimilaridade. A diferença interna de um componente $C$ é dada por:
+\begin{equation}\label{eq:internal-difference}
+    \mathrm{Int}(C)=\max_{e\in\mathrm{MST}(C,E)} w(e),
+\end{equation}
+em que $\mathrm{MST}$ representa a árvore geradora mínima do componente. A
+diferença entre dois componentes é:
+\begin{equation}\label{eq:component-difference}
+    \mathrm{Dif}(C_1,C_2)=
+    \min_{v_i\in C_1,\,v_j\in C_2,\,(v_i,v_j)\in E} w(v_i,v_j).
+\end{equation}
+Componentes são fundidos quando a diferença entre eles não excede uma medida de
+dissimilaridade interna ajustada pelo tamanho:
+\begin{equation}\label{eq:mint}
+    \mathrm{MInt}(C_1,C_2)=
+    \min\left(\mathrm{Int}(C_1)+\tau(C_1),\mathrm{Int}(C_2)+\tau(C_2)\right),
+    \quad \tau(C)=\frac{k}{|C|}.
+\end{equation}
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.88\textwidth]{figuras/graph_method.png}
+    \caption[Segmentação de tecido baseada em grafos]{Ilustração conceitual de segmentação baseada em grafos: pixels ou regiões são conectados por arestas ponderadas e o algoritmo decide onde preservar fronteiras. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \label{fig:graph-method}
+\end{figure}
+
+No repositório, essa família de métodos é utilizada em uma etapa específica de
+limpeza de amostras cancerosas, com uma regra local de contaminação por fundo. A
+literatura sustenta o princípio algorítmico; os limiares, erosões e critérios de
+rejeição descritos na metodologia são decisões do fluxo implementado.
+
+\section{Normalização de cor}\label{sec:normalizacao_cor}
+
+A coloração hematoxilina-eosina varia entre laboratórios, scanners e protocolos
+de preparo. Essa variabilidade pode alterar propriedades ópticas e computadas
+das imagens, fazendo com que modelos confundam diferenças técnicas com sinais
+biológicos \cite{tellez2019augmentation,duenweg2023scanner}. Por isso,
+normalização de cor e aumento de dados são estratégias recorrentes em patologia
+digital.
+
+Na normalização de Reinhard, uma imagem de origem pode ser transformada para
+aproximar estatísticas de uma imagem-alvo. Para um canal $c$, a operação pode
+ser escrita como:
+\begin{equation}\label{eq:reinhard-norm}
+    I'_c = \frac{I_c-\mu_{s,c}}{\sigma_{s,c}}\sigma_{t,c}+\mu_{t,c},
+\end{equation}
+em que $\mu_{s,c}$ e $\sigma_{s,c}$ são média e desvio padrão da imagem de
+origem, e $\mu_{t,c}$ e $\sigma_{t,c}$ são estatísticas correspondentes do alvo
+\cite{reinhard2001color}. Abordagens baseadas em separação de corantes, como
+Ruifrok, Macenko e Vahadane, operam sobre densidade óptica ou estimativa de
+matrizes de coloração \cite{ruifrok2001quantification,macenko2009method,vahadane2016structure}. Uma forma simplificada de densidade óptica é:
+\begin{equation}\label{eq:od}
+    \mathrm{OD}=-\log\left(\frac{I+\epsilon}{I_0}\right),
+\end{equation}
+em que $I$ é a intensidade observada, $I_0$ é a intensidade de referência e
+$\epsilon$ evita instabilidade numérica.
+
+\begin{figure}[!htb]
+    \centering
+    \begin{subfigure}{0.18\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/original_patch.png}
+        \caption{Original}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.18\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/reinhard_patch.png}
+        \caption{Reinhard}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.18\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/macenko_patch.png}
+        \caption{Macenko}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.18\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/ruifrok_patch.png}
+        \caption{Ruifrok}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.18\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/vahadane_patch.png}
+        \caption{Vahadane}
+    \end{subfigure}
+    \caption[Exemplos de normalização de cor]{Exemplos visuais de famílias de normalização de cor consideradas no projeto. A imagem ilustra o efeito qualitativo das transformações, sem representar ainda comparação quantitativa final.}
+    \label{fig:normalizacao-exemplos}
+\end{figure}
+
+No fluxo atual, a normalização não é tratada como uma cópia permanente de todos
+os conjuntos. A Fase 4 registra artefatos de referência, e fases posteriores
+escolhem a normalização em tempo de execução. Essa distinção é importante para a
+reprodutibilidade, pois o mesmo particionamento pode ser avaliado sob diferentes
+métodos sem regenerar a divisão de pacientes.
+
+\section{Segmentação semântica e arquiteturas neurais}\label{sec:segmentacao_arquiteturas}
+
+Segmentação semântica atribui uma classe a cada pixel da imagem. Em uma tarefa
+binária de câncer, a saída esperada é uma máscara que separa região positiva e
+região negativa. A \Figura{fig:semantic-segmentation} resume visualmente a
+diferença entre imagem de entrada, classes de interesse e predição segmentada.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.82\textwidth]{figuras/semantic_segmentation.png}
+    \caption[Segmentação semântica]{Representação conceitual de segmentação semântica, na qual cada pixel recebe uma classe. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \label{fig:semantic-segmentation}
+\end{figure}
+
+Arquiteturas encoder-decoder, como U-Net e UNet++, são referências clássicas
+para segmentação biomédica \cite{ronneberger2015unet,zhou2020unetpp}. Modelos
+como DeepLabv3+, FPN, MA-Net, SegFormer, DPT e UPerNet oferecem diferentes
+formas de combinar contexto espacial, pirâmides de características e mecanismos
+de atenção \cite{chen2018deeplabv3plus,lin2017fpn,fan2020manet,xie2021segformer,ranftl2021dpt,xiao2018upernet}. O repositório explora essas famílias por meio de
+bibliotecas consolidadas, sem reivindicar que uma arquitetura seja superior antes
+da análise final.
+
+\begin{figure}[!htb]
+    \centering
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/CNN.png}
+        \caption{Rede convolucional}
+        \label{fig:cnn-conceito}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/vit_architecture.png}
+        \caption{\textit{Transformer} visual}
+        \label{fig:vit-conceito}
+    \end{subfigure}
+    \caption[Arquiteturas neurais em visão computacional]{Representações conceituais de famílias arquiteturais usadas em visão computacional. CNNs enfatizam extração local por convoluções; \textit{Transformers} visuais organizam a imagem em \textit{patches} e usam atenção para modelar relações globais.}
+    \label{fig:arquiteturas-conceituais}
+\end{figure}
+
+O mecanismo de atenção usado por \textit{Transformers} pode ser resumido pela
+atenção escalada por produto interno:
+\begin{equation}\label{eq:attention}
+    \mathrm{Attention}(Q,K,V)=
+    \mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V,
+\end{equation}
+em que $Q$, $K$ e $V$ são matrizes de consulta, chave e valor, e $d_k$ é a
+dimensão das chaves \cite{dosovitskiy2021vit}. Em WSIs, esse tipo de mecanismo é
+atraente porque permite representar relações mais amplas do que filtros locais,
+embora o custo computacional precise ser controlado.
+
+\section{Aumento de dados e otimização}\label{sec:treinamento_revisao}
+
+O aumento de dados busca expor o modelo a variações plausíveis de orientação,
+cor, ruído e textura. Em histopatologia, rotações, espelhamentos, variações de
+cor e perturbações locais são particularmente relevantes porque a orientação do
+tecido raramente possui significado absoluto, enquanto a aparência cromática
+pode variar por razões técnicas. Bibliotecas como Albumentations oferecem uma
+forma eficiente de compor essas transformações \cite{buslaev2020albumentations,dossantos2023augmentation,shorten2019survey}.
+
+\begin{figure}[!htb]
+    \centering
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_original.png}
+        \caption{Original}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_HF.png}
+        \caption{Espelho horizontal}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_VF.png}
+        \caption{Espelho vertical}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_RR.png}
+        \caption{Rotação}
+    \end{subfigure}
+
+    \vspace{0.4em}
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_GB.png}
+        \caption{Desfoque}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_HED.png}
+        \caption{Variação HED}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.24\textwidth}
+        \includegraphics[width=\linewidth]{figuras/example_HSV.png}
+        \caption{Variação HSV}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.24\textwidth}
+        \centering
+        \vspace{1.7em}
+        \rule{0.8\linewidth}{0.35pt}\\[0.4em]
+        \small Transformações configuráveis
+        \vspace{1.7em}
+    \end{subfigure}
+    \caption[Exemplos de aumento de dados]{Exemplos qualitativos de transformações de aumento de dados relevantes para histopatologia. As transformações efetivamente usadas devem ser reportadas a partir da configuração final de treinamento.}
+    \label{fig:augmentation-exemplos}
+\end{figure}
+
+O treinamento supervisionado em segmentação combina otimização pixel a pixel e
+otimização de sobreposição. No projeto, a família de perda combina BCE para a
+classe positiva com termos Dice para fundo e primeiro plano. O uso de AdamW
+separa a atualização adaptativa do decaimento de peso
+\cite{loshchilov2019decoupled}; estratégias schedule-free e busca de taxa de
+aprendizado são tratadas como componentes experimentais quando habilitadas
+\cite{defazio2024road,smith2017cyclical}.
+
+\section{Métricas de avaliação}\label{sec:metricas_reprodutibilidade}
+
+A avaliação de segmentação deve explicitar as quantidades básicas da matriz de
+confusão em nível de pixel: verdadeiros positivos ($TP$), falsos positivos
+($FP$), verdadeiros negativos ($TN$) e falsos negativos ($FN$). A partir dessas
+quantidades, a acurácia mede a proporção total de acertos:
+\begin{equation}\label{eq:acuracia}
+    \mathrm{Acurácia}=\frac{TP+TN}{TP+TN+FP+FN}.
+\end{equation}
+Em cenários desbalanceados, entretanto, métricas de sobreposição são mais
+informativas. O Coeficiente de Dice e a interseção sobre união são definidos por:
+\begin{equation}\label{eq:dice-iou-revisao}
+    \mathrm{Dice}=\frac{2TP}{2TP+FP+FN},
+    \qquad
+    \mathrm{IoU}=\frac{TP}{TP+FP+FN}.
+\end{equation}
+Comparações de Dice devem considerar unidade de agregação, tratamento de
+máscaras vazias e limiarização \cite{seghier2024dice}.
+
+Para avaliar discriminação probabilística, AUROC e AUPRC são métricas
+complementares. A curva ROC relaciona sensibilidade e taxa de falsos positivos
+em diferentes limiares, enquanto a curva precisão-revocação é frequentemente
+mais informativa em dados desbalanceados \cite{fawcett2006roc,saito2015precision}.
+A \Figura{fig:roc-conceitual} ilustra a leitura conceitual de uma curva ROC.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.68\textwidth]{figuras/roc_curve.png}
+    \caption[Curva ROC conceitual]{Representação conceitual de curvas ROC. A linha diagonal indica um classificador sem capacidade discriminativa; curvas mais próximas do canto superior esquerdo indicam melhor separação entre classes.}
+    \label{fig:roc-conceitual}
+\end{figure}
+
+\section{Particionamento, reprodutibilidade e ferramentas}\label{sec:reprodutibilidade_ferramentas}
+
+Em dados médicos, muitos \textit{patches} podem derivar da mesma lâmina ou do
+mesmo paciente. Se amostras correlacionadas forem distribuídas entre treino e
+teste, o modelo pode ser avaliado sobre padrões quase duplicados, produzindo uma
+estimativa otimista de desempenho. Por isso, validação agrupada e separação por
+identificador de paciente são princípios metodológicos importantes
+\cite{roberts2017crossvalidation,dawood2026confounding}.
+
+Reprodutibilidade também depende da preservação de artefatos. Manifestos,
+assinaturas de arquivos, configurações, checkpoints, relatórios e logs conectam
+o resultado final às decisões tomadas ao longo do fluxo. Essa preocupação está
+alinhada a princípios FAIR e a recomendações de reprodutibilidade computacional
+\cite{wilkinson2016fair,piccolo2016tools}. Ferramentas de acompanhamento de
+experimentos, como AIM, ajudam a registrar curvas de treino, validação e
+metadados operacionais. A \Figura{fig:aim-stack} ilustra esse tipo de interface.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figuras/AIM_stack.png}
+    \caption[Monitoramento de experimentos com AIM]{Exemplo de interface de monitoramento de experimentos usada para acompanhar métricas e comparar execuções. A figura é ilustrativa; os resultados finais desta dissertação serão preenchidos a partir dos artefatos consolidados das fases de treinamento e inferência.}
+    \label{fig:aim-stack}
+\end{figure}
+
+\section{\textit{Ensembles} e inferência final}\label{sec:ensembles_revisao}
+
+\textit{Ensembles} combinam predições de múltiplos modelos para explorar
+diversidade entre hipóteses aprendidas. A literatura clássica sustenta que a
+combinação de modelos pode reduzir erro quando os componentes apresentam erros
+parcialmente independentes \cite{dietterich2000ensemble}. Seleção de modelos a
+partir de bibliotecas de candidatos também aparece como estratégia para compor
+receitas finais a partir de desempenho em validação \cite{caruana2004ensemble}.
+
+No fluxo desta dissertação, a ideia geral de \textit{ensemble} é adaptada a uma
+receita local: modelos treinados individualmente são combinados por pesos e
+limiares otimizados na validação, e a inferência final deve usar essa receita
+congelada no teste. Essa separação é central para a interpretação científica.
+Resultados de teste só podem ser usados para avaliação final; se pesos, limiares
+ou escolha de modelos forem ajustados depois de observar o teste, a estimativa
+de desempenho deixa de refletir uma avaliação independente.

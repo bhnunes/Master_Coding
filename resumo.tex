@@ -1,11 +1,15 @@
-% Sempre deve haver um resumo em português:
+% Sempre deve haver um resumo em português.
 \begin{resumo}
-O resumo deve ter no máximo 500 palavras e deve ocupar uma única página.
+Esta dissertação descreve um fluxo de trabalho computacional reprodutível para detecção e segmentação de câncer em imagens histopatológicas de lâminas inteiras, ou \Sigla{\textit{Whole Slide Images}}{WSI}. O trabalho parte do desafio prático de transformar lâminas digitais, anotações heterogêneas e artefatos de aquisição em dados supervisionados adequados para treinamento, validação e inferência de modelos de aprendizagem profunda. A metodologia implementada no repositório organiza esse processo em estágios explícitos: detecção de artefatos, ingestão em banco de dados, extração de \textit{patches} e máscaras em HDF5, curadoria manual e automática de regiões contaminadas, geração de divisões por identificador de paciente, verificação de sanidade, amostragem inteligente do conjunto de treino, busca de taxa de aprendizado, treinamento de modelos de segmentação, otimização de \textit{ensemble} no conjunto de validação e inferência final com receita congelada no conjunto de teste.
+
+O foco da dissertação é metodológico e reprodutível. Em vez de apresentar uma única arquitetura como contribuição isolada, o texto documenta os contratos de dados, as salvaguardas contra vazamento entre pacientes, os artefatos de proveniência, as decisões de normalização de cor em tempo de execução e os limites científicos das heurísticas implementadas. Bases públicas de diferentes domínios histopatológicos são tratadas como fontes de dados para uma tarefa binária comum de câncer versus não câncer, evitando restringir a narrativa a um único órgão ou a uma única coorte. Resultados quantitativos finais, estatísticas completas das coortes e figuras qualitativas definitivas serão incorporados a partir dos artefatos experimentais consolidados; nesta versão inicial, esses pontos permanecem marcados explicitamente como pendentes.
 \end{resumo}
 
-% Sempre deve haver um abstract:
+% Sempre deve haver um abstract.
 \begin{abstract}
-The abstract must have at most 500 words and must fit in a single page.
+This dissertation describes a reproducible computational workflow for cancer detection and segmentation in whole-slide histopathology images. The work addresses the practical challenge of transforming large digital slides, heterogeneous annotations, and acquisition artifacts into supervised data suitable for deep-learning training, validation, and inference. The implemented repository organizes this process into explicit stages: artifact detection, database-backed ingestion, HDF5 patch and mask extraction, manual and graph-based curation of contaminated regions, patient-identifier-aware split generation, sanity checking, smart sampling of the training set, learning-rate screening, segmentation-model training, validation-only ensemble optimization, and final frozen-recipe inference on the test set.
+
+The dissertation emphasizes methodology and reproducibility. Rather than presenting a single architecture as an isolated contribution, it documents data contracts, safeguards against patient-level leakage, provenance artifacts, runtime stain-normalization decisions, and the scientific limits of local heuristics. Public datasets from different histopathological domains are treated as data sources for a shared binary cancer-versus-non-cancer task, avoiding a narrative restricted to one organ or one cohort. Final quantitative results, complete cohort statistics, and definitive qualitative figures will be incorporated from consolidated experiment artifacts; in this initial version, these items are explicitly marked as pending.
 \end{abstract}
 
 % Se houver um resumo em espanhol, descomente as linhas a seguir:

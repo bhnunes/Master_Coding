@@ -50,9 +50,21 @@
 %Adicione seu arquivo com as referências bibliográficas
 \addbibresource{bibliografia.bib}
 
-%O pacote a seguir gera um "dummy text". Elimine a linha quando
-% for editar seu texto.
-\usepackage{lipsum}
+% Pacotes adicionais usados pelo texto da dissertação.
+\usepackage{array}
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{makecell}
+\usepackage{subcaption}
+\usepackage{pdflscape}
+\usepackage{fontspec}
+
+% A classe oficial é preservada, mas a seleção explícita de fontes evita que
+% o XeLaTeX substitua a Libertine por Computer Modern quando estilos T1 faltam.
+\defaultfontfeatures{Ligatures=TeX}
+\setmainfont{Linux Libertine O}
+\setsansfont{Linux Biolinum O}
+\setmonofont{Consolas}[Scale=MatchLowercase]
 
 \begin{document}
 % Defina o nome da instituição e a sigla
@@ -88,18 +100,18 @@
 %\cotutela{Universidade Nova de Plutão}
 
 % Escolha entre autor ou autora:
-\autor{Nome do autor}
+\autor{Bruno Henrique Nunes}
 %\autora{Nome da Autora}
 
 % Sempre deve haver um título em português:
-\titulo{Título da Dissertação ou Tese em Português}
+\titulo{Fluxo de Trabalho Reprodutível para Detecção de Câncer em Imagens Histopatológicas de Lâminas Inteiras}
 
 % Se a língua for o inglês ou o espanhol defina:
 %\title{The Dissertation or Thesis Title in English or Spanish for FT}
 
 % Escolha entre orientador ou orientadora e inclua os títulos:
-\orientador{Prof. Dr. Nome do Orientador}
-%\orientadora{Profa. Dra. Nome da Orientadora}
+%\orientador{Prof. Dr. Nome do Orientador}
+\orientadora{Profa. Dra. Ana Estela Antunes da Silva}
 
 % Escolha entre coorientador ou coorientadora, se houver, 
 % e inclua os títulos:
@@ -117,13 +129,13 @@
 % Defina a data da defesa no formato {Dia}{Mês}{Ano}
 % Use apenas números! O template transformará em palavras,
 % se necessário.
-\datadadefesa{25}{11}{2025}
+\datadadefesa{30}{6}{2026}
 
 % Para a versão final defina:
 % Repita o nome do Orientador(a) no primeiro avaliador
-\avaliadorA{Prof. Dr. Nome do Orientador}{FT/UNICAMP}
-\avaliadorB{Prof.ª Dr.ª Segunda Avaliadora}{Instituição da segunda avaliadora}
-\avaliadorC{Dr. Terceiro Avaliador}{Instituição do terceiro avaliador}
+\avaliadorA{Profa. Dra. Ana Estela Antunes da Silva}{Faculdade de Tecnologia/UNICAMP}
+\avaliadorB{Prof. Dr. A definir}{Instituição a definir}
+\avaliadorC{Prof. Dr. A definir}{Instituição a definir}
 % \avaliadorD{Prof. Dr. Quarto Avaliador}{Instituição do quarto avaliador}
 % \avaliadorE{Prof. Dr. Quinto Avaliador}{Instituição do quinto avaliador}
 % \avaliadorF{Prof. Dr. Sexto Avaliador}{Instituição do sexto avaliador}
@@ -207,6 +219,10 @@
 % que contém o capítulo de desenvolvimento. 
 % Detalhe: não precisa incluir a extensão .tex
 \include{desenvolvimento}
+
+% O comando a seguir inclui o arquivo resultados.tex
+% que contém os resultados e a discussão.
+\include{resultados}
 
 % O comando a seguir inclui o arquivo conclusoes.tex
 % que contém o capítulo de conclusoes. 
