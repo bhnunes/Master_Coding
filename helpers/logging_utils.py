@@ -67,9 +67,7 @@ def configure_logger(
         active_settings = LoggerSettings(
             logger_level=cast(int | None, legacy_kwargs.get("logger_level")) or logging.INFO,
             file_level=cast(int | None, legacy_kwargs.get("file_level")) or logging.INFO,
-            console_level=(
-                cast(int | None, legacy_kwargs.get("console_level")) or logging.INFO
-            ),
+            console_level=(cast(int | None, legacy_kwargs.get("console_level")) or logging.INFO),
             file_mode=cast(str | None, legacy_kwargs.get("file_mode")) or "a",
             file_pattern=(
                 "%(asctime)s - %(process)d - %(levelname)s - %(message)s"
@@ -148,24 +146,63 @@ def configure_stage_logger(
 class LoggerWriter:
     """File-like adapter that forwards writes to a logger."""
 
-    def __init__(self, logger: logging.Logger, level: int) -> None:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        level: int,
+        fallback_stream: TextIO | None = None,
+    ) -> None:
         self._logger = logger
         self._level = level
         self._buffer = ""
+        if fallback_stream is not None:
+            self._fallback_stream = fallback_stream
+        elif level >= logging.ERROR:
+            self._fallback_stream = cast(TextIO, sys.__stderr__)
+        else:
+            self._fallback_stream = cast(TextIO, sys.__stdout__)
+        self._writing = False
+
+    def _write_fallback(self, message: str) -> None:
+        try:
+            self._fallback_stream.write(message)
+            self._fallback_stream.flush()
+        except Exception:
+            pass
+
+    def _log_line(self, line: str) -> None:
+        if self._writing:
+            self._write_fallback(f"{line}\n")
+            return
+
+        try:
+            self._writing = True
+            self._logger.log(self._level, line)
+        except Exception:
+            self._write_fallback(f"{line}\n")
+        finally:
+            self._writing = False
 
     def write(self, message: str) -> int:
+        if self._writing:
+            self._write_fallback(message)
+            return len(message)
+
         self._buffer += message
         while "\n" in self._buffer:
             line, self._buffer = self._buffer.split("\n", 1)
             stripped = line.rstrip()
             if stripped:
-                self._logger.log(self._level, stripped)
+                self._log_line(stripped)
         return len(message)
 
     def flush(self) -> None:
+        if self._writing:
+            return
+
         stripped = self._buffer.rstrip()
         if stripped:
-            self._logger.log(self._level, stripped)
+            self._log_line(stripped)
         self._buffer = ""
 
     def isatty(self) -> bool:

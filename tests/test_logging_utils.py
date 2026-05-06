@@ -11,6 +11,7 @@ import pytest
 from helpers import logging_utils
 from helpers.logging_utils import (
     LoggerSettings,
+    LoggerWriter,
     configure_logger,
     configure_root_logger,
     configure_stage_logger,
@@ -292,6 +293,43 @@ def test_configure_stage_logger_applies_actual_stage_defaults(tmp_path: Path) ->
     assert console_handler.level == logging.WARNING
     assert console_handler.formatter is not None
     assert console_handler.formatter._fmt == "%(levelname)s: %(message)s"
+
+
+def test_logger_writer_forwards_complete_lines_to_logger() -> None:
+    stream = io.StringIO()
+    logger = logging.getLogger("test_logger_writer_forwards_complete_lines")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    logger.addHandler(logging.StreamHandler(stream))
+    writer = LoggerWriter(logger, logging.INFO)
+
+    assert writer.write("first") == len("first")
+    writer.write(" line\nsecond line\n")
+
+    assert stream.getvalue().splitlines() == ["first line", "second line"]
+
+
+def test_logger_writer_uses_fallback_for_reentrant_stderr_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback = io.StringIO()
+    logger = logging.getLogger("test_logger_writer_uses_fallback_for_reentrant_stderr_write")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+
+    class RecursiveStderrHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            sys.stderr.write(f"recursive handler saw: {record.getMessage()}\n")
+
+    logger.addHandler(RecursiveStderrHandler())
+    writer = LoggerWriter(logger, logging.ERROR, fallback_stream=fallback)
+    monkeypatch.setattr(sys, "stderr", writer)
+
+    writer.write("outer error\n")
+
+    assert fallback.getvalue() == "recursive handler saw: outer error\n"
 
 
 def test_logging_utils_module_namespace_smoke_exercises_primary_functions(

@@ -74,6 +74,7 @@ training_logger = configure_root_logger(
         file_mode="a",
         file_pattern="%(asctime)s - %(process)d - %(levelname)s - %(message)s",
         console_pattern="%(message)s",
+        console_stream=sys.__stdout__,
     ),
 )
 sys.stdout = LoggerWriter(training_logger, logging.INFO)
