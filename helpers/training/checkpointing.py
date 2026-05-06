@@ -291,6 +291,7 @@ class EarlyStopping:
         verbose: bool = True,
         delta: float = 0.0001,
         output_best_model_path: str = "best_model.pth",
+        compatibility_signature: str | None = None,
     ) -> None:
         self.patience = patience
         self.verbose = verbose
@@ -299,6 +300,7 @@ class EarlyStopping:
         self.best_score: float | None = None
         self.delta = delta
         self.output_best_model_path = output_best_model_path
+        self.compatibility_signature = compatibility_signature
         self._current_best_checkpoint_on_disk_path: str | None = None
 
         output_dir = os.path.dirname(self.output_best_model_path)
@@ -372,6 +374,8 @@ class EarlyStopping:
             "val_mcc_star": checkpoint.val_mcc_star,
             "is_compiled": hasattr(checkpoint.model, "_orig_mod"),
         }
+        if self.compatibility_signature:
+            save_dict["compatibility_signature"] = self.compatibility_signature
 
         try:
             torch.save(save_dict, self.output_best_model_path)
@@ -403,16 +407,29 @@ def _resolve_resume_checkpoint_path(request: ResumeCheckpointRequest) -> str | N
 
 def _verify_resume_compatibility(
     checkpoint_path: str,
+    checkpoint: Mapping[str, Any],
     expected_compatibility_signature: str | None,
 ) -> None:
     if expected_compatibility_signature is None:
         return
+
+    checkpoint_signature = str(checkpoint.get("compatibility_signature", "")).strip()
+    if checkpoint_signature:
+        if checkpoint_signature != expected_compatibility_signature:
+            raise ValueError(
+                "Resume checkpoint has incompatible provenance for the current training inputs."
+            )
+        return
+
     metadata_path = _metadata_path_for_checkpoint(checkpoint_path)
     if not metadata_path.exists():
-        raise ValueError(
-            "Resume checkpoint has no metadata sidecar; cannot verify compatible provenance. "
-            f"Expected metadata at '{metadata_path}'."
+        print(
+            "Warning: resume checkpoint has no embedded compatibility signature and no "
+            f"metadata sidecar at '{metadata_path}'. Proceeding with legacy checkpoint resume "
+            "without provenance verification."
         )
+        return
+
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     observed_signature = str(payload.get("compatibility_signature", "")).strip()
     if observed_signature != expected_compatibility_signature:
@@ -428,10 +445,14 @@ def load_checkpoint_for_resume(request: ResumeCheckpointRequest) -> int:
     checkpoint_path = _resolve_resume_checkpoint_path(request)
     if checkpoint_path is None:
         return start_epoch
-    _verify_resume_compatibility(checkpoint_path, request.expected_compatibility_signature)
 
     print(f"\n*** Resuming from checkpoint: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=request.device)
+    _verify_resume_compatibility(
+        checkpoint_path,
+        checkpoint,
+        request.expected_compatibility_signature,
+    )
     state_dict = checkpoint.get("model_state_dict")
     if state_dict is None:
         print("Checkpoint missing 'model_state_dict'. Training from scratch.")

@@ -368,14 +368,6 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
         checkpoint_path, f"BEST_MODEL_{experiment_name}.pth"
     )
 
-    # Initialize EarlyStopping with this fixed path
-    early_stopping = EarlyStopping(
-        patience=int(patience),
-        verbose=True,
-        delta=0.0001,
-        output_best_model_path=output_best_model_path_for_this_run,
-    )
-
     full_resume_checkpoint_path = (
         os.path.join(checkpoint_path, resume_checkpoint_path) if resume_checkpoint_path else None
     )
@@ -392,6 +384,15 @@ for architecture, encoder, resume_checkpoint_path in [selected_run]:
                 ohem_min_kept=ohem_min_kept,
             ),
         )
+    )
+
+    # Initialize EarlyStopping with this fixed path
+    early_stopping = EarlyStopping(
+        patience=int(patience),
+        verbose=True,
+        delta=0.0001,
+        output_best_model_path=output_best_model_path_for_this_run,
+        compatibility_signature=expected_compatibility_signature,
     )
 
     start_epoch = load_checkpoint_for_resume(

@@ -272,6 +272,123 @@ def test_load_checkpoint_for_resume_rejects_incompatible_provenance(tmp_path: Pa
         )
 
 
+def test_load_checkpoint_for_resume_accepts_embedded_compatibility_signature(
+    tmp_path: Path,
+) -> None:
+    saved_model = torch.nn.Linear(2, 2)
+    saved_optimizer = torch.optim.SGD(saved_model.parameters(), lr=0.1)
+    checkpoint_path = tmp_path / "resume.pth"
+    torch.save(
+        {
+            "epoch": RESUME_EPOCH,
+            "model_state_dict": saved_model.state_dict(),
+            "optimizer_state_dict": saved_optimizer.state_dict(),
+            "best_val_score": RESUME_BEST_SCORE,
+            "compatibility_signature": "current-lineage",
+        },
+        checkpoint_path,
+    )
+
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    early_stopping = EarlyStopping(
+        patience=2,
+        verbose=False,
+        output_best_model_path=str(tmp_path / "best_model.pth"),
+    )
+
+    start_epoch = load_checkpoint_for_resume(
+        _resume_request(
+            model,
+            optimizer,
+            early_stopping,
+            str(checkpoint_path),
+            expected_compatibility_signature="current-lineage",
+        )
+    )
+
+    assert start_epoch == RESUME_EPOCH
+    assert early_stopping.best_score == RESUME_BEST_SCORE
+
+
+def test_load_checkpoint_for_resume_rejects_incompatible_embedded_signature(
+    tmp_path: Path,
+) -> None:
+    saved_model = torch.nn.Linear(2, 2)
+    saved_optimizer = torch.optim.SGD(saved_model.parameters(), lr=0.1)
+    checkpoint_path = tmp_path / "resume.pth"
+    torch.save(
+        {
+            "epoch": RESUME_EPOCH,
+            "model_state_dict": saved_model.state_dict(),
+            "optimizer_state_dict": saved_optimizer.state_dict(),
+            "best_val_score": RESUME_BEST_SCORE,
+            "compatibility_signature": "old-lineage",
+        },
+        checkpoint_path,
+    )
+
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    early_stopping = EarlyStopping(
+        patience=2,
+        verbose=False,
+        output_best_model_path=str(tmp_path / "best_model.pth"),
+    )
+
+    with pytest.raises(ValueError, match="incompatible provenance"):
+        load_checkpoint_for_resume(
+            _resume_request(
+                model,
+                optimizer,
+                early_stopping,
+                str(checkpoint_path),
+                expected_compatibility_signature="current-lineage",
+            )
+        )
+
+
+def test_load_checkpoint_for_resume_allows_legacy_checkpoint_without_sidecar(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    saved_model = torch.nn.Linear(2, 2)
+    saved_optimizer = torch.optim.SGD(saved_model.parameters(), lr=0.1)
+    checkpoint_path = tmp_path / "resume.pth"
+    torch.save(
+        {
+            "epoch": RESUME_EPOCH,
+            "model_state_dict": saved_model.state_dict(),
+            "optimizer_state_dict": saved_optimizer.state_dict(),
+            "best_val_score": RESUME_BEST_SCORE,
+        },
+        checkpoint_path,
+    )
+
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    early_stopping = EarlyStopping(
+        patience=2,
+        verbose=False,
+        output_best_model_path=str(tmp_path / "best_model.pth"),
+    )
+
+    start_epoch = load_checkpoint_for_resume(
+        _resume_request(
+            model,
+            optimizer,
+            early_stopping,
+            str(checkpoint_path),
+            expected_compatibility_signature="current-lineage",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert start_epoch == RESUME_EPOCH
+    assert early_stopping.best_score == RESUME_BEST_SCORE
+    assert "legacy checkpoint resume without provenance verification" in captured.out
+
+
 def test_get_previous_metrics_returns_checkpoint_metrics() -> None:
     checkpoint = {
         "val_auprc": BEST_SCORE,
@@ -318,6 +435,33 @@ def test_early_stopping_saves_original_module_state_dict(tmp_path: Path) -> None
 
     assert saved["is_compiled"] is True
     assert saved["model_state_dict"].keys() == compiled_inner.state_dict().keys()
+
+
+def test_early_stopping_embeds_compatibility_signature(tmp_path: Path) -> None:
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    checkpoint_path = tmp_path / "best_model.pth"
+    early_stopping = EarlyStopping(
+        verbose=False,
+        output_best_model_path=str(checkpoint_path),
+        compatibility_signature="current-lineage",
+    )
+
+    early_stopping.save_checkpoint(
+        EarlyStoppingCheckpoint(
+            score=0.8,
+            model=model,
+            optimizer=optimizer,
+            epoch=1,
+            val_loss=0.2,
+            val_auprc=0.8,
+            val_mcc_star=0.7,
+            val_auroc=0.9,
+        )
+    )
+
+    saved = torch.load(checkpoint_path, map_location="cpu")
+    assert saved["compatibility_signature"] == "current-lineage"
 
 
 def test_load_checkpoint_for_resume_handles_empty_or_missing_paths(tmp_path: Path) -> None:
