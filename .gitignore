@@ -1,6 +1,8 @@
 # Environment files
 *.log
 *.png
+!masters_thesis/New_Thesis/figuras/*.png
+!masters_thesis/New_Thesis/figuras/*.PNG
 *.pyc
 credentials.json
 token.json
