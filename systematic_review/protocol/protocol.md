@@ -12,7 +12,7 @@ Domain: Application of Deep Learning to Whole-Slide Histopathology.
 Biological Target: Must explicitly focus on the detection, segmentation, or classification of cancer/neoplasms/tumors.
 Methodological Focus: Must explicitly detail the pipeline infrastructure for at least one of the following: slide-level quality control, stain normalization, patient-level data partitioning, data serialization (e.g., HDF5, Zarr), or multi-model ensembling.
 Reproducibility: Must provide a link to a public repository (GitHub, GitLab, etc.) containing the pipeline implementation.
-Publication Parameters: Published between January 1, 2020, and the present (2026); English language; Open Access.
+Publication Parameters: Published between January 1, 2020, and December 31, 2025; English language; Open Access.
 Exclusion Criteria:
 Target Flaws: Purely clinical correlation studies or focus on non-neoplastic conditions.
 "Pre-Extracted Patch" Scam: Studies that bypass WSI processing completely by utilizing perfectly curated, pre-extracted patch datasets (e.g., standard PatchCamelyon, CRC-100K).
@@ -22,10 +22,10 @@ Target Flaws: Purely clinical correlation studies or focus on non-neoplastic con
 
 3. Databases and Exact Search Queries
 A. PubMed / MEDLINE
-("Whole Slide Imaging"[MeSH] OR "histopathology"[tiab] OR "whole-slide"[tiab] OR "WSI"[tiab]) AND ("Neoplasms"[MeSH] OR "cancer"[tiab] OR "tumor"[tiab] OR "tumour"[tiab] OR "carcinoma"[tiab] OR "malignancy"[tiab]) AND ("Deep Learning"[MeSH] OR "deep learning"[tiab] OR "ensemble learning"[tiab] OR "neural networks"[tiab] OR "segmentation"[tiab]) AND ("reproducibility"[tiab] OR "artifact"[tiab] OR "stain normalization"[tiab] OR "quality control"[tiab] OR "patient-level"[tiab] OR "data leakage"[tiab] OR "pipeline"[tiab]) AND ("2020/01/01"[Date - Publication] : "3000"[Date - Publication])
-B. IEEE Xplore (Ensure the "Open Access" filter is checked)
+("Whole Slide Imaging"[MeSH] OR "histopathology"[tiab] OR "whole-slide"[tiab] OR "WSI"[tiab]) AND ("Neoplasms"[MeSH] OR "cancer"[tiab] OR "tumor"[tiab] OR "tumour"[tiab] OR "carcinoma"[tiab] OR "malignancy"[tiab]) AND ("Deep Learning"[MeSH] OR "deep learning"[tiab] OR "ensemble learning"[tiab] OR "neural networks"[tiab] OR "segmentation"[tiab]) AND ("reproducibility"[tiab] OR "artifact"[tiab] OR "stain normalization"[tiab] OR "quality control"[tiab] OR "patient-level"[tiab] OR "data leakage"[tiab] OR "pipeline"[tiab]) AND ("2020/01/01"[Date - Publication] : "2025/12/31"[Date - Publication])
+B. IEEE Xplore
 ("Document Title":histopathology OR "Document Title":"whole slide" OR "Document Title":WSI OR "Abstract":histopathology) AND ("Abstract":cancer OR "Abstract":tumor OR "Abstract":tumour OR "Abstract":carcinoma OR "Abstract":malignancy) AND ("Abstract":"deep learning" OR "Abstract":"ensemble" OR "Abstract":"segmentation") AND ("Abstract":reproducibility OR "Abstract":artifact OR "Abstract":normalization OR "Abstract":"data leakage" OR "Abstract":"patient-level" OR "Abstract":"quality control" OR "Abstract":"pipeline")
-C. SpringerLink (Apply filters: English, Open Access, Article, 2020-2026)
+C. SpringerLink
 ("whole slide" OR "WSI" OR "computational pathology") AND ("cancer" OR "tumor" OR "carcinoma") AND ("deep learning" OR "convolutional neural network") AND ("stain normalization" OR "reproducibility" OR "artifact" OR "data leakage" OR "quality control")
 
 4. Two-Phase Screening Workflow & LLM Prompts

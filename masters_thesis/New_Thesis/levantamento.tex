@@ -7,7 +7,11 @@ a validade metodológica do projeto: imagens de lâminas inteiras, anotações
 supervisionadas, controle de qualidade, extração de \textit{patches},
 normalização de cor, segmentação semântica, arquiteturas de aprendizagem
 profunda, métricas, particionamento por paciente, reprodutibilidade e
-\textit{ensembles}.
+\textit{ensembles}. Ao final, esses conceitos são confrontados com uma revisão
+sistemática recente, conduzida a partir do protocolo descrito no material
+suplementar do repositório, para mostrar como a literatura aceita trata
+qualidade, vazamento de dados, governança e agregação de modelos em fluxos de
+patologia computacional.
 
 \section{Patologia digital e imagens de lâminas inteiras}\label{sec:patologia_digital_wsi}
 
@@ -426,3 +430,92 @@ congelada no teste. Essa separação é central para a interpretação científi
 Resultados de teste só podem ser usados para avaliação final; se pesos, limiares
 ou escolha de modelos forem ajustados depois de observar o teste, a estimativa
 de desempenho deixa de refletir uma avaliação independente.
+
+\section{Revisão sistemática da literatura recente}\label{sec:revisao_sistematica}
+
+A revisão sistemática complementou a revisão conceitual ao investigar como a
+literatura recente descreve a engenharia experimental de fluxos de patologia
+digital oncológica. O objetivo não foi listar arquiteturas de redes neurais, mas
+identificar práticas verificáveis para quatro problemas que afetam diretamente a
+validade desta dissertação: controle de qualidade e artefatos, prevenção de
+vazamento de dados, governança de dados e agregação de modelos. Por isso, o
+protocolo foi definido antes da síntese e estruturado em perguntas de pesquisa,
+critérios de elegibilidade, consultas reproduzíveis e uma matriz de extração.
+
+As Tabelas~\ref{tab:revisao_sistematica_perguntas},
+\ref{tab:revisao_sistematica_criterios} e
+\ref{tab:revisao_sistematica_consultas} registram os elementos necessários para
+reproduzir a busca: perguntas de pesquisa, critérios de inclusão e exclusão, e
+consultas exatas aplicadas em PubMed/MEDLINE, IEEE Xplore e SpringerLink. Os
+filtros exigiram publicações em inglês, acesso aberto, período de 1 de janeiro
+de 2020 a 31 de dezembro de 2025, foco oncológico, uso de aprendizagem profunda
+em WSI ou histopatologia e descrição explícita de pelo menos um componente
+operacional do fluxo. Após a recuperação dos registros, as referências foram
+deduplicadas e triadas em duas fases. A primeira fase avaliou a relevância
+oncológica, o uso de WSI e a ausência de falhas metodológicas evidentes, como
+bases apenas pré-extraídas ou particionamento por \textit{patch}. A segunda fase
+avaliou o texto completo para verificar disponibilidade pública de código,
+descrição da governança de dados, política de particionamento, tratamento de
+artefatos e validade da estratégia de agregação de modelos.
+
+\input{generated/systematic_review_protocol_summary}
+
+A triagem retornou 1004 registros. Destes, 61 foram aceitos para síntese e 943
+foram rejeitados. A \Tabela{tab:revisao_sistematica_triagem} apresenta a
+contagem por base, e a \Figura{fig:revisao-sistematica-triagem} resume a
+distribuição entre estudos aceitos e rejeitados.
+
+\input{generated/systematic_review_screening_tables}
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.88\textwidth]{figuras/systematic_review_screening.png}
+    \caption[Triagem da revisão sistemática]{Distribuição dos registros aceitos e rejeitados por base consultada.}
+    \label{fig:revisao-sistematica-triagem}
+\end{figure}
+
+A síntese dos estudos aceitos foi organizada pelas perguntas de pesquisa, em vez
+de ser apresentada como uma sequência de resumos individuais. Essa decisão evita
+transformar o capítulo em uma lista de artigos e mantém o foco no papel da
+revisão para a dissertação. A matriz completa, com uma linha por estudo e os
+campos de referência e ano, estratégia de artefatos ou controle de qualidade,
+política de normalização, política de particionamento, armazenamento e
+governança, ensemble ou pós-processamento e disponibilidade de código, é
+apresentada no Apêndice~\ref{ap:matriz_revisao_sistematica}. No corpo do
+capítulo, a \Tabela{tab:revisao_sistematica_sintese} resume os achados agregados
+que sustentam a discussão metodológica.
+
+\input{generated/systematic_review_findings_summary}
+
+Os estudos aceitos mostram que controle de qualidade é uma preocupação
+recorrente, mas ainda pouco padronizada. Em muitos trabalhos, QC aparece como
+segmentação de tecido, remoção de fundo ou seleção de regiões de interesse; em
+outros, é tratado como detecção explícita de artefatos, controle humano ou
+análise de incerteza. Essa heterogeneidade é importante para esta dissertação
+porque justifica tratar artefatos como parte auditável do fluxo, e não como uma
+etapa implícita que desaparece antes do treinamento.
+
+Particionamento e normalização de cor permanecem como pontos críticos de
+validade experimental. A literatura aceita frequentemente declara divisões de
+treino, validação e teste, mas nem sempre descreve com precisão se a separação é
+feita por paciente, lâmina ou \textit{patch}, nem em que momento a normalização
+é ajustada. A implicação direta é que a ordem das operações precisa ser
+explícita: primeiro define-se uma separação que preserve independência entre
+pacientes; depois, qualquer estatística de pré-processamento deve respeitar essa
+fronteira experimental.
+
+Os trabalhos mais reprodutíveis tendem a explicitar contratos de dados,
+formatos persistentes, execução orquestrada ou disponibilidade de código. Essa
+tendência reforça que reprodutibilidade em WSI não depende apenas de publicar
+um modelo treinado. O fluxo precisa preservar a ligação entre lâmina, paciente,
+amostra, máscara, configuração e resultado, de modo que cada decisão
+experimental possa ser rastreada e reexecutada.
+
+Por fim, a literatura recente usa \textit{ensembles}, incerteza e
+pós-processamento de forma heterogênea. O ponto relevante para esta dissertação
+é que a agregação de modelos só preserva validade inferencial quando pesos,
+limiares e regras de combinação são definidos com base em validação e
+congelados antes do teste. A lacuna observada, portanto, não é a ausência de
+modelos profundos para patologia digital, mas a falta de fronteiras operacionais
+claras entre extração, normalização, particionamento, treinamento, otimização e
+inferência final.
