@@ -424,84 +424,81 @@ def write_protocol_summary(protocol: ProtocolData, output_path: Path) -> None:
 
 
 def write_findings_summary(studies: list[AcceptedStudy], output_path: Path) -> None:
-    """Write a compact synthesis table grouped by protocol research question."""
+    """Write a cited prose synthesis grouped by protocol research question."""
 
     artifact = Counter(study.artifact_qc_strategy for study in studies)
     normalization = Counter(study.normalization_policy for study in studies)
     partitioning = Counter(study.partitioning_policy for study in studies)
     governance = Counter(study.storage_governance for study in studies)
     ensemble = Counter(study.ensemble_postprocessing for study in studies)
-
-    rows = [
-        (
-            "RQ1",
-            (
-                f"{artifact['controle de qualidade ou artefatos explicitado']} estudos explicitam "
-                "controle de qualidade ou artefatos; "
-                f"{artifact['segmentação de tecido/fundo']} tratam tecido/fundo como etapa "
-                "operacional."
-            ),
-            (
-                "QC aparece como componente recorrente, mas com profundidade variável; por isso, "
-                "deve ser tratado como contrato verificável do fluxo."
-            ),
-        ),
-        (
-            "RQ2",
-            (
-                f"{partitioning['separação por paciente']} estudos declaram separação por "
-                "paciente; "
-                f"{sum(normalization.values()) - normalization['não especificada']} mencionam "
-                "normalização de cor."
-            ),
-            (
-                "A literatura reconhece particionamento e normalização como fontes de viés, "
-                "mas nem sempre explicita a ordem operacional das etapas."
-            ),
-        ),
-        (
-            "RQ3",
-            (
-                f"{len(studies) - governance['governança não detalhada']} estudos apresentam algum "
-                "sinal de governança, repositório público, manifesto ou formato persistente."
-            ),
-            (
-                "A reprodutibilidade depende de rastrear lâmina, paciente, amostra e configuração, "
-                "não apenas de publicar pesos de modelo."
-            ),
-        ),
-        (
-            "RQ4",
-            (
-                f"{ensemble['ensemble/incerteza discutido']} estudos discutem ensemble ou "
-                "incerteza; "
-                f"{ensemble['pós-processamento descrito']} enfatizam pós-processamento."
-            ),
-            (
-                "Agregação de modelos é metodologicamente defensável quando a receita é definida "
-                "em validação e congelada antes do teste."
-            ),
-        ),
-    ]
-
     lines = [
-        r"\begin{table}[!htb]",
-        r"\centering",
-        r"\caption{Síntese dos achados organizados pelas perguntas de pesquisa.}",
-        r"\label{tab:revisao_sistematica_sintese}",
-        r"\small",
-        r"\begin{tabular}{>{\raggedright\arraybackslash}p{1.2cm}"
-        r">{\raggedright\arraybackslash}p{5.9cm}"
-        r">{\raggedright\arraybackslash}p{6.0cm}}",
-        r"\toprule",
-        r"RQ & Achado agregado & Implicação para a dissertação \\",
-        r"\midrule",
+        r"\begingroup",
+        r"\emergencystretch=3em",
+        r"\sloppy",
+        "",
+        (
+            "A matriz de extração do Apêndice~\\ref{ap:matriz_revisao_sistematica} "
+            "permite ler o corpus aceito como evidência metodológica, não apenas como "
+            "uma lista de aplicações. Para RQ1, "
+            f"{artifact['controle de qualidade ou artefatos explicitado']} estudos "
+            "foram classificados com controle de qualidade ou tratamento de artefatos "
+            "explicitado. No mesmo eixo, "
+            f"{artifact['segmentação de tecido/fundo']} estudos trataram tecido/fundo "
+            "como etapa operacional. Esses dois grupos sustentam a decisão de manter "
+            "detecção de artefatos, "
+            "triagem visual e filtragem de regiões não informativas como fronteiras "
+            "explícitas do fluxo experimental desta dissertação."
+        ),
+        "",
+        (
+            "A prevenção de vazamento de dados aparece principalmente na política de "
+            "particionamento. Em RQ2, "
+            f"{partitioning['separação por paciente']} estudos declararam separação por "
+            "paciente. A normalização de cor foi "
+            "codificada separadamente, pois ela atua sobre variação de coloração, mas "
+            "não substitui isolamento entre pacientes; "
+            f"{sum(normalization.values()) - normalization['não especificada']} estudos "
+            "mencionaram normalização de cor. A síntese, portanto, trata particionamento "
+            "e normalização como controles "
+            "complementares: o primeiro protege a avaliação contra dependência entre "
+            "amostras, enquanto o segundo reduz variação de aquisição e preparação."
+        ),
+        "",
+        (
+            "A reprodutibilidade foi avaliada pela presença de governança de dados, "
+            "repositório público, manifesto, formato persistente ou execução "
+            f"orquestrada. Em RQ3, {len(studies) - governance['governança não detalhada']} "
+            "estudos apresentaram pelo menos um desses sinais de rastreabilidade. "
+            "Essa leitura não afirma que todos "
+            "os trabalhos ofereçam o mesmo nível de auditabilidade; ela delimita quais "
+            "artigos registraram algum contrato verificável entre dados, código, "
+            "metadados ou execução."
+        ),
+        "",
+        (
+            "Por fim, RQ4 separou agregação de modelos, incerteza e pós-processamento, "
+            "porque esses mecanismos afetam pontos diferentes da inferência. "
+            f"{ensemble['ensemble/incerteza discutido']} estudos discutiram ensemble "
+            "ou incerteza. Outros "
+            f"{ensemble['pós-processamento descrito']} estudos enfatizaram "
+            "pós-processamento. A consequência "
+            "para a dissertação é metodológica: qualquer receita final de ensemble deve "
+            "ser otimizada apenas em validação, congelada antes do teste e descrita como "
+            "parte rastreável do protocolo, em vez de ser apresentada como uma escolha "
+            "genérica ou posterior aos resultados."
+        ),
+        "",
+        (
+            "Essa síntese substitui uma leitura impressionista por uma leitura "
+            "auditável: cada contagem acima é sustentada pelos estudos citados no "
+            "próprio parágrafo, e a classificação individual permanece disponível no "
+            "Apêndice~\\ref{ap:matriz_revisao_sistematica}."
+        ),
+        "",
+        r"\fussy",
+        r"\endgroup",
+        "",
     ]
-    for code, finding, implication in rows:
-        lines.append(
-            f"{latex_escape(code)} & {latex_escape(finding)} & {latex_escape(implication)} \\\\"
-        )
-    lines.extend([r"\bottomrule", r"\end{tabular}", r"\normalsize", r"\end{table}", ""])
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -509,8 +506,6 @@ def write_accepted_matrix(studies: list[AcceptedStudy], output_path: Path) -> No
     """Write the accepted-paper extraction matrix required by protocol step 5."""
 
     lines = [
-        "% Corpus-complete accepted-study bibliography coverage.",
-        *[rf"\nocite{{{study.bib_key}}}" for study in studies],
         r"\begin{landscape}",
         r"\begingroup",
         r"\scriptsize",
@@ -853,6 +848,7 @@ def _screening_table_row(count: ScreeningCount) -> str:
 def _accepted_matrix_row(study: AcceptedStudy) -> str:
     study_cell = (
         f"{latex_escape(study.title)} "
+        rf"\cite{{{study.bib_key}}} "
         f"({latex_escape(_display_origin(study.source))}, {latex_escape(study.year)})"
     )
     return (

@@ -482,40 +482,7 @@ campos de referência e ano, estratégia de artefatos ou controle de qualidade,
 política de normalização, política de particionamento, armazenamento e
 governança, ensemble ou pós-processamento e disponibilidade de código, é
 apresentada no Apêndice~\ref{ap:matriz_revisao_sistematica}. No corpo do
-capítulo, a \Tabela{tab:revisao_sistematica_sintese} resume os achados agregados
-que sustentam a discussão metodológica.
+capítulo, a síntese abaixo transforma essa matriz em uma leitura agregada,
+mantendo as citações dos estudos que sustentam cada achado.
 
 \input{generated/systematic_review_findings_summary}
-
-Os estudos aceitos mostram que controle de qualidade é uma preocupação
-recorrente, mas ainda pouco padronizada. Em muitos trabalhos, QC aparece como
-segmentação de tecido, remoção de fundo ou seleção de regiões de interesse; em
-outros, é tratado como detecção explícita de artefatos, controle humano ou
-análise de incerteza. Essa heterogeneidade é importante para esta dissertação
-porque justifica tratar artefatos como parte auditável do fluxo, e não como uma
-etapa implícita que desaparece antes do treinamento.
-
-Particionamento e normalização de cor permanecem como pontos críticos de
-validade experimental. A literatura aceita frequentemente declara divisões de
-treino, validação e teste, mas nem sempre descreve com precisão se a separação é
-feita por paciente, lâmina ou \textit{patch}, nem em que momento a normalização
-é ajustada. A implicação direta é que a ordem das operações precisa ser
-explícita: primeiro define-se uma separação que preserve independência entre
-pacientes; depois, qualquer estatística de pré-processamento deve respeitar essa
-fronteira experimental.
-
-Os trabalhos mais reprodutíveis tendem a explicitar contratos de dados,
-formatos persistentes, execução orquestrada ou disponibilidade de código. Essa
-tendência reforça que reprodutibilidade em WSI não depende apenas de publicar
-um modelo treinado. O fluxo precisa preservar a ligação entre lâmina, paciente,
-amostra, máscara, configuração e resultado, de modo que cada decisão
-experimental possa ser rastreada e reexecutada.
-
-Por fim, a literatura recente usa \textit{ensembles}, incerteza e
-pós-processamento de forma heterogênea. O ponto relevante para esta dissertação
-é que a agregação de modelos só preserva validade inferencial quando pesos,
-limiares e regras de combinação são definidos com base em validação e
-congelados antes do teste. A lacuna observada, portanto, não é a ausência de
-modelos profundos para patologia digital, mas a falta de fronteiras operacionais
-claras entre extração, normalização, particionamento, treinamento, otimização e
-inferência final.

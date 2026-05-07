@@ -116,6 +116,7 @@ def test_generated_chapter_tables_and_step5_matrix_are_thesis_ready(tmp_path: Pa
 
     matrix_text = outputs.accepted_matrix_tex.read_text(encoding="utf-8")
     chapter_summary = outputs.protocol_summary_tex.read_text(encoding="utf-8")
+    findings_summary = outputs.findings_summary_tex.read_text(encoding="utf-8")
     stale_appendix = tmp_path / "thesis" / "generated" / "systematic_review_protocol_appendix.tex"
 
     assert not stale_appendix.exists()
@@ -147,8 +148,44 @@ def test_generated_chapter_tables_and_step5_matrix_are_thesis_ready(tmp_path: Pa
         "Código",
     ):
         assert heading in matrix_text
+    assert r"\nocite" not in matrix_text
+    matrix_study_rows = [
+        line
+        for line in matrix_text.splitlines()
+        if line.endswith(r"\\") and " & " in line and not line.startswith("Referência / ano")
+    ]
+    assert len(matrix_study_rows) == ACCEPTED_RECORDS
+    assert all(r"\cite{" in row for row in matrix_study_rows)
+    assert r"\cite{" not in findings_summary
+    assert r"\begin{longtable}" not in findings_summary
+    assert r"\label{tab:revisao_sistematica_sintese}" not in findings_summary
+    assert "Achado verificável" not in findings_summary
+    assert "Estudos que sustentam o achado" not in findings_summary
+    assert "Implicação para a dissertação" not in findings_summary
+    assert r"\footnote{" not in findings_summary
+    for prose_anchor in (
+        "A matriz de extração do Apêndice",
+        "Para RQ1",
+        "Em RQ2",
+        "Em RQ3",
+        "Por fim, RQ4",
+        "Essa síntese substitui uma leitura impressionista",
+    ):
+        assert prose_anchor in findings_summary
+    for stale_phrase in (
+        "QC aparece como componente recorrente",
+        "A reprodutibilidade depende de rastrear",
+        "Agregação de modelos é metodologicamente defensável",
+        "continuação do achado anterior",
+    ):
+        assert stale_phrase not in findings_summary
     assert "automatic_review.sqlite3" not in chapter_summary
     assert "accepted_studies.csv" not in chapter_summary
+    section_text = (ROOT / "masters_thesis" / "New_Thesis" / "levantamento.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "tab:revisao_sistematica_sintese" not in section_text
+    assert "Tabela 2.6" not in section_text
 
 
 def _record(file_name: str, verdict: str | None, status: str) -> ReviewRecord:
