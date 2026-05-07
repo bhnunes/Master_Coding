@@ -1,17 +1,16 @@
-\begin{table}[!htb]
-\centering
-\caption{Síntese dos achados organizados pelas perguntas de pesquisa.}
-\label{tab:revisao_sistematica_sintese}
-\small
-\begin{tabular}{>{\raggedright\arraybackslash}p{1.2cm}>{\raggedright\arraybackslash}p{5.9cm}>{\raggedright\arraybackslash}p{6.0cm}}
-\toprule
-RQ & Achado agregado & Implicação para a dissertação \\
-\midrule
-RQ1 & 48 estudos explicitam controle de qualidade ou artefatos; 11 tratam tecido/fundo como etapa operacional. & QC aparece como componente recorrente, mas com profundidade variável; por isso, deve ser tratado como contrato verificável do fluxo. \\
-RQ2 & 29 estudos declaram separação por paciente; 33 mencionam normalização de cor. & A literatura reconhece particionamento e normalização como fontes de viés, mas nem sempre explicita a ordem operacional das etapas. \\
-RQ3 & 56 estudos apresentam algum sinal de governança, repositório público, manifesto ou formato persistente. & A reprodutibilidade depende de rastrear lâmina, paciente, amostra e configuração, não apenas de publicar pesos de modelo. \\
-RQ4 & 27 estudos discutem ensemble ou incerteza; 7 enfatizam pós-processamento. & Agregação de modelos é metodologicamente defensável quando a receita é definida em validação e congelada antes do teste. \\
-\bottomrule
-\end{tabular}
-\normalsize
-\end{table}
+\begingroup
+\emergencystretch=3em
+\sloppy
+
+A matriz de extração do Apêndice~\ref{ap:matriz_revisao_sistematica} permite ler o corpus aceito como evidência metodológica, não apenas como uma lista de aplicações. Para RQ1, 48 estudos foram classificados com controle de qualidade ou tratamento de artefatos explicitado. No mesmo eixo, 11 estudos trataram tecido/fundo como etapa operacional. Esses dois grupos sustentam a decisão de manter detecção de artefatos, triagem visual e filtragem de regiões não informativas como fronteiras explícitas do fluxo experimental desta dissertação.
+
+A prevenção de vazamento de dados aparece principalmente na política de particionamento. Em RQ2, 29 estudos declararam separação por paciente. A normalização de cor foi codificada separadamente, pois ela atua sobre variação de coloração, mas não substitui isolamento entre pacientes; 33 estudos mencionaram normalização de cor. A síntese, portanto, trata particionamento e normalização como controles complementares: o primeiro protege a avaliação contra dependência entre amostras, enquanto o segundo reduz variação de aquisição e preparação.
+
+A reprodutibilidade foi avaliada pela presença de governança de dados, repositório público, manifesto, formato persistente ou execução orquestrada. Em RQ3, 56 estudos apresentaram pelo menos um desses sinais de rastreabilidade. Essa leitura não afirma que todos os trabalhos ofereçam o mesmo nível de auditabilidade; ela delimita quais artigos registraram algum contrato verificável entre dados, código, metadados ou execução.
+
+Por fim, RQ4 separou agregação de modelos, incerteza e pós-processamento, porque esses mecanismos afetam pontos diferentes da inferência. 27 estudos discutiram ensemble ou incerteza. Outros 7 estudos enfatizaram pós-processamento. A consequência para a dissertação é metodológica: qualquer receita final de ensemble deve ser otimizada apenas em validação, congelada antes do teste e descrita como parte rastreável do protocolo, em vez de ser apresentada como uma escolha genérica ou posterior aos resultados.
+
+Essa síntese substitui uma leitura impressionista por uma leitura auditável: cada contagem acima é sustentada pelos estudos citados no próprio parágrafo, e a classificação individual permanece disponível no Apêndice~\ref{ap:matriz_revisao_sistematica}.
+
+\fussy
+\endgroup
