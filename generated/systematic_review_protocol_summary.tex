@@ -1,0 +1,54 @@
+\begin{table}[!htb]
+\centering
+\caption{Perguntas de pesquisa da revisão sistemática.}
+\label{tab:revisao_sistematica_perguntas}
+\small
+\begin{tabular}{>{\raggedright\arraybackslash}p{2.0cm}>{\raggedright\arraybackslash}p{11.1cm}}
+\toprule
+Código & Pergunta \\
+\midrule
+RQ1 & Como fluxos recentes de WSI tratam artefatos de lâmina, contaminação por fundo e necrose antes da extração de amostras para aprendizagem profunda? \\
+RQ2 & Como a literatura aborda o particionamento por paciente e o risco de vazamento de dados durante pré-processamentos aplicados ao conjunto, como normalização de coloração? \\
+RQ3 & Em que medida os fluxos contemporâneos implementam contratos explícitos de dados, orquestração rastreável e proveniência automatizada? \\
+RQ4 & Quais estratégias são usadas para agregação de múltiplos modelos em histopatologia e como a receita final é otimizada em validação? \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Critérios de elegibilidade aplicados na revisão.}
+\label{tab:revisao_sistematica_criterios}
+\scriptsize
+\begin{tabular}{>{\raggedright\arraybackslash}p{6.35cm}>{\raggedright\arraybackslash}p{6.35cm}}
+\toprule
+Inclusão & Exclusão \\
+\midrule
+Aplicação de aprendizagem profunda a histopatologia de lâmina inteira. & Estudos puramente clínicos ou centrados em doenças não neoplásicas. \\
+Foco explícito em detecção, segmentação ou classificação de câncer, neoplasias ou tumores. & Uso exclusivo de bases de amostras pré-extraídas que eliminam os desafios de processamento de WSI. \\
+Descrição de pelo menos um componente operacional do fluxo: controle de qualidade em lâmina, normalização de coloração, particionamento por paciente, serialização de dados ou agregação de modelos. & Particionamento por amostra ou por lâmina, ou normalização global antes da separação treino-validação-teste. \\
+Disponibilização de repositório público com a implementação do fluxo. & Trabalhos focados apenas em arquitetura neural, sem documentação do fluxo de extração, proveniência ou orquestração; ausência de código público verificável. \\
+\bottomrule
+\end{tabular}
+\normalsize
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Consultas exatas aplicadas na revisão sistemática.}
+\label{tab:revisao_sistematica_consultas}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{>{\raggedright\arraybackslash}p{2.8cm}>{\raggedright\arraybackslash}p{10.45cm}}
+\toprule
+Base & Consulta exata \\
+\midrule
+PubMed / MEDLINE & ("Whole Slide Imaging"[MeSH] OR "histopathology"[tiab] OR "whole-slide"[tiab] OR "WSI"[tiab]) AND ("Neoplasms"[MeSH] OR "cancer"[tiab] OR "tumor"[tiab] OR "tumour"[tiab] OR "carcinoma"[tiab] OR "malignancy"[tiab]) AND ("Deep Learning"[MeSH] OR "deep learning"[tiab] OR "ensemble learning"[tiab] OR "neural networks"[tiab] OR "segmentation"[tiab]) AND ("reproducibility"[tiab] OR "artifact"[tiab] OR "stain normalization"[tiab] OR "quality control"[tiab] OR "patient-level"[tiab] OR "data leakage"[tiab] OR "pipeline"[tiab]) AND ("2020/01/01"[Date - Publication] : "2025/12/31"[Date - Publication]) \\[0.35em]
+IEEE Xplore & ("Document Title":histopathology OR "Document Title":"whole slide" OR "Document Title":WSI OR "Abstract":histopathology) AND ("Abstract":cancer OR "Abstract":tumor OR "Abstract":tumour OR "Abstract":carcinoma OR "Abstract":malignancy) AND ("Abstract":"deep learning" OR "Abstract":"ensemble" OR "Abstract":"segmentation") AND ("Abstract":reproducibility OR "Abstract":artifact OR "Abstract":normalization OR "Abstract":"data leakage" OR "Abstract":"patient-level" OR "Abstract":"quality control" OR "Abstract":"pipeline") \\[0.35em]
+SpringerLink & ("whole slide" OR "WSI" OR "computational pathology") AND ("cancer" OR "tumor" OR "carcinoma") AND ("deep learning" OR "convolutional neural network") AND ("stain normalization" OR "reproducibility" OR "artifact" OR "data leakage" OR "quality control") \\[0.35em]
+\bottomrule
+\end{tabular}
+\normalsize
+\end{table}
