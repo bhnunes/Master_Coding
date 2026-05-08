@@ -62,7 +62,7 @@ param(
 
     [string]$Prefix = "masters_thesis/New_Thesis",
 
-    [string]$RemoteUrl = "",
+    [string]$RemoteUrl = "https://github.com/bhnunes/thesis_overleaf.git",
 
     [switch]$NoSquash,
 
