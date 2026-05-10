@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,6 +54,8 @@ def _validate_fail_closed_provenance(payload: dict[str, Any], metadata_file: Pat
 def load_model_candidates(
     metadata_dir: Path,
     sort_metric: str,
+    *,
+    requested_architectures: Sequence[str] | None = None,
 ) -> list[SelectedModelMetadata]:
     valid_sort_metrics = {"best_validation_DICE", "best_val_auprc_pixel_score"}
     if sort_metric not in valid_sort_metrics:
@@ -65,16 +67,23 @@ def load_model_candidates(
     if not metadata_files:
         raise FileNotFoundError(f"No metadata files found in {metadata_dir}")
 
+    requested_set = (
+        {architecture.upper() for architecture in requested_architectures}
+        if requested_architectures is not None
+        else None
+    )
     selected: list[SelectedModelMetadata] = []
     observed_signatures: set[str] = set()
     for metadata_file in metadata_files:
         payload = json.loads(metadata_file.read_text(encoding="utf-8"))
+        architecture = str(payload.get("architecture", "")).upper()
+        if requested_set is not None and architecture not in requested_set:
+            continue
         metric_value = payload.get(sort_metric)
         if not isinstance(metric_value, (int, float)) or np.isnan(metric_value):
             continue
         compatibility_signature = _validate_fail_closed_provenance(payload, metadata_file)
         observed_signatures.add(compatibility_signature)
-        architecture = str(payload.get("architecture", "")).upper()
         encoder = str(payload.get("encoder", "")).strip()
         checkpoint_path = str(payload.get("checkpoint_path", "")).strip()
         if not architecture or not encoder or not checkpoint_path:
@@ -91,7 +100,7 @@ def load_model_candidates(
             )
         )
 
-    if not selected:
+    if not selected and requested_architectures is None:
         raise ValueError("No valid metadata loaded after filtering for sort metric.")
     if len(observed_signatures) > 1:
         raise ValueError(
@@ -101,27 +110,52 @@ def load_model_candidates(
     return selected
 
 
-def select_best_candidates_by_architecture(
+def select_unique_candidates_by_architecture(
     candidates: list[SelectedModelMetadata],
     *,
     requested_architectures: Sequence[str],
-    score_getter: Callable[[SelectedModelMetadata], float] | None = None,
-) -> tuple[list[SelectedModelMetadata], dict[str, str]]:
-    getter = score_getter or (lambda item: item.sort_metric_value)
-    best_by_architecture: dict[str, SelectedModelMetadata] = {}
+    minimum_models: int = 2,
+) -> list[SelectedModelMetadata]:
+    ordered_requested = tuple(
+        dict.fromkeys(architecture.upper() for architecture in requested_architectures)
+    )
+    requested_set = set(ordered_requested)
+    candidates_by_architecture: dict[str, list[SelectedModelMetadata]] = {
+        architecture: [] for architecture in ordered_requested
+    }
     for candidate in candidates:
         architecture = candidate.architecture.upper()
-        current_best = best_by_architecture.get(architecture)
-        if current_best is None or getter(candidate) > getter(current_best):
-            best_by_architecture[architecture] = candidate
+        if architecture in requested_set:
+            candidates_by_architecture[architecture].append(candidate)
 
-    selected: list[SelectedModelMetadata] = []
-    skipped: dict[str, str] = {}
-    for architecture in requested_architectures:
-        normalized_architecture = architecture.upper()
-        selected_candidate = best_by_architecture.get(normalized_architecture)
-        if selected_candidate is None:
-            skipped[normalized_architecture] = "no valid candidate metadata found"
-            continue
-        selected.append(selected_candidate)
-    return selected, skipped
+    missing = [
+        architecture
+        for architecture, architecture_candidates in candidates_by_architecture.items()
+        if not architecture_candidates
+    ]
+    duplicates = {
+        architecture: [candidate.metadata_filename for candidate in architecture_candidates]
+        for architecture, architecture_candidates in candidates_by_architecture.items()
+        if len(architecture_candidates) > 1
+    }
+    if missing or duplicates:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing={missing}")
+        if duplicates:
+            duplicate_details = {
+                architecture: sorted(filenames) for architecture, filenames in duplicates.items()
+            }
+            details.append(f"duplicates={duplicate_details}")
+        raise ValueError(
+            "Phase 9 requires exactly one valid metadata file per requested architecture; "
+            + "; ".join(details)
+        )
+
+    selected = [candidates_by_architecture[architecture][0] for architecture in ordered_requested]
+    if len(selected) < minimum_models:
+        raise ValueError(
+            "Fewer than 2 requested architectures had valid unique metadata files. "
+            f"Requested={list(ordered_requested)} selected={len(selected)}"
+        )
+    return selected

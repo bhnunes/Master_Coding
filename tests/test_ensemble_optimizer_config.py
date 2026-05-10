@@ -156,6 +156,22 @@ def test_load_ensemble_optimizer_config_allows_explicit_positive_only_policy(
     assert config.spatial_patient_policy == "positive_only"
 
 
+def test_load_ensemble_optimizer_config_rejects_semantic_spatial_overlap(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="overlapping architectures: FPN"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_SEMANTIC_ARCHITECTURES": "swin, fpn",
+                "ENSEMBLE_OPT_SPATIAL_ARCHITECTURES": "fpn, manet",
+            }
+        )
+
+
 def test_load_ensemble_optimizer_config_rejects_unknown_group_architecture(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unknown ensemble optimizer architectures"):
         load_ensemble_optimizer_config(

@@ -77,6 +77,19 @@ def _parse_architecture_group(value: str | None, *, default: tuple[str, ...]) ->
     return tuple(ordered)
 
 
+def _validate_disjoint_architecture_groups(
+    semantic_architectures: tuple[str, ...],
+    spatial_architectures: tuple[str, ...],
+) -> None:
+    overlap = sorted(set(semantic_architectures) & set(spatial_architectures))
+    if overlap:
+        raise ValueError(
+            "ENSEMBLE_OPT_SEMANTIC_ARCHITECTURES and ENSEMBLE_OPT_SPATIAL_ARCHITECTURES "
+            "must be disjoint; overlapping architectures: "
+            f"{', '.join(overlap)}"
+        )
+
+
 @dataclass(frozen=True)
 class EnsembleOptimizerConfig:
     master_manifest_path: Path
@@ -110,6 +123,12 @@ class EnsembleOptimizerConfig:
     @property
     def log_path(self) -> Path:
         return self.log_folder / self.log_file_name
+
+    def __post_init__(self) -> None:
+        _validate_disjoint_architecture_groups(
+            self.semantic_architectures,
+            self.spatial_architectures,
+        )
 
 
 def load_ensemble_optimizer_config(

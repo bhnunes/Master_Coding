@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
 
 import pytest
 
 from helpers.ensemble_optimizer.metadata import (
     load_model_candidates,
-    select_best_candidates_by_architecture,
+    select_unique_candidates_by_architecture,
 )
 
 
@@ -58,101 +57,45 @@ def _write_candidate(
     )
 
 
-def test_select_best_candidates_by_architecture_picks_best_requested_models(tmp_path: Path) -> None:
+def test_select_unique_candidates_by_architecture_selects_one_per_requested_in_order(
+    tmp_path: Path,
+) -> None:
     metadata_dir = tmp_path / "metadata"
     metadata_dir.mkdir()
-    entries = [
-        (
-            "a_meta.json",
-            {
-                "architecture": "FPN",
-                "encoder": "senet154",
-                "checkpoint_path": "a.ckpt",
-                "best_val_auprc_pixel_score": 0.61,
-            },
-        ),
-        (
-            "b_meta.json",
-            {
-                "architecture": "SWIN",
-                "encoder": "enc",
-                "checkpoint_path": "b.ckpt",
-                "best_val_auprc_pixel_score": 0.88,
-            },
-        ),
-        (
-            "c_meta.json",
-            {
-                "architecture": "MANET",
-                "encoder": "enc",
-                "checkpoint_path": "c.ckpt",
-                "best_val_auprc_pixel_score": 0.73,
-            },
-        ),
-    ]
-    for filename, payload in entries:
-        _write_candidate(
-            metadata_dir / filename,
-            architecture=str(payload["architecture"]),
-            encoder=str(payload["encoder"]),
-            checkpoint_path=str(payload["checkpoint_path"]),
-            score=cast(float, payload["best_val_auprc_pixel_score"]),
-        )
+    _write_candidate(metadata_dir / "a_meta.json", architecture="FPN", checkpoint_path="a.ckpt")
+    _write_candidate(metadata_dir / "b_meta.json", architecture="MANET", checkpoint_path="b.ckpt")
+    _write_candidate(metadata_dir / "c_meta.json", architecture="SWIN", checkpoint_path="c.ckpt")
+    _write_candidate(metadata_dir / "d_meta.json", architecture="DPT", checkpoint_path="d.ckpt")
 
     candidates = load_model_candidates(metadata_dir, "best_val_auprc_pixel_score")
-    selected, skipped = select_best_candidates_by_architecture(
+    selected = select_unique_candidates_by_architecture(
         candidates,
-        requested_architectures=("SWIN", "MANET"),
+        requested_architectures=("SWIN", "DPT", "FPN", "MANET"),
     )
 
-    assert [item.architecture for item in selected] == ["SWIN", "MANET"]
-    assert selected[0].metadata_filename == "b_meta.json"
-    assert skipped == {}
+    assert [item.architecture for item in selected] == ["SWIN", "DPT", "FPN", "MANET"]
+    assert selected[0].metadata_filename == "c_meta.json"
 
 
-def test_select_best_candidates_by_architecture_can_use_override_scores(tmp_path: Path) -> None:
+def test_select_unique_candidates_by_architecture_rejects_duplicate_requested_metadata(
+    tmp_path: Path,
+) -> None:
     metadata_dir = tmp_path / "metadata"
     metadata_dir.mkdir()
-    for filename, payload in (
-        (
-            "a_meta.json",
-            {
-                "architecture": "FPN",
-                "encoder": "enc-a",
-                "checkpoint_path": "a.ckpt",
-                "best_val_auprc_pixel_score": 0.2,
-            },
-        ),
-        (
-            "b_meta.json",
-            {
-                "architecture": "SWIN",
-                "encoder": "enc-b",
-                "checkpoint_path": "b.ckpt",
-                "best_val_auprc_pixel_score": 0.9,
-            },
-        ),
-    ):
-        _write_candidate(
-            metadata_dir / filename,
-            architecture=str(payload["architecture"]),
-            encoder=str(payload["encoder"]),
-            checkpoint_path=str(payload["checkpoint_path"]),
-            score=cast(float, payload["best_val_auprc_pixel_score"]),
-        )
+    _write_candidate(metadata_dir / "a_meta.json", architecture="FPN", checkpoint_path="a.ckpt")
+    _write_candidate(metadata_dir / "b_meta.json", architecture="FPN", checkpoint_path="b.ckpt")
+    _write_candidate(metadata_dir / "c_meta.json", architecture="SWIN", checkpoint_path="c.ckpt")
 
     candidates = load_model_candidates(metadata_dir, "best_val_auprc_pixel_score")
-    ranked, skipped = select_best_candidates_by_architecture(
-        candidates,
-        requested_architectures=("FPN",),
-        score_getter=lambda item: {"a_meta.json": 0.95, "b_meta.json": 0.1}[item.metadata_filename],
-    )
 
-    assert [item.metadata_filename for item in ranked] == ["a_meta.json"]
-    assert skipped == {}
+    with pytest.raises(ValueError, match="duplicates=.*FPN"):
+        select_unique_candidates_by_architecture(
+            candidates,
+            requested_architectures=("SWIN", "FPN"),
+        )
 
 
-def test_select_best_candidates_by_architecture_skips_missing_requested_models(
+def test_select_unique_candidates_by_architecture_rejects_missing_requested_metadata(
     tmp_path: Path,
 ) -> None:
     metadata_dir = tmp_path / "metadata"
@@ -160,13 +103,45 @@ def test_select_best_candidates_by_architecture_skips_missing_requested_models(
     _write_candidate(metadata_dir / "a_meta.json", architecture="SWIN", checkpoint_path="a.ckpt")
 
     candidates = load_model_candidates(metadata_dir, "best_val_auprc_pixel_score")
-    selected, skipped = select_best_candidates_by_architecture(
+
+    with pytest.raises(ValueError, match="missing=.*FPN"):
+        select_unique_candidates_by_architecture(
+            candidates,
+            requested_architectures=("SWIN", "FPN"),
+        )
+
+
+def test_select_unique_candidates_by_architecture_ignores_unrequested_duplicates(
+    tmp_path: Path,
+) -> None:
+    metadata_dir = tmp_path / "metadata"
+    metadata_dir.mkdir()
+    _write_candidate(metadata_dir / "a_meta.json", architecture="SWIN", checkpoint_path="a.ckpt")
+    _write_candidate(metadata_dir / "b_meta.json", architecture="FPN", checkpoint_path="b.ckpt")
+    _write_candidate(
+        metadata_dir / "c_meta.json",
+        architecture="MANET",
+        checkpoint_path="c.ckpt",
+        compatibility_signature="compat-b",
+    )
+    _write_candidate(
+        metadata_dir / "d_meta.json",
+        architecture="MANET",
+        checkpoint_path="d.ckpt",
+        compatibility_signature="compat-b",
+    )
+
+    candidates = load_model_candidates(
+        metadata_dir,
+        "best_val_auprc_pixel_score",
+        requested_architectures=("SWIN", "FPN"),
+    )
+    selected = select_unique_candidates_by_architecture(
         candidates,
         requested_architectures=("SWIN", "FPN"),
     )
 
-    assert [item.architecture for item in selected] == ["SWIN"]
-    assert skipped == {"FPN": "no valid candidate metadata found"}
+    assert [item.metadata_filename for item in selected] == ["a_meta.json", "b_meta.json"]
 
 
 def test_load_model_candidates_rejects_missing_provenance_fields(tmp_path: Path) -> None:

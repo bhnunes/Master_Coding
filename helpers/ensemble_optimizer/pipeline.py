@@ -3,15 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
-
-import numpy as np
-import torch
-from tqdm import tqdm
+from typing import Any
 
 from helpers.ensemble_optimizer.config import EnsembleOptimizerConfig
 from helpers.ensemble_optimizer.data import (
@@ -24,13 +19,10 @@ from helpers.ensemble_optimizer.data import (
 from helpers.ensemble_optimizer.metadata import (
     SelectedModelMetadata,
     load_model_candidates,
-    select_best_candidates_by_architecture,
+    select_unique_candidates_by_architecture,
 )
-from helpers.ensemble_optimizer.models import load_ensemble_models, load_single_model
-from helpers.ensemble_optimizer.optimization import (
-    predict_with_tta_batched,
-    run_two_stream_optimization,
-)
+from helpers.ensemble_optimizer.models import load_ensemble_models
+from helpers.ensemble_optimizer.optimization import run_two_stream_optimization
 from helpers.ensemble_optimizer.reporting import (
     RecipeMetadataConfig,
     build_recipe_metadata,
@@ -39,38 +31,19 @@ from helpers.ensemble_optimizer.reporting import (
 from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
 from helpers.provenance import build_split_fingerprint
 from helpers.training.device import require_cuda_device
-from helpers.training.gpu import GPUNormalizer
-from helpers.training.metrics import AdvancedMetricTracker
 from helpers.training.runtime import seed_everything
 from helpers.training.stain_normalization import resolve_dataloader_stain_normalizer_device
 from helpers.training.utils import get_formatted_datetime_string
 
 LOGGER = logging.getLogger(__name__)
-_PROGRESS_MIN_INTERVAL_SECONDS = 0.5
 _ENSEMBLE_SELECTION_MIN_MODELS = 2
-_PROBABILITY_THRESHOLD = 0.5
-
-
-def _progress_file() -> Any:
-    """Use the real terminal stream so tqdm stays interactive under LoggerWriter."""
-
-    return sys.__stderr__
-
-
-def _progress_disabled() -> bool:
-    isatty = getattr(_progress_file(), "isatty", None)
-    return not bool(isatty() if callable(isatty) else False)
+_MODEL_SELECTION_STRATEGY = "strict_unique_metadata_per_requested_architecture"
 
 
 @dataclass(frozen=True)
 class EnsembleOptimizerOutputs:
     recipe_path: Path
     run_config_path: Path
-
-
-@dataclass(frozen=True)
-class _CandidateSubsetEvaluation:
-    score: float
 
 
 def _prepare_output_dir(config: EnsembleOptimizerConfig) -> None:
@@ -95,138 +68,27 @@ def _serialize_config(config: EnsembleOptimizerConfig) -> dict[str, Any]:
     return payload
 
 
-def _compute_candidate_subset_score(
-    selected_model: SelectedModelMetadata,
-    dataloader: Any,
-    *,
-    sort_metric: str,
-    device: torch.device,
-) -> _CandidateSubsetEvaluation:
-    model = load_single_model(selected_model, device)
-    tracker = AdvancedMetricTracker(device=device, from_logits=False)
-    normalizer = GPUNormalizer(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225],
-        device=device,
-    )
-    tp = 0
-    fp = 0
-    fn = 0
-    with torch.inference_mode():
-        for batch in dataloader:
-            if batch is None:
-                continue
-            images, masks, _ = batch
-            images = normalizer(images.to(device))
-            mask_tensor = masks.to(device)
-            probabilities = predict_with_tta_batched(model, images, selected_model.architecture)
-            tracker.update_from_probs_fg(probabilities, mask_tensor)
-            pred_fg = probabilities >= _PROBABILITY_THRESHOLD
-            true_fg = mask_tensor[:, 1, :, :] > _PROBABILITY_THRESHOLD
-            tp += int((pred_fg & true_fg).sum().item())
-            fp += int((pred_fg & ~true_fg).sum().item())
-            fn += int((~pred_fg & true_fg).sum().item())
-
-    metrics = tracker.compute_and_reset()
-    del model
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    if sort_metric == "best_val_auprc_pixel_score":
-        if metrics is None:
-            score = float("nan")
-        else:
-            score = float(metrics["val_auprc"])
-    elif sort_metric == "best_validation_DICE":
-        denominator = (2 * tp) + fp + fn
-        score = float((2 * tp) / denominator) if denominator > 0 else 0.0
-    else:
-        raise ValueError(f"Unsupported optimizer sort metric: {sort_metric}")
-    return _CandidateSubsetEvaluation(score=score)
-
-
-def _select_models_from_optimization_subset(
+def _select_models_from_metadata(
     config: EnsembleOptimizerConfig,
-    validation_layout: ValidationDatasetLayout,
-    optimization_patients: set[str],
-    device: torch.device,
-) -> tuple[
-    list[SelectedModelMetadata],
-    dict[str, float],
-    dict[str, str],
-]:
-    candidates = load_model_candidates(config.metadata_dir, config.sort_metric)
-    dataloader = create_validation_dataloader(
-        validation_layout,
-        batch_size=config.batch_size,
-        workers=config.workers,
-        allowed_patients=optimization_patients,
-    )
-    if len(cast(Any, dataloader.dataset)) == 0:
-        raise ValueError("Optimization subset is empty; cannot rank candidate models.")
-
-    LOGGER.info("Ranking %s candidate models on the optimization subset.", len(candidates))
-    subset_scores: dict[str, float] = {}
+) -> list[SelectedModelMetadata]:
     requested_architectures = tuple(
         dict.fromkeys(config.semantic_architectures + config.spatial_architectures)
     )
-    with tqdm(
-        candidates,
-        total=len(candidates),
-        desc="Rank models",
-        leave=False,
-        mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
-        dynamic_ncols=True,
-        file=_progress_file(),
-        disable=_progress_disabled(),
-    ) as progress_bar:
-        for candidate in progress_bar:
-            progress_bar.set_postfix(
-                {"arch": candidate.architecture, "encoder": candidate.encoder},
-                refresh=False,
-            )
-            try:
-                evaluation = _compute_candidate_subset_score(
-                    candidate,
-                    dataloader,
-                    sort_metric=config.sort_metric,
-                    device=device,
-                )
-                subset_scores[candidate.metadata_filename] = evaluation.score
-            except Exception as error:
-                LOGGER.warning(
-                    "Skipping candidate %s (%s/%s): %s",
-                    candidate.metadata_filename,
-                    candidate.architecture,
-                    candidate.encoder,
-                    error,
-                )
-                subset_scores[candidate.metadata_filename] = float("nan")
-
-    filtered_candidates = [
-        candidate
-        for candidate in candidates
-        if np.isfinite(subset_scores.get(candidate.metadata_filename, float("nan")))
-    ]
-    selected_models, skipped_architectures = select_best_candidates_by_architecture(
-        filtered_candidates,
+    candidates = load_model_candidates(
+        config.metadata_dir,
+        config.sort_metric,
         requested_architectures=requested_architectures,
-        score_getter=lambda item: subset_scores[item.metadata_filename],
     )
-    if len(selected_models) < _ENSEMBLE_SELECTION_MIN_MODELS:
-        raise ValueError(
-            "Fewer than 2 requested architectures had valid scored candidates. "
-            f"Requested={list(requested_architectures)} skipped={skipped_architectures}"
-        )
-    for architecture, reason in skipped_architectures.items():
-        LOGGER.warning("Skipping requested architecture %s: %s", architecture, reason)
+    selected_models = select_unique_candidates_by_architecture(
+        candidates,
+        requested_architectures=requested_architectures,
+        minimum_models=_ENSEMBLE_SELECTION_MIN_MODELS,
+    )
     LOGGER.info(
-        "Model ranking complete: %s valid candidates, %s requested architectures, %s selected.",
-        len(filtered_candidates),
-        len(requested_architectures),
+        "Selected %s models using strict unique metadata contract.",
         len(selected_models),
     )
-    return selected_models, subset_scores, skipped_architectures
+    return selected_models
 
 
 def _build_validation_split(
@@ -243,10 +105,11 @@ def _build_validation_split(
 
 
 def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutputs:
-    device = require_cuda_device()
     seed_everything(config.seed)
+    selected_models = _select_models_from_metadata(config)
+    device = require_cuda_device()
     LOGGER.info(
-        "Stage 10 starting on %s. validation staging=%s output_dir=%s",
+        "Stage 9 starting on %s. validation staging=%s output_dir=%s",
         device,
         "local" if config.stage_input_locally else "direct",
         config.output_dir,
@@ -275,16 +138,6 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         optimization_patients=split.optimization_patients,
         calibration_patients=split.calibration_patients,
         holdout_patients=split.holdout_patients,
-    )
-    (
-        selected_models,
-        subset_scores,
-        skipped_architectures,
-    ) = _select_models_from_optimization_subset(
-        config,
-        validation_layout,
-        split.optimization_patients,
-        device,
     )
     LOGGER.info("Loading %s selected models.", len(selected_models))
     models, _ = load_ensemble_models(selected_models, device)
@@ -357,6 +210,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             "calibration_metrics": optimization_result.calibration_metrics,
             "validation_provenance": validation_provenance,
             "split_fingerprint": split_fingerprint,
+            "model_selection_strategy": _MODEL_SELECTION_STRATEGY,
             "selected_semantic_architectures": [
                 model.architecture
                 for model in selected_models
@@ -367,22 +221,21 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
                 for model in selected_models
                 if model.architecture in config.spatial_architectures
             ],
-            "skipped_requested_architectures": skipped_architectures,
             "selected_models": [
                 {
                     "architecture": model.architecture,
                     "encoder": model.encoder,
                     "checkpoint_path": model.checkpoint_path,
-                    "sort_metric_value": model.sort_metric_value,
+                    "metadata_sort_metric_value": model.sort_metric_value,
                     "metadata_filename": model.metadata_filename,
-                    "optimization_subset_score": subset_scores[model.metadata_filename],
+                    "optimization_subset_score": None,
                 }
                 for model in selected_models
             ],
         }
     )
     run_config_path.write_text(json.dumps(run_payload, indent=2), encoding="utf-8")
-    LOGGER.info("Stage 10 complete: recipe=%s run_config=%s", recipe_path, run_config_path)
+    LOGGER.info("Stage 9 complete: recipe=%s run_config=%s", recipe_path, run_config_path)
     return EnsembleOptimizerOutputs(recipe_path=recipe_path, run_config_path=run_config_path)
 
 
