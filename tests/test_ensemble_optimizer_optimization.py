@@ -245,27 +245,22 @@ def test_build_optimization_patient_caches_stacks_predictions_by_patient(tmp_pat
         total_samples,
         height,
         width,
-        _truth_memmap,
+        truth_memmap,
     ) = cache_payload
     prediction_memmaps = [
         np.memmap(path, dtype="uint16", mode="r", shape=(total_samples, height, width))
         for path in prediction_paths
     ]
-    optimization_truth = np.array(
-        [np.zeros((2, 2), dtype=np.uint8), np.ones((2, 2), dtype=np.uint8)],
-        dtype=np.uint8,
-    )
-
     semantic_cache, spatial_cache, truth_cache, gt_density_by_patient = (
         _build_optimization_patient_caches(
             optimization._OptimizationCacheBuildInput(
                 prediction_memmaps=prediction_memmaps,
+                truth_memmap=truth_memmap,
                 optimization_idx=np.array([0, 1]),
                 optimization_local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
                 optimization_patients=["p1", "p2"],
                 semantic_indices=[0],
                 spatial_indices=[1],
-                optimization_truth=optimization_truth,
                 height=height,
                 width=width,
             )
@@ -324,7 +319,7 @@ def test_optimization_patient_helpers_prefer_cached_arrays() -> None:
     assert np.array_equal(patient_truth, np.ones((1, 2, 2), dtype=np.uint8))
 
 
-def test_prepare_optimization_reuses_model_subset_caches(
+def test_prepare_optimization_builds_memory_capped_patient_caches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, optimizer_config: EnsembleOptimizerConfig
 ) -> None:
     cache_payload = _write_prediction_cache(
@@ -371,20 +366,6 @@ def test_prepare_optimization_reuses_model_subset_caches(
     )
     semantic_model = _ConstantBinaryModel(0.0, arch_name="SWIN")
     spatial_model = _TupleTwoClassModel(arch_name="FPN")
-    cast(Any, semantic_model)._optimization_subset_cache = (
-        optimization._OptimizationSubsetCachePayload(
-            prediction_u16=np.asarray([np.full((2, 2), UINT16_MAX, dtype=np.uint16)]),
-            truth_u8=np.asarray([np.ones((2, 2), dtype=np.uint8)]),
-            patient_ids=("p1",),
-        )
-    )
-    cast(Any, spatial_model)._optimization_subset_cache = (
-        optimization._OptimizationSubsetCachePayload(
-            prediction_u16=np.asarray([np.full((2, 2), TOP_CACHE_VALUE, dtype=np.uint16)]),
-            truth_u8=np.asarray([np.ones((2, 2), dtype=np.uint8)]),
-            patient_ids=("p1",),
-        )
-    )
 
     prepared = optimization._prepare_optimization(
         optimizer_config,
@@ -397,11 +378,11 @@ def test_prepare_optimization_reuses_model_subset_caches(
     assert prepared.optimization_semantic_cache is not None
     assert prepared.optimization_spatial_cache is not None
     assert prepared.optimization_truth_cache is not None
-    assert int(prepared.optimization_semantic_cache["p1"][0, 0, 0, 0]) == UINT16_MAX
-    assert int(prepared.optimization_spatial_cache["p1"][0, 0, 0, 0]) == TOP_CACHE_VALUE
+    assert int(prepared.optimization_semantic_cache["p1"][0, 0, 0, 0]) == LOW_CACHE_VALUE
+    assert int(prepared.optimization_spatial_cache["p1"][0, 0, 0, 0]) == HIGH_CACHE_VALUE
     assert np.array_equal(
         prepared.optimization_truth_cache["p1"],
-        np.ones((1, 2, 2), dtype=np.uint8),
+        np.zeros((1, 2, 2), dtype=np.uint8),
     )
 
 

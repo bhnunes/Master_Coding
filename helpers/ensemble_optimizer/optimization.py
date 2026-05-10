@@ -168,7 +168,7 @@ class OptimizationPreparation:
     optimization_patients: list[str]
     semantic_indices: list[int]
     spatial_indices: list[int]
-    optimization_truth: npt.NDArray[np.uint8]
+    optimization_truth: npt.NDArray[np.uint8] | None
     optimization_semantic_cache: dict[str, npt.NDArray[np.uint16]] | None
     optimization_spatial_cache: dict[str, npt.NDArray[np.uint16]] | None
     optimization_truth_cache: dict[str, npt.NDArray[np.uint8]] | None
@@ -201,21 +201,14 @@ class CacheModelPredictionConfig:
 @dataclass(frozen=True)
 class _OptimizationCacheBuildInput:
     prediction_memmaps: list[np.memmap[Any, Any]]
+    truth_memmap: np.memmap[Any, Any]
     optimization_idx: npt.NDArray[np.int64]
     optimization_local_map: dict[str, slice]
     optimization_patients: list[str]
     semantic_indices: list[int]
     spatial_indices: list[int]
-    optimization_truth: npt.NDArray[np.uint8]
     height: int
     width: int
-
-
-@dataclass(frozen=True)
-class _OptimizationSubsetCachePayload:
-    prediction_u16: npt.NDArray[np.uint16]
-    truth_u8: npt.NDArray[np.uint8]
-    patient_ids: tuple[str, ...]
 
 
 def get_stream_type(architecture: str, config: EnsembleOptimizerConfig) -> str:
@@ -525,11 +518,10 @@ def _calibrate_decision_threshold(
             "Calibration_n_negative_patients": 0,
         }
 
-    patient_payloads: list[
-        tuple[npt.NDArray[np.float32], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]
-    ] = []
     positive_patients = 0
     negative_patients = 0
+    thresholds = np.linspace(0.05, 0.95, 19)
+    threshold_score_sums = np.zeros(thresholds.shape, dtype=np.float64)
     for patient_id in config.patient_ids:
         local_slice = config.local_map[patient_id]
         patient_global_indices = config.global_indices[local_slice]
@@ -561,24 +553,19 @@ def _calibrate_decision_threshold(
             positive_patients += 1
         else:
             negative_patients += 1
-        patient_payloads.append((spatial_prediction, patient_truth, roi_mask))
-
-    best_threshold = 0.5
-    best_mcc = float("-inf")
-    for threshold in np.linspace(0.05, 0.95, 19):
-        patient_scores: list[float] = []
-        for spatial_prediction, patient_truth, roi_mask in patient_payloads:
+        for threshold_index, threshold in enumerate(thresholds):
             tp, fp, fn, tn = _compute_patient_confusion_at_threshold(
                 spatial_prediction,
                 patient_truth,
                 roi_mask,
                 float(threshold),
             )
-            patient_scores.append(_compute_mcc(tp, fp, fn, tn))
-        mean_mcc = float(np.mean(patient_scores)) if patient_scores else 0.0
-        if mean_mcc > best_mcc:
-            best_mcc = mean_mcc
-            best_threshold = float(threshold)
+            threshold_score_sums[threshold_index] += _compute_mcc(tp, fp, fn, tn)
+
+    threshold_means = threshold_score_sums / max(1, len(config.patient_ids))
+    best_index = int(np.argmax(threshold_means))
+    best_threshold = float(thresholds[best_index])
+    best_mcc = float(threshold_means[best_index])
 
     return best_threshold, {
         "Calibration_metric": "Patient_MCC",
@@ -595,80 +582,6 @@ def _build_patient_map(patient_ids: list[str]) -> dict[str, list[int]]:
     for index, patient_id in enumerate(patient_ids):
         patient_map[str(patient_id)].append(index)
     return patient_map
-
-
-def _build_optimization_caches_from_model_subset_payloads(
-    models: list[nn.Module],
-    *,
-    optimization_patients: list[str],
-    semantic_indices: list[int],
-    spatial_indices: list[int],
-) -> tuple[
-    dict[str, npt.NDArray[np.uint16]] | None,
-    dict[str, npt.NDArray[np.uint16]] | None,
-    dict[str, npt.NDArray[np.uint8]] | None,
-    dict[str, float] | None,
-]:
-    required_indices = sorted(set(semantic_indices + spatial_indices))
-    if not required_indices:
-        return None, None, None, None
-
-    payloads_by_index: dict[int, _OptimizationSubsetCachePayload] = {}
-    shared_patient_ids: tuple[str, ...] | None = None
-    shared_truth: npt.NDArray[np.uint8] | None = None
-    for model_index in required_indices:
-        raw_payload = getattr(models[model_index], "_optimization_subset_cache", None)
-        if raw_payload is None:
-            return None, None, None, None
-        payload = cast(_OptimizationSubsetCachePayload, raw_payload)
-        if shared_patient_ids is None:
-            shared_patient_ids = payload.patient_ids
-            shared_truth = payload.truth_u8
-        elif payload.patient_ids != shared_patient_ids or not np.array_equal(
-            payload.truth_u8,
-            cast(npt.NDArray[np.uint8], shared_truth),
-        ):
-            return None, None, None, None
-        payloads_by_index[model_index] = payload
-
-    assert shared_patient_ids is not None
-    assert shared_truth is not None
-    if set(shared_patient_ids) != set(optimization_patients):
-        return None, None, None, None
-
-    patient_map = _build_patient_map(list(shared_patient_ids))
-    semantic_cache: dict[str, npt.NDArray[np.uint16]] = {}
-    spatial_cache: dict[str, npt.NDArray[np.uint16]] = {}
-    truth_cache: dict[str, npt.NDArray[np.uint8]] = {}
-    gt_density_by_patient: dict[str, float] = {}
-    for patient_id in optimization_patients:
-        patient_indices = np.asarray(patient_map[patient_id], dtype=np.int64)
-        patient_truth = np.asarray(shared_truth[patient_indices], dtype=np.uint8)
-        truth_cache[patient_id] = patient_truth
-        gt_density_by_patient[patient_id] = (
-            float(np.mean(patient_truth)) if patient_truth.size else 0.0
-        )
-        semantic_cache[patient_id] = np.stack(
-            [
-                np.asarray(
-                    payloads_by_index[model_index].prediction_u16[patient_indices],
-                    dtype=np.uint16,
-                )
-                for model_index in semantic_indices
-            ],
-            axis=0,
-        )
-        spatial_cache[patient_id] = np.stack(
-            [
-                np.asarray(
-                    payloads_by_index[model_index].prediction_u16[patient_indices],
-                    dtype=np.uint16,
-                )
-                for model_index in spatial_indices
-            ],
-            axis=0,
-        )
-    return semantic_cache, spatial_cache, truth_cache, gt_density_by_patient
 
 
 def _estimate_optimization_cache_bytes(
@@ -735,7 +648,7 @@ def _build_optimization_patient_caches(
     for patient_id in request.optimization_patients:
         local_slice = request.optimization_local_map[patient_id]
         patient_global_indices = request.optimization_idx[local_slice]
-        patient_truth = np.asarray(request.optimization_truth[local_slice], dtype=np.uint8)
+        patient_truth = np.asarray(request.truth_memmap[patient_global_indices], dtype=np.uint8)
         truth_cache[patient_id] = patient_truth
         gt_density_by_patient[patient_id] = (
             float(np.mean(patient_truth)) if patient_truth.size else 0.0
@@ -822,7 +735,10 @@ def _optimization_patient_truth(
     if prepared.optimization_truth_cache is not None:
         return prepared.optimization_truth_cache[patient_id]
     local_slice = prepared.optimization_local_map[patient_id]
-    return np.asarray(prepared.optimization_truth[local_slice], dtype=np.uint8)
+    if prepared.optimization_truth is not None:
+        return np.asarray(prepared.optimization_truth[local_slice], dtype=np.uint8)
+    global_indices = prepared.optimization_idx[local_slice]
+    return np.asarray(prepared.truth_memmap[global_indices], dtype=np.uint8)
 
 
 def _resolve_stream_indices(
@@ -889,43 +805,24 @@ def _prepare_optimization(
         for path in prediction_paths
     ]
     semantic_indices, spatial_indices = _resolve_stream_indices(config, models)
-    optimization_truth = truth_memmap[optimization_idx].astype(np.uint8)
-    reuse_payload = _build_optimization_caches_from_model_subset_payloads(
-        models,
-        optimization_patients=optimization_patients,
-        semantic_indices=semantic_indices,
-        spatial_indices=spatial_indices,
+    (
+        optimization_semantic_cache,
+        optimization_spatial_cache,
+        optimization_truth_cache,
+        optimization_gt_density_by_patient,
+    ) = _build_optimization_patient_caches(
+        _OptimizationCacheBuildInput(
+            prediction_memmaps=prediction_memmaps,
+            optimization_idx=optimization_idx,
+            optimization_local_map=optimization_local_map,
+            optimization_patients=optimization_patients,
+            semantic_indices=semantic_indices,
+            spatial_indices=spatial_indices,
+            truth_memmap=truth_memmap,
+            height=height,
+            width=width,
+        )
     )
-    if reuse_payload[0] is not None:
-        (
-            optimization_semantic_cache,
-            optimization_spatial_cache,
-            optimization_truth_cache,
-            optimization_gt_density_by_patient,
-        ) = reuse_payload
-        LOGGER.info(
-            "Reused optimization-subset predictions from model ranking for %s patients.",
-            len(optimization_patients),
-        )
-    else:
-        (
-            optimization_semantic_cache,
-            optimization_spatial_cache,
-            optimization_truth_cache,
-            optimization_gt_density_by_patient,
-        ) = _build_optimization_patient_caches(
-            _OptimizationCacheBuildInput(
-                prediction_memmaps=prediction_memmaps,
-                optimization_idx=optimization_idx,
-                optimization_local_map=optimization_local_map,
-                optimization_patients=optimization_patients,
-                semantic_indices=semantic_indices,
-                spatial_indices=spatial_indices,
-                optimization_truth=optimization_truth,
-                height=height,
-                width=width,
-            )
-        )
     LOGGER.info(
         "Prediction cache ready: %s samples across %s patients.",
         total_samples,
@@ -951,7 +848,7 @@ def _prepare_optimization(
         optimization_patients=optimization_patients,
         semantic_indices=semantic_indices,
         spatial_indices=spatial_indices,
-        optimization_truth=optimization_truth,
+        optimization_truth=None,
         optimization_semantic_cache=optimization_semantic_cache,
         optimization_spatial_cache=optimization_spatial_cache,
         optimization_truth_cache=optimization_truth_cache,
@@ -1011,7 +908,7 @@ def _semantic_objective(
         ]
         if prepared.optimization_gt_density_by_patient is not None
         else [
-            float(np.mean(prepared.optimization_truth[prepared.optimization_local_map[patient_id]]))
+            float(np.mean(_optimization_patient_truth(prepared, patient_id=patient_id)))
             for patient_id in prepared.optimization_patients
         ]
     )
@@ -1073,8 +970,13 @@ def _build_fixed_roi_mask(
     best_semantic_weights: list[float],
     best_roi_threshold: float,
 ) -> npt.NDArray[np.uint8]:
-    fixed_roi_mask = np.zeros(
-        (len(prepared.optimization_idx), prepared.height, prepared.width), dtype=np.uint8
+    roi_path = config.pred_cache_dir / "fixed_roi_mask.dat"
+    roi_path.parent.mkdir(parents=True, exist_ok=True)
+    fixed_roi_mask = np.memmap(
+        roi_path,
+        dtype="uint8",
+        mode="w+",
+        shape=(len(prepared.optimization_idx), prepared.height, prepared.width),
     )
     if prepared.optimization_semantic_cache is not None:
         for patient_id in prepared.optimization_patients:
@@ -1090,6 +992,7 @@ def _build_fixed_roi_mask(
                 best_roi_threshold,
             )
             fixed_roi_mask[local_slice] = patient_roi.numpy().astype(np.uint8)
+        fixed_roi_mask.flush()
         return fixed_roi_mask
     chunk_size = 2048
     roi_chunk_count = max(1, int(np.ceil(len(prepared.optimization_idx) / chunk_size)))
@@ -1118,6 +1021,7 @@ def _build_fixed_roi_mask(
             )
             fixed_roi_mask[start:stop] = chunk_roi.numpy().astype(np.uint8)
             roi_progress.update(1)
+    fixed_roi_mask.flush()
     return fixed_roi_mask
 
 

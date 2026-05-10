@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
-import numpy.typing as npt
 import torch
 from tqdm import tqdm
 
@@ -72,16 +71,6 @@ class EnsembleOptimizerOutputs:
 @dataclass(frozen=True)
 class _CandidateSubsetEvaluation:
     score: float
-    prediction_u16: npt.NDArray[np.uint16]
-    truth_u8: npt.NDArray[np.uint8]
-    patient_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class _SubsetPredictionCachePayload:
-    prediction_u16: npt.NDArray[np.uint16]
-    truth_u8: npt.NDArray[np.uint8]
-    patient_ids: tuple[str, ...]
 
 
 def _prepare_output_dir(config: EnsembleOptimizerConfig) -> None:
@@ -123,36 +112,15 @@ def _compute_candidate_subset_score(
     tp = 0
     fp = 0
     fn = 0
-    prediction_batches: list[npt.NDArray[np.uint16]] = []
-    truth_batches: list[npt.NDArray[np.uint8]] = []
-    patient_ids: list[str] = []
-
     with torch.inference_mode():
         for batch in dataloader:
             if batch is None:
                 continue
-            images, masks, _patient_ids = batch
+            images, masks, _ = batch
             images = normalizer(images.to(device))
             mask_tensor = masks.to(device)
             probabilities = predict_with_tta_batched(model, images, selected_model.architecture)
             tracker.update_from_probs_fg(probabilities, mask_tensor)
-            prediction_batches.append(
-                np.clip(
-                    np.nan_to_num(
-                        probabilities.detach().float().cpu().numpy(),
-                        nan=0.0,
-                        posinf=1.0,
-                        neginf=0.0,
-                    ),
-                    0.0,
-                    1.0,
-                )
-                .astype(np.float32)
-                .__mul__(65535.0)
-                .astype(np.uint16)
-            )
-            truth_batches.append(mask_tensor[:, 1, :, :].detach().cpu().numpy().astype(np.uint8))
-            patient_ids.extend(str(patient_id) for patient_id in _patient_ids)
             pred_fg = probabilities >= _PROBABILITY_THRESHOLD
             true_fg = mask_tensor[:, 1, :, :] > _PROBABILITY_THRESHOLD
             tp += int((pred_fg & true_fg).sum().item())
@@ -160,7 +128,9 @@ def _compute_candidate_subset_score(
             fn += int((~pred_fg & true_fg).sum().item())
 
     metrics = tracker.compute_and_reset()
-    model.cpu()
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     if sort_metric == "best_val_auprc_pixel_score":
         if metrics is None:
@@ -172,16 +142,7 @@ def _compute_candidate_subset_score(
         score = float((2 * tp) / denominator) if denominator > 0 else 0.0
     else:
         raise ValueError(f"Unsupported optimizer sort metric: {sort_metric}")
-    return _CandidateSubsetEvaluation(
-        score=score,
-        prediction_u16=np.concatenate(prediction_batches, axis=0)
-        if prediction_batches
-        else np.zeros((0, 0, 0), dtype=np.uint16),
-        truth_u8=np.concatenate(truth_batches, axis=0)
-        if truth_batches
-        else np.zeros((0, 0, 0), dtype=np.uint8),
-        patient_ids=tuple(patient_ids),
-    )
+    return _CandidateSubsetEvaluation(score=score)
 
 
 def _select_models_from_optimization_subset(
@@ -193,7 +154,6 @@ def _select_models_from_optimization_subset(
     list[SelectedModelMetadata],
     dict[str, float],
     dict[str, str],
-    dict[str, _SubsetPredictionCachePayload],
 ]:
     candidates = load_model_candidates(config.metadata_dir, config.sort_metric)
     dataloader = create_validation_dataloader(
@@ -210,8 +170,6 @@ def _select_models_from_optimization_subset(
     requested_architectures = tuple(
         dict.fromkeys(config.semantic_architectures + config.spatial_architectures)
     )
-    requested_architecture_set = {architecture.upper() for architecture in requested_architectures}
-    best_evaluations_by_architecture: dict[str, tuple[str, _CandidateSubsetEvaluation]] = {}
     with tqdm(
         candidates,
         total=len(candidates),
@@ -235,20 +193,6 @@ def _select_models_from_optimization_subset(
                     device=device,
                 )
                 subset_scores[candidate.metadata_filename] = evaluation.score
-                architecture = candidate.architecture.upper()
-                if (
-                    architecture in requested_architecture_set
-                    and np.isfinite(evaluation.score)
-                    and (
-                        architecture not in best_evaluations_by_architecture
-                        or evaluation.score
-                        > best_evaluations_by_architecture[architecture][1].score
-                    )
-                ):
-                    best_evaluations_by_architecture[architecture] = (
-                        candidate.metadata_filename,
-                        evaluation,
-                    )
             except Exception as error:
                 LOGGER.warning(
                     "Skipping candidate %s (%s/%s): %s",
@@ -282,18 +226,7 @@ def _select_models_from_optimization_subset(
         len(requested_architectures),
         len(selected_models),
     )
-    subset_prediction_caches: dict[str, _SubsetPredictionCachePayload] = {}
-    for selected_model in selected_models:
-        best_evaluation = best_evaluations_by_architecture.get(selected_model.architecture.upper())
-        if best_evaluation is None or best_evaluation[0] != selected_model.metadata_filename:
-            continue
-        evaluation = best_evaluation[1]
-        subset_prediction_caches[selected_model.metadata_filename] = _SubsetPredictionCachePayload(
-            prediction_u16=evaluation.prediction_u16,
-            truth_u8=evaluation.truth_u8,
-            patient_ids=evaluation.patient_ids,
-        )
-    return selected_models, subset_scores, skipped_architectures, subset_prediction_caches
+    return selected_models, subset_scores, skipped_architectures
 
 
 def _build_validation_split(
@@ -347,7 +280,6 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         selected_models,
         subset_scores,
         skipped_architectures,
-        subset_prediction_caches,
     ) = _select_models_from_optimization_subset(
         config,
         validation_layout,
@@ -356,11 +288,6 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
     )
     LOGGER.info("Loading %s selected models.", len(selected_models))
     models, _ = load_ensemble_models(selected_models, device)
-    if len(models) == len(selected_models):
-        for model, selected_model in zip(models, selected_models, strict=True):
-            cache_payload = subset_prediction_caches.get(selected_model.metadata_filename)
-            if cache_payload is not None:
-                cast(Any, model)._optimization_subset_cache = cache_payload
     LOGGER.info(
         "Running two-stream optimization with %s semantic trials and %s spatial trials.",
         config.num_trials_semantic,
