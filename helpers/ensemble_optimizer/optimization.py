@@ -32,7 +32,6 @@ from helpers.training.utils import clear_gpu
 
 LOGGER = logging.getLogger(__name__)
 _PROGRESS_MIN_INTERVAL_SECONDS = 0.5
-_MAX_OPTIMIZATION_CACHE_BYTES = 512 * 1024 * 1024
 _WEIGHT_SKIP_THRESHOLD = 1e-4
 
 
@@ -173,6 +172,7 @@ class OptimizationPreparation:
     optimization_spatial_cache: dict[str, npt.NDArray[np.uint16]] | None
     optimization_truth_cache: dict[str, npt.NDArray[np.uint8]] | None
     optimization_gt_density_by_patient: dict[str, float] | None
+    optimization_positive_patients: set[str]
     height: int
     width: int
 
@@ -209,6 +209,17 @@ class _OptimizationCacheBuildInput:
     spatial_indices: list[int]
     height: int
     width: int
+    max_cache_bytes: int
+
+
+@dataclass(frozen=True)
+class _SpatialObjectivePatientCache:
+    is_positive_patient: bool
+    roi_truth: npt.NDArray[np.uint8]
+    roi_predictions: npt.NDArray[np.uint16]
+    total_mass_by_model: npt.NDArray[np.float64]
+    outside_mass_by_model: npt.NDArray[np.float64]
+    negative_mean_by_model: npt.NDArray[np.float64]
 
 
 def get_stream_type(architecture: str, config: EnsembleOptimizerConfig) -> str:
@@ -246,6 +257,13 @@ def compute_patient_auprc_in_roi(
         return 0.0
     y_true_roi = y_true[valid_indices]
     y_pred_roi = y_pred[valid_indices]
+    return _compute_auprc_from_roi_vectors(y_true_roi, y_pred_roi)
+
+
+def _compute_auprc_from_roi_vectors(
+    y_true_roi: Any,
+    y_pred_roi: Any,
+) -> float:
     if np.sum(y_true_roi) == 0:
         return 0.0
     try:
@@ -445,15 +463,20 @@ def _weighted_ensemble_from_u16_cache(
 ) -> npt.NDArray[np.float32]:
     accumulator: npt.NDArray[np.float32] | None = None
     scale = 1.0 / 65535.0
-    weight_skip_threshold = 1e-4
     for weight, values in zip(weights, u16_arrays, strict=False):
-        if weight <= weight_skip_threshold:
+        if weight <= _WEIGHT_SKIP_THRESHOLD:
             continue
         contribution = cast(npt.NDArray[np.float32], values.astype(np.float32) * (weight * scale))
         accumulator = contribution if accumulator is None else (accumulator + contribution)
     if accumulator is None:
         return cast(npt.NDArray[np.float32], np.zeros_like(u16_arrays[0], dtype=np.float32))
     return accumulator
+
+
+def _effective_weight_array(weights: list[float]) -> npt.NDArray[np.float32]:
+    effective_weights = np.asarray(weights, dtype=np.float32)
+    effective_weights[effective_weights <= _WEIGHT_SKIP_THRESHOLD] = 0.0
+    return effective_weights
 
 
 def _normalize_weights(raw_weights: list[float]) -> list[float]:
@@ -632,12 +655,15 @@ def _build_optimization_patient_caches(
         height=request.height,
         width=request.width,
     )
-    if estimated_bytes > _MAX_OPTIMIZATION_CACHE_BYTES:
+    if request.max_cache_bytes == 0:
+        LOGGER.info("Skipping optimization patient cache: cache disabled by configuration.")
+        return None, None, None, None
+    if estimated_bytes > request.max_cache_bytes:
         LOGGER.info(
             "Skipping optimization patient cache: estimated footprint %.2f MiB "
             "exceeds limit %.2f MiB.",
             estimated_bytes / (1024 * 1024),
-            _MAX_OPTIMIZATION_CACHE_BYTES / (1024 * 1024),
+            request.max_cache_bytes / (1024 * 1024),
         )
         return None, None, None, None
 
@@ -678,8 +704,7 @@ def _weighted_ensemble_from_stacked_u16(
             npt.NDArray[np.float32],
             np.zeros(stacked_values.shape[1:], dtype=np.float32),
         )
-    effective_weights = np.asarray(weights, dtype=np.float32)
-    effective_weights[effective_weights <= _WEIGHT_SKIP_THRESHOLD] = 0.0
+    effective_weights = _effective_weight_array(weights)
     if not np.any(effective_weights):
         return cast(
             npt.NDArray[np.float32],
@@ -687,6 +712,109 @@ def _weighted_ensemble_from_stacked_u16(
         )
     scaled = stacked_values.astype(np.float32) * (effective_weights[:, None, None, None] / 65535.0)
     return cast(npt.NDArray[np.float32], np.sum(scaled, axis=0, dtype=np.float32))
+
+
+def _weighted_roi_predictions_from_u16(
+    roi_predictions: npt.NDArray[np.uint16],
+    weights: list[float],
+) -> npt.NDArray[np.float32]:
+    if roi_predictions.shape[1] == 0:
+        return np.zeros((0,), dtype=np.float32)
+    effective_weights = _effective_weight_array(weights)
+    if not np.any(effective_weights):
+        return np.zeros((roi_predictions.shape[1],), dtype=np.float32)
+    scaled = roi_predictions.astype(np.float32) * (effective_weights[:, None] / 65535.0)
+    return cast(npt.NDArray[np.float32], np.sum(scaled, axis=0, dtype=np.float32))
+
+
+def _optimization_patient_spatial_stack(
+    prepared: OptimizationPreparation,
+    *,
+    patient_id: str,
+) -> npt.NDArray[np.uint16]:
+    if prepared.optimization_spatial_cache is not None:
+        return prepared.optimization_spatial_cache[patient_id]
+    local_slice = prepared.optimization_local_map[patient_id]
+    global_indices = prepared.optimization_idx[local_slice]
+    return _stack_prediction_rows(
+        prepared.prediction_memmaps,
+        model_indices=prepared.spatial_indices,
+        global_indices=global_indices,
+        height=prepared.height,
+        width=prepared.width,
+    )
+
+
+def _build_spatial_objective_patient_cache(
+    config: EnsembleOptimizerConfig,
+    prepared: OptimizationPreparation,
+    fixed_roi_mask: npt.NDArray[np.uint8],
+    patient_id: str,
+) -> _SpatialObjectivePatientCache | None:
+    patient_truth = _optimization_patient_truth(prepared, patient_id=patient_id)
+    is_positive_patient = patient_id in prepared.optimization_positive_patients
+    if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
+        return None
+
+    local_slice = prepared.optimization_local_map[patient_id]
+    patient_roi = np.asarray(fixed_roi_mask[local_slice], dtype=np.uint8)
+    spatial_stack = _optimization_patient_spatial_stack(prepared, patient_id=patient_id)
+    total_mass_by_model = cast(
+        npt.NDArray[np.float64],
+        np.sum(spatial_stack, axis=(1, 2, 3), dtype=np.float64) / 65535.0,
+    )
+    outside_mask = (1 - patient_roi).astype(np.uint8, copy=False)
+    outside_mass_by_model = cast(
+        npt.NDArray[np.float64],
+        np.sum(spatial_stack * outside_mask[None, ...], axis=(1, 2, 3), dtype=np.float64) / 65535.0,
+    )
+    negative_mean_by_model = (
+        total_mass_by_model / max(1, int(patient_truth.size))
+        if not is_positive_patient
+        else np.zeros_like(total_mass_by_model)
+    )
+
+    if is_positive_patient:
+        roi_flat = patient_roi.reshape(-1).astype(bool)
+        truth_roi = np.asarray(patient_truth.reshape(-1)[roi_flat], dtype=np.uint8)
+        roi_predictions = np.asarray(
+            spatial_stack.reshape(len(prepared.spatial_indices), -1)[:, roi_flat],
+            dtype=np.uint16,
+        )
+    else:
+        truth_roi = np.zeros((0,), dtype=np.uint8)
+        roi_predictions = np.zeros((len(prepared.spatial_indices), 0), dtype=np.uint16)
+
+    return _SpatialObjectivePatientCache(
+        is_positive_patient=is_positive_patient,
+        roi_truth=truth_roi,
+        roi_predictions=roi_predictions,
+        total_mass_by_model=total_mass_by_model,
+        outside_mass_by_model=outside_mass_by_model,
+        negative_mean_by_model=negative_mean_by_model,
+    )
+
+
+def _build_spatial_objective_cache(
+    config: EnsembleOptimizerConfig,
+    prepared: OptimizationPreparation,
+    fixed_roi_mask: npt.NDArray[np.uint8],
+) -> list[_SpatialObjectivePatientCache]:
+    patient_caches: list[_SpatialObjectivePatientCache] = []
+    for patient_id in prepared.optimization_patients:
+        patient_cache = _build_spatial_objective_patient_cache(
+            config,
+            prepared,
+            fixed_roi_mask,
+            patient_id,
+        )
+        if patient_cache is not None:
+            patient_caches.append(patient_cache)
+    LOGGER.info(
+        "Spatial objective precompute ready for %s evaluated optimization patients.",
+        len(patient_caches),
+    )
+    return patient_caches
 
 
 def _optimization_patient_semantic_prediction(
@@ -821,6 +949,7 @@ def _prepare_optimization(
             truth_memmap=truth_memmap,
             height=height,
             width=width,
+            max_cache_bytes=config.optimization_cache_max_bytes,
         )
     )
     LOGGER.info(
@@ -853,6 +982,7 @@ def _prepare_optimization(
         optimization_spatial_cache=optimization_spatial_cache,
         optimization_truth_cache=optimization_truth_cache,
         optimization_gt_density_by_patient=optimization_gt_density_by_patient,
+        optimization_positive_patients=set(split.optimization_patients) & positive_patients,
         height=height,
         width=width,
     )
@@ -870,7 +1000,11 @@ def _semantic_objective(
     roi_threshold = trial.suggest_float("roi_thresh", 0.15, 0.60)
     roi_area_fractions: list[float] = []
     roi_positive_recalls: list[float] = []
+    positive_recall_sum = 0.0
+    processed_positive_patients = 0
+    total_positive_patients = len(prepared.optimization_positive_patients)
     empty_rois = 0
+    total_patients = len(prepared.optimization_patients)
     for patient_id in prepared.optimization_patients:
         patient_ensemble = _optimization_patient_semantic_prediction(
             prepared,
@@ -893,7 +1027,23 @@ def _semantic_objective(
         if np.sum(patient_truth) > 0:
             intersection = np.sum((roi_mask == 1) & (patient_truth == 1))
             total_positive = np.sum(patient_truth)
-            roi_positive_recalls.append(float(intersection / (total_positive + 1e-7)))
+            recall = float(intersection / (total_positive + 1e-7))
+            roi_positive_recalls.append(recall)
+            positive_recall_sum += recall
+            processed_positive_patients += 1
+        if empty_rois / max(1, total_patients) > config.roi_empty_max:
+            raise optuna.exceptions.TrialPruned(
+                f"Trivial Empty: {empty_rois / max(1, total_patients):.2f}"
+            )
+        if total_positive_patients > 0:
+            remaining_positive_patients = total_positive_patients - processed_positive_patients
+            best_possible_positive_recall = (
+                positive_recall_sum + remaining_positive_patients
+            ) / total_positive_patients
+            if best_possible_positive_recall < config.roi_min_pos_recall:
+                raise optuna.exceptions.TrialPruned(
+                    f"Misses Positives: {best_possible_positive_recall:.2f}"
+                )
     median_area = float(np.median(roi_area_fractions)) if roi_area_fractions else 0.0
     empty_rate = float(empty_rois / max(1, len(prepared.optimization_patients)))
     mean_positive_recall = float(np.mean(roi_positive_recalls)) if roi_positive_recalls else 0.0
@@ -1030,44 +1180,36 @@ def _spatial_objective(
     *,
     config: EnsembleOptimizerConfig,
     prepared: OptimizationPreparation,
-    fixed_roi_mask: npt.NDArray[np.uint8],
+    patient_caches: list[_SpatialObjectivePatientCache],
 ) -> float:
     weights = _normalize_weights(
         [trial.suggest_float(f"w_spa_{i}", 0.0, 1.0) for i in range(len(prepared.spatial_indices))]
     )
+    effective_weights = _effective_weight_array(weights).astype(np.float64)
     positive_auprc_total = 0.0
     spill_total = 0.0
     evaluated_patients = 0
     evaluated_positive_patients = 0
     negative_fp_total = 0.0
     evaluated_negative_patients = 0
-    for patient_id in prepared.optimization_patients:
-        patient_truth = _optimization_patient_truth(prepared, patient_id=patient_id)
-        local_slice = prepared.optimization_local_map[patient_id]
-        patient_roi = fixed_roi_mask[local_slice]
-        is_positive_patient = bool(np.sum(patient_truth) > 0)
-        if config.spatial_patient_policy == "positive_only" and not is_positive_patient:
-            continue
-        patient_prediction = _optimization_patient_spatial_prediction(
-            prepared,
-            patient_id=patient_id,
-            weights=weights,
-        )
-        if is_positive_patient:
-            positive_auprc_total += compute_patient_auprc_in_roi(
-                patient_truth.ravel(),
-                patient_prediction.ravel(),
-                patient_roi.ravel(),
+    for patient_cache in patient_caches:
+        if patient_cache.is_positive_patient:
+            patient_prediction = _weighted_roi_predictions_from_u16(
+                patient_cache.roi_predictions,
+                weights,
+            )
+            positive_auprc_total += _compute_auprc_from_roi_vectors(
+                patient_cache.roi_truth,
+                patient_prediction,
             )
             evaluated_positive_patients += 1
         else:
-            negative_fp_total += _compute_negative_false_positive_mass(
-                patient_prediction,
-                patient_truth,
+            negative_fp_total += float(
+                np.dot(effective_weights, patient_cache.negative_mean_by_model)
             )
             evaluated_negative_patients += 1
-        mass_total = float(np.sum(patient_prediction) + 1e-7)
-        mass_outside = float(np.sum(patient_prediction * (1 - patient_roi)))
+        mass_total = float(np.dot(effective_weights, patient_cache.total_mass_by_model) + 1e-7)
+        mass_outside = float(np.dot(effective_weights, patient_cache.outside_mass_by_model))
         spill_total += mass_outside / mass_total
         evaluated_patients += 1
     if evaluated_patients == 0:
@@ -1091,7 +1233,7 @@ def _spatial_objective(
 def _run_spatial_optimization(
     config: EnsembleOptimizerConfig,
     prepared: OptimizationPreparation,
-    fixed_roi_mask: npt.NDArray[np.uint8],
+    patient_caches: list[_SpatialObjectivePatientCache],
 ) -> list[float]:
     spatial_study = optuna.create_study(
         direction="maximize",
@@ -1116,7 +1258,7 @@ def _run_spatial_optimization(
                 trial,
                 config=config,
                 prepared=prepared,
-                fixed_roi_mask=fixed_roi_mask,
+                patient_caches=patient_caches,
             ),
             n_trials=config.num_trials_spatial,
             callbacks=_optuna_callbacks(spatial_progress),
@@ -1316,7 +1458,16 @@ def run_two_stream_optimization(
             best_semantic_weights=best_semantic_weights,
             best_roi_threshold=best_roi_threshold,
         )
-        best_spatial_weights = _run_spatial_optimization(config, prepared, fixed_roi_mask)
+        spatial_objective_cache = _build_spatial_objective_cache(
+            config,
+            prepared,
+            fixed_roi_mask,
+        )
+        best_spatial_weights = _run_spatial_optimization(
+            config,
+            prepared,
+            spatial_objective_cache,
+        )
     finally:
         _restore_optuna_verbosity(previous_optuna_verbosity)
     LOGGER.info(

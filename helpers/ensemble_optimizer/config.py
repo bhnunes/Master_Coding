@@ -17,6 +17,7 @@ from helpers.training.registry import load_training_model_registry
 
 VALID_SORT_METRICS = {"best_validation_DICE", "best_val_auprc_pixel_score"}
 VALID_SPATIAL_PATIENT_POLICIES = {"positive_only", "all"}
+DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024
 
 
 def _parse_bool(value: str | None, *, default: bool) -> bool:
@@ -27,6 +28,13 @@ def _parse_bool(value: str | None, *, default: bool) -> bool:
 
 def _parse_int(value: str | None, *, default: int) -> int:
     return int(str(default) if value is None or value.strip() == "" else value)
+
+
+def _parse_non_negative_int(value: str | None, *, default: int, variable_name: str) -> int:
+    parsed = _parse_int(value, default=default)
+    if parsed < 0:
+        raise ValueError(f"{variable_name} must be greater than or equal to 0.")
+    return parsed
 
 
 def _parse_float(value: str | None, *, default: float) -> float:
@@ -115,6 +123,7 @@ class EnsembleOptimizerConfig:
     spatial_patient_policy: str
     num_trials_semantic: int
     num_trials_spatial: int
+    optimization_cache_max_bytes: int = DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
     runtime_normalization_method: str = "NOT_NORMALIZED"
     runtime_vahadane_backend: str = "fixed_source"
     log_folder: Path = Path("logs")
@@ -214,6 +223,11 @@ def load_ensemble_optimizer_config(
         ),
         num_trials_semantic=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC"), default=50),
         num_trials_spatial=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SPATIAL"), default=50),
+        optimization_cache_max_bytes=_parse_non_negative_int(
+            values.get("ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES"),
+            default=DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES,
+            variable_name="ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES",
+        ),
         runtime_normalization_method=parse_runtime_normalization_method(
             values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
         ),

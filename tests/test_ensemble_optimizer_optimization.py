@@ -83,6 +83,15 @@ class _ListLoader:
         return iter(self._batches)
 
 
+class _FixedTrial:
+    def __init__(self, params: dict[str, float]) -> None:
+        self._params = params
+
+    def suggest_float(self, name: str, low: float, high: float) -> float:
+        del low, high
+        return self._params[name]
+
+
 @pytest.fixture
 def optimizer_config(tmp_path: Path) -> EnsembleOptimizerConfig:
     return EnsembleOptimizerConfig(
@@ -263,6 +272,7 @@ def test_build_optimization_patient_caches_stacks_predictions_by_patient(tmp_pat
                 spatial_indices=[1],
                 height=height,
                 width=width,
+                max_cache_bytes=1024 * 1024,
             )
         )
     )
@@ -304,6 +314,7 @@ def test_optimization_patient_helpers_prefer_cached_arrays() -> None:
         },
         optimization_truth_cache={"p1": np.ones((1, 2, 2), dtype=np.uint8)},
         optimization_gt_density_by_patient={"p1": 1.0},
+        optimization_positive_patients={"p1"},
         height=2,
         width=2,
     )
@@ -386,6 +397,71 @@ def test_prepare_optimization_builds_memory_capped_patient_caches(
     )
 
 
+def test_prepare_optimization_uses_memmap_fallback_when_cache_cap_is_exceeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, optimizer_config: EnsembleOptimizerConfig
+) -> None:
+    cache_payload = _write_prediction_cache(
+        tmp_path / "pred-cache",
+        predictions=[
+            np.array(
+                [
+                    np.full((2, 2), LOW_CACHE_VALUE, dtype=np.uint16),
+                    np.full((2, 2), MID_CACHE_VALUE, dtype=np.uint16),
+                ]
+            ),
+            np.array(
+                [
+                    np.full((2, 2), HIGH_CACHE_VALUE, dtype=np.uint16),
+                    np.full((2, 2), TOP_CACHE_VALUE, dtype=np.uint16),
+                ]
+            ),
+        ],
+        truths=np.array([np.zeros((2, 2), dtype=np.uint8), np.ones((2, 2), dtype=np.uint8)]),
+        patient_ids=["p1", "p2"],
+    )
+    monkeypatch.setattr(
+        optimization, "cache_predictions_sequential", lambda *args, **kwargs: cache_payload
+    )
+    monkeypatch.setattr(
+        optimization,
+        "build_holdout_split",
+        lambda patient_ids, positive_patients, calibration_frac, holdout_frac, seed: (
+            SimpleNamespace(
+                holdout_patients={"p2"},
+                calibration_patients=set(),
+                optimization_patients={"p1"},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        optimization,
+        "build_indices_and_local_map",
+        lambda selected_patients, patient_map: (
+            np.array([0]) if selected_patients == {"p1"} else np.array([1]),
+            {"p1": slice(0, 1)} if selected_patients == {"p1"} else {"p2": slice(0, 1)},
+            ["p1"] if selected_patients == {"p1"} else ["p2"],
+        ),
+    )
+
+    prepared = optimization._prepare_optimization(
+        replace(optimizer_config, optimization_cache_max_bytes=1),
+        [_ConstantBinaryModel(0.0, arch_name="SWIN"), _TupleTwoClassModel(arch_name="FPN")],
+        cast(Any, _ListLoader(2, [])),
+        device=torch.device("cpu"),
+        predefined_split=None,
+    )
+
+    assert prepared.optimization_semantic_cache is None
+    assert prepared.optimization_spatial_cache is None
+    assert prepared.optimization_truth_cache is None
+    semantic_prediction = _optimization_patient_semantic_prediction(
+        prepared,
+        patient_id="p1",
+        weights=[1.0],
+    )
+    assert semantic_prediction[0, 0, 0] == pytest.approx(LOW_CACHE_VALUE / UINT16_MAX)
+
+
 def test_normalize_weights_returns_probabilities_summing_to_one() -> None:
     normalized = _normalize_weights([2.0, 1.0, 1.0])
 
@@ -448,6 +524,217 @@ def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> N
     assert metrics["Calibration_best_mcc"] == pytest.approx(0.5)
     assert metrics["Calibration_n_positive_patients"] == 1
     assert metrics["Calibration_n_negative_patients"] == 1
+
+
+def test_spatial_objective_precompute_matches_full_image_objective(
+    tmp_path: Path,
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    truths = np.array(
+        [
+            [[1, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    cache_payload = _write_prediction_cache(
+        tmp_path / "pred-cache",
+        predictions=[
+            np.full((2, 2, 2), UINT16_MAX, dtype=np.uint16),
+            np.array(
+                [
+                    [[UINT16_MAX, 0], [0, 0]],
+                    [[UINT16_MAX, UINT16_MAX], [0, 0]],
+                ],
+                dtype=np.uint16,
+            ),
+            np.array(
+                [
+                    [[0, UINT16_MAX], [0, 0]],
+                    [[0, UINT16_MAX], [UINT16_MAX, 0]],
+                ],
+                dtype=np.uint16,
+            ),
+        ],
+        truths=truths,
+        patient_ids=["p1", "p2"],
+    )
+    prediction_paths, _truth_path, _pids_path, total_samples, height, width, truth_memmap = (
+        cache_payload
+    )
+    prediction_memmaps = [
+        np.memmap(path, dtype="uint16", mode="r", shape=(total_samples, height, width))
+        for path in prediction_paths
+    ]
+    prepared = optimization.OptimizationPreparation(
+        patient_map={"p1": [0], "p2": [1]},
+        prediction_memmaps=prediction_memmaps,
+        truth_memmap=truth_memmap,
+        holdout_idx=np.array([], dtype=np.int64),
+        holdout_local_map={},
+        holdout_patients=[],
+        calibration_idx=np.array([], dtype=np.int64),
+        calibration_local_map={},
+        calibration_patients=[],
+        optimization_idx=np.array([0, 1], dtype=np.int64),
+        optimization_local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
+        optimization_patients=["p1", "p2"],
+        semantic_indices=[0],
+        spatial_indices=[1, 2],
+        optimization_truth=None,
+        optimization_semantic_cache=None,
+        optimization_spatial_cache=None,
+        optimization_truth_cache=None,
+        optimization_gt_density_by_patient=None,
+        optimization_positive_patients={"p1"},
+        height=height,
+        width=width,
+    )
+    config = replace(
+        optimizer_config,
+        spatial_architectures=("FPN", "MANET"),
+        spatial_patient_policy="all",
+    )
+    fixed_roi_mask = np.array(
+        [
+            [[1, 1], [0, 0]],
+            [[1, 1], [1, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    trial = cast(optuna.Trial, _FixedTrial({"w_spa_0": 0.25, "w_spa_1": 0.75}))
+
+    patient_caches = optimization._build_spatial_objective_cache(
+        config,
+        prepared,
+        fixed_roi_mask,
+    )
+    precomputed_score = optimization._spatial_objective(
+        trial,
+        config=config,
+        prepared=prepared,
+        patient_caches=patient_caches,
+    )
+
+    weights = _normalize_weights([0.25, 0.75])
+    positive_auprc_total = 0.0
+    spill_total = 0.0
+    negative_fp_total = 0.0
+    evaluated_positive_patients = 0
+    evaluated_negative_patients = 0
+    for patient_id in prepared.optimization_patients:
+        patient_truth = _optimization_patient_truth(prepared, patient_id=patient_id)
+        local_slice = prepared.optimization_local_map[patient_id]
+        patient_roi = fixed_roi_mask[local_slice]
+        patient_prediction = optimization._optimization_patient_spatial_prediction(
+            prepared,
+            patient_id=patient_id,
+            weights=weights,
+        )
+        if patient_id in prepared.optimization_positive_patients:
+            positive_auprc_total += compute_patient_auprc_in_roi(
+                patient_truth.ravel(),
+                patient_prediction.ravel(),
+                patient_roi.ravel(),
+            )
+            evaluated_positive_patients += 1
+        else:
+            negative_fp_total += float(np.mean(patient_prediction))
+            evaluated_negative_patients += 1
+        mass_total = float(np.sum(patient_prediction) + 1e-7)
+        mass_outside = float(np.sum(patient_prediction * (1 - patient_roi)))
+        spill_total += mass_outside / mass_total
+
+    macro_positive_auprc = positive_auprc_total / evaluated_positive_patients
+    macro_spill = spill_total / len(prepared.optimization_patients)
+    macro_negative_fp = negative_fp_total / evaluated_negative_patients
+    expected_score = (
+        macro_positive_auprc
+        - (config.spill_penalty_lambda * macro_spill)
+        - (config.spill_penalty_lambda * macro_negative_fp)
+    )
+
+    assert precomputed_score == pytest.approx(expected_score)
+
+
+def test_semantic_objective_early_prunes_impossible_positive_recall(
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    prepared = optimization.OptimizationPreparation(
+        patient_map={"p1": [0], "p2": [1]},
+        prediction_memmaps=[],
+        truth_memmap=cast(Any, np.ones((2, 2, 2), dtype=np.uint8)),
+        holdout_idx=np.array([], dtype=np.int64),
+        holdout_local_map={},
+        holdout_patients=[],
+        calibration_idx=np.array([], dtype=np.int64),
+        calibration_local_map={},
+        calibration_patients=[],
+        optimization_idx=np.array([0, 1], dtype=np.int64),
+        optimization_local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
+        optimization_patients=["p1", "p2"],
+        semantic_indices=[0],
+        spatial_indices=[0],
+        optimization_truth=None,
+        optimization_semantic_cache={
+            "p1": np.asarray([np.zeros((1, 2, 2), dtype=np.uint16)]),
+            "p2": np.asarray([np.full((1, 2, 2), UINT16_MAX, dtype=np.uint16)]),
+        },
+        optimization_spatial_cache=None,
+        optimization_truth_cache={
+            "p1": np.ones((1, 2, 2), dtype=np.uint8),
+            "p2": np.ones((1, 2, 2), dtype=np.uint8),
+        },
+        optimization_gt_density_by_patient={"p1": 1.0, "p2": 1.0},
+        optimization_positive_patients={"p1", "p2"},
+        height=2,
+        width=2,
+    )
+    config = replace(optimizer_config, roi_min_pos_recall=0.8, roi_empty_max=1.0)
+    trial = cast(optuna.Trial, _FixedTrial({"w_sem_0": 1.0, "roi_thresh": 0.5}))
+
+    with pytest.raises(optuna.exceptions.TrialPruned, match="Misses Positives"):
+        optimization._semantic_objective(trial, config=config, prepared=prepared)
+
+
+def test_semantic_objective_early_checks_preserve_completed_trial_score(
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    prepared = optimization.OptimizationPreparation(
+        patient_map={"p1": [0], "p2": [1]},
+        prediction_memmaps=[],
+        truth_memmap=cast(Any, np.ones((2, 2, 2), dtype=np.uint8)),
+        holdout_idx=np.array([], dtype=np.int64),
+        holdout_local_map={},
+        holdout_patients=[],
+        calibration_idx=np.array([], dtype=np.int64),
+        calibration_local_map={},
+        calibration_patients=[],
+        optimization_idx=np.array([0, 1], dtype=np.int64),
+        optimization_local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
+        optimization_patients=["p1", "p2"],
+        semantic_indices=[0],
+        spatial_indices=[0],
+        optimization_truth=None,
+        optimization_semantic_cache={
+            "p1": np.asarray([np.full((1, 2, 2), UINT16_MAX, dtype=np.uint16)]),
+            "p2": np.asarray([np.full((1, 2, 2), UINT16_MAX, dtype=np.uint16)]),
+        },
+        optimization_spatial_cache=None,
+        optimization_truth_cache={
+            "p1": np.ones((1, 2, 2), dtype=np.uint8),
+            "p2": np.ones((1, 2, 2), dtype=np.uint8),
+        },
+        optimization_gt_density_by_patient={"p1": 1.0, "p2": 1.0},
+        optimization_positive_patients={"p1", "p2"},
+        height=2,
+        width=2,
+    )
+    trial = cast(optuna.Trial, _FixedTrial({"w_sem_0": 1.0, "roi_thresh": 0.5}))
+
+    score = optimization._semantic_objective(trial, config=optimizer_config, prepared=prepared)
+
+    assert score == pytest.approx(1.0)
 
 
 def test_compute_positive_patients_flags_any_patient_with_positive_pixel(tmp_path: Path) -> None:

@@ -8,6 +8,8 @@ from helpers.ensemble_optimizer.config import load_ensemble_optimizer_config
 ENSEMBLE_SEED = 17
 ENSEMBLE_BATCH_SIZE = 12
 ENSEMBLE_WORKERS = 3
+DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES = 8589934592
+EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES = 123456
 VALIDATION_CALIBRATION_FRACTION = 0.25
 VALIDATION_HOLDOUT_FRACTION = 0.3
 SEMANTIC_TRIALS = 11
@@ -61,6 +63,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_SPATIAL_ARCHITECTURES": "fpn, manet",
             "ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC": "11",
             "ENSEMBLE_OPT_NUM_TRIALS_SPATIAL": "13",
+            "ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES": str(EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES),
         }
     )
 
@@ -81,6 +84,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.spatial_architectures == ("FPN", "MANET")
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
+    assert config.optimization_cache_max_bytes == EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
     assert config.log_path == Path("logs/ensemble_optimizer.log")
@@ -104,8 +108,25 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.sort_metric == "best_val_auprc_pixel_score"
     assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
+    assert config.optimization_cache_max_bytes == DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
+
+
+def test_load_ensemble_optimizer_config_allows_disabling_optimization_cache(
+    tmp_path: Path,
+) -> None:
+    config = load_ensemble_optimizer_config(
+        {
+            "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                tmp_path / "dataset" / "master_manifest.sqlite"
+            ),
+            "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+            "ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES": "0",
+        }
+    )
+
+    assert config.optimization_cache_max_bytes == 0
 
 
 def test_load_ensemble_optimizer_config_reads_shared_runtime_normalization_method(
