@@ -1,111 +1,223 @@
 \chapter{Levantamento bibliográfico}\label{chp:levantamento}
 
-Este capítulo apresenta a base conceitual necessária para compreender o fluxo de
-trabalho desenvolvido nesta dissertação. A revisão não busca cobrir toda a
-literatura de patologia computacional; ela prioriza os conceitos que determinam
-a validade metodológica do projeto: imagens de lâminas inteiras, anotações
-supervisionadas, controle de qualidade, extração de \textit{patches},
-normalização de cor, segmentação semântica, arquiteturas de aprendizagem
-profunda, métricas, particionamento por paciente, reprodutibilidade e
-\textit{ensembles}. Ao final, esses conceitos são confrontados com uma revisão
-sistemática recente, conduzida a partir do protocolo descrito no material
-suplementar do repositório, para mostrar como a literatura aceita trata
-qualidade, vazamento de dados, governança e agregação de modelos em fluxos de
-patologia computacional.
+Este capítulo apresenta os fundamentos conceituais necessários à compreensão do
+fluxo de trabalho desenvolvido nesta dissertação. A discussão não pretende
+abranger toda a literatura em patologia computacional; em vez disso, concentra-se
+nos conceitos diretamente relacionados à validade metodológica do projeto:
+WSIs, anotações supervisionadas, controle de qualidade, extração de
+\textit{patches}, normalização de cor, segmentação semântica, arquiteturas de
+aprendizagem profunda, métricas de avaliação, particionamento por paciente,
+reprodutibilidade e \textit{ensembles}. Ao final, esses temas são articulados
+com uma revisão bibliográfica recente, conduzida a partir de um protocolo de
+busca e seleção descrito no material suplementar do repositório, com o objetivo
+de examinar como estudos contemporâneos tratam qualidade dos dados, risco de
+vazamento, governança experimental e agregação de modelos em fluxos de patologia
+computacional.
 
-\section{Patologia digital e imagens de lâminas inteiras}\label{sec:patologia_digital_wsi}
+\section{Patologia digital e WSIs}\label{sec:patologia_digital_wsi}
 
-Patologia digital é o uso de lâminas histológicas digitalizadas para
-visualização, armazenamento, compartilhamento e análise computacional. O produto
-central desse processo é a \Sigla{\textit{Whole Slide Image}}{WSI}, uma imagem
-em múltiplas resoluções que representa a lâmina inteira em escala microscópica.
-Diferentemente de imagens convencionais de visão computacional, uma WSI pode
-atingir dimensões de \textit{gigapixel}; por isso, raramente é processada como
-um único tensor. A prática comum é dividir a lâmina em recortes menores,
-denominados \textit{patches}, preservando metadados que permitam reconstruir sua
-origem espacial e biológica \cite{khened2021generalized,munozaguirre2020pyhist}.
+A patologia digital utiliza lâminas histológicas digitalizadas para visualização,
+armazenamento, compartilhamento e análise computacional. Nesse contexto, a
+\Sigla{\textit{Whole Slide Image}}{WSI} constitui a principal representação
+computacional da lâmina: uma imagem digital em múltiplas resoluções, capaz de
+preservar a organização do tecido em escala microscópica. Diferentemente de
+imagens convencionais em visão computacional, uma WSI pode atingir escala de
+\textit{gigapixel}, o que torna inviável processá-la integralmente como um único
+tensor em modelos de aprendizagem profunda \cite{khened2021generalized,
+munozaguirre2020pyhist}. Por essa razão, o processamento costuma ser realizado a
+partir de recortes menores, denominados \textit{patches}, que tornam a análise
+compatível com as restrições de memória e processamento dos dispositivos
+computacionais.
 
-A \Figura{fig:wsi-patching} ilustra essa ideia. A lâmina inteira fornece o
-contexto anatômico, enquanto os \textit{patches} permitem treinar modelos em
-unidades compatíveis com memória de GPU. Essa divisão, entretanto, cria uma
-responsabilidade metodológica: cada recorte precisa manter relação consistente
-com a máscara, o identificador de paciente, o arquivo de origem e o conjunto
-experimental ao qual pertence.
+A \Figura{fig:wsi-patching} ilustra essa estratégia. A WSI preserva o contexto
+global da lâmina, enquanto os \textit{patches} permitem operar sobre regiões
+menores, adequadas ao treinamento e à inferência de modelos de segmentação. Essa
+divisão, entretanto, não é apenas uma solução operacional. Ela introduz uma
+exigência metodológica: cada recorte deve manter vínculo consistente com a
+lâmina de origem, a posição espacial, a máscara correspondente, o identificador
+de paciente e o conjunto experimental ao qual pertence. Sem essa rastreabilidade,
+a relação entre imagem original, amostra treinável e resultado avaliado torna-se
+frágil, dificultando a reprodução do experimento e a interpretação científica das
+predições.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.92\textwidth]{figuras/WSI_schema.png}
-    \caption[Estrutura de uma WSI e extração de \textit{patches}]{Representação conceitual de uma WSI e do processo de extração de \textit{patches}. A imagem completa preserva o contexto da lâmina, enquanto os recortes permitem processamento por modelos de aprendizagem profunda. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \caption[Estrutura de uma WSI e extração de \textit{patches}]{
+    Representação conceitual de uma WSI e do processo de extração de
+    \textit{patches}. A imagem completa preserva o contexto global da lâmina,
+    enquanto os recortes permitem o processamento por modelos de aprendizagem
+    profunda em unidades compatíveis com restrições de memória e GPU. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:wsi-patching}
 \end{figure}
 
 \section{Aprendizagem profunda em patologia digital}\label{sec:ia_dl_patologia}
 
 \Sigla{Inteligência Artificial}{IA}, \Sigla{\textit{Machine Learning}}{ML} e
-\Sigla{\textit{Deep Learning}}{DL} formam uma hierarquia conceitual. IA é o
-campo amplo de métodos computacionais para tarefas associadas a comportamento
-inteligente; ML trata de algoritmos que aprendem padrões a partir de dados; DL é
-uma família de modelos com múltiplas camadas capazes de aprender representações
-hierárquicas diretamente de imagens. Essa relação é resumida na
-\Figura{fig:ia-ml-dl}.
+\Sigla{\textit{Deep Learning}}{DL} representam níveis distintos de abstração em
+métodos computacionais baseados em dados. A IA corresponde ao campo mais amplo,
+voltado ao desenvolvimento de sistemas capazes de executar tarefas associadas a
+comportamento inteligente. O ML, por sua vez, reúne métodos que aprendem padrões
+a partir de exemplos, sem depender exclusivamente de regras programadas de forma
+explícita. O DL constitui uma subárea do ML baseada em redes neurais com múltiplas
+camadas, capazes de aprender representações hierárquicas diretamente dos dados
+\cite{lecun2015deep}. Essa relação é resumida na \Figura{fig:ia-ml-dl}.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.58\textwidth]{figuras/AI_ML_DL.png}
-    \caption[Hierarquia conceitual entre IA, ML e DL]{Relação hierárquica entre Inteligência Artificial, Aprendizado de Máquina e Aprendizado Profundo. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \caption[Hierarquia conceitual entre IA, ML e DL]{Relação hierárquica entre
+    Inteligência Artificial, Aprendizado de Máquina e Aprendizado Profundo. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:ia-ml-dl}
 \end{figure}
 
-O treinamento de uma rede neural supervisionada pode ser entendido como um ciclo
-iterativo. Primeiro, os dados de entrada atravessam a rede e produzem uma
-predição. Em seguida, a predição é comparada com o \textit{ground truth} por uma
-função de perda. O erro é retropropagado, gradientes são calculados e o
-otimizador atualiza os pesos. Esse ciclo, representado na
-\Figura{fig:ciclo-dl}, é repetido por múltiplas épocas até que a função de perda
-e as métricas de validação indiquem uma configuração adequada.
+Em aprendizagem supervisionada, o treinamento de uma rede neural pode ser
+descrito como um processo iterativo de ajuste de parâmetros. A cada iteração, os
+dados de entrada são propagados pela rede e produzem uma predição. Essa predição
+é comparada com a referência anotada por meio de uma função de perda, que
+quantifica a discrepância entre a saída esperada e a saída estimada. Em seguida,
+o erro é retropropagado, os gradientes são calculados e o otimizador atualiza os
+pesos do modelo. Esse ciclo, representado na \Figura{fig:ciclo-dl}, é repetido
+por múltiplas épocas, até que a evolução da perda e das métricas de validação
+indique uma configuração adequada ao problema investigado.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.78\textwidth]{figuras/DL_pipeline.png}
-    \caption[Ciclo de treinamento de uma rede neural]{Fluxo conceitual de treinamento em aprendizagem profunda: passagem direta, cálculo de perda, retropropagação e atualização de pesos. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \caption[Ciclo de treinamento de uma rede neural]{Fluxo conceitual de
+    treinamento em aprendizagem profunda: propagação direta, comparação com a
+	referência anotada, cálculo da função
+    de perda, retropropagação e atualização dos pesos. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:ciclo-dl}
 \end{figure}
 
-Em patologia digital, o aprendizado supervisionado depende de anotações
-realizadas por especialistas. Essas anotações podem delimitar tumores, tecido
-normal, fundo, necrose, artefatos ou outras classes. No escopo desta
-dissertação, as anotações são convertidas para uma tarefa binária de câncer
-versus não câncer quando a base de dados permite essa interpretação. Esse
-mapeamento simplifica a formulação, mas torna indispensável documentar que
-classes originais foram fundidas, ignoradas ou rejeitadas.
+Em patologia digital, modelos de DL têm sido aplicados a diferentes tarefas de
+análise de imagens histológicas, incluindo classificação, detecção, segmentação
+semântica e análise de estruturas celulares ou teciduais
+\cite{deng2020deep}. No caso do aprendizado supervisionado, essas tarefas
+dependem de anotações produzidas por especialistas, as quais podem delimitar
+tumores, tecido normal, fundo, necrose, artefatos ou outras classes de interesse.
+No escopo desta dissertação, quando a base de dados permite essa interpretação,
+as anotações são convertidas para uma formulação binária de câncer versus não
+câncer. Essa simplificação torna a tarefa experimental mais uniforme entre
+bases distintas, mas exige documentar explicitamente quais classes originais
+foram fundidas, ignoradas ou rejeitadas ao longo do fluxo de preparação dos
+dados.
 
-\section{Bases públicas consideradas}\label{sec:bases_publicas}
+\section{Conjuntos públicos de imagens utilizados}\label{sec:bases_publicas}
 
-O projeto atual não depende de dados proprietários antigos. As bases citadas
-nesta dissertação servem como fontes públicas de proveniência e como exemplos de
-heterogeneidade em patologia digital. A \Tabela{tab:datasets_ativos} resume os
-conjuntos de dados considerados no escopo metodológico.
+Os conjuntos públicos utilizados nesta dissertação foram selecionados por
+representarem diferentes cenários de patologia digital, tanto do ponto de vista
+clínico quanto metodológico. Eles variam em órgão, espécie, tipo de lesão,
+protocolo de aquisição, formato de anotação, granularidade diagnóstica e nível
+de supervisão disponível. Essa heterogeneidade é relevante para o objetivo do
+trabalho, pois permite avaliar se o fluxo proposto é capaz de organizar dados
+histopatológicos distintos sob contratos comuns de ingestão, rastreabilidade,
+curadoria, particionamento, treinamento e inferência.
+
+A \Tabela{tab:datasets_ativos} resume os principais conjuntos considerados no
+escopo experimental e metodológico da dissertação. A finalidade da tabela não é
+estabelecer comparação direta de desempenho entre bases, mas explicitar o papel
+de cada conjunto na validação do fluxo de trabalho proposto.
 
 \begin{table}[!htb]
 \centering
-\caption{Bases públicas ativas no escopo metodológico da dissertação.}
+\caption{Conjuntos públicos de imagens considerados no escopo da dissertação.}
 \label{tab:datasets_ativos}
-\begin{tabular}{p{3.1cm}p{4.1cm}p{6.4cm}}
+\begin{tabular}{p{2.7cm}p{3.4cm}p{4.7cm}p{4.2cm}}
 \toprule
-Base & Domínio & Papel no texto \\
+Conjunto & Domínio & Características principais & Papel na dissertação \\
 \midrule
-CAMELYON16 & Metástases de câncer de mama em linfonodos & Referência de desafio público em patologia digital e proveniência de WSIs anotadas \cite{bejnordi2017diagnostic}. \\
-CATCH & Tumores cutâneos caninos & Exemplo de patologia comparativa com anotações poligonais detalhadas \cite{wilm2022catch}. \\
-DiagSet & Histopatologia de câncer de próstata & Base pública de um domínio humano específico; aparece como proveniência, não como foco exclusivo da dissertação \cite{koziarski2024diagset}. \\
-HiESD & Câncer gástrico precoce e lesões pré-cancerosas & Fonte de amostras e regiões anotadas de espécimes ESD \cite{wang2025hiesd}. \\
+CAMELYON16 &
+Metástases de câncer de mama em linfonodos sentinela &
+WSIs hematoxilina-eosina de linfonodos, com casos positivos e negativos para
+metástase; inclui anotações de lesões metastáticas no conjunto de treino e
+avaliação independente em conjunto de teste \cite{bejnordi2017diagnostic}. &
+Referência clássica de desafio público em patologia digital, usada para
+representar detecção de regiões tumorais em WSIs com protocolo de avaliação
+bem definido. \\
+
+CATCH &
+Tumores cutâneos caninos &
+Conjunto pan-tumoral com WSIs de tumores cutâneos caninos, anotações
+poligonais extensas e múltiplas classes histológicas, incluindo subtipos
+tumorais e tecidos não tumorais \cite{wilm2022catch}. &
+Exemplo de patologia comparativa com anotações poligonais ricas, útil para
+avaliar ingestão, conversão de polígonos em máscaras e curadoria de classes. \\
+
+DiagSet &
+Histopatologia de câncer de próstata &
+Conjunto público para detecção de câncer de próstata, composto por imagens
+anotadas em diferentes níveis, incluindo \textit{patches} extraídos de exames
+totalmente anotados e exames com diagnóstico binário \cite{koziarski2024diagset}. &
+Fonte de dados de um domínio humano específico, empregada para representar
+formulação binária de câncer versus não câncer e avaliação em múltiplas
+escalas. \\
+
+HiESD &
+Câncer gástrico precoce e lesões pré-cancerosas &
+WSIs de espécimes gástricos obtidos por dissecção submucosa endoscópica, com
+amostras de tecido, anotações categóricas e máscaras adequadas à segmentação
+supervisionada \cite{wang2025hiesd}. &
+Exemplo de base com supervisão detalhada em nível de tecido, relevante para
+testar segmentação, rastreabilidade entre lâmina e amostra, e conversão de
+classes para a tarefa binária. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Essas bases têm protocolos, scanners, classes e granularidade de anotação
-distintos. Essa diversidade é relevante porque um fluxo de trabalho
-reprodutível precisa registrar a origem de cada amostra e as regras usadas para
-converter anotações específicas em contratos comuns de treinamento.
+O conjunto CAMELYON16 é utilizado como referência de desafio público em
+patologia digital. Ele foi proposto para avaliar algoritmos de detecção de
+metástases de câncer de mama em WSIs de linfonodos sentinela. Seu interesse para
+esta dissertação está no fato de combinar lâminas positivas e negativas,
+anotações de regiões metastáticas no conjunto de treino, separação explícita
+entre treino e teste, e tarefas de avaliação em nível de lesão e em nível de
+lâmina \cite{bejnordi2017diagnostic}. Assim, CAMELYON16 representa um caso
+paradigmático de fluxo supervisionado em WSI, no qual a validade experimental
+depende da relação correta entre lâmina, anotação, \textit{patch}, paciente e
+conjunto de avaliação.
+
+O conjunto CATCH amplia o escopo para a patologia comparativa. Diferentemente de
+bases restritas a uma única classe tumoral, CATCH reúne tumores cutâneos caninos
+com diferentes subtipos histológicos e anotações poligonais detalhadas
+\cite{wilm2022catch}. Essa característica torna o conjunto particularmente
+relevante para testar etapas de ingestão, rasterização de polígonos, preservação
+da hierarquia entre classes e geração de máscaras supervisionadas. Além disso,
+por incluir classes tumorais e não tumorais, CATCH exige decisões explícitas de
+mapeamento quando o problema é convertido para uma formulação binária de câncer
+versus não câncer.
+
+O DiagSet introduz um domínio humano específico: a histopatologia do câncer de
+próstata. A base combina imagens com anotação detalhada, \textit{patches}
+extraídos de exames anotados e exames com diagnóstico binário, permitindo
+trabalhar tanto com informação localizada quanto com diagnóstico em nível mais
+global \cite{koziarski2024diagset}. No contexto desta dissertação, o DiagSet é
+relevante por aproximar o fluxo experimental de uma tarefa clínica frequente,
+na qual a distinção entre tecido tumoral e não tumoral precisa ser preservada
+sem perder a rastreabilidade entre amostras, exames e rótulos diagnósticos.
+
+O HiESD, por sua vez, representa um cenário de câncer gástrico precoce e lesões
+pré-cancerosas em espécimes obtidos por dissecção submucosa endoscópica. A base
+inclui WSIs, amostras de tecido, máscaras de qualidade, anotações e arquivos
+auxiliares que permitem localizar componentes de tecido dentro da lâmina
+original \cite{wang2025hiesd}. Sua inclusão é importante porque aproxima o
+fluxo de um problema de segmentação supervisionada com múltiplos tipos
+histológicos, exigindo conversão cuidadosa das categorias originais para uma
+tarefa binária, além de preservação da correspondência entre lâmina, fragmento
+tecidual, anotação e máscara.
+
+Em conjunto, essas bases permitem exercitar o fluxo proposto em condições
+heterogêneas. CAMELYON16 enfatiza o desafio público e a avaliação independente;
+CATCH enfatiza anotações poligonais extensas e diversidade de classes;
+DiagSet enfatiza um domínio humano específico com formulação diagnóstica de
+câncer de próstata; e HiESD enfatiza segmentação supervisionada em espécimes
+gástricos com múltiplas categorias histológicas. Essa diversidade torna
+necessário documentar, para cada amostra, sua origem, classe original,
+transformação aplicada, identificador de paciente ou caso, conjunto
+experimental, máscara resultante e regras de inclusão ou rejeição. Desse modo,
+os conjuntos públicos não são tratados apenas como fontes de imagens, mas como
+casos metodológicos para avaliar a rastreabilidade e a robustez do fluxo
+experimental.
 
 \section{Pré-processamento, tecido e artefatos}\label{sec:preprocessamento_patologia}
 
