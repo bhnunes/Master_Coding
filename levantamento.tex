@@ -543,58 +543,132 @@ Resultados de teste só podem ser usados para avaliação final; se pesos, limia
 ou escolha de modelos forem ajustados depois de observar o teste, a estimativa
 de desempenho deixa de refletir uma avaliação independente.
 
-\section{Revisão da literatura recente}\label{sec:revisao_sistematica}
+\section{Revisão estruturada da literatura recente}
+\label{sec:revisao_literatura_recente}
 
-A revisão sistemática complementou a revisão conceitual ao investigar como a
-literatura recente descreve a engenharia experimental de fluxos de patologia
-digital oncológica. O objetivo não foi listar arquiteturas de redes neurais, mas
-identificar práticas verificáveis para quatro problemas que afetam diretamente a
-validade desta dissertação: controle de qualidade e artefatos, prevenção de
-vazamento de dados, governança de dados e agregação de modelos. Por isso, o
-protocolo foi definido antes da síntese e estruturado em perguntas de pesquisa,
-critérios de elegibilidade, consultas reproduzíveis e uma matriz de extração.
+Esta seção apresenta uma revisão bibliográfica estruturada da literatura recente
+sobre fluxos de patologia digital oncológica baseados em aprendizagem profunda.
+A revisão complementa a fundamentação conceitual do capítulo ao examinar como
+estudos contemporâneos descrevem decisões metodológicas que afetam diretamente a
+validade experimental: controle de qualidade e tratamento de artefatos,
+prevenção de vazamento de dados, governança e rastreabilidade dos dados, e
+agregação de modelos por \textit{ensemble} ou pós-processamento.
 
-As Tabelas~\ref{tab:revisao_sistematica_perguntas},
+O objetivo da revisão não foi ranquear arquiteturas neurais nem comparar
+métricas finais de desempenho entre estudos heterogêneos. A finalidade foi
+identificar práticas verificáveis de engenharia experimental, isto é, decisões
+documentadas que permitam compreender como uma WSI ou imagem histopatológica é
+transformada em amostras treináveis, como os conjuntos de treino, validação e
+teste são definidos, como artefatos e regiões inválidas são tratados, como os
+dados e metadados são persistidos e como a inferência final é construída. Essa
+delimitação é coerente com o objetivo metodológico da dissertação, que trata o
+fluxo completo de análise como objeto científico.
+
+Para tornar o levantamento reprodutível, foi definido previamente um protocolo
+de busca e seleção. O protocolo especificou quatro perguntas orientadoras,
+critérios de inclusão e exclusão, bases consultadas, intervalo temporal,
+consultas exatas e campos de extração. As
+Tabelas~\ref{tab:revisao_sistematica_perguntas},
 \ref{tab:revisao_sistematica_criterios} e
-\ref{tab:revisao_sistematica_consultas} registram os elementos necessários para
-reproduzir a busca: perguntas de pesquisa, critérios de inclusão e exclusão, e
-consultas exatas aplicadas em PubMed/MEDLINE, IEEE Xplore e SpringerLink. Os
-filtros exigiram publicações em inglês, acesso aberto, período de 1 de janeiro
-de 2020 a 31 de dezembro de 2025, foco oncológico, uso de aprendizagem profunda
-em WSI ou histopatologia e descrição explícita de pelo menos um componente
-operacional do fluxo. Após a recuperação dos registros, as referências foram
-deduplicadas e triadas em duas fases. A primeira fase avaliou a relevância
-oncológica, o uso de WSI e a ausência de falhas metodológicas evidentes, como
-bases apenas pré-extraídas ou particionamento por \textit{patch}. A segunda fase
-avaliou o texto completo para verificar disponibilidade pública de código,
-descrição da governança de dados, política de particionamento, tratamento de
-artefatos e validade da estratégia de agregação de modelos.
+\ref{tab:revisao_sistematica_consultas} registram esses elementos. Em
+particular, a Tabela~\ref{tab:revisao_sistematica_consultas} preserva as
+consultas completas aplicadas em PubMed/MEDLINE, IEEE Xplore e SpringerLink,
+incluindo termos, operadores booleanos e restrições usadas na recuperação dos
+registros.
 
 \input{generated/systematic_review_protocol_summary}
 
-A triagem retornou 1004 registros. Destes, 61 foram aceitos para síntese e 943
-foram rejeitados. A \Tabela{tab:revisao_sistematica_triagem} apresenta a
-contagem por base, e a \Figura{fig:revisao-sistematica-triagem} resume a
-distribuição entre estudos aceitos e rejeitados.
+Foram consideradas publicações em inglês, de acesso aberto, publicadas entre
+1 de janeiro de 2020 e 31 de dezembro de 2025, com foco oncológico, aplicação de
+aprendizagem profunda em WSI ou histopatologia e descrição explícita de pelo
+menos um componente operacional do fluxo experimental. Foram excluídos estudos
+puramente clínicos, trabalhos centrados em doenças não neoplásicas, estudos
+baseados apenas em amostras pré-extraídas que eliminassem os desafios de
+processamento de WSI, trabalhos com particionamento por \textit{patch} ou por
+lâmina quando incompatíveis com a prevenção de vazamento, e artigos que
+relatassem apenas uma arquitetura neural sem documentação verificável do fluxo
+de extração, proveniência, governança ou orquestração.
+
+Após a recuperação dos registros, as referências foram deduplicadas e avaliadas
+em duas etapas. A primeira triagem verificou a pertinência ao domínio oncológico,
+o uso de WSI ou imagens histopatológicas e a presença de elementos mínimos
+compatíveis com o escopo metodológico da dissertação. Nessa fase, foram
+rejeitados estudos cuja formulação experimental não permitia avaliar os
+problemas centrais investigados, como controle de qualidade, particionamento,
+rastreabilidade ou agregação de modelos. Na segunda etapa, os textos completos
+foram examinados para verificar disponibilidade pública de código, descrição da
+governança de dados, política de particionamento, tratamento de artefatos,
+normalização, armazenamento persistente e validade da estratégia de
+\textit{ensemble} ou pós-processamento.
+
+A busca retornou 1004 registros. Após a aplicação dos critérios de seleção, 61
+estudos foram aceitos para síntese e 943 foram rejeitados. A
+\Tabela{tab:revisao_sistematica_triagem} apresenta a contagem por base
+consultada, enquanto a \Figura{fig:revisao-literatura-triagem} resume a
+distribuição entre registros aceitos e rejeitados.
 
 \input{generated/systematic_review_screening_tables}
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.88\textwidth]{figuras/systematic_review_screening.png}
-    \caption[Triagem da revisão sistemática]{Distribuição dos registros aceitos e rejeitados por base consultada.}
-    \label{fig:revisao-sistematica-triagem}
+    \caption[Triagem da revisão bibliográfica estruturada]{Distribuição dos
+    registros aceitos e rejeitados por base consultada.}
+    \label{fig:revisao-literatura-triagem}
 \end{figure}
 
-A síntese dos estudos aceitos foi organizada pelas perguntas de pesquisa, em vez
-de ser apresentada como uma sequência de resumos individuais. Essa decisão evita
-transformar o capítulo em uma lista de artigos e mantém o foco no papel da
-revisão para a dissertação. A matriz completa, com uma linha por estudo e os
-campos de referência e ano, estratégia de artefatos ou controle de qualidade,
-política de normalização, política de particionamento, armazenamento e
-governança, ensemble ou pós-processamento e disponibilidade de código, é
-apresentada no Apêndice~\ref{ap:matriz_revisao_sistematica}. No corpo do
-capítulo, a síntese abaixo transforma essa matriz em uma leitura agregada,
-mantendo as citações dos estudos que sustentam cada achado.
+A matriz de extração apresentada no
+Apêndice~\ref{ap:matriz_revisao_sistematica} registra, para cada estudo aceito,
+os campos usados na síntese: referência, ano, estratégia de controle de
+qualidade ou tratamento de artefatos, política de normalização, política de
+particionamento, mecanismos de armazenamento e governança, uso de
+\textit{ensemble} ou pós-processamento, disponibilidade de código e observações
+metodológicas relevantes. A partir dessa matriz, os resultados da revisão são
+organizados a seguir em torno das quatro perguntas de pesquisa definidas na
+\Tabela{tab:revisao_sistematica_perguntas}. Essa organização evita uma
+enumeração artigo a artigo e permite discutir, para cada pergunta, a frequência
+das práticas observadas, sua função metodológica e sua relação com as decisões
+adotadas nesta dissertação.
 
-\input{generated/systematic_review_findings_summary}
+A RQ1 examinou como os estudos tratam controle de qualidade, artefatos de
+lâmina, contaminação por fundo e necrose antes da extração de amostras para
+aprendizagem profunda. Entre os estudos aceitos, 48 foram classificados como
+contendo controle de qualidade ou tratamento explícito de artefatos, e 11
+trataram a separação entre tecido e fundo como etapa operacional do fluxo. Esses
+resultados reforçam a decisão de manter detecção de artefatos, triagem visual e
+filtragem de regiões não informativas como fronteiras explícitas do fluxo
+experimental proposto.
+
+A RQ2 investigou como a literatura aborda particionamento, separação por
+paciente e risco de vazamento de dados, inclusive em etapas de pré-processamento.
+Nesse eixo, 29 estudos declararam separação por paciente. A normalização de cor,
+por sua vez, foi codificada separadamente, pois atua sobre variações de
+coloração, mas não substitui o isolamento entre pacientes; 33 estudos
+mencionaram alguma forma de normalização. Assim, particionamento e normalização
+são interpretados como controles complementares: o primeiro protege a avaliação
+contra dependência entre amostras, enquanto o segundo reduz variações associadas
+à aquisição e ao preparo histológico.
+
+A RQ3 avaliou a presença de contratos explícitos de dados, orquestração,
+proveniência e governança experimental. Para essa pergunta, foram considerados
+sinais como repositório público, manifestos, formatos persistentes, contratos de
+dados e execução orquestrada. Ao todo, 56 estudos apresentaram pelo menos um
+desses elementos. Esse resultado não significa que todos os trabalhos ofereçam o
+mesmo nível de auditabilidade, mas indica que parte expressiva da literatura já
+registra algum vínculo verificável entre dados, código, metadados e execução.
+
+A RQ4 analisou estratégias de agregação de modelos, incerteza e
+pós-processamento, com atenção à forma como a receita final de inferência é
+definida e avaliada. Nesse eixo, 27 estudos discutiram \textit{ensemble} ou
+incerteza, enquanto 7 enfatizaram procedimentos de pós-processamento. Para esta
+dissertação, a implicação é metodológica: qualquer receita final de
+\textit{ensemble} deve ser otimizada apenas no conjunto de validação, congelada
+antes da avaliação em teste e descrita como parte rastreável do protocolo, em
+vez de aparecer como uma decisão genérica ou posterior aos resultados.
+
+Em conjunto, as respostas a RQ1--RQ4 mostram que a validade de fluxos de
+patologia digital oncológica depende de decisões distribuídas ao longo de todo o
+processo experimental, e não apenas da arquitetura neural empregada. As
+contagens apresentadas em cada pergunta derivam da classificação registrada na
+matriz de extração, enquanto a classificação individual de cada estudo permanece
+disponível no Apêndice~\ref{ap:matriz_revisao_sistematica}. 
