@@ -26,6 +26,7 @@ MaskMode = Literal["raw", "binary", "two_channel"]
 class CanonicalDatasetLayout:
     records: tuple[CanonicalRowRecord, ...]
     local_cache_dir: Path | None
+    local_cache_size_cap_bytes: int = 0
 
 
 class CanonicalRowHDF5Dataset(Dataset[Any]):
@@ -53,7 +54,10 @@ class CanonicalRowHDF5Dataset(Dataset[Any]):
         self.patient_ids = np.asarray([record.patient_id for record in self.records], dtype=str)
         self.filenames = np.asarray([record.filename for record in self.records], dtype=str)
         self.cache = (
-            PatientShardCache(layout.local_cache_dir, size_cap_bytes=0)
+            PatientShardCache(
+                layout.local_cache_dir,
+                size_cap_bytes=layout.local_cache_size_cap_bytes,
+            )
             if layout.local_cache_dir is not None
             else None
         )

@@ -10,6 +10,7 @@ ENSEMBLE_BATCH_SIZE = 12
 ENSEMBLE_WORKERS = 3
 DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES = 8589934592
 EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES = 123456
+LOCAL_SHARD_CACHE_MAX_BYTES = 987654
 VALIDATION_CALIBRATION_FRACTION = 0.25
 VALIDATION_HOLDOUT_FRACTION = 0.3
 SEMANTIC_TRIALS = 11
@@ -64,6 +65,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC": "11",
             "ENSEMBLE_OPT_NUM_TRIALS_SPATIAL": "13",
             "ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES": str(EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES),
+            "ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES": str(LOCAL_SHARD_CACHE_MAX_BYTES),
         }
     )
 
@@ -85,6 +87,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
     assert config.optimization_cache_max_bytes == EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES
+    assert config.local_shard_cache_max_bytes == LOCAL_SHARD_CACHE_MAX_BYTES
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
     assert config.log_path == Path("logs/ensemble_optimizer.log")
@@ -109,6 +112,7 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
     assert config.optimization_cache_max_bytes == DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
+    assert config.local_shard_cache_max_bytes == 0
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
     assert config.runtime_vahadane_backend == "fixed_source"
 

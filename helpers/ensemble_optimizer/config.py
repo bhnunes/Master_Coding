@@ -124,6 +124,7 @@ class EnsembleOptimizerConfig:
     num_trials_semantic: int
     num_trials_spatial: int
     optimization_cache_max_bytes: int = DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
+    local_shard_cache_max_bytes: int = 0
     runtime_normalization_method: str = "NOT_NORMALIZED"
     runtime_vahadane_backend: str = "fixed_source"
     log_folder: Path = Path("logs")
@@ -187,6 +188,11 @@ def load_ensemble_optimizer_config(
         seed=_parse_int(values.get("ENSEMBLE_OPT_SEED"), default=24),
         batch_size=_parse_int(values.get("ENSEMBLE_OPT_BATCH_SIZE"), default=32),
         workers=max(1, _parse_int(values.get("ENSEMBLE_OPT_WORKERS"), default=workers_default)),
+        local_shard_cache_max_bytes=_parse_non_negative_int(
+            values.get("ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES"),
+            default=0,
+            variable_name="ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES",
+        ),
         sort_metric=_parse_choice(
             values.get("ENSEMBLE_OPT_SORT_METRIC"),
             default="best_val_auprc_pixel_score",

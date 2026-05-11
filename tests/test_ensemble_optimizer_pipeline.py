@@ -153,7 +153,7 @@ def test_execute_pipeline_records_strict_metadata_selection_in_run_config(
     )
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline.run_two_stream_optimization",
-        lambda config, models, dataloader, device, predefined_split: type(
+        lambda config, models, dataloader, device, predefined_split, **kwargs: type(
             "Result",
             (),
             {
@@ -326,7 +326,7 @@ def test_execute_pipeline_logs_phase_summaries(
     )
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline.run_two_stream_optimization",
-        lambda config, models, dataloader, device, predefined_split: type(
+        lambda config, models, dataloader, device, predefined_split, **kwargs: type(
             "Result",
             (),
             {
@@ -467,7 +467,7 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
     )
     monkeypatch.setattr(
         "helpers.ensemble_optimizer.pipeline.run_two_stream_optimization",
-        lambda config, models, dataloader, device, predefined_split: type(
+        lambda config, models, dataloader, device, predefined_split, **kwargs: type(
             "Result",
             (),
             {

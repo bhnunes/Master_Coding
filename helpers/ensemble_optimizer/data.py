@@ -28,6 +28,7 @@ class ValidationDatasetLayout:
     runtime_normalization_method: str = "NOT_NORMALIZED"
     runtime_vahadane_backend: str = "fixed_source"
     normalizer_device: torch.device | str = "cpu"
+    local_shard_cache_max_bytes: int = 0
 
 
 def setup_validation_data(
@@ -38,6 +39,7 @@ def setup_validation_data(
     runtime_normalization_method: str = "NOT_NORMALIZED",
     runtime_vahadane_backend: str = "fixed_source",
     normalizer_device: torch.device | str = "cpu",
+    local_shard_cache_max_bytes: int = 0,
 ) -> ValidationDatasetLayout:
     local_cache_dir = local_data_dir / "patient_shards" if stage_input_locally else None
     if local_cache_dir is not None:
@@ -54,6 +56,7 @@ def setup_validation_data(
         runtime_normalization_method=runtime_normalization_method,
         runtime_vahadane_backend=runtime_vahadane_backend,
         normalizer_device=normalizer_device,
+        local_shard_cache_max_bytes=local_shard_cache_max_bytes,
     )
 
 
@@ -107,6 +110,7 @@ class ValidationDataset(Dataset[Any]):
             CanonicalDatasetLayout(
                 records=tuple(self.records),
                 local_cache_dir=layout.local_cache_dir,
+                local_cache_size_cap_bytes=layout.local_shard_cache_max_bytes,
             ),
             mode="val",
             mask_mode="two_channel",

@@ -6,6 +6,7 @@ import logging
 import shutil
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -33,6 +34,9 @@ from helpers.training.utils import clear_gpu
 LOGGER = logging.getLogger(__name__)
 _PROGRESS_MIN_INTERVAL_SECONDS = 0.5
 _WEIGHT_SKIP_THRESHOLD = 1e-4
+_BYTES_PER_GIB = 1024**3
+
+ValidationDataloaderFactory = Callable[[set[str] | None], DataLoader[Any]]
 
 
 def _progress_file() -> Any:
@@ -220,6 +224,31 @@ class _SpatialObjectivePatientCache:
     total_mass_by_model: npt.NDArray[np.float64]
     outside_mass_by_model: npt.NDArray[np.float64]
     negative_mean_by_model: npt.NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class _StreamingPredictionContext:
+    config: EnsembleOptimizerConfig
+    dataloader_factory: ValidationDataloaderFactory
+    models: list[nn.Module]
+    semantic_indices: list[int]
+    semantic_weights: list[float]
+    spatial_indices: list[int]
+    spatial_weights: list[float]
+    device: torch.device
+    roi_threshold: float
+
+
+@dataclass(frozen=True)
+class _StreamPreparationRequest:
+    config: EnsembleOptimizerConfig
+    prediction_paths: list[Path]
+    pids_path: Path
+    total_samples: int
+    height: int
+    width: int
+    truth_memmap: np.memmap[Any, Any]
+    stream: str
 
 
 def get_stream_type(architecture: str, config: EnsembleOptimizerConfig) -> str:
@@ -458,6 +487,104 @@ def cache_predictions_sequential(
     )
 
 
+def _close_memmap(memmap: np.memmap[Any, Any]) -> None:
+    memmap.flush()
+    mmap_handle = getattr(memmap, "_mmap", None)
+    close = getattr(mmap_handle, "close", None)
+    if callable(close):
+        close()
+
+
+def _close_prediction_memmaps(memmaps: list[np.memmap[Any, Any]]) -> None:
+    for memmap in memmaps:
+        _close_memmap(memmap)
+
+
+def _remove_paths(paths: list[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
+def _open_prediction_memmaps(
+    prediction_paths: list[Path],
+    *,
+    total_samples: int,
+    height: int,
+    width: int,
+) -> list[np.memmap[Any, Any]]:
+    return [
+        np.memmap(path, dtype="uint16", mode="r", shape=(total_samples, height, width))
+        for path in prediction_paths
+    ]
+
+
+def _cache_prediction_group(
+    *,
+    config: EnsembleOptimizerConfig,
+    models: list[nn.Module],
+    model_indices: list[int],
+    dataloader: DataLoader[Any],
+    device: torch.device,
+    cache_name: str,
+) -> tuple[list[Path], Path, Path, int, int, int, np.memmap[Any, Any]]:
+    selected_models = [models[index] for index in model_indices]
+    return cache_predictions_sequential(
+        selected_models,
+        dataloader,
+        device=device,
+        cache_dir=config.pred_cache_dir / cache_name,
+    )
+
+
+def _cache_bytes_to_gib(byte_count: int) -> float:
+    return byte_count / _BYTES_PER_GIB
+
+
+def _log_staged_cache_estimate(
+    config: EnsembleOptimizerConfig,
+    *,
+    optimization_samples: int,
+    height: int,
+    width: int,
+    semantic_model_count: int,
+    spatial_model_count: int,
+) -> None:
+    truth_bytes = optimization_samples * height * width
+    fixed_roi_bytes = truth_bytes
+    semantic_bytes = truth_bytes + (
+        optimization_samples * height * width * 2 * semantic_model_count
+    )
+    spatial_bytes = (
+        truth_bytes
+        + fixed_roi_bytes
+        + (optimization_samples * height * width * 2 * spatial_model_count)
+    )
+    peak_bytes = max(semantic_bytes, spatial_bytes)
+    LOGGER.info(
+        "Staged prediction cache estimate: optimization_samples=%s, shape=%sx%s, "
+        "semantic_peak=%.2f GiB, spatial_peak=%.2f GiB, estimated_peak=%.2f GiB, cache_dir=%s.",
+        optimization_samples,
+        height,
+        width,
+        _cache_bytes_to_gib(semantic_bytes),
+        _cache_bytes_to_gib(spatial_bytes),
+        _cache_bytes_to_gib(peak_bytes),
+        config.pred_cache_dir,
+    )
+    try:
+        free_bytes = shutil.disk_usage(config.pred_cache_dir.parent).free
+    except OSError:
+        return
+    if peak_bytes > free_bytes:
+        LOGGER.warning(
+            "Estimated staged prediction-cache peak %.2f GiB exceeds available free space "
+            "%.2f GiB under %s.",
+            _cache_bytes_to_gib(peak_bytes),
+            _cache_bytes_to_gib(free_bytes),
+            config.pred_cache_dir.parent,
+        )
+
+
 def _weighted_ensemble_from_u16_cache(
     u16_arrays: list[npt.NDArray[np.generic]], weights: list[float]
 ) -> npt.NDArray[np.float32]:
@@ -595,6 +722,149 @@ def _calibrate_decision_threshold(
         "Calibration_threshold": best_threshold,
         "Calibration_best_mcc": float(best_mcc if np.isfinite(best_mcc) else 0.0),
         "Calibration_n_patients": len(config.patient_ids),
+        "Calibration_n_positive_patients": positive_patients,
+        "Calibration_n_negative_patients": negative_patients,
+    }
+
+
+def _collect_truth_from_dataloader(dataloader: DataLoader[Any]) -> npt.NDArray[np.uint8]:
+    truth_batches: list[npt.NDArray[np.uint8]] = []
+    for batch in dataloader:
+        if batch is None:
+            continue
+        _batch_images, batch_masks, _batch_patient_ids = batch
+        truth_batches.append(
+            cast(
+                npt.NDArray[np.uint8],
+                batch_masks[:, 1, :, :].cpu().numpy().astype("uint8"),
+            )
+        )
+    if not truth_batches:
+        return np.zeros((0, 0, 0), dtype=np.uint8)
+    return cast(npt.NDArray[np.uint8], np.concatenate(truth_batches, axis=0))
+
+
+def _batch_predictions_to_u16(predictions: torch.Tensor) -> npt.NDArray[np.uint16]:
+    predictions_np = predictions.detach().float().cpu().numpy()
+    predictions_np = np.nan_to_num(predictions_np, nan=0.0, posinf=1.0, neginf=0.0)
+    predictions_np = np.clip(predictions_np, 0.0, 1.0)
+    return cast(npt.NDArray[np.uint16], (predictions_np * 65535).astype(np.uint16))
+
+
+def _stream_weighted_prediction_for_patient(
+    *,
+    models: list[nn.Module],
+    model_indices: list[int],
+    weights: list[float],
+    dataloader: DataLoader[Any],
+    device: torch.device,
+    truth: npt.NDArray[np.uint8] | None = None,
+) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.uint8]]:
+    truth = truth if truth is not None else _collect_truth_from_dataloader(dataloader)
+    if truth.size == 0:
+        return np.zeros((0, 0, 0), dtype=np.float32), truth
+    accumulator = cast(npt.NDArray[np.float32], np.zeros(truth.shape, dtype=np.float32))
+    normalizer = GPUNormalizer(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+        device=device,
+    )
+    for model_index, weight in zip(model_indices, weights, strict=False):
+        if weight <= _WEIGHT_SKIP_THRESHOLD:
+            continue
+        model = models[model_index].to(device)
+        architecture = str(getattr(model, "arch_name", "UNK"))
+        write_position = 0
+        for batch in dataloader:
+            if batch is None:
+                continue
+            batch_images, _batch_masks, _batch_patient_ids = batch
+            batch_size = int(batch_images.shape[0])
+            batch_images = normalizer(batch_images.to(device))
+            predictions = predict_with_tta_batched(model, batch_images, architecture)
+            predictions_u16 = _batch_predictions_to_u16(predictions)
+            accumulator[write_position : write_position + batch_size] += predictions_u16.astype(
+                np.float32
+            ) * (weight / 65535.0)
+            write_position += batch_size
+        if write_position != truth.shape[0]:
+            raise RuntimeError(
+                "Streamed "
+                f"{write_position} samples but expected {truth.shape[0]} for model "
+                f"{model_index}."
+            )
+        model.cpu()
+        clear_gpu()
+    return accumulator, truth
+
+
+def _calibrate_decision_threshold_streaming(
+    context: _StreamingPredictionContext,
+    *,
+    patient_ids: list[str],
+) -> tuple[float, dict[str, float | int | str]]:
+    if not patient_ids:
+        return 0.5, {
+            "Calibration_metric": "Patient_MCC",
+            "Calibration_threshold": 0.5,
+            "Calibration_best_mcc": 0.0,
+            "Calibration_n_patients": 0,
+            "Calibration_n_positive_patients": 0,
+            "Calibration_n_negative_patients": 0,
+        }
+
+    positive_patients = 0
+    negative_patients = 0
+    thresholds = np.linspace(0.05, 0.95, 19)
+    threshold_score_sums = np.zeros(thresholds.shape, dtype=np.float64)
+    for patient_id in patient_ids:
+        dataloader = context.dataloader_factory({patient_id})
+        semantic_prediction, patient_truth = _stream_weighted_prediction_for_patient(
+            models=context.models,
+            model_indices=context.semantic_indices,
+            weights=context.semantic_weights,
+            dataloader=dataloader,
+            device=context.device,
+        )
+        spatial_prediction, _patient_truth = _stream_weighted_prediction_for_patient(
+            models=context.models,
+            model_indices=context.spatial_indices,
+            weights=context.spatial_weights,
+            dataloader=dataloader,
+            device=context.device,
+            truth=patient_truth,
+        )
+        roi_mask = (
+            generate_roi_batch(
+                torch.from_numpy(semantic_prediction),
+                context.config.roi_context_scale,
+                context.roi_threshold,
+            )
+            .numpy()
+            .astype(np.uint8)
+        )
+        if np.any(patient_truth):
+            positive_patients += 1
+        else:
+            negative_patients += 1
+        for threshold_index, threshold in enumerate(thresholds):
+            tp, fp, fn, tn = _compute_patient_confusion_at_threshold(
+                spatial_prediction,
+                patient_truth,
+                roi_mask,
+                float(threshold),
+            )
+            threshold_score_sums[threshold_index] += _compute_mcc(tp, fp, fn, tn)
+
+    threshold_means = threshold_score_sums / max(1, len(patient_ids))
+    best_index = int(np.argmax(threshold_means))
+    best_threshold = float(thresholds[best_index])
+    best_mcc = float(threshold_means[best_index])
+    return best_threshold, {
+        "Calibration_metric": "Patient_MCC",
+        "Calibration_threshold": best_threshold,
+        "Calibration_best_mcc": float(best_mcc if np.isfinite(best_mcc) else 0.0),
+        "Calibration_n_patients": len(patient_ids),
         "Calibration_n_positive_patients": positive_patients,
         "Calibration_n_negative_patients": negative_patients,
     }
@@ -1119,7 +1389,7 @@ def _build_fixed_roi_mask(
     *,
     best_semantic_weights: list[float],
     best_roi_threshold: float,
-) -> npt.NDArray[np.uint8]:
+) -> np.memmap[Any, Any]:
     roi_path = config.pred_cache_dir / "fixed_roi_mask.dat"
     roi_path.parent.mkdir(parents=True, exist_ok=True)
     fixed_roi_mask = np.memmap(
@@ -1429,6 +1699,374 @@ def _evaluate_holdout(
     )
 
 
+def _evaluate_holdout_streaming(
+    context: _StreamingPredictionContext,
+    *,
+    patient_ids: list[str],
+    decision_threshold: float,
+) -> HoldoutEvaluation:
+    positive_auprc_total = 0.0
+    spill_total = 0.0
+    evaluated_patients = 0
+    evaluated_positive_patients = 0
+    negative_fp_total = 0.0
+    evaluated_negative_patients = 0
+    positive_patient_count = 0
+    negative_patient_count = 0
+    LOGGER.info("Evaluating holdout set across %s patients.", len(patient_ids))
+    with tqdm(
+        patient_ids,
+        total=len(patient_ids),
+        desc="Eval holdout",
+        leave=False,
+        mininterval=_PROGRESS_MIN_INTERVAL_SECONDS,
+        dynamic_ncols=True,
+        file=_progress_file(),
+        disable=_progress_disabled(),
+    ) as holdout_progress:
+        for patient_id in holdout_progress:
+            gc.collect()
+            dataloader = context.dataloader_factory({patient_id})
+            semantic_prediction, patient_truth = _stream_weighted_prediction_for_patient(
+                models=context.models,
+                model_indices=context.semantic_indices,
+                weights=context.semantic_weights,
+                dataloader=dataloader,
+                device=context.device,
+            )
+            if patient_truth.size == 0:
+                continue
+            roi_mask = (
+                generate_roi_batch(
+                    torch.from_numpy(semantic_prediction),
+                    context.config.roi_context_scale,
+                    context.roi_threshold,
+                )
+                .numpy()
+                .astype(np.uint8)
+            )
+            spatial_prediction, _patient_truth = _stream_weighted_prediction_for_patient(
+                models=context.models,
+                model_indices=context.spatial_indices,
+                weights=context.spatial_weights,
+                dataloader=dataloader,
+                device=context.device,
+                truth=patient_truth,
+            )
+            is_positive_patient = bool(np.sum(patient_truth) > 0)
+            if is_positive_patient:
+                positive_patient_count += 1
+            else:
+                negative_patient_count += 1
+            if context.config.spatial_patient_policy == "positive_only" and not is_positive_patient:
+                continue
+            if is_positive_patient:
+                positive_auprc_total += compute_patient_auprc_in_roi(
+                    patient_truth.ravel(),
+                    spatial_prediction.ravel(),
+                    roi_mask.ravel(),
+                )
+                evaluated_positive_patients += 1
+            else:
+                negative_fp_total += _compute_negative_false_positive_mass(
+                    spatial_prediction,
+                    patient_truth,
+                )
+                evaluated_negative_patients += 1
+            mass_total = float(np.sum(spatial_prediction) + 1e-7)
+            mass_outside = float(np.sum(spatial_prediction * (1 - roi_mask)))
+            spill_total += mass_outside / mass_total
+            evaluated_patients += 1
+    macro_positive_auprc = (
+        float(positive_auprc_total / evaluated_positive_patients)
+        if evaluated_positive_patients > 0
+        else 0.0
+    )
+    macro_spill = float(spill_total / evaluated_patients) if evaluated_patients > 0 else 0.0
+    macro_negative_fp = (
+        float(negative_fp_total / evaluated_negative_patients)
+        if evaluated_negative_patients > 0
+        else 0.0
+    )
+    holdout_objective = float(
+        macro_positive_auprc
+        - (context.config.spill_penalty_lambda * macro_spill)
+        - (context.config.spill_penalty_lambda * macro_negative_fp)
+    )
+    metrics: dict[str, float | int | str] = {
+        "Macro_AUPRC_in_ROI": macro_positive_auprc,
+        "Macro_AUPRC_in_ROI_Positive": macro_positive_auprc,
+        "Macro_Spill": macro_spill,
+        "Macro_Spill_All": macro_spill,
+        "Macro_Negative_FP": macro_negative_fp,
+        "Objective_AUPRC_minus_lambdaSpill": holdout_objective,
+        "Objective_Composite": holdout_objective,
+        "N_eval_patients": int(evaluated_patients),
+        "N_eval_positive_patients": int(evaluated_positive_patients),
+        "N_eval_negative_patients": int(evaluated_negative_patients),
+        "N_pos_patients_total": int(positive_patient_count),
+        "N_neg_patients_total": int(negative_patient_count),
+        "Decision_threshold": decision_threshold,
+        "Spatial_patient_policy": context.config.spatial_patient_policy,
+        "Spill_lambda": float(context.config.spill_penalty_lambda),
+    }
+    LOGGER.info(
+        "Holdout evaluation complete: objective=%.4f macro_auprc=%.4f spill=%.4f.",
+        holdout_objective,
+        macro_positive_auprc,
+        macro_spill,
+    )
+    return HoldoutEvaluation(
+        macro_positive_auprc=macro_positive_auprc,
+        macro_spill=macro_spill,
+        holdout_objective=holdout_objective,
+        metrics=metrics,
+    )
+
+
+def _build_stream_preparation_from_cache(
+    request: _StreamPreparationRequest,
+) -> OptimizationPreparation:
+    patient_ids = cast(list[str], json.loads(request.pids_path.read_text(encoding="utf-8")))
+    patient_map = _build_patient_map(patient_ids)
+    optimization_idx, optimization_local_map, optimization_patients = build_indices_and_local_map(
+        set(patient_map),
+        patient_map,
+    )
+    prediction_memmaps = _open_prediction_memmaps(
+        request.prediction_paths,
+        total_samples=request.total_samples,
+        height=request.height,
+        width=request.width,
+    )
+    model_cache_indices = list(range(len(prediction_memmaps)))
+    semantic_indices = model_cache_indices if request.stream == "semantic" else []
+    spatial_indices = model_cache_indices if request.stream == "spatial" else []
+    (
+        optimization_semantic_cache,
+        optimization_spatial_cache,
+        optimization_truth_cache,
+        optimization_gt_density_by_patient,
+    ) = _build_optimization_patient_caches(
+        _OptimizationCacheBuildInput(
+            prediction_memmaps=prediction_memmaps,
+            optimization_idx=optimization_idx,
+            optimization_local_map=optimization_local_map,
+            optimization_patients=optimization_patients,
+            semantic_indices=semantic_indices,
+            spatial_indices=spatial_indices,
+            truth_memmap=request.truth_memmap,
+            height=request.height,
+            width=request.width,
+            max_cache_bytes=request.config.optimization_cache_max_bytes,
+        )
+    )
+    positive_patients = _compute_positive_patients(patient_map, request.truth_memmap)
+    return OptimizationPreparation(
+        patient_map=patient_map,
+        prediction_memmaps=prediction_memmaps,
+        truth_memmap=request.truth_memmap,
+        holdout_idx=np.array([], dtype=np.int64),
+        holdout_local_map={},
+        holdout_patients=[],
+        calibration_idx=np.array([], dtype=np.int64),
+        calibration_local_map={},
+        calibration_patients=[],
+        optimization_idx=optimization_idx,
+        optimization_local_map=optimization_local_map,
+        optimization_patients=optimization_patients,
+        semantic_indices=semantic_indices,
+        spatial_indices=spatial_indices,
+        optimization_truth=None,
+        optimization_semantic_cache=(
+            optimization_semantic_cache if request.stream == "semantic" else None
+        ),
+        optimization_spatial_cache=(
+            optimization_spatial_cache if request.stream == "spatial" else None
+        ),
+        optimization_truth_cache=optimization_truth_cache,
+        optimization_gt_density_by_patient=optimization_gt_density_by_patient,
+        optimization_positive_patients=positive_patients,
+        height=request.height,
+        width=request.width,
+    )
+
+
+def _run_two_stream_optimization_staged(
+    config: EnsembleOptimizerConfig,
+    models: list[nn.Module],
+    *,
+    device: torch.device,
+    predefined_split: HoldoutSplit,
+    dataloader_factory: ValidationDataloaderFactory,
+) -> OptimizationResult:
+    semantic_indices, spatial_indices = _resolve_stream_indices(config, models)
+    if config.pred_cache_dir.exists():
+        shutil.rmtree(config.pred_cache_dir)
+    config.pred_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    optimization_patients = set(predefined_split.optimization_patients)
+    LOGGER.info(
+        "Using staged prediction cache: optimization=%s calibration=%s holdout=%s patients.",
+        len(optimization_patients),
+        len(predefined_split.calibration_patients),
+        len(predefined_split.holdout_patients),
+    )
+    semantic_payload = _cache_prediction_group(
+        config=config,
+        models=models,
+        model_indices=semantic_indices,
+        dataloader=dataloader_factory(optimization_patients),
+        device=device,
+        cache_name="semantic_optimization",
+    )
+    (
+        semantic_prediction_paths,
+        _semantic_truth_path,
+        semantic_pids_path,
+        total_samples,
+        height,
+        width,
+        semantic_truth_memmap,
+    ) = semantic_payload
+    _log_staged_cache_estimate(
+        config,
+        optimization_samples=total_samples,
+        height=height,
+        width=width,
+        semantic_model_count=len(semantic_indices),
+        spatial_model_count=len(spatial_indices),
+    )
+    semantic_prepared = _build_stream_preparation_from_cache(
+        _StreamPreparationRequest(
+            config=config,
+            prediction_paths=semantic_prediction_paths,
+            pids_path=semantic_pids_path,
+            total_samples=total_samples,
+            height=height,
+            width=width,
+            truth_memmap=semantic_truth_memmap,
+            stream="semantic",
+        )
+    )
+
+    previous_optuna_verbosity = _set_optuna_warning_verbosity()
+    try:
+        best_semantic_weights, best_roi_threshold = _run_semantic_optimization(
+            config,
+            semantic_prepared,
+        )
+        fixed_roi_mask = _build_fixed_roi_mask(
+            config,
+            semantic_prepared,
+            best_semantic_weights=best_semantic_weights,
+            best_roi_threshold=best_roi_threshold,
+        )
+        _close_prediction_memmaps(semantic_prepared.prediction_memmaps)
+        _remove_paths(semantic_prediction_paths)
+
+        spatial_payload = _cache_prediction_group(
+            config=config,
+            models=models,
+            model_indices=spatial_indices,
+            dataloader=dataloader_factory(optimization_patients),
+            device=device,
+            cache_name="spatial_optimization",
+        )
+        (
+            spatial_prediction_paths,
+            _spatial_truth_path,
+            spatial_pids_path,
+            spatial_total_samples,
+            spatial_height,
+            spatial_width,
+            spatial_truth_memmap,
+        ) = spatial_payload
+        if (
+            spatial_total_samples != total_samples
+            or spatial_height != height
+            or spatial_width != width
+            or spatial_pids_path.read_text(encoding="utf-8")
+            != semantic_pids_path.read_text(encoding="utf-8")
+        ):
+            raise RuntimeError(
+                "Staged semantic and spatial optimization caches do not describe the same "
+                "sample order."
+            )
+        spatial_prepared = _build_stream_preparation_from_cache(
+            _StreamPreparationRequest(
+                config=config,
+                prediction_paths=spatial_prediction_paths,
+                pids_path=spatial_pids_path,
+                total_samples=spatial_total_samples,
+                height=spatial_height,
+                width=spatial_width,
+                truth_memmap=spatial_truth_memmap,
+                stream="spatial",
+            )
+        )
+        spatial_objective_cache = _build_spatial_objective_cache(
+            config,
+            spatial_prepared,
+            fixed_roi_mask,
+        )
+        _close_prediction_memmaps(spatial_prepared.prediction_memmaps)
+        _remove_paths(spatial_prediction_paths)
+        best_spatial_weights = _run_spatial_optimization(
+            config,
+            spatial_prepared,
+            spatial_objective_cache,
+        )
+    finally:
+        _restore_optuna_verbosity(previous_optuna_verbosity)
+
+    fixed_roi_path = config.pred_cache_dir / "fixed_roi_mask.dat"
+    _close_memmap(fixed_roi_mask)
+    fixed_roi_path.unlink(missing_ok=True)
+    _close_memmap(semantic_truth_memmap)
+    _close_memmap(spatial_truth_memmap)
+
+    streaming_context = _StreamingPredictionContext(
+        config=config,
+        dataloader_factory=dataloader_factory,
+        models=models,
+        semantic_indices=semantic_indices,
+        semantic_weights=best_semantic_weights,
+        spatial_indices=spatial_indices,
+        spatial_weights=best_spatial_weights,
+        device=device,
+        roi_threshold=best_roi_threshold,
+    )
+    calibration_patients = sorted(predefined_split.calibration_patients)
+    LOGGER.info("Calibrating decision threshold on %s patients.", len(calibration_patients))
+    decision_threshold, calibration_metrics = _calibrate_decision_threshold_streaming(
+        streaming_context,
+        patient_ids=calibration_patients,
+    )
+    LOGGER.info(
+        "Calibration complete: threshold=%.4f best_mcc=%.4f.",
+        decision_threshold,
+        float(cast(float, calibration_metrics.get("Calibration_best_mcc", 0.0))),
+    )
+    holdout_evaluation = _evaluate_holdout_streaming(
+        streaming_context,
+        patient_ids=sorted(predefined_split.holdout_patients),
+        decision_threshold=decision_threshold,
+    )
+    shutil.rmtree(config.pred_cache_dir, ignore_errors=True)
+    config.pred_cache_dir.mkdir(parents=True, exist_ok=True)
+    return OptimizationResult(
+        semantic_indices=semantic_indices,
+        spatial_indices=spatial_indices,
+        semantic_weights=best_semantic_weights,
+        spatial_weights=best_spatial_weights,
+        roi_threshold=best_roi_threshold,
+        decision_threshold=decision_threshold,
+        calibration_metrics=calibration_metrics,
+        holdout_metrics=holdout_evaluation.metrics,
+    )
+
+
 def run_two_stream_optimization(
     config: EnsembleOptimizerConfig,
     models: list[nn.Module],
@@ -1436,7 +2074,17 @@ def run_two_stream_optimization(
     *,
     device: torch.device,
     predefined_split: HoldoutSplit | None = None,
+    dataloader_factory: ValidationDataloaderFactory | None = None,
 ) -> OptimizationResult:
+    if dataloader_factory is not None and predefined_split is not None:
+        return _run_two_stream_optimization_staged(
+            config,
+            models,
+            device=device,
+            predefined_split=predefined_split,
+            dataloader_factory=dataloader_factory,
+        )
+
     LOGGER.info("Caching ensemble predictions for %s models.", len(models))
     prepared = _prepare_optimization(
         config,

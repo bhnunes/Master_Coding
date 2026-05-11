@@ -33,6 +33,7 @@ from helpers.ensemble_optimizer.optimization import (
     predict_with_tta_batched,
     run_two_stream_optimization,
 )
+from helpers.ensemble_optimizer.splitting import HoldoutSplit
 
 UINT16_MAX = 65535
 DEFAULT_THRESHOLD = 0.5
@@ -1017,6 +1018,83 @@ def test_run_two_stream_optimization_falls_back_to_semantic_models_for_spatial_s
     assert result.spatial_indices == [0]
     assert result.holdout_metrics["N_eval_patients"] == 0
     assert result.holdout_metrics["Spatial_patient_policy"] == "positive_only"
+
+
+def test_run_two_stream_optimization_staged_cleans_raw_prediction_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    patient_truths = {
+        "p1": np.array([[1, 0], [0, 0]], dtype=np.uint8),
+        "p2": np.zeros((2, 2), dtype=np.uint8),
+        "p3": np.array([[1, 0], [0, 0]], dtype=np.uint8),
+        "p4": np.array([[1, 0], [0, 0]], dtype=np.uint8),
+    }
+    factory_calls: list[set[str] | None] = []
+
+    def dataloader_factory(allowed_patients: set[str] | None) -> _ListLoader:
+        factory_calls.append(set(allowed_patients) if allowed_patients is not None else None)
+        selected = sorted(allowed_patients or set(patient_truths))
+        if not selected:
+            return _ListLoader(dataset_len=0, batches=[])
+        images = torch.zeros((len(selected), 3, 2, 2), dtype=torch.uint8)
+        masks = torch.zeros((len(selected), 2, 2, 2), dtype=torch.uint8)
+        for index, patient_id in enumerate(selected):
+            masks[index, 1] = torch.from_numpy(patient_truths[patient_id])
+        return _ListLoader(dataset_len=len(selected), batches=[(images, masks, selected)])
+
+    monkeypatch.setattr(
+        optimization,
+        "predict_with_tta_batched",
+        lambda model, images, architecture: torch.full(
+            (images.shape[0], images.shape[2], images.shape[3]),
+            0.8 if architecture == "SWIN" else 0.6,
+            dtype=torch.float32,
+        ),
+    )
+    monkeypatch.setattr(optimization, "clear_gpu", lambda: None)
+
+    class _FakeStudy:
+        def __init__(self, best_params: dict[str, float]) -> None:
+            self.best_params = best_params
+            self.best_value = 1.0
+            self.trials: list[Any] = [SimpleNamespace(state=optuna.trial.TrialState.COMPLETE)]
+
+        def optimize(
+            self, objective: Any, n_trials: int, callbacks: list[Any] | None = None
+        ) -> None:
+            del objective, n_trials
+            if callbacks:
+                for callback in callbacks:
+                    callback(self, cast(Any, object()))
+
+    studies = iter([_FakeStudy({"w_sem_0": 1.0, "roi_thresh": 0.5}), _FakeStudy({"w_spa_0": 1.0})])
+    optuna_module = optimization.optuna  # type: ignore[attr-defined]
+    monkeypatch.setattr(optuna_module, "create_study", lambda direction, sampler: next(studies))
+
+    result = run_two_stream_optimization(
+        optimizer_config,
+        [_ConstantBinaryModel(0.0, arch_name="SWIN"), _TupleTwoClassModel(arch_name="FPN")],
+        cast(Any, _ListLoader(0, [])),
+        device=torch.device("cpu"),
+        predefined_split=HoldoutSplit(
+            optimization_patients={"p1", "p2"},
+            calibration_patients={"p3"},
+            holdout_patients={"p4"},
+            positive_patients={"p1", "p3", "p4"},
+            negative_patients={"p2"},
+        ),
+        dataloader_factory=cast(Any, dataloader_factory),
+    )
+
+    assert result.semantic_indices == [0]
+    assert result.spatial_indices == [1]
+    assert {path.name for path in optimizer_config.pred_cache_dir.rglob("*.dat")} == set()
+    assert {"p1", "p2"} in factory_calls
+    assert {"p3"} in factory_calls
+    assert {"p4"} in factory_calls
+    assert None not in factory_calls
 
 
 def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_policy(

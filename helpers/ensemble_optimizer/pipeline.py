@@ -125,6 +125,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             device,
             workers=config.workers,
         ),
+        local_shard_cache_max_bytes=config.local_shard_cache_max_bytes,
     )
     LOGGER.info("Validation source ready: %s", config.master_manifest_path)
     split = _build_validation_split(config, validation_layout)
@@ -157,6 +158,12 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
         dataloader,
         device=device,
         predefined_split=split,
+        dataloader_factory=lambda allowed_patients: create_validation_dataloader(
+            validation_layout,
+            batch_size=config.batch_size,
+            workers=config.workers,
+            allowed_patients=allowed_patients,
+        ),
     )
     LOGGER.info(
         "Optimization summary: roi_threshold=%.4f decision_threshold=%.4f holdout_objective=%.4f.",
