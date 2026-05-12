@@ -221,11 +221,16 @@ experimental.
 
 \section{Pré-processamento, tecido e artefatos}\label{sec:preprocessamento_patologia}
 
-Antes de alimentar modelos de segmentação, é necessário separar regiões
-informativas de fundo, vidro e áreas visualmente inválidas. Uma estratégia
-clássica para detectar tecido consiste em trabalhar no espaço HSV e aplicar um
-limiar no canal de saturação, seguido de operações morfológicas. De forma
-abstrata, uma limiarização binária pode ser escrita como:
+Antes que uma WSI seja utilizada no treinamento de modelos de segmentação, é
+necessário distinguir regiões informativas de áreas sem conteúdo histológico
+útil, como fundo, vidro e regiões visualmente inválidas. Em fluxos de patologia
+digital, uma estratégia comum consiste em segmentar o tecido por meio de
+limiarização em uma representação de cor adequada. No fluxo desta dissertação,
+essa etapa utiliza o método de Otsu, que seleciona automaticamente um limiar a
+partir do histograma da imagem \cite{otsu1979threshold}.
+
+De forma abstrata, a limiarização binária induzida por esse limiar pode ser
+escrita como:
 \begin{equation}\label{eq:otsu-threshold}
     g(x,y) =
     \begin{cases}
@@ -233,94 +238,168 @@ abstrata, uma limiarização binária pode ser escrita como:
         0, & \text{se } f(x,y) \leq t,
     \end{cases}
 \end{equation}
-em que $f(x,y)$ é a intensidade do pixel em uma representação escolhida, $t$ é
-o limiar e $g(x,y)$ é a máscara binária resultante. No fluxo desta dissertação,
-essa família de procedimentos fundamenta a rejeição de janelas com baixo
-conteúdo tecidual antes da persistência em HDF5
-\cite{khened2021generalized,munozaguirre2020pyhist}.
+em que $f(x,y)$ representa a intensidade do pixel em uma imagem ou canal
+selecionado, $t$ é o limiar adotado e $g(x,y)$ é a máscara binária resultante.
+No contexto desta dissertação, essa formulação representa a família de métodos
+usada para separar regiões com conteúdo tecidual de áreas de fundo antes da
+extração e persistência dos \textit{patches}.
 
-Máscaras binárias obtidas por limiarização podem conter ruídos, buracos ou
-pequenas regiões desconectadas. Operações morfológicas tratam esse problema por
-meio de um elemento estruturante $B$. A abertura remove componentes pequenos e é
-definida por $A \circ B = (A \ominus B) \oplus B$, enquanto o fechamento preenche
-lacunas pequenas e é definido por $A \bullet B = (A \oplus B) \ominus B$. A
-\Figura{fig:morfologia} mostra visualmente esse refinamento.
+Máscaras obtidas apenas por limiarização podem conter ruídos, buracos internos
+ou pequenos componentes desconectados. Por isso, operações morfológicas são
+frequentemente aplicadas como etapa de refinamento. Considerando uma máscara
+binária $A$ e um elemento estruturante $B$, a abertura é definida como uma
+erosão seguida de dilatação:
+
+\begin{equation}\label{eq:morph-opening}
+    A \circ B = (A \ominus B) \oplus B,
+\end{equation}
+
+enquanto o fechamento corresponde a uma dilatação seguida de erosão:
+
+\begin{equation}\label{eq:morph-closing}
+    A \bullet B = (A \oplus B) \ominus B.
+\end{equation}
+
+Nessas expressões, $\ominus$ representa erosão e $\oplus$ representa dilatação.
+A abertura tende a remover componentes pequenos, protrusões finas e conexões
+estreitas, enquanto o fechamento tende a preencher pequenas lacunas e tornar as
+regiões segmentadas mais coesas \cite{gonzalez2018digital}. A
+\Figura{fig:morfologia} ilustra esse efeito sobre uma máscara binária.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.78\textwidth]{figuras/morphological_operation.PNG}
-    \caption[Operações morfológicas de abertura e fechamento]{Exemplo conceitual do efeito de abertura e fechamento sobre uma máscara binária. A abertura reduz ruído externo e o fechamento torna a região mais coesa. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \caption[Operações morfológicas de abertura e fechamento]{Exemplo
+    conceitual do efeito de abertura e fechamento sobre uma máscara binária. A
+    abertura reduz componentes pequenos e ruídos externos, enquanto o fechamento
+    preenche lacunas e torna a região segmentada mais coesa. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:morfologia}
 \end{figure}
 
-Além de fundo e ruído geométrico, WSIs podem conter dobras, bolhas, marcas de
-caneta, regiões fora de foco e corpos estranhos. Esses artefatos podem criar
-sinais não biológicos e prejudicar o treinamento. Trabalhos de controle de
-qualidade, como o GrandQC, motivam a detecção explícita dessas regiões
-\cite{weng2024grandqc}. Nesta dissertação, a informação de artefatos é tratada
-como proveniência e possível variável experimental, não como evidência clínica.
+A separação entre tecido e fundo, embora necessária, não esgota o problema de
+qualidade em WSIs. Lâminas digitalizadas podem conter dobras de tecido, bolhas,
+marcas de caneta, regiões fora de foco, bordas, manchas escuras e corpos
+estranhos. Esses artefatos introduzem sinais não biológicos que podem interferir
+no treinamento e na avaliação de modelos, especialmente quando aparecem
+correlacionados a classes, scanners ou subconjuntos experimentais. Trabalhos de
+controle de qualidade em patologia digital, como o GrandQC, motivam a detecção
+explícita dessas regiões e sua preservação como informação de proveniência
+\cite{weng2024grandqc}.
 
-\section{Segmentação baseada em grafos e limpeza de amostras}\label{sec:grafos_limpeza}
+Nesta dissertação, portanto, informações sobre tecido, fundo e artefatos são
+tratadas como parte do contrato experimental. Elas orientam a rejeição de
+janelas com baixo conteúdo histológico, apoiam a curadoria de amostras
+contaminadas e registram possíveis fontes de viés técnico. Assim, artefatos de
+aquisição não são interpretados como evidência clínica, mas como metadados
+necessários para controlar a qualidade, a rastreabilidade e a validade do fluxo
+de treinamento e inferência.
 
-Segmentação por grafos oferece uma forma complementar de caracterizar regiões em
-uma imagem. Na formulação de \textcite{felzenszwalb2004efficient}, a imagem é
-representada por um grafo não direcionado $G=(V,E)$, no qual vértices
-representam pixels ou regiões elementares, e arestas recebem pesos que medem
-dissimilaridade. A diferença interna de um componente $C$ é dada por:
+\section{Segmentação baseada em grafos e limpeza de amostras}
+\label{sec:grafos_limpeza}
+
+A segmentação baseada em grafos oferece uma forma complementar de caracterizar
+regiões em imagens, especialmente quando o objetivo é separar componentes
+visualmente distintos sem depender exclusivamente de limiares globais. Na
+formulação de \textcite{felzenszwalb2004efficient}, a imagem é representada por
+um grafo não direcionado $G=(V,E)$, no qual os vértices $V$ correspondem a pixels
+ou regiões elementares, e as arestas $E$ recebem pesos que representam a
+dissimilaridade entre elementos vizinhos. A segmentação resulta da decisão de
+fundir ou preservar fronteiras entre componentes, de acordo com a relação entre
+a diferença interna de cada região e a diferença observada entre regiões
+adjacentes.
+
+A diferença interna de um componente $C$ é definida como:
 \begin{equation}\label{eq:internal-difference}
     \mathrm{Int}(C)=\max_{e\in\mathrm{MST}(C,E)} w(e),
 \end{equation}
 em que $\mathrm{MST}$ representa a árvore geradora mínima do componente. A
-diferença entre dois componentes é:
+diferença entre dois componentes $C_1$ e $C_2$ é dada por:
 \begin{equation}\label{eq:component-difference}
     \mathrm{Dif}(C_1,C_2)=
     \min_{v_i\in C_1,\,v_j\in C_2,\,(v_i,v_j)\in E} w(v_i,v_j).
 \end{equation}
-Componentes são fundidos quando a diferença entre eles não excede uma medida de
-dissimilaridade interna ajustada pelo tamanho:
+Dois componentes são candidatos à fusão quando a diferença entre eles não excede
+uma medida de dissimilaridade interna ajustada pelo tamanho:
 \begin{equation}\label{eq:mint}
     \mathrm{MInt}(C_1,C_2)=
     \min\left(\mathrm{Int}(C_1)+\tau(C_1),\mathrm{Int}(C_2)+\tau(C_2)\right),
     \quad \tau(C)=\frac{k}{|C|}.
 \end{equation}
+Nessa formulação, $k$ controla a escala da segmentação: valores maiores tendem a
+produzir componentes mais amplos, enquanto valores menores favorecem regiões
+mais fragmentadas.
+
+Em histopatologia digital, essa família de métodos é relevante porque pode
+auxiliar a separação entre tecido e fundo antes da geração de amostras para
+aprendizagem profunda. Essa motivação foi incorporada a partir do PyHIST, uma
+ferramenta de pré-processamento para imagens histológicas que utiliza
+segmentação baseada em grafos para produzir máscaras de tecido e orientar a
+seleção de \textit{tiles} com conteúdo histológico suficiente
+\cite{munozaguirre2020pyhist}. No PyHIST, a segmentação baseada em grafos é
+usada para distinguir regiões de primeiro plano e fundo, permitindo avaliar se
+cada recorte satisfaz um limiar mínimo de tecido antes de ser mantido no
+conjunto de amostras.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.88\textwidth]{figuras/graph_method.png}
-    \caption[Segmentação de tecido baseada em grafos]{Ilustração conceitual de segmentação baseada em grafos: pixels ou regiões são conectados por arestas ponderadas e o algoritmo decide onde preservar fronteiras. Figura reaproveitada do primeiro rascunho da dissertação.}
+    \caption[Segmentação de tecido baseada em grafos]{Ilustração conceitual de
+    segmentação baseada em grafos. Pixels ou regiões elementares são
+    representados como vértices, conectados por arestas ponderadas por
+    dissimilaridade; a segmentação decide quais componentes devem ser fundidos e
+    quais fronteiras devem ser preservadas. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:graph-method}
 \end{figure}
 
-No repositório, essa família de métodos é utilizada em uma etapa específica de
-limpeza de amostras cancerosas, com uma regra local de contaminação por fundo. A
-literatura sustenta o princípio algorítmico; os limiares, erosões e critérios de
-rejeição descritos na metodologia são decisões do fluxo implementado.
+No fluxo desta dissertação, a segmentação baseada em grafos não é apresentada
+como uma nova contribuição algorítmica, mas como uma etapa de apoio à curadoria
+de amostras. Em particular, ela é utilizada na limpeza de amostras cancerosas,
+com uma regra local de contaminação por fundo. A literatura sustenta o princípio
+algorítmico e o uso desse tipo de abordagem para separação entre tecido e fundo
+em imagens histológicas; contudo, os limiares, erosões e critérios de rejeição
+adotados no repositório são decisões específicas do fluxo implementado e são
+descritos na metodologia.
 
 \section{Normalização de cor}\label{sec:normalizacao_cor}
 
-A coloração hematoxilina-eosina varia entre laboratórios, scanners e protocolos
-de preparo. Essa variabilidade pode alterar propriedades ópticas e computadas
-das imagens, fazendo com que modelos confundam diferenças técnicas com sinais
-biológicos \cite{tellez2019augmentation,duenweg2023scanner}. Por isso,
-normalização de cor e aumento de dados são estratégias recorrentes em patologia
-digital.
+A coloração hematoxilina-eosina pode variar entre laboratórios, scanners,
+protocolos de preparo, lotes de reagentes e condições de digitalização. Essa
+variabilidade altera a aparência visual das lâminas e pode modificar
+características computadas a partir das imagens, fazendo com que modelos de
+aprendizagem profunda confundam diferenças técnicas com padrões morfológicos de
+interesse \cite{tellez2019augmentation,duenweg2023scanner}. Nesse contexto, a
+normalização de cor busca reduzir variações cromáticas não biológicas e tornar
+mais consistente a comparação entre amostras processadas em condições distintas.
 
-Na normalização de Reinhard, uma imagem de origem pode ser transformada para
-aproximar estatísticas de uma imagem-alvo. Para um canal $c$, a operação pode
-ser escrita como:
+Uma estratégia clássica é a normalização de Reinhard, na qual uma imagem de
+origem é transformada para aproximar suas estatísticas de cor das estatísticas
+de uma imagem-alvo. Para um canal $c$, a transformação pode ser escrita como:
 \begin{equation}\label{eq:reinhard-norm}
     I'_c = \frac{I_c-\mu_{s,c}}{\sigma_{s,c}}\sigma_{t,c}+\mu_{t,c},
 \end{equation}
-em que $\mu_{s,c}$ e $\sigma_{s,c}$ são média e desvio padrão da imagem de
-origem, e $\mu_{t,c}$ e $\sigma_{t,c}$ são estatísticas correspondentes do alvo
-\cite{reinhard2001color}. Abordagens baseadas em separação de corantes, como
-Ruifrok, Macenko e Vahadane, operam sobre densidade óptica ou estimativa de
-matrizes de coloração \cite{ruifrok2001quantification,macenko2009method,vahadane2016structure}. Uma forma simplificada de densidade óptica é:
+em que $I_c$ representa a intensidade do canal na imagem de origem,
+$\mu_{s,c}$ e $\sigma_{s,c}$ são, respectivamente, a média e o desvio padrão da
+imagem de origem nesse canal, e $\mu_{t,c}$ e $\sigma_{t,c}$ são as estatísticas
+correspondentes da imagem-alvo \cite{reinhard2001color}. Essa formulação ajusta
+a distribuição de cores da imagem de origem, mas não modela explicitamente a
+contribuição dos corantes histológicos.
+
+Em imagens histológicas coradas por hematoxilina-eosina, abordagens baseadas em
+separação de corantes procuram representar a imagem em termos de densidade
+óptica e estimar a contribuição de cada corante. Métodos como Ruifrok, Macenko e
+Vahadane exploram essa ideia para decompor ou normalizar a aparência das
+lâminas, aproximando imagens obtidas sob diferentes condições a uma
+representação cromática mais comparável
+\cite{ruifrok2001quantification,macenko2009method,vahadane2016structure}. Uma
+forma simplificada de densidade óptica é:
 \begin{equation}\label{eq:od}
     \mathrm{OD}=-\log\left(\frac{I+\epsilon}{I_0}\right),
 \end{equation}
 em que $I$ é a intensidade observada, $I_0$ é a intensidade de referência e
-$\epsilon$ evita instabilidade numérica.
+$\epsilon$ é um termo de estabilização numérica. Essa transformação aproxima a
+relação entre intensidade observada e absorção de luz pelos corantes,
+permitindo que diferenças de coloração sejam tratadas em um espaço mais
+adequado à análise histológica.
 
 \begin{figure}[!htb]
     \centering
@@ -349,75 +428,40 @@ $\epsilon$ evita instabilidade numérica.
         \includegraphics[width=\linewidth]{figuras/vahadane_patch.png}
         \caption{Vahadane}
     \end{subfigure}
-    \caption[Exemplos de normalização de cor]{Exemplos visuais de famílias de normalização de cor consideradas no projeto. A imagem ilustra o efeito qualitativo das transformações, sem representar ainda comparação quantitativa final.}
+    \caption[Exemplos de normalização de cor]{Exemplos visuais de métodos de
+    normalização de cor considerados no projeto. A figura ilustra diferenças
+    qualitativas entre a imagem original e versões normalizadas por Reinhard,
+    Macenko, Ruifrok e Vahadane.}
     \label{fig:normalizacao-exemplos}
 \end{figure}
 
-No fluxo atual, a normalização não é tratada como uma cópia permanente de todos
-os conjuntos. A Fase 4 registra artefatos de referência, e fases posteriores
-escolhem a normalização em tempo de execução. Essa distinção é importante para a
-reprodutibilidade, pois o mesmo particionamento pode ser avaliado sob diferentes
-métodos sem regenerar a divisão de pacientes.
+No fluxo desta dissertação, a normalização de cor não é materializada como uma
+nova cópia permanente de todos os conjuntos de dados. Em vez disso, a Fase 4
+registra artefatos de referência e metadados necessários para que as fases
+posteriores possam modificar o método de normalização em tempo de execução. Essa decisão preserva o mesmo particionamento por paciente, permite avaliar diferentes métodos sob a mesma divisão experimental e evita que a comparação entre estratégias seja confundida com alterações na composição dos conjuntos de treino, validação e teste.
 
-\section{Segmentação semântica e arquiteturas neurais}\label{sec:segmentacao_arquiteturas}
+\section{Aumento de dados}\label{sec:aumento_dados}
 
-Segmentação semântica atribui uma classe a cada pixel da imagem. Em uma tarefa
-binária de câncer, a saída esperada é uma máscara que separa região positiva e
-região negativa. A \Figura{fig:semantic-segmentation} resume visualmente a
-diferença entre imagem de entrada, classes de interesse e predição segmentada.
+O aumento de dados consiste em aplicar transformações às amostras de treinamento
+com o objetivo de expor o modelo a variações plausíveis do domínio, sem alterar
+o significado do rótulo ou da máscara associada. Em histopatologia, essa etapa é
+particularmente relevante porque a orientação do tecido raramente possui
+significado absoluto, enquanto textura, foco, ruído e coloração podem variar por
+razões técnicas relacionadas ao preparo da lâmina, ao scanner e ao processo de
+digitalização. Assim, rotações, espelhamentos, pequenas perturbações locais e
+variações cromáticas podem contribuir para reduzir dependência de padrões
+acidentais do conjunto de treino.
 
-\begin{figure}[!htb]
-    \centering
-    \includegraphics[width=0.82\textwidth]{figuras/semantic_segmentation.png}
-    \caption[Segmentação semântica]{Representação conceitual de segmentação semântica, na qual cada pixel recebe uma classe. Figura reaproveitada do primeiro rascunho da dissertação.}
-    \label{fig:semantic-segmentation}
-\end{figure}
-
-Arquiteturas encoder-decoder, como U-Net e UNet++, são referências clássicas
-para segmentação biomédica \cite{ronneberger2015unet,zhou2020unetpp}. Modelos
-como DeepLabv3+, FPN, MA-Net, SegFormer, DPT e UPerNet oferecem diferentes
-formas de combinar contexto espacial, pirâmides de características e mecanismos
-de atenção \cite{chen2018deeplabv3plus,lin2017fpn,fan2020manet,xie2021segformer,ranftl2021dpt,xiao2018upernet}. O repositório explora essas famílias por meio de
-bibliotecas consolidadas, sem reivindicar que uma arquitetura seja superior antes
-da análise final.
-
-\begin{figure}[!htb]
-    \centering
-    \begin{subfigure}{0.48\textwidth}
-        \centering
-        \includegraphics[width=\linewidth]{figuras/CNN.png}
-        \caption{Rede convolucional}
-        \label{fig:cnn-conceito}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.48\textwidth}
-        \centering
-        \includegraphics[width=\linewidth]{figuras/vit_architecture.png}
-        \caption{\textit{Transformer} visual}
-        \label{fig:vit-conceito}
-    \end{subfigure}
-    \caption[Arquiteturas neurais em visão computacional]{Representações conceituais de famílias arquiteturais usadas em visão computacional. CNNs enfatizam extração local por convoluções; \textit{Transformers} visuais organizam a imagem em \textit{patches} e usam atenção para modelar relações globais.}
-    \label{fig:arquiteturas-conceituais}
-\end{figure}
-
-O mecanismo de atenção usado por \textit{Transformers} pode ser resumido pela
-atenção escalada por produto interno:
-\begin{equation}\label{eq:attention}
-    \mathrm{Attention}(Q,K,V)=
-    \mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V,
-\end{equation}
-em que $Q$, $K$ e $V$ são matrizes de consulta, chave e valor, e $d_k$ é a
-dimensão das chaves \cite{dosovitskiy2021vit}. Em WSIs, esse tipo de mecanismo é
-atraente porque permite representar relações mais amplas do que filtros locais,
-embora o custo computacional precise ser controlado.
-
-\section{Aumento de dados e otimização}\label{sec:treinamento_revisao}
-
-O aumento de dados busca expor o modelo a variações plausíveis de orientação,
-cor, ruído e textura. Em histopatologia, rotações, espelhamentos, variações de
-cor e perturbações locais são particularmente relevantes porque a orientação do
-tecido raramente possui significado absoluto, enquanto a aparência cromática
-pode variar por razões técnicas. Bibliotecas como Albumentations oferecem uma
-forma eficiente de compor essas transformações \cite{buslaev2020albumentations,dossantos2023augmentation,shorten2019survey}.
+No contexto desta dissertação, o aumento de dados é tratado como uma etapa de
+regularização experimental. Sua finalidade não é criar novas evidências
+biológicas, mas tornar o treinamento menos sensível a variações compatíveis com
+o processo de aquisição das imagens. Para isso, as transformações devem preservar
+a correspondência entre imagem e máscara: qualquer operação espacial aplicada ao
+\textit{patch} precisa ser aplicada de forma equivalente à respectiva máscara de
+segmentação. Bibliotecas como Albumentations são adequadas para esse cenário por
+permitirem compor transformações geométricas e fotométricas de maneira eficiente
+e consistente entre imagens e anotações
+\cite{buslaev2020albumentations,dossantos2023augmentation,shorten2019survey}.
 
 \begin{figure}[!htb]
     \centering
@@ -458,48 +502,445 @@ forma eficiente de compor essas transformações \cite{buslaev2020albumentations
         \small Transformações configuráveis
         \vspace{1.7em}
     \end{subfigure}
-    \caption[Exemplos de aumento de dados]{Exemplos qualitativos de transformações de aumento de dados relevantes para histopatologia. As transformações efetivamente usadas devem ser reportadas a partir da configuração final de treinamento.}
+    \caption[Exemplos de aumento de dados]{Exemplos qualitativos de
+    transformações de aumento de dados relevantes para histopatologia. As
+    transformações ilustram variações geométricas e fotométricas que podem ser
+    aplicadas ao \textit{patch} e, quando necessário, à máscara correspondente.}
     \label{fig:augmentation-exemplos}
 \end{figure}
 
-O treinamento supervisionado em segmentação combina otimização pixel a pixel e
-otimização de sobreposição. No projeto, a família de perda combina BCE para a
-classe positiva com termos Dice para fundo e primeiro plano. O uso de AdamW
-separa a atualização adaptativa do decaimento de peso
-\cite{loshchilov2019decoupled}; estratégias schedule-free e busca de taxa de
-aprendizado são tratadas como componentes experimentais quando habilitadas
-\cite{defazio2024road,smith2017cyclical}.
+
+\section{Otimização e função de perda}\label{sec:otimizacao_loss}
+
+O treinamento supervisionado de redes neurais pode ser entendido como a
+minimização de uma função de perda, isto é, uma medida da discrepância entre a
+predição do modelo e a referência anotada. Essa função transforma o problema de
+aprendizagem em um problema de otimização: a cada iteração, os parâmetros da rede
+são ajustados para reduzir o erro observado no conjunto de treinamento, buscando
+melhor generalização no conjunto de validação \cite{goodfellow2016deep}.
+
+Em segmentação semântica, a função de perda deve considerar tanto a
+classificação pixel a pixel quanto a sobreposição espacial entre a máscara
+prevista e a máscara de referência. A entropia cruzada binária penaliza erros
+locais de classificação em cada pixel, enquanto termos baseados no coeficiente
+de Dice favorecem a sobreposição entre regiões segmentadas. Essa combinação é
+particularmente útil em tarefas biomédicas desbalanceadas, nas quais a classe de
+interesse pode ocupar uma fração pequena da imagem \cite{sudre2017generalised}.
+
+No fluxo desta dissertação, a função de perda segue a formulação híbrida adotada
+por \textcite{khened2021generalized}, combinando um termo de entropia cruzada
+binária para a classe positiva com termos Dice para fundo e primeiro plano. De
+forma geral, essa composição pode ser escrita como:
+
+\begin{equation}\label{eq:hybrid-loss}
+    \mathcal{L}
+    =
+    \alpha \mathcal{L}_{\mathrm{BCE}}
+    +
+    \beta \mathcal{L}_{\mathrm{Dice,bg}}
+    +
+    \gamma \mathcal{L}_{\mathrm{Dice,fg}},
+\end{equation}
+em que $\mathcal{L}_{\mathrm{BCE}}$ representa o termo de entropia cruzada
+binária, $\mathcal{L}_{\mathrm{Dice,bg}}$ e
+$\mathcal{L}_{\mathrm{Dice,fg}}$ representam os termos Dice para fundo e
+primeiro plano, respectivamente, e $\alpha$, $\beta$ e $\gamma$ controlam a
+contribuição relativa de cada componente. Essa formulação permite equilibrar a
+penalização de erros pixel a pixel com a qualidade global da segmentação,
+reduzindo a dependência de uma única medida de erro.
+
+A otimização dos parâmetros do modelo é realizada por um algoritmo iterativo que atualiza os pesos a partir dos gradientes da função de perda. Entre os
+otimizadores adaptativos, o Adam estima médias móveis do primeiro e do segundo
+momento dos gradientes, ajustando a escala das atualizações para cada parâmetro
+ao longo do treinamento \cite{kingma2015adam}. A atualização adaptativa pode ser representada, de forma simplificada, por:
+\begin{equation}\label{eq:adam-update}
+    \theta_{t+1}
+    =
+    \theta_t
+    -
+    \eta
+    \frac{\hat{m}_t}{\sqrt{\hat{v}_t}+\epsilon},
+\end{equation}
+em que $\theta_t$ representa os parâmetros no passo $t$, $\eta$ é a taxa de
+aprendizado, $\hat{m}_t$ e $\hat{v}_t$ são as estimativas corrigidas do primeiro e do segundo momento dos gradientes, e $\epsilon$ é um termo de estabilidade numérica.
+
+O AdamW parte dessa atualização, mas desacopla o decaimento de peso da
+estimativa adaptativa dos gradientes. Em implementações tradicionais, a
+regularização pode ser incorporada à função de perda por meio de uma penalização proporcional à norma quadrática dos parâmetros, isto é, um termo $L_2$. No AdamW, em vez de misturar esse termo ao gradiente da perda, o decaimento de peso é aplicado diretamente aos parâmetros:
+\begin{equation}\label{eq:adamw-update}
+    \theta_{t+1}
+    =
+    \theta_t
+    -
+    \eta
+    \frac{\hat{m}_t}{\sqrt{\hat{v}_t}+\epsilon}
+    -
+    \eta\lambda\theta_t,
+\end{equation}
+em que $\lambda$ controla a intensidade do decaimento de peso
+\cite{loshchilov2019decoupled}. Essa separação torna mais explícito o papel
+regularizador do decaimento de peso e evita misturá-lo à estimativa adaptativa
+dos gradientes.
+
+Quando habilitada, a estratégia \textit{schedule-free} é tratada como um
+componente experimental do protocolo de otimização. Diferentemente de
+escalonadores tradicionais, que reduzem ou ajustam a taxa de aprendizado segundo uma agenda predefinida, métodos \textit{schedule-free} buscam eliminar a necessidade de especificar uma agenda explícita ou o número total de passos de treinamento. Para isso, substituem o papel clássico do momentum por uma
+combinação de interpolação e média iterativa dos parâmetros, mantendo a taxa de
+aprendizado como hiperparâmetro principal \cite{defazio2024road}.
+
+Dessa forma, aumento de dados, função de perda, otimizador e taxa de aprendizado não são decisões independentes. Em conjunto, eles definem as condições sob as quais o modelo observa variações dos dados, calcula o erro, atualiza seus parâmetros e seleciona uma solução candidata. Por esse motivo, essas escolhas devem ser explicitadas nas configurações de treinamento e preservadas como parte dos artefatos necessários à reprodução do experimento.
+
+\section{Segmentação semântica e arquiteturas neurais}
+\label{sec:segmentacao_arquiteturas}
+
+\subsection{Segmentação semântica}
+\label{subsec:segmentacao_semantica}
+
+Segmentação semântica é a tarefa de atribuir uma classe a cada pixel de uma
+imagem. Diferentemente da classificação, que produz um rótulo para a imagem como
+um todo, a segmentação preserva a estrutura espacial da predição. Em uma tarefa
+binária de câncer, a saída esperada é uma máscara em que pixels associados à
+região tumoral pertencem à classe positiva, enquanto os demais pixels pertencem
+à classe negativa ou ao fundo. Essa formulação é particularmente relevante em
+patologia digital, pois permite não apenas indicar a presença de câncer, mas
+também estimar sua localização e extensão espacial.
+
+A \Figura{fig:semantic-segmentation} ilustra essa diferença entre imagem de
+entrada, classes de interesse e máscara predita. No contexto desta dissertação,
+a segmentação é tratada como uma tarefa supervisionada: cada \textit{patch}
+extraído da WSI deve estar associado a uma máscara de referência compatível, e a
+predição do modelo deve preservar correspondência espacial com essa máscara.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.82\textwidth]{figuras/semantic_segmentation.png}
+    \caption[Segmentação semântica]{Representação conceitual de segmentação
+    semântica. A imagem de entrada é processada por um modelo que atribui uma
+    classe a cada pixel, produzindo uma máscara de predição espacialmente
+    alinhada à imagem original.Imagem gerada por ferramenta de IA (Gemini).}
+    \label{fig:semantic-segmentation}
+\end{figure}
+
+\subsection{Redes neurais para segmentação}
+\label{subsec:redes_segmentacao}
+
+Modelos de segmentação semântica precisam combinar duas exigências
+complementares. A primeira é semântica: o modelo deve reconhecer padrões visuais
+associados às classes de interesse, como regiões tumorais e não tumorais. A
+segunda é espacial: a predição precisa preservar localização e contorno das
+regiões segmentadas. Por essa razão, muitas arquiteturas de segmentação adotam
+uma estrutura do tipo codificador--decodificador. O codificador extrai
+representações progressivamente mais abstratas da imagem; o decodificador
+projeta essas representações de volta para uma grade espacial compatível com a
+máscara de saída.
+
+Arquiteturas convolucionais, como U-Net, UNet++, DeepLabv3+, FPN e MA-Net,
+exploram filtros locais, fusões multiescala e mecanismos de atenção para
+reconstruir máscaras densas. Em contrapartida, arquiteturas baseadas em
+\textit{Transformers}, como Swin, DPT, SegFormer e UPerNet, introduzem formas
+alternativas de modelar contexto, seja por atenção em janelas, agregação de
+\textit{tokens}, codificadores hierárquicos ou fusão multiescala. A
+\Figura{fig:arquiteturas-conceituais} resume, em nível conceitual, a diferença
+entre uma rede convolucional e um \textit{Transformer} visual.
+
+\begin{figure}[!htb]
+    \centering
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/CNN.png}
+        \caption{Rede convolucional}
+        \label{fig:cnn-conceito}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figuras/vit_architecture.png}
+        \caption{\textit{Transformer} visual}
+        \label{fig:vit-conceito}
+    \end{subfigure}
+    \caption[Arquiteturas neurais em visão computacional]{Representações
+    conceituais de famílias arquiteturais usadas em visão computacional. Redes
+    convolucionais enfatizam extração local por filtros compartilhados, enquanto
+    \textit{Transformers} visuais organizam a imagem em unidades de
+    representação e usam mecanismos de atenção para modelar relações entre
+    regiões. Imagem gerada por ferramenta de IA (Gemini).}
+    \label{fig:arquiteturas-conceituais}
+\end{figure}
+
+
+\subsection{Pré-treinamento em \textit{ImageNet}}
+\label{subsec:pretreinamento_imagenet}
+
+No fluxo desta dissertação, as arquiteturas avaliadas são inicializadas com
+pesos pré-treinados em ImageNet. Essa estratégia corresponde a uma forma de
+transferência de aprendizado: em vez de iniciar todos os parâmetros de maneira
+aleatória, o modelo parte de representações visuais previamente aprendidas em
+uma base ampla de imagens naturais. Embora imagens naturais e imagens
+histopatológicas pertençam a domínios distintos, o pré-treinamento pode fornecer
+representações iniciais úteis para padrões visuais genéricos, como bordas,
+texturas, contrastes locais e composições estruturais. Com isso, reduz-se a
+dependência de grandes volumes de dados anotados no domínio-alvo e favorece-se
+uma inicialização mais estável do treinamento.
+
+O ImageNet foi proposto como uma base hierárquica de larga escala para
+reconhecimento visual, organizada a partir da estrutura semântica do WordNet
+\cite{deng2009imagenet}. Posteriormente, o desafio ILSVRC consolidou seu papel
+como referência para avaliação de algoritmos de classificação e detecção em
+visão computacional, reunindo centenas de categorias de objetos e milhões de
+imagens anotadas \cite{russakovsky2015imagenet}. Nesta dissertação, o uso de
+pesos pré-treinados em ImageNet é tratado como uma escolha de inicialização dos
+modelos, enquanto os detalhes específicos de codificadores, registros de
+arquitetura e configurações de treinamento são descritos no capítulo de
+metodologia.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=\linewidth]{figuras/imagenet.png}
+    \caption[ImageNet como base de pré-treinamento]{ImageNet, grande base de dados composta por 14.197.122 imagens e 21.841
+    \textit{synsets} indexados. Cada \textit{synset} corresponde a um conceito
+    semanticamente definido no \textit{WordNet}, ao qual são associadas imagens anotadas
+    e controladas por qualidade. Essa estrutura tornou o ImageNet uma referência
+    para treinamento, avaliação e pré-treinamento de modelos de reconhecimento
+    visual \cite{deng2009imagenet,russakovsky2015imagenet}.}
+    \label{fig:imagenet-conceito}
+\end{figure}
+
+\subsection{Arquiteturas convolucionais}
+\label{subsec:arquiteturas_convolucionais}
+
+Redes convolucionais permanecem relevantes em segmentação biomédica porque
+combinam eficiência computacional, viés indutivo local e capacidade de recuperar
+detalhes espaciais. Em histopatologia, esses aspectos são importantes para
+representar textura, bordas glandulares, transições entre tecido tumoral e não
+tumoral, além de pequenos padrões morfológicos distribuídos no \textit{patch}.
+
+A \Tabela{tab:cnn-models} resume as arquiteturas convolucionais utilizadas no
+fluxo experimental. A tabela distingue a arquitetura de segmentação, o
+codificador adotado no repositório e a função principal de cada família no
+conjunto de modelos.
+
+\begin{table}[!htb]
+\centering
+\caption{Arquiteturas convolucionais consideradas no fluxo experimental.}
+\label{tab:cnn-models}
+\begin{tabular}{p{2.8cm}p{8.4cm}p{3.0cm}}
+\toprule
+Arquitetura & Princípio arquitetural & Referência \\
+\midrule
+DeepLabv3+ &
+Arquitetura codificador--decodificador que combina convoluções atrous,
+agregação de contexto multiescala e refinamento espacial da predição. &
+\cite{chen2018deeplabv3plus} \\
+
+UNet++ &
+Extensão da U-Net com conexões densas e aninhadas entre codificador e
+decodificador, proposta para reduzir a lacuna semântica entre mapas de
+características de diferentes níveis. &
+\cite{zhou2020unetpp} \\
+
+FPN &
+Rede de pirâmide de características que combina mapas de alta resolução com
+representações semanticamente mais abstratas, favorecendo predições
+multiescala. &
+\cite{lin2017fpn} \\
+
+MA-Net &
+Arquitetura baseada em U-Net que incorpora mecanismos de atenção multiescala
+para integrar informações locais e globais durante a reconstrução da máscara. &
+\cite{fan2020manet} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No fluxo desta dissertação, essas arquiteturas compõem o grupo de modelos com
+maior viés espacial. Essa denominação não implica que os modelos ignorem
+informação semântica; ela apenas indica que, em comparação com os modelos
+baseados em \textit{Transformers}, essas arquiteturas tendem a favorecer
+reconstrução local, fusão multiescala e preservação de detalhes espaciais.
+
+\subsection{Arquiteturas baseadas em \textit{Transformers}}
+\label{subsec:arquiteturas_transformers}
+
+\textit{Transformers} visuais adaptam mecanismos de atenção para imagens. Em vez
+de depender exclusivamente de filtros convolucionais locais, essas arquiteturas
+representam a imagem por unidades ou regiões e calculam relações entre elas por
+meio de atenção. O mecanismo de atenção escalada por produto interno pode ser
+resumido por:
+\begin{equation}\label{eq:attention}
+    \mathrm{Attention}(Q,K,V)=
+    \mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V,
+\end{equation}
+em que $Q$, $K$ e $V$ são matrizes de consulta, chave e valor, e $d_k$ é a
+dimensão das chaves \cite{dosovitskiy2021vit}.
+
+Em WSIs, esse tipo de mecanismo é atraente porque permite representar relações
+mais amplas do que filtros estritamente locais. Ao mesmo tempo, o custo
+computacional da atenção precisa ser controlado, especialmente quando se trabalha
+com \textit{patches} de alta resolução ou grande volume de amostras. Por isso,
+as arquiteturas modernas adotam estratégias como atenção em janelas,
+codificadores hierárquicos, agregação multiescala ou decodificadores leves.
+
+A \Tabela{tab:transformer-models} resume as arquiteturas baseadas em
+\textit{Transformers} consideradas no fluxo experimental.
+
+\begin{table}[!htb]
+\centering
+\caption{Arquiteturas baseadas em \textit{Transformers} consideradas no fluxo experimental.}
+\label{tab:transformer-models}
+\begin{tabular}{p{2.8cm}p{8.4cm}p{3.0cm}}
+\toprule
+Arquitetura & Princípio arquitetural & Referência \\
+\midrule
+Swin &
+\textit{Transformer} hierárquico com atenção em janelas deslocadas, projetado
+para reduzir custo computacional e preservar representações multiescala. &
+\cite{liu2021swin} \\
+
+DPT &
+Arquitetura de predição densa que combina representações intermediárias de um
+\textit{Vision Transformer} e as projeta para uma saída espacial. &
+\cite{ranftl2021dpt} \\
+
+SegFormer &
+Estrutura de segmentação que combina codificador \textit{Transformer}
+hierárquico com decodificador MLP leve para agregação multiescala. &
+\cite{xie2021segformer} \\
+
+UPerNet &
+Estrutura de segmentação multiescala proposta para \textit{unified perceptual
+parsing}, utilizada para integrar representações hierárquicas em predições
+densas. &
+\cite{xiao2018upernet} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No fluxo experimental, esses modelos compõem o grupo semântico. Essa
+classificação reflete a intenção metodológica de incluir arquiteturas capazes de
+explorar contexto mais amplo e representações hierárquicas, complementando os
+modelos convolucionais no \textit{ensemble}. Assim, a comparação entre famílias
+não busca estabelecer superioridade a priori de uma arquitetura, mas avaliar se
+diferentes vieses arquiteturais podem contribuir para predições complementares
+em segmentação de câncer.
 
 \section{Métricas de avaliação}\label{sec:metricas_reprodutibilidade}
 
-A avaliação de segmentação deve explicitar as quantidades básicas da matriz de
-confusão em nível de pixel: verdadeiros positivos ($TP$), falsos positivos
-($FP$), verdadeiros negativos ($TN$) e falsos negativos ($FN$). A partir dessas
-quantidades, a acurácia mede a proporção total de acertos:
-\begin{equation}\label{eq:acuracia}
-    \text{Acurácia}=\frac{TP+TN}{TP+TN+FP+FN}
-\end{equation}
-Em cenários desbalanceados, entretanto, métricas de sobreposição são mais
-informativas. O Coeficiente de Dice e a interseção sobre união são definidos por:
-\begin{equation}\label{eq:dice-iou-revisao}
-    \mathrm{Dice}=\frac{2TP}{2TP+FP+FN},
-    \qquad
-    \mathrm{IoU}=\frac{TP}{TP+FP+FN}.
-\end{equation}
-Comparações de Dice devem considerar unidade de agregação, tratamento de
-máscaras vazias e limiarização \cite{seghier2024dice}.
+A avaliação de modelos de segmentação em patologia digital deve considerar tanto
+a qualidade espacial das máscaras preditas quanto a capacidade discriminativa
+das probabilidades produzidas pelo modelo. No contexto desta dissertação, as
+métricas centrais são o Coeficiente de Correlação de Matthews
+(\Sigla{\textit{Matthews Correlation Coefficient}}{MCC}), a área sob a curva ROC
+(\Sigla{\textit{Area Under the Receiver Operating Characteristic Curve}}{AUROC}),
+a área sob a curva precisão-revocação
+(\Sigla{\textit{Area Under the Precision-Recall Curve}}{AUPRC}) e o Coeficiente
+de Dice. Essas métricas são complementares, pois capturam aspectos distintos do
+desempenho: correlação entre predição e referência, discriminação probabilística,
+desempenho sob desbalanceamento e sobreposição espacial.
 
-Para avaliar discriminação probabilística, AUROC e AUPRC são métricas
-complementares. A curva ROC relaciona sensibilidade e taxa de falsos positivos
-em diferentes limiares, enquanto a curva precisão-revocação é frequentemente
-mais informativa em dados desbalanceados \cite{fawcett2006roc,saito2015precision}.
-A \Figura{fig:roc-conceitual} ilustra a leitura conceitual de uma curva ROC.
+Para obter uma máscara binária a partir da probabilidade predita pelo modelo, é
+necessário definir um limiar de decisão. Seja $p_i$ a probabilidade atribuída ao
+pixel $i$ pertencer à classe positiva. A predição binária $\hat{y}_i(t)$ para um
+limiar $t$ pode ser escrita como:
+\begin{equation}\label{eq:threshold-prediction}
+    \hat{y}_i(t) =
+    \begin{cases}
+        1, & \text{se } p_i \geq t,\\
+        0, & \text{se } p_i < t.
+    \end{cases}
+\end{equation}
+
+A partir da comparação entre $\hat{y}_i(t)$ e a máscara de referência $y_i$,
+obtêm-se as quantidades da matriz de confusão em nível de pixel: verdadeiros
+positivos ($TP$), falsos positivos ($FP$), verdadeiros negativos ($TN$) e falsos
+negativos ($FN$). Métricas como Dice e MCC dependem dessas contagens e,
+portanto, dependem do limiar escolhido.
+
+O Coeficiente de Dice mede a sobreposição entre a região positiva prevista e a
+região positiva de referência:
+\begin{equation}\label{eq:dice-revisao}
+    \mathrm{Dice} =
+    \frac{2TP}{2TP+FP+FN}.
+\end{equation}
+Em segmentação, essa métrica é intuitiva porque avalia diretamente a
+concordância espacial entre máscara prevista e máscara anotada. Entretanto,
+comparações baseadas em Dice devem explicitar a unidade de agregação, o
+tratamento de máscaras vazias e o limiar usado para binarizar as probabilidades
+\cite{seghier2024dice}.
+
+O MCC resume a associação entre predição binária e referência considerando, em
+uma única expressão, os quatro termos da matriz de confusão:
+\begin{equation}\label{eq:mcc}
+    \mathrm{MCC} =
+    \frac{TP \cdot TN - FP \cdot FN}
+    {\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}}.
+\end{equation}
+Seu valor varia de $-1$ a $1$: valores próximos de $1$ indicam forte concordância
+entre predição e referência; valores próximos de $0$ indicam desempenho próximo
+ao acaso; e valores negativos indicam discordância sistemática. Em cenários
+desbalanceados, o MCC é particularmente útil porque penaliza simultaneamente
+erros na classe positiva e na classe negativa, evitando interpretações
+excessivamente otimistas baseadas apenas em acurácia \cite{chicco2020advantages}.
+
+Além das métricas dependentes de limiar, esta dissertação utiliza métricas
+independentes de limiar, calculadas a partir da variação do ponto de decisão
+sobre as probabilidades preditas. A curva ROC relaciona a sensibilidade
+(\Sigla{\textit{True Positive Rate}}{TPR}) e a taxa de falsos positivos
+(\Sigla{\textit{False Positive Rate}}{FPR}) para diferentes valores de $t$:
+\begin{equation}\label{eq:tpr-fpr}
+    \mathrm{TPR}(t)=\frac{TP(t)}{TP(t)+FN(t)},
+    \qquad
+    \mathrm{FPR}(t)=\frac{FP(t)}{FP(t)+TN(t)}.
+\end{equation}
+
+A AUROC corresponde à área sob essa curva e avalia a capacidade do modelo de
+atribuir escores mais altos aos pixels positivos do que aos negativos, ao longo
+de todos os limiares considerados \cite{fawcett2006roc}.
+A curva precisão-revocação, por sua vez, relaciona precisão e revocação:
+\begin{equation}\label{eq:precision-recall}
+    \mathrm{Precis\tilde{a}o}(t)=\frac{TP(t)}{TP(t)+FP(t)},
+    \qquad
+    \mathrm{Revoca\c{c}\tilde{a}o}(t)=\frac{TP(t)}{TP(t)+FN(t)}.
+\end{equation}
+
+A AUPRC corresponde à área sob essa curva. Em tarefas com forte
+desbalanceamento, como segmentação de câncer em que a região positiva pode
+ocupar pequena fração da imagem, a AUPRC tende a ser mais sensível à qualidade
+das predições positivas do que a AUROC, pois considera diretamente a relação
+entre falsos positivos e verdadeiros positivos \cite{saito2015precision}.
+
+A \Figura{fig:roc-conceitual} ilustra a leitura conceitual da curva ROC,
+enquanto a \Figura{fig:prc-conceitual} apresenta a curva precisão-revocação.
+Essas curvas complementam as métricas calculadas em um limiar específico: AUROC
+e AUPRC avaliam o comportamento probabilístico do modelo ao longo de diferentes
+limiares, enquanto Dice e MCC caracterizam o desempenho após a escolha de um
+ponto de decisão.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.68\textwidth]{figuras/roc_curve.png}
-    \caption[Curva ROC conceitual]{Representação conceitual de curvas ROC. A linha diagonal indica um classificador sem capacidade discriminativa; curvas mais próximas do canto superior esquerdo indicam melhor separação entre classes.}
+    \caption[Curva ROC conceitual]{Representação conceitual de uma curva ROC.
+    A curva relaciona sensibilidade e taxa de falsos positivos para diferentes
+    limiares de decisão. A linha diagonal indica um classificador sem capacidade
+    discriminativa; curvas mais próximas do canto superior esquerdo indicam
+    melhor separação entre classes.}
     \label{fig:roc-conceitual}
+\end{figure}
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.68\textwidth]{figuras/auprc_curve.png}
+    \caption[Curva precisão-revocação conceitual]{
+    Representação conceitual de uma curva precisão-revocação. O eixo horizontal
+    indica a revocação, isto é, a proporção de exemplos positivos corretamente
+    recuperados, enquanto o eixo vertical indica a precisão, isto é, a proporção de
+    predições positivas que correspondem de fato à classe positiva. A curva azul
+    representa o desempenho do modelo ao longo de diferentes limiares de decisão, e
+    a região sombreada sob essa curva corresponde à área sob a curva
+    precisão-revocação, ou AUPRC. Em tarefas desbalanceadas, como a segmentação de
+    regiões tumorais, essa visualização é particularmente informativa por evidenciar
+    o compromisso entre recuperar a classe positiva e controlar a quantidade de
+    falsos positivos.
+    }
+    \label{fig:prc-conceitual}
 \end{figure}
 
 \section{Particionamento, reprodutibilidade e ferramentas}\label{sec:reprodutibilidade_ferramentas}
