@@ -918,10 +918,14 @@ ponto de decisão.
     \centering
     \includegraphics[width=0.68\textwidth]{figuras/roc_curve.png}
     \caption[Curva ROC conceitual]{Representação conceitual de uma curva ROC.
-    A curva relaciona sensibilidade e taxa de falsos positivos para diferentes
-    limiares de decisão. A linha diagonal indica um classificador sem capacidade
-    discriminativa; curvas mais próximas do canto superior esquerdo indicam
-    melhor separação entre classes.}
+    O eixo horizontal indica a taxa de falsos positivos (\textit{false positive rate}, FPR),
+    enquanto o eixo vertical indica a taxa de verdadeiros positivos
+    (\textit{true positive rate}, TPR), também interpretada como sensibilidade.
+    A curva azul ilustra o comportamento do classificador ao longo de diferentes
+    limiares de decisão: quanto mais a curva se aproxima do canto superior esquerdo,
+    melhor tende a ser a capacidade discriminativa do modelo. A região sombreada
+    sob a curva representa a área sob a curva ROC (AUROC), utilizada como medida
+    agregada de separação entre as classes ao longo de todos os limiares. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:roc-conceitual}
 \end{figure}
 
@@ -938,51 +942,142 @@ ponto de decisão.
     precisão-revocação, ou AUPRC. Em tarefas desbalanceadas, como a segmentação de
     regiões tumorais, essa visualização é particularmente informativa por evidenciar
     o compromisso entre recuperar a classe positiva e controlar a quantidade de
-    falsos positivos.
-    }
+    falsos positivos. Imagem gerada por ferramenta de IA (Gemini).}
     \label{fig:prc-conceitual}
 \end{figure}
 
-\section{Particionamento, reprodutibilidade e ferramentas}\label{sec:reprodutibilidade_ferramentas}
+\section{Reprodutibilidade e Auditoria}
+\label{sec:reprodutibilidade_ferramentas}
 
-Em dados médicos, muitos \textit{patches} podem derivar da mesma lâmina ou do
-mesmo paciente. Se amostras correlacionadas forem distribuídas entre treino e
-teste, o modelo pode ser avaliado sobre padrões quase duplicados, produzindo uma
-estimativa otimista de desempenho. Por isso, validação agrupada e separação por
-identificador de paciente são princípios metodológicos importantes
-\cite{roberts2017crossvalidation,dawood2026confounding}.
+Em dados médicos, múltiplas amostras podem derivar da mesma lâmina, do mesmo
+caso ou do mesmo paciente. Em fluxos baseados em \textit{patches}, essa
+dependência é especialmente crítica: recortes visualmente semelhantes podem
+aparecer em diferentes conjuntos experimentais se o particionamento for feito em
+nível de amostra. Quando isso ocorre, o modelo pode ser avaliado sobre padrões
+quase duplicados daqueles observados durante o treinamento, produzindo uma
+estimativa artificialmente otimista de desempenho. Por essa razão, a separação
+por identificador de paciente e a validação agrupada constituem princípios
+metodológicos centrais em experimentos de aprendizagem profunda com dados
+médicos \cite{roberts2017crossvalidation,dawood2026confounding}.
 
-Reprodutibilidade também depende da preservação de artefatos. Manifestos,
-assinaturas de arquivos, configurações, checkpoints, relatórios e logs conectam
-o resultado final às decisões tomadas ao longo do fluxo. Essa preocupação está
-alinhada a princípios FAIR e a recomendações de reprodutibilidade computacional
-\cite{wilkinson2016fair,piccolo2016tools}. Ferramentas de acompanhamento de
-experimentos, como AIM, ajudam a registrar curvas de treino, validação e
-metadados operacionais. A \Figura{fig:aim-stack} ilustra esse tipo de interface.
+A reprodutibilidade do fluxo também depende da preservação dos artefatos que
+conectam dados, decisões e resultados. Manifestos, assinaturas de arquivos,
+configurações, relatórios, \textit{checkpoints}, métricas e logs permitem
+reconstruir o caminho entre a WSI original, os \textit{patches} extraídos, os
+modelos treinados e a inferência final. Sem esses registros, a métrica reportada
+torna-se difícil de auditar, pois não é possível determinar com precisão quais
+dados foram usados, quais transformações foram aplicadas, quais versões de
+configuração foram executadas e quais artefatos deram origem ao resultado.
 
-\begin{figure}[!htb]
-    \centering
-    \includegraphics[width=0.95\textwidth]{figuras/AIM_stack.png}
-    \caption[Monitoramento de experimentos com AIM]{Exemplo de interface de monitoramento de experimentos usada para acompanhar métricas e comparar execuções. A figura é ilustrativa; os resultados finais desta dissertação serão preenchidos a partir dos artefatos consolidados das fases de treinamento e inferência.}
-    \label{fig:aim-stack}
-\end{figure}
+Essa preocupação está alinhada aos princípios FAIR, que enfatizam a necessidade
+de tornar dados e metadados localizáveis, acessíveis, interoperáveis e
+reutilizáveis, e às recomendações de reprodutibilidade computacional, segundo as
+quais os passos de uma análise devem ser descritos com detalhe suficiente para
+que outros pesquisadores possam verificá-los e reconstruí-los
+\cite{wilkinson2016fair,piccolo2016tools}. No contexto desta dissertação, essas
+diretrizes são traduzidas em contratos operacionais: preservação de metadados,
+particionamento explícito, versionamento de configurações, armazenamento de
+artefatos intermediários e registro das execuções de treinamento, validação e
+teste.
 
-\section{\textit{Ensembles} e inferência final}\label{sec:ensembles_revisao}
+\section{\textit{Ensembles}}
+\label{sec:ensembles_revisao}
 
-\textit{Ensembles} combinam predições de múltiplos modelos para explorar
-diversidade entre hipóteses aprendidas. A literatura clássica sustenta que a
-combinação de modelos pode reduzir erro quando os componentes apresentam erros
-parcialmente independentes \cite{dietterich2000ensemble}. Seleção de modelos a
-partir de bibliotecas de candidatos também aparece como estratégia para compor
-receitas finais a partir de desempenho em validação \cite{caruana2004ensemble}.
+\textit{Ensembles} combinam predições de múltiplos modelos com o objetivo de
+explorar a diversidade entre hipóteses aprendidas. A literatura clássica sustenta
+que a combinação de modelos pode reduzir erro quando os componentes apresentam
+erros parcialmente independentes \cite{dietterich2000ensemble}. Além disso, a
+seleção de modelos a partir de uma biblioteca de candidatos permite construir
+receitas finais com base no desempenho observado em dados de validação, em vez
+de depender da escolha isolada de uma única arquitetura \cite{caruana2004ensemble}.
 
-No fluxo desta dissertação, a ideia geral de \textit{ensemble} é adaptada a uma
-receita local: modelos treinados individualmente são combinados por pesos e
-limiares otimizados na validação, e a inferência final deve usar essa receita
-congelada no teste. Essa separação é central para a interpretação científica.
-Resultados de teste só podem ser usados para avaliação final; se pesos, limiares
-ou escolha de modelos forem ajustados depois de observar o teste, a estimativa
-de desempenho deixa de refletir uma avaliação independente.
+No contexto desta dissertação, o \textit{ensemble} é tratado como uma etapa
+explícita do fluxo experimental, e não apenas como uma média simples de
+predições. Os modelos treinados individualmente são organizados em dois grupos
+com funções complementares. O primeiro grupo, denominado fluxo semântico, reúne
+modelos voltados à identificação de regiões prováveis de interesse. O segundo
+grupo, denominado fluxo espacial, reúne modelos voltados ao refinamento da
+segmentação dentro dessas regiões. Essa divisão busca explorar a
+complementaridade entre arquiteturas com maior capacidade de representação
+contextual e arquiteturas com maior viés para reconstrução local da máscara.
+
+Essa organização é motivada pela natureza multiescala da patologia digital. Em
+WSIs, a presença de câncer pode depender tanto de padrões locais, como bordas,
+texturas e transições glandulares, quanto de relações mais amplas entre regiões
+do tecido. Modelos convolucionais tendem a favorecer a captura de regularidades
+locais e a preservação de detalhes espaciais, enquanto arquiteturas baseadas em
+\textit{Transformers} podem contribuir com representações de contexto mais
+amplo. A separação entre fluxo semântico e fluxo espacial não implica uma divisão
+absoluta entre essas capacidades, mas oferece uma forma metodológica de organizar
+vieses arquiteturais complementares no momento da inferência.
+
+A estratégia adotada nesta dissertação pode ser descrita como um
+\textit{ensemble} em dois fluxos com restrição espacial por região de interesse.
+No fluxo semântico, as predições dos modelos são combinadas para produzir uma
+estimativa grosseira da região em que o câncer pode estar presente. Essa região
+é usada como uma máscara de interesse, obtida por agregação das probabilidades,
+redução de resolução para incorporar contexto, aplicação de um limiar próprio e
+retorno à resolução original. No fluxo espacial, as predições dos modelos são
+combinadas para produzir uma estimativa mais fina da máscara tumoral. A predição
+final resulta da aplicação da região de interesse semântica sobre a saída do
+fluxo espacial.
+
+De forma conceitual, sejam $P_{\mathrm{sem}}(x)$ e $P_{\mathrm{spa}}(x)$ as
+probabilidades agregadas dos fluxos semântico e espacial no pixel $x$. A região
+de interesse semântica pode ser representada por uma máscara binária
+$R(x)$, enquanto a probabilidade final é dada por:
+
+\begin{equation}\label{eq:two-stream-gated-ensemble}
+    P_{\mathrm{final}}(x)
+    =
+    P_{\mathrm{spa}}(x)R(x).
+\end{equation}
+
+Nessa formulação, $R(x)$ atua como uma restrição espacial: regiões fora da área
+considerada plausível pelo fluxo semântico são suprimidas, enquanto regiões
+dentro da área de interesse preservam a predição refinada do fluxo espacial. Em
+seguida, a probabilidade final é convertida em máscara binária por meio de um
+limiar de decisão:
+
+\begin{equation}\label{eq:ensemble-decision-threshold}
+    \hat{Y}(x)
+    =
+    \mathbb{I}\left(P_{\mathrm{final}}(x)>\tau_{\mathrm{dec}}\right),
+\end{equation}
+
+em que $\hat{Y}(x)$ é a predição binária final, $\mathbb{I}(\cdot)$ representa a
+função indicadora e $\tau_{\mathrm{dec}}$ é o limiar de decisão final. Essa
+distinção é metodologicamente importante porque o limiar usado para definir a
+região de interesse semântica não possui o mesmo papel do limiar usado para
+produzir a máscara binária final. O primeiro delimita onde o refinamento espacial
+deve atuar; o segundo define a decisão final de segmentação.
+
+A otimização da receita do \textit{ensemble} é realizada exclusivamente no
+conjunto de validação. Nesse processo, são definidos os pesos dos modelos em
+cada fluxo, o limiar da região de interesse e o limiar de decisão final. A
+otimização do fluxo semântico favorece regiões de interesse capazes de recuperar
+a maior parte da área positiva sem se tornarem triviais ou excessivamente
+permissivas. A otimização do fluxo espacial, por sua vez, privilegia desempenho
+dentro da região de interesse, penalizando extravasamento de predição para fora
+dessa região e massa de falsos positivos em pacientes negativos. Assim, a
+receita final não busca apenas maximizar uma métrica global, mas equilibrar
+detecção ampla, refinamento local e controle de falsos positivos.
+
+Após a otimização, a receita de inferência é congelada e registrada como
+artefato experimental. Esse registro inclui a estratégia de \textit{ensemble}, a
+atribuição dos modelos aos fluxos semântico e espacial, os pesos normalizados,
+os limiares escolhidos e as assinaturas de proveniência associadas aos modelos e
+dados. O conjunto de teste é utilizado apenas depois dessa etapa, para avaliar a
+receita já definida. Caso pesos, limiares ou seleção de modelos fossem ajustados
+após observar o teste, a avaliação deixaria de representar uma estimativa
+independente de generalização.
+
+Dessa forma, o \textit{ensemble} cumpre duas funções nesta dissertação. A
+primeira é preditiva: combinar arquiteturas com vieses complementares para
+integrar contexto semântico e refinamento espacial. A segunda é metodológica:
+transformar a inferência final em uma receita explícita, otimizada apenas em
+validação, registrada de forma rastreável e aplicada ao teste sem ajustes
+posteriores.
 
 \section{Revisão estruturada da literatura recente}
 \label{sec:revisao_literatura_recente}
