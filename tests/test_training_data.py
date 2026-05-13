@@ -724,6 +724,33 @@ def test_prepare_training_data_uses_sqlite_rows_and_manifest_provenance(
     assert prepared.validation_provenance["split"] == "VALIDATION"
 
 
+def test_prepare_training_data_rejects_empty_stage6_selection(
+    training_manifest_fixture: tuple[Path, list[Path]],
+) -> None:
+    master_manifest_path, _shard_paths = training_manifest_fixture
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.execute(
+            "UPDATE patch_stage_state "
+            "SET is_stage7_selected = 0, sampling_decision = 'rejected_reducible'"
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError, match="No training rows") as error:
+        prepare_training_data(
+            master_manifest_path=master_manifest_path,
+            local_data_dir=master_manifest_path.parent / "local",
+            smart_sampling=True,
+            use_subset=False,
+            subset_ratio=1.0,
+            seed=24,
+            use_artifact_aware_loss=False,
+        )
+
+    message = str(error.value)
+    assert "TRAINING_SMART_SAMPLING=True" in message
+    assert "TRAIN: accepted=4, stage7_selected=0" in message
+
+
 def test_prepare_training_data_reads_canonical_stage2_rows(
     training_manifest_fixture: tuple[Path, list[Path]],
 ) -> None:

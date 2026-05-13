@@ -466,25 +466,9 @@ class MasterManifest:
         """Insert one stage execution row and return its run_id."""
 
         self.initialize()
-        config_path_str = (
-            to_manifest_path_ref(config_path, manifest_path=self.database_path)
-            if config_path is not None
-            else None
-        )
-        input_summary_path_str = (
-            to_manifest_path_ref(input_summary_json_path, manifest_path=self.database_path)
-            if input_summary_json_path is not None
-            else None
-        )
-        config_sha256 = (
-            hash_file_sha256(config_path)
-            if config_path is not None and config_path.is_file()
-            else None
-        )
-        input_summary_sha256 = (
-            hash_file_sha256(input_summary_json_path)
-            if input_summary_json_path is not None and input_summary_json_path.is_file()
-            else None
+        config_path_str, config_sha256 = self._stage_run_artifact_metadata(config_path)
+        input_summary_path_str, input_summary_sha256 = self._stage_run_artifact_metadata(
+            input_summary_json_path
         )
         with self._connect() as connection:
             cursor = connection.execute(
@@ -510,6 +494,54 @@ class MasterManifest:
         if cursor.lastrowid is None:
             raise ValueError(f"{stage_name} run insert did not return a run_id.")
         return int(cursor.lastrowid)
+
+    def record_stage6_sampling_run(
+        self,
+        *,
+        config_path: Path | None,
+        input_summary_json_path: Path | None,
+        decisions: Sequence[Mapping[str, object]],
+    ) -> int:
+        """Atomically record one Stage 6 run and its sampling decisions."""
+
+        self.initialize()
+        config_path_str, config_sha256 = self._stage_run_artifact_metadata(config_path)
+        input_summary_path_str, input_summary_sha256 = self._stage_run_artifact_metadata(
+            input_summary_json_path
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO runs (
+                    stage_name,
+                    config_path,
+                    config_sha256,
+                    completed_at,
+                    input_summary_json_path,
+                    input_summary_sha256
+                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                """,
+                (
+                    STAGE6_STAGE_NAME,
+                    config_path_str,
+                    config_sha256,
+                    input_summary_path_str,
+                    input_summary_sha256,
+                ),
+            )
+            self._apply_stage6_sampling_decisions(connection, decisions=decisions)
+            self._verify_stage6_sampling_decisions(connection, decisions=decisions)
+            connection.commit()
+        if cursor.lastrowid is None:
+            raise ValueError("STAGE6 run insert did not return a run_id.")
+        return int(cursor.lastrowid)
+
+    def _stage_run_artifact_metadata(self, path: Path | None) -> tuple[str | None, str | None]:
+        if path is None:
+            return None, None
+        path_ref = to_manifest_path_ref(path, manifest_path=self.database_path)
+        sha256 = hash_file_sha256(path) if path.is_file() else None
+        return path_ref, sha256
 
     def create_normalization_artifact(
         self,
@@ -694,40 +726,76 @@ class MasterManifest:
 
         self.initialize()
         with self._connect() as connection:
-            patch_rows = self._fetch_patch_rows_for_updates(
-                connection,
-                rows=decisions,
-                selected_columns=("filename", "patient_id", "label"),
-                missing_message=(
-                    "Stage 6 sampling decision targets a missing canonical Stage 2 row"
-                ),
-            )
-            updates: list[tuple[object, ...]] = []
-            for decision, patch_row in zip(decisions, patch_rows, strict=True):
-                self._validate_stage4_assignment_provenance(
-                    patch_row=patch_row,
-                    assignment=decision,
-                )
-                updates.append(
-                    (
-                        str(decision["sampling_decision"]),
-                        1 if bool(decision["is_stage7_selected"]) else 0,
-                        STAGE6_STAGE_NAME,
-                        int(patch_row["patch_id"]),
-                    )
-                )
-            connection.executemany(
-                """
-                UPDATE patch_stage_state
-                SET sampling_decision = ?,
-                    is_stage7_selected = ?,
-                    last_updated_stage_name = ?,
-                    last_updated_at = CURRENT_TIMESTAMP
-                WHERE patch_id = ?
-                """,
-                updates,
-            )
+            self._apply_stage6_sampling_decisions(connection, decisions=decisions)
+            self._verify_stage6_sampling_decisions(connection, decisions=decisions)
             connection.commit()
+
+    def _apply_stage6_sampling_decisions(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        decisions: Sequence[Mapping[str, object]],
+    ) -> None:
+        patch_rows = self._fetch_patch_rows_for_updates(
+            connection,
+            rows=decisions,
+            selected_columns=("filename", "patient_id", "label"),
+            missing_message=("Stage 6 sampling decision targets a missing canonical Stage 2 row"),
+        )
+        updates: list[tuple[object, ...]] = []
+        for decision, patch_row in zip(decisions, patch_rows, strict=True):
+            self._validate_stage4_assignment_provenance(
+                patch_row=patch_row,
+                assignment=decision,
+            )
+            updates.append(
+                (
+                    str(decision["sampling_decision"]),
+                    1 if bool(decision["is_stage7_selected"]) else 0,
+                    STAGE6_STAGE_NAME,
+                    int(patch_row["patch_id"]),
+                )
+            )
+        connection.executemany(
+            """
+            UPDATE patch_stage_state
+            SET sampling_decision = ?,
+                is_stage7_selected = ?,
+                last_updated_stage_name = ?,
+                last_updated_at = CURRENT_TIMESTAMP
+            WHERE patch_id = ?
+            """,
+            updates,
+        )
+
+    def _verify_stage6_sampling_decisions(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        decisions: Sequence[Mapping[str, object]],
+    ) -> None:
+        expected_selected = sum(1 for decision in decisions if bool(decision["is_stage7_selected"]))
+        observed_row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total_count,
+                COALESCE(SUM(CASE WHEN is_stage7_selected = 1 THEN 1 ELSE 0 END), 0)
+                    AS selected_count
+            FROM patch_stage_state
+            WHERE last_updated_stage_name = ?
+            """,
+            (STAGE6_STAGE_NAME,),
+        ).fetchone()
+        if observed_row is None:
+            raise RuntimeError("Stage 6 sampling decision verification returned no row.")
+        observed_total = int(observed_row["total_count"])
+        observed_selected = int(observed_row["selected_count"])
+        if observed_total != len(decisions) or observed_selected != expected_selected:
+            raise RuntimeError(
+                "Stage 6 sampling decision verification failed: "
+                f"expected rows={len(decisions)}, selected={expected_selected}; "
+                f"observed rows={observed_total}, selected={observed_selected}."
+            )
 
     def _fetch_patch_rows_for_updates(
         self,

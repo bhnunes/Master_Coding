@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,13 @@ class CanonicalRowRecord:
     sampling_decision: str | None
     is_stage7_selected: bool
     stage4_split_bundle_id: int | None = None
+
+
+@dataclass(frozen=True)
+class SplitRecordAvailability:
+    split: str
+    accepted_count: int
+    stage7_selected_count: int
 
 
 def load_lr_finder_training_records(
@@ -56,6 +64,56 @@ def load_test_records(master_manifest_path: Path) -> list[CanonicalRowRecord]:
     """Load canonical test rows from SQLite once at startup."""
 
     return _load_split_records(master_manifest_path, split="TEST")
+
+
+def summarize_split_record_availability(
+    master_manifest_path: Path,
+) -> tuple[SplitRecordAvailability, ...]:
+    """Count Stage 4-accepted rows and Stage 6-selected rows by split."""
+
+    with sqlite3.connect(master_manifest_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT
+                s.split AS split,
+                COUNT(*) AS accepted_count,
+                COALESCE(
+                    SUM(CASE WHEN s.is_stage7_selected = 1 THEN 1 ELSE 0 END),
+                    0
+                ) AS stage7_selected_count
+            FROM patches p
+            INNER JOIN patch_stage_state s ON s.patch_id = p.patch_id
+            WHERE s.is_stage4_accepted = 1
+            GROUP BY s.split
+            ORDER BY s.split
+            """
+        ).fetchall()
+
+    return tuple(
+        SplitRecordAvailability(
+            split=str(row["split"]) if row["split"] is not None else "<NULL>",
+            accepted_count=int(row["accepted_count"]),
+            stage7_selected_count=int(row["stage7_selected_count"]),
+        )
+        for row in rows
+    )
+
+
+def format_split_record_availability(
+    availability: Sequence[SplitRecordAvailability],
+) -> str:
+    """Format split availability counts for configuration errors."""
+
+    if not availability:
+        return "no Stage 4-accepted rows"
+    return "; ".join(
+        (
+            f"{item.split}: accepted={item.accepted_count}, "
+            f"stage7_selected={item.stage7_selected_count}"
+        )
+        for item in availability
+    )
 
 
 def _load_split_records(

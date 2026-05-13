@@ -402,6 +402,75 @@ def test_master_manifest_batches_stage3_3_stage4_and_stage6_updates(tmp_path: Pa
     ]
 
 
+def test_stage6_run_record_rolls_back_when_sampling_decisions_fail(tmp_path: Path) -> None:
+    records = [
+        {
+            "filename": "a.png",
+            "label": 1,
+            "patient_id": "2001",
+            "slide_id": "slide_c",
+            "cov_fold": 0.0,
+            "cov_penmarking": 0.0,
+            "cov_oof": 0.0,
+            "cov_darkspot_foreign": 0.0,
+            "cov_edge_airbubble": 0.0,
+            "_image_array": np.full((4, 4, 3), 120, dtype=np.uint8),
+            "_mask_array": np.ones((4, 4), dtype=np.uint8),
+        }
+    ]
+    shard_path = _write_stage2_shard(tmp_path, name="slide_c", records=records)
+    source_root = tmp_path / "source"
+    manifest_path = tmp_path / "master_manifest.sqlite"
+    manifest = MasterManifest(manifest_path, source_root=source_root)
+    manifest.replace_stage2_slide_rows(
+        Stage2SlideRows(
+            source_hdf5_path=shard_path,
+            records=records,
+            source_slide_path=source_root / "IMAGES" / "slide_c.svs",
+            annotation_path=source_root / "ANNOTATIONS" / "slide_c.xml",
+            artifacts_geojson_path=None,
+            stage2_case_record_id=19,
+            stage2_processing_signature="proc-sig",
+            stage2_status="COMPLETED",
+        )
+    )
+    stage6_dir = tmp_path / "STAGE6_SMART_SAMPLER"
+    stage6_dir.mkdir()
+    config_path = stage6_dir / "filter_run_config.json"
+    summary_path = stage6_dir / "filter_summary.json"
+    config_path.write_text("{}", encoding="utf-8")
+    summary_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="filename does not match"):
+        manifest.record_stage6_sampling_run(
+            config_path=config_path,
+            input_summary_json_path=summary_path,
+            decisions=[
+                {
+                    "source_hdf5_path": str(shard_path),
+                    "source_row_index": 0,
+                    "filename": "wrong.png",
+                    "patient_id": 2001,
+                    "label": 1,
+                    "sampling_decision": "sampled_kept",
+                    "is_stage7_selected": True,
+                }
+            ],
+        )
+
+    with sqlite3.connect(manifest_path) as connection:
+        stage6_run_count = connection.execute(
+            "SELECT COUNT(*) FROM runs WHERE stage_name = 'STAGE6'"
+        ).fetchone()[0]
+        stage_state = connection.execute(
+            "SELECT sampling_decision, is_stage7_selected, last_updated_stage_name "
+            "FROM patch_stage_state"
+        ).fetchone()
+
+    assert stage6_run_count == 0
+    assert stage_state == (None, None, "STAGE2")
+
+
 def test_list_stage2_patch_records_rejects_legacy_absolute_manifest_paths(tmp_path: Path) -> None:
     manifest_path = tmp_path / "master_manifest.sqlite"
     shard_path = tmp_path / "PATCHES" / "HDF5_SHARDS" / "legacy.h5"

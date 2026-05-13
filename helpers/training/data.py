@@ -24,8 +24,10 @@ from helpers.training.canonical_dataset import CanonicalDatasetLayout, Canonical
 from helpers.training.compact_train_selected import remap_records_to_compact_train_selected
 from helpers.training.master_manifest_queries import (
     CanonicalRowRecord,
+    format_split_record_availability,
     load_training_records,
     load_validation_records,
+    summarize_split_record_availability,
 )
 from helpers.training.stain_normalization import (
     build_split_stain_normalizer,
@@ -735,6 +737,11 @@ def prepare_training_data(  # noqa: PLR0913
         master_manifest_path,
         smart_sampling=smart_sampling,
     )
+    if not training_records:
+        _raise_empty_training_records(
+            master_manifest_path,
+            smart_sampling=smart_sampling,
+        )
     original_training_records = tuple(training_records)
     compact_provenance: dict[str, Any] | None = None
     use_compact_storage = smart_sampling and use_compact_train_selected
@@ -786,6 +793,11 @@ def prepare_training_data(  # noqa: PLR0913
         train_records_for_dataset = tuple(
             training_records[int(index)] for index in list(train_subset.indices)
         )
+        if not train_records_for_dataset:
+            _raise_empty_training_subset(
+                subset_ratio=subset_ratio,
+                source_row_count=len(training_records),
+            )
         train_records_for_provenance = tuple(
             original_training_records[int(index)] for index in list(train_subset.indices)
         )
@@ -874,6 +886,37 @@ def prepare_training_data(  # noqa: PLR0913
             runtime_normalization_method=runtime_normalization_method,
             runtime_vahadane_backend=runtime_vahadane_backend,
         ),
+    )
+
+
+def _raise_empty_training_records(master_manifest_path: Path, *, smart_sampling: bool) -> None:
+    availability = format_split_record_availability(
+        summarize_split_record_availability(master_manifest_path)
+    )
+    selection = (
+        "Stage 6-selected TRAIN rows (is_stage7_selected=1)"
+        if smart_sampling
+        else "Stage 4-accepted TRAIN rows"
+    )
+    guidance = (
+        "TRAINING_SMART_SAMPLING=True requires a completed Stage 6 selection for TRAIN. "
+        "Rerun 6_smart_sampler.py for this manifest and confirm it finishes the manifest "
+        "update, or set TRAINING_SMART_SAMPLING=False to use all Stage 4-accepted TRAIN rows."
+        if smart_sampling
+        else "Check that 4_crossfold.py assigned accepted rows to split=TRAIN before training."
+    )
+    raise ValueError(
+        "No training rows are available for "
+        f"{selection}. master_manifest_path={master_manifest_path}. "
+        f"Stage 4-accepted manifest counts: {availability}. {guidance}"
+    )
+
+
+def _raise_empty_training_subset(*, subset_ratio: float, source_row_count: int) -> None:
+    raise ValueError(
+        "Training subset selection produced zero TRAIN rows. "
+        f"source_row_count={source_row_count}, TRAINING_SUBSET_RATIO={subset_ratio}. "
+        "Increase TRAINING_SUBSET_RATIO or disable TRAINING_USE_SUBSET."
     )
 
 

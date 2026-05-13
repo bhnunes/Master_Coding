@@ -8,7 +8,7 @@ from typing import Any
 
 from tqdm.auto import tqdm
 
-from helpers.extraction.master_manifest import STAGE6_STAGE_NAME, MasterManifest
+from helpers.extraction.master_manifest import MasterManifest
 from helpers.smart_sampling.config import SmartSamplerConfig
 from helpers.smart_sampling.embeddings import EmbeddingExtractor
 from helpers.smart_sampling.index import CanonicalPatientReference, MasterManifestIndex
@@ -302,12 +302,11 @@ def _record_sampling_run(
     decisions: list[dict[str, object]],
 ) -> None:
     master_manifest = MasterManifest(config.master_manifest_path)
-    master_manifest.create_run(
-        stage_name=STAGE6_STAGE_NAME,
+    master_manifest.record_stage6_sampling_run(
         config_path=run_config_path,
         input_summary_json_path=summary_json_path,
+        decisions=decisions,
     )
-    master_manifest.update_stage6_sampling_decisions(decisions=decisions)
 
 
 def run_smart_sampling_pipeline(

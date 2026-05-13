@@ -13,8 +13,10 @@ from helpers.training.canonical_dataset import CanonicalDatasetLayout, Canonical
 from helpers.training.compact_train_selected import remap_records_to_compact_train_selected
 from helpers.training.data import collect_manifest_split_provenance
 from helpers.training.master_manifest_queries import (
+    format_split_record_availability,
     load_lr_finder_training_records,
     load_validation_records,
+    summarize_split_record_availability,
 )
 from helpers.training.runtime import worker_init_fn
 from helpers.training.stain_normalization import (
@@ -49,6 +51,8 @@ def prepare_training_data(
         config.master_manifest_path,
         smart_sampling=config.smart_sampling,
     )
+    if not training_records:
+        _raise_empty_lr_finder_training_records(config)
     original_training_records = tuple(training_records)
     compact_provenance: dict[str, Any] | None = None
     if use_compact_train_selected:
@@ -93,6 +97,8 @@ def prepare_training_data(
         )
         subset_indices = [int(index) for index in subset.indices]
         base_dataset.close()
+        if not subset_indices:
+            _raise_empty_lr_finder_subset(config, source_row_count=len(training_records))
         subset_records = tuple(training_records[index] for index in subset_indices)
         dataset = CanonicalRowHDF5Dataset(
             CanonicalDatasetLayout(records=subset_records, local_cache_dir=local_cache_dir),
@@ -136,6 +142,40 @@ def prepare_training_data(
     )
 
 
+def _raise_empty_lr_finder_training_records(config: LRFinderConfig) -> None:
+    availability = format_split_record_availability(
+        summarize_split_record_availability(config.master_manifest_path)
+    )
+    selection = (
+        "Stage 6-selected TRAIN rows (is_stage7_selected=1)"
+        if config.smart_sampling
+        else "Stage 4-accepted TRAIN rows"
+    )
+    guidance = (
+        "LR_FINDER_SMART_SAMPLING=True makes Stage 7 require a completed Stage 6 "
+        "selection for TRAIN. Rerun 6_smart_sampler.py for this manifest and confirm it "
+        "finishes the manifest update, or set LR_FINDER_SMART_SAMPLING=False to use all "
+        "Stage 4-accepted TRAIN rows."
+        if config.smart_sampling
+        else "Check that 4_crossfold.py assigned accepted rows to split=TRAIN before "
+        "running Stage 7."
+    )
+    raise ValueError(
+        "No LR finder training rows are available for "
+        f"{selection}. master_manifest_path={config.master_manifest_path}. "
+        f"Stage 4-accepted manifest counts: {availability}. {guidance}"
+    )
+
+
+def _raise_empty_lr_finder_subset(config: LRFinderConfig, *, source_row_count: int) -> None:
+    raise ValueError(
+        "LR finder subset selection produced zero TRAIN rows. "
+        f"source_row_count={source_row_count}, "
+        f"LR_FINDER_SUBSET_RATIO={config.subset_ratio}. Increase LR_FINDER_SUBSET_RATIO "
+        "or disable LR_FINDER_USE_SUBSET."
+    )
+
+
 def _with_compact_provenance(
     provenance: dict[str, Any],
     *,
@@ -156,6 +196,12 @@ def build_train_loader(
     workers: int,
     seed: int,
 ) -> DataLoader[object]:
+    if len(sample_weights) <= 0:
+        raise ValueError(
+            "Cannot build LR finder training loader with zero sample weights. "
+            "The training dataset is empty; check LR_FINDER_SMART_SAMPLING, Stage 6 "
+            "selection, and LR_FINDER_SUBSET_RATIO."
+        )
     sampler = WeightedRandomSampler(
         weights=cast(Sequence[float], sample_weights.numpy()),
         num_samples=len(sample_weights),

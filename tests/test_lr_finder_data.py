@@ -324,6 +324,25 @@ def test_prepare_training_data_uses_sqlite_rows_for_smart_sampling(
     assert prepared.validation_provenance["row_count"] == VALIDATION_ROW_COUNT
 
 
+def test_prepare_training_data_rejects_empty_stage6_selection(
+    lr_finder_fixture: tuple[LRFinderConfig, list[Path]],
+) -> None:
+    config, _shard_paths = lr_finder_fixture
+    with sqlite3.connect(config.master_manifest_path) as connection:
+        connection.execute(
+            "UPDATE patch_stage_state "
+            "SET is_stage7_selected = 0, sampling_decision = 'rejected_reducible'"
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError, match="No LR finder training rows") as error:
+        lr_data.prepare_training_data(config)
+
+    message = str(error.value)
+    assert "LR_FINDER_SMART_SAMPLING=True" in message
+    assert "TRAIN: accepted=4, stage7_selected=0" in message
+
+
 def test_prepare_training_data_reads_canonical_stage2_rows(
     lr_finder_fixture: tuple[LRFinderConfig, list[Path]],
 ) -> None:
@@ -434,3 +453,11 @@ def test_build_train_loader_uses_weighted_sampler() -> None:
 
     assert isinstance(loader.sampler, torch.utils.data.WeightedRandomSampler)
     assert loader.worker_init_fn is lr_data.worker_init_fn  # type: ignore[attr-defined]
+
+
+def test_build_train_loader_rejects_empty_sample_weights() -> None:
+    dataset = _TinyDataset()
+    sample_weights = torch.tensor([], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="zero sample weights"):
+        lr_data.build_train_loader(dataset, sample_weights, batch_size=1, workers=0, seed=24)
