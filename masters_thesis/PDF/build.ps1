@@ -27,7 +27,11 @@ function Move-BuildArtifacts {
     foreach ($pattern in $ArtifactPatterns) {
         Get-ChildItem -LiteralPath $SourceDir -File -Filter $pattern -Force -ErrorAction SilentlyContinue |
             ForEach-Object {
-                Move-Item -LiteralPath $_.FullName -Destination (Join-Path $ScriptDir $_.Name) -Force
+                $Destination = Join-Path $ScriptDir $_.Name
+                if (Test-Path -LiteralPath $Destination) {
+                    Remove-Item -LiteralPath $Destination -Force
+                }
+                Move-Item -LiteralPath $_.FullName -Destination $Destination -Force
             }
     }
 }

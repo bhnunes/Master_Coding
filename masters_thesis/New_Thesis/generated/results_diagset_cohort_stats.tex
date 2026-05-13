@@ -1,0 +1,18 @@
+\begin{table}[!htb]
+\centering
+\caption{Particionamento por paciente e volume de patches em DIAGSET.}
+\label{tab:results_diagset-cohort}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+Particao & Pacientes & Pos. & Neg. & Patches & Patches pos. & Patches neg. \\
+\midrule
+TRAIN & 236 & 115 & 121 & 660\,867 & 123\,479 & 537\,388 \\
+VALIDATION & 78 & 43 & 35 & 138\,586 & 25\,867 & 112\,719 \\
+TEST & 79 & 38 & 41 & 387\,325 & 72\,428 & 314\,897 \\
+\midrule
+Total & 393 & 196 & 197 & 1\,186\,778 & 221\,774 & 965\,004 \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize Fonte: \texttt{split\_stats.csv} e \texttt{run\_config.json}.}
+\end{table}
