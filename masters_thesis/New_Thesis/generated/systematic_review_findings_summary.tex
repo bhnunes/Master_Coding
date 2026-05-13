@@ -2,15 +2,51 @@
 \emergencystretch=3em
 \sloppy
 
-A matriz de extração do Apêndice~\ref{ap:matriz_revisao_sistematica} permite ler o corpus aceito como evidência metodológica, não apenas como uma lista de aplicações. Para RQ1, 48 estudos foram classificados com controle de qualidade ou tratamento de artefatos explicitado. No mesmo eixo, 11 estudos trataram tecido/fundo como etapa operacional. Esses dois grupos sustentam a decisão de manter detecção de artefatos, triagem visual e filtragem de regiões não informativas como fronteiras explícitas do fluxo experimental desta dissertação.
+A matriz de extração do Apêndice~\ref{ap:matriz_revisao_sistematica}
+permite relacionar cada estudo aceito às perguntas de pesquisa definidas na
+\Tabela{tab:revisao_sistematica_perguntas}. A partir dessa matriz, a síntese a
+seguir apresenta as respostas a RQ1, RQ2, RQ3 e RQ4, destacando não apenas a
+frequência com que cada tema aparece na literatura, mas também sua implicação
+para as decisões metodológicas adotadas nesta dissertação.
 
-A prevenção de vazamento de dados aparece principalmente na política de particionamento. Em RQ2, 29 estudos declararam separação por paciente. A normalização de cor foi codificada separadamente, pois ela atua sobre variação de coloração, mas não substitui isolamento entre pacientes; 33 estudos mencionaram normalização de cor. A síntese, portanto, trata particionamento e normalização como controles complementares: o primeiro protege a avaliação contra dependência entre amostras, enquanto o segundo reduz variação de aquisição e preparação.
+Em relação à RQ1, 48 estudos foram classificados como contendo controle de
+qualidade ou tratamento explícito de artefatos. Além disso, 11 estudos trataram
+a separação entre tecido e fundo como etapa operacional do fluxo. Esses achados
+reforçam a decisão de manter detecção de artefatos, triagem visual e filtragem
+de regiões não informativas como fronteiras explícitas do fluxo experimental
+proposto.
 
-A reprodutibilidade foi avaliada pela presença de governança de dados, repositório público, manifesto, formato persistente ou execução orquestrada. Em RQ3, 56 estudos apresentaram pelo menos um desses sinais de rastreabilidade. Essa leitura não afirma que todos os trabalhos ofereçam o mesmo nível de auditabilidade; ela delimita quais artigos registraram algum contrato verificável entre dados, código, metadados ou execução.
+A RQ2 investigou estratégias de particionamento e risco de vazamento de dados.
+Nesse eixo, 29 estudos declararam separação por paciente. A normalização de cor
+foi codificada separadamente, pois atua sobre variações de coloração, mas não
+substitui o isolamento entre pacientes; 33 estudos mencionaram alguma forma de
+normalização de cor. Dessa forma, a síntese trata particionamento e
+normalização como controles complementares: o primeiro protege a avaliação contra
+dependência entre amostras, enquanto o segundo reduz variações associadas à
+aquisição e ao preparo histológico.
 
-Por fim, RQ4 separou agregação de modelos, incerteza e pós-processamento, porque esses mecanismos afetam pontos diferentes da inferência. 27 estudos discutiram ensemble ou incerteza. Outros 7 estudos enfatizaram pós-processamento. A consequência para a dissertação é metodológica: qualquer receita final de ensemble deve ser otimizada apenas em validação, congelada antes do teste e descrita como parte rastreável do protocolo, em vez de ser apresentada como uma escolha genérica ou posterior aos resultados.
+A RQ3 avaliou sinais de governança, proveniência e rastreabilidade
+experimental. Foram considerados, nesse eixo, elementos como repositório
+público, manifestos, formatos persistentes, contratos de dados e execução
+orquestrada. Ao todo, 56 estudos apresentaram pelo menos um desses elementos.
+Esse resultado não implica que todos os trabalhos tenham o mesmo nível de
+auditabilidade; indica, mais precisamente, que parte expressiva da literatura já
+registra algum vínculo verificável entre dados, código, metadados e execução.
 
-Essa síntese substitui uma leitura impressionista por uma leitura auditável: cada contagem acima é sustentada pelos estudos citados no próprio parágrafo, e a classificação individual permanece disponível no Apêndice~\ref{ap:matriz_revisao_sistematica}.
+Por fim, a RQ4 examinou estratégias de agregação de modelos, incerteza e
+pós-processamento, uma vez que esses mecanismos afetam etapas distintas da
+inferência. Nesse eixo, 27 estudos discutiram \textit{ensemble} ou incerteza,
+enquanto 7 enfatizaram procedimentos de pós-processamento. Para esta
+dissertação, a implicação é metodológica: qualquer receita final de
+\textit{ensemble} deve ser otimizada apenas no conjunto de validação, congelada
+antes da avaliação em teste e descrita como parte rastreável do protocolo, em
+vez de aparecer como uma decisão genérica ou posterior aos resultados.
+
+Assim, a síntese responde diretamente às quatro perguntas de pesquisa e preserva
+a rastreabilidade entre interpretação e evidência. As contagens apresentadas em
+cada eixo derivam da classificação registrada na matriz de extração, enquanto a
+classificação individual de cada estudo permanece disponível no
+Apêndice~\ref{ap:matriz_revisao_sistematica}.
 
 \fussy
 \endgroup
