@@ -21,6 +21,16 @@ configurações executáveis e rastreabilidade é alinhada a princípios FAIR e 
 práticas de reprodutibilidade computacional
 \cite{wilkinson2016fair,piccolo2016tools}.
 
+O ambiente executável também faz parte da metodologia. O repositório alvo usa
+Python 3.12, dependências gerenciadas por \texttt{uv} e configuração por variáveis
+de ambiente declaradas a partir de \texttt{.env\_example}. Cada fase registra
+metadados, logs e arquivos de configuração suficientes para que a execução final
+possa ser auditada sem depender de valores implícitos no código. Assim, quando a
+dissertação reportar resultados quantitativos, valores como hardware, flags de
+normalização, amostragem, OHEM, perda sensível a artefatos e receita de
+\textit{ensemble} deverão vir dos artefatos de execução correspondentes, não de
+suposições sobre os padrões do repositório.
+
 A \Figura{fig:fluxo-atual} resume o desenho metodológico. O processo começa com
 lâminas e anotações, passa por controle de qualidade e extração de
 \textit{patches}, consolida manifestos e HDF5, produz divisões por paciente,
@@ -90,6 +100,15 @@ artefatos, convertida em polígonos GeoJSON e removida ao final do
 processamento. O estado da execução é registrado em SQLite, permitindo retomar
 processamentos interrompidos sem duplicar artefatos.
 
+As fontes de dados consideradas no projeto abrangem domínios histopatológicos
+distintos: CAMELYON16, CATCH, DiagSet e HiESD
+\cite{bejnordi2017diagnostic,wilm2022catch,koziarski2024diagset,wang2025hiesd}.
+Essas referências são usadas para proveniência e enquadramento das coortes, não
+como evidência de desempenho do repositório. A presença efetiva de cada base em
+um resultado final deve ser determinada pelo manifesto e pelos artefatos de
+execução daquela análise, pois o código define um fluxo comum de câncer versus
+não câncer, mas não fixa por si só a composição da coorte final.
+
 A detecção de artefatos combina uma etapa de localização de tecido com uma etapa
 de classificação de qualidade. A motivação científica vem de trabalhos de
 controle de qualidade em WSI, como GrandQC \cite{weng2024grandqc}, e da
@@ -109,6 +128,16 @@ geometrias anotadas, reduzindo I/O desnecessário em regiões sem relação com 
 tarefa. Esse padrão é coerente com fluxos de processamento de WSIs baseados em
 tecido, \textit{patches} e restrições de escala gigapixel
 \cite{munozaguirre2020pyhist,khened2021generalized,bandi2019resolution}.
+
+A interface de ingestão converte anotações heterogêneas para o mesmo contrato
+binário. O caminho atual aceita combinações como \texttt{.svs/.xml},
+\texttt{.ndpi/.ndpa}, \texttt{.tif/.json} e \texttt{.svs/.json}; quando
+\texttt{TAG=HIESD} ou \texttt{TAG=Chile} está ativo, a política de cores e o
+formato XML são resolvidos internamente pelo código. Essa conversão é uma etapa
+metodológica crítica porque transforma categorias e formatos específicos de cada
+base em rótulos \texttt{cancer} e \texttt{not\_cancer}. As citações das bases
+apoiam a proveniência dos dados, mas a regra exata de mapeamento é uma política
+do repositório.
 
 Um \textit{patch} só é aceito quando satisfaz três condições. Primeiro, a janela
 precisa ter associação semântica não ambígua a uma classe. Segundo, deve conter
@@ -428,7 +457,7 @@ biblioteca Albumentations fornece a composição prática dessas transformaçõe
 \cite{buslaev2020albumentations}, enquanto trabalhos de aumento de dados em
 histopatologia e visão computacional motivam a busca por invariância a variações
 visuais não biológicas
-\cite{dossantos2023augmentation,tellez2019augmentation,shorten2019survey,zhong2020random,devries2017cutout}.
+\cite{dossantos2023augmentation,tellez2019augmentation,shorten2019survey,zhong2020random}.
 Validação não recebe aumentos estocásticos, para que a comparação entre épocas
 permaneça estável.
 
@@ -541,7 +570,7 @@ Métricas auxiliares incluem AUROC e uma varredura de MCC
     (TP_t+FP_t)(TP_t+FN_t)(TN_t+FP_t)(TN_t+FN_t)+\varepsilon
     }
     } .
-    \label{eq:mcc}
+    \label{eq:mcc_validacao}
 \end{equation}
 O treinamento usa validação para parada antecipada e seleção de melhor
 checkpoint \cite{prechelt1998automatic}. Checkpoints preservados carregam
@@ -577,6 +606,15 @@ P_{\mathrm{spa}}(x) &=&
 \label{eq:streams}
 \end{equation}
 Os pesos são normalizados e não negativos dentro de cada fluxo.
+
+A implementação da Fase 9 pode materializar as probabilidades de validação em
+\textit{memmaps} e processar os fluxos semântico e espacial de forma escalonada
+para controlar RAM e disco. Esse cache armazena predições com TTA, máscaras de
+referência e identificadores de paciente para a mesma divisão de validação usada
+na otimização, podendo ser descartado e recriado durante a execução. Portanto, o
+cache é uma representação operacional de armazenamento e proveniência, não uma
+nova métrica nem uma etapa adicional de seleção de modelos
+\cite{wilkinson2016fair,piccolo2016tools}.
 
 A região de interesse é formada por redução de resolução, limiarização e retorno
 à grade original:
@@ -691,12 +729,14 @@ externa.
 
 \section{Limitações metodológicas conhecidas}\label{sec:met_limitacoes}
 
-Quatro limitações permanecem explícitas até a versão final. Primeiro, os
+Cinco limitações permanecem explícitas até a versão final. Primeiro, os
 identificadores de paciente usados para separação são os identificadores
 operacionais persistidos no manifesto; sua equivalência biológica precisa ser
 garantida pela origem dos dados. Segundo, VAHADANE \texttt{fixed\_source} é uma
 aproximação por matriz fixa, não VAHADANE exato com ajuste por \textit{patch}.
 Terceiro, a seleção GIST em grandes conjuntos deve ser descrita como GIST-style
-ou inspirada em GIST. Quarto, resultados quantitativos só podem ser preenchidos a
-partir dos artefatos consolidados das Fases 8 a 10, não inferidos a partir do
-código-fonte isoladamente.
+ou inspirada em GIST. Quarto, as citações das bases públicas sustentam
+proveniência e enquadramento da tarefa, não desempenho final nem inclusão
+automática de todas as coortes em cada experimento. Quinto, resultados
+quantitativos só podem ser preenchidos a partir dos artefatos consolidados das
+Fases 8 a 10, não inferidos a partir do código-fonte isoladamente.

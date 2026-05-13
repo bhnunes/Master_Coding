@@ -1,152 +1,192 @@
 \chapter{Resultados e discussão}\label{chp:resultados}
 
-Este capítulo reserva a estrutura da análise final. Como os artefatos
-consolidados das Fases 8 a 10 ainda serão atualizados, os resultados numéricos
-permanecem como campos explícitos de preenchimento. Essa escolha evita atribuir
-desempenho, robustez ou superioridade clínica antes da execução final
-auditável. O objetivo desta versão é garantir que, quando os resultados forem
-gerados, eles tenham lugar claro no texto, nas tabelas e nas figuras.
+Este capítulo apresenta os resultados finais obtidos para DIAGSET, primeira
+coorte concluída no fluxo experimental. A organização adotada aqui será
+replicada nas demais coortes: primeiro são descritas a ingestão das imagens, a
+curadoria e a rastreabilidade dos dados; em seguida, o particionamento, a
+amostragem de treino, os hiperparâmetros efetivamente usados, a receita
+congelada do \textit{ensemble} e as métricas finais de inferência. Essa sequência
+preserva a fronteira entre as decisões feitas antes do treinamento, as decisões
+feitas em validação e a avaliação final no teste.
 
-\section{Estatísticas das coortes}\label{sec:res_coortes}
+Os valores reportados foram extraídos dos artefatos finais, sem recalcular
+métricas nem alterar intervalos de confiança. As métricas finais vêm dos arquivos
+\texttt{ENSEMBLE\_METRICS\_*}; os limiares e pesos vêm da receita congelada do
+\textit{ensemble}; os metadados de ingestão vêm de \texttt{database.db}; e os
+metadados de limpeza vêm dos artefatos da Fase 3 e do
+\texttt{master\_manifest.sqlite}. O manifesto passou em \texttt{PRAGMA
+quick\_check}, sustentando a rastreabilidade das tabelas geradas para este
+capítulo.
 
-A primeira análise quantitativa deverá descrever o volume de dados processado em
-cada base: número de lâminas, identificadores de paciente, \textit{patches}
-aceitos, \textit{patches} rejeitados e distribuição entre treino, validação e
-teste. A \Tabela{tab:coortes_placeholder} apresenta a estrutura mínima esperada.
+\section{Ingestão, curadoria e coorte}\label{sec:res_diagset_coorte}
 
-\begin{table}[!htb]
-\centering
-\caption{Estrutura provisória para estatísticas de coorte e particionamento.}
-\label{tab:coortes_placeholder}
-\begin{tabular}{p{3.2cm}p{1.7cm}p{1.6cm}p{2.2cm}p{3.6cm}}
-\toprule
-Base & WSIs & IDs & \textit{Patches} & Observação \\
-\midrule
-CAMELYON16 & -- & -- & -- & A preencher com manifesto final. \\
-CATCH & -- & -- & -- & A preencher com manifesto final. \\
-DiagSet & -- & -- & -- & A preencher com manifesto final. \\
-HiESD & -- & -- & -- & A preencher com manifesto final. \\
-\bottomrule
-\end{tabular}
-\end{table}
+Antes da geração de \textit{patches}, DIAGSET foi registrado no banco de
+ingestão da Fase 2. A \Tabela{tab:results_diagset-stage2-ingestion} resume esse
+estado inicial: 429 imagens \texttt{.ndpi} com 429 anotações \texttt{.ndpa}
+foram encontradas; 419 casos passaram pela checagem de pareamento com GeoJSON, e
+10 foram marcados como falha ou rejeição antes da extração final. A mesma tabela
+registra os parâmetros operacionais usados nessa extração, incluindo
+\texttt{WINDOW\_SIZE}, \texttt{STRIDE}, \texttt{MATCH\_PERCENTAGE},
+\texttt{TISSUE\_PERCENTAGE} e o tempo médio por imagem concluída.
 
-Além das contagens globais, a versão final deve relatar quantas amostras foram
-removidas por baixo conteúdo tecidual, por ambiguidade de anotação, por falha de
-leitura ou por regra de limpeza por grafos. Esses números são necessários para
-avaliar se a curadoria alterou substancialmente a distribuição dos dados.
+\input{generated/results_diagset_stage2_ingestion}
 
-\section{Extração, limpeza e particionamento}\label{sec:res_preprocessamento}
+A curadoria quantitativa prosseguiu antes do particionamento por paciente. A
+Fase 3.1 produziu uma amostra piloto e um conjunto mestre revisado para otimizar
+a limpeza baseada em grafos. Como mostrado na
+\Tabela{tab:results_diagset-stage3-sampling}, 100 amostras compuseram a revisão
+piloto e 385 amostras compuseram o conjunto mestre rotulado. A Fase 3.2 escolheu
+os parâmetros de segmentação por grafo e o limiar de contaminação, com
+$\tau=0{,}19$; a Fase 3.3 aplicou essa decisão ao manifesto, rejeitando 74\,047
+\textit{patches} de câncer por contaminação estimada acima do limiar.
 
-Os resultados de pré-processamento deverão mostrar se o fluxo preservou os
-contratos definidos na metodologia: alinhamento entre imagem e máscara,
-separação de pacientes, existência de artefatos de normalização e ausência de
-linhas inválidas. A discussão deve separar três dimensões. A primeira é
-operacional, relacionada a tempo de execução, tamanho dos HDF5 e possibilidade de
-retomada. A segunda é científica, relacionada a vazamento, rótulos ambíguos e
-qualidade da supervisão. A terceira é prática, relacionada ao custo de disco e ao
-uso de armazenamento compacto de treino.
+\input{generated/results_diagset_stage3_cleaning}
 
-\begin{figure}[!htb]
-    \centering
-    \fbox{\begin{minipage}{0.82\textwidth}
-        \centering
-        \vspace{2.5em}
-        Figura qualitativa pendente: exemplos de \textit{patches} aceitos,
-        rejeitados por artefato e rejeitados por ambiguidade.
-        \vspace{2.5em}
-    \end{minipage}}
-    \caption[Placeholder para exemplos de curadoria]{Local reservado para exemplos qualitativos da curadoria de dados. As imagens finais devem ser extraídas dos artefatos atuais, não do rascunho antigo.}
-    \label{fig:placeholder-curadoria}
-\end{figure}
+\input{generated/results_diagset_stage3_rejected_examples}
 
-\section{Triagem e treinamento de modelos}\label{sec:res_treinamento}
+Após essa limpeza, o particionamento de DIAGSET foi realizado no nível do
+paciente. A \Tabela{tab:results_diagset-cohort} mostra 393 pacientes após a
+curadoria considerada neste experimento, distribuídos em 236 pacientes de
+treino, 78 de validação e 79 de teste. O conjunto de teste concentrou 387\,325
+\textit{patches}, com 38 pacientes positivos e 41 negativos, o que permite
+interpretar as métricas finais tanto em nível de pixel quanto em nível de
+paciente.
 
-A triagem da Fase 7 deverá ser relatada como seleção de configurações, não como
-desempenho final. A Fase 8 deverá apresentar os modelos efetivamente treinados,
-as configurações de perda e normalização, o melhor checkpoint selecionado por
-validação e as métricas de validação correspondentes. A \Tabela{tab:modelos_placeholder}
-define uma estrutura inicial para esse relato.
+\input{generated/results_diagset_cohort_stats}
 
-\begin{table}[!htb]
-\centering
-\caption{Estrutura provisória para modelos treinados na Fase 8.}
-\label{tab:modelos_placeholder}
-\begin{tabular}{p{2.5cm}p{2.8cm}p{2.6cm}p{2.4cm}p{2.4cm}}
-\toprule
-Arquitetura & Encoder & Normalização & Critério de seleção & Status \\
-\midrule
-A preencher & A preencher & A preencher & AUPRC validação & Pendente \\
-A preencher & A preencher & A preencher & AUPRC validação & Pendente \\
-A preencher & A preencher & A preencher & AUPRC validação & Pendente \\
-\bottomrule
-\end{tabular}
-\end{table}
+A etapa de amostragem inteligente reduziu o conjunto de treino antes da triagem
+de taxa de aprendizado e do treinamento final. Dos 660\,867 \textit{patches} de
+treino, 180\,381 foram mantidos, correspondendo a 27,29\% das amostras
+originais. A \Tabela{tab:results_diagset-smart-sampling} resume essa seleção.
+Validação e teste permaneceram ancorados nos \textit{patches} aceitos da
+partição original, enquanto o treino utilizou a seleção compacta produzida pela
+Fase 6.
 
-As curvas de treinamento deverão ser discutidas com cautela. Uma curva de perda
-decrescente indica otimização, mas não garante generalização. Divergência,
-colapso de predição, métricas não finitas e instabilidade entre épocas devem ser
-reportadas como evidência metodológica, mesmo quando não produzirem o melhor
-modelo.
+\input{generated/results_diagset_smart_sampling}
 
-\begin{figure}[!htb]
-    \centering
-    \fbox{\begin{minipage}{0.82\textwidth}
-        \centering
-        \vspace{2.5em}
-        Figura pendente: curvas finais de perda, AUPRC, AUROC e MCC por época.
-        \vspace{2.5em}
-    \end{minipage}}
-    \caption[Placeholder para curvas de treinamento]{Local reservado para curvas finais de treinamento e validação exportadas dos logs atuais.}
-    \label{fig:placeholder-curvas}
-\end{figure}
+\section{Treinamento e receita final do ensemble}\label{sec:res_diagset_treinamento}
 
-\section{Otimização do ensemble e inferência final}\label{sec:res_ensemble}
+Cada normalização foi avaliada com oito arquiteturas no treinamento final. As
+Tabelas \ref{tab:results_diagset-training-not_normalized} a
+\ref{tab:results_diagset-training-vahadane} apresentam todos os checkpoints
+selecionados por validação, incluindo época, perda, AUPRC, AUROC e MCC. Esses
+valores documentam a seleção de modelos que alimentou a otimização posterior do
+\textit{ensemble}; eles não substituem a avaliação congelada de teste.
 
-Os resultados da Fase 9 deverão descrever a composição do \textit{ensemble}, os
-pesos atribuídos a cada modelo, o limiar calibrado e as assinaturas de
-compatibilidade verificadas antes da inferência. A Fase 10 deverá apresentar
-somente a avaliação da receita congelada no teste.
+\input{generated/results_diagset_training_tables}
 
-\begin{table}[!htb]
-\centering
-\caption{Estrutura provisória para métricas finais de inferência.}
-\label{tab:metricas_finais_placeholder}
-\small
-\begin{tabular}{p{3.1cm}p{1.5cm}p{1.5cm}p{2.7cm}p{2.8cm}}
-\toprule
-Agregação & Dice & IoU & Sensibilidade & Especificidade \\
-\midrule
-Micro & -- & -- & -- & -- \\
-Macro por paciente & -- & -- & -- & -- \\
-Bootstrap por paciente & -- & -- & -- & -- \\
-\bottomrule
-\end{tabular}
-\end{table}
+Os metadados dos 40 treinamentos finais registraram o mesmo valor de semente
+aleatória: \texttt{Seed}=24. Essa padronização manteve constante a configuração
+de reprodutibilidade entre normalizações e arquiteturas, de modo que as
+comparações desta etapa não confundissem a escolha de arquitetura, normalização
+ou taxa de aprendizado com uma variação deliberada de semente.
 
-\begin{figure}[!htb]
-    \centering
-    \fbox{\begin{minipage}{0.82\textwidth}
-        \centering
-        \vspace{2.5em}
-        Figura qualitativa pendente: WSI ou \textit{patches} com máscara real,
-        probabilidade do ensemble e máscara binarizada.
-        \vspace{2.5em}
-    \end{minipage}}
-    \caption[Placeholder para inferência qualitativa]{Local reservado para exemplos qualitativos da inferência final.}
-    \label{fig:placeholder-inferencia}
-\end{figure}
+As taxas de aprendizado foram extraídas dos metadados de cada checkpoint. Todos
+os treinamentos utilizaram o otimizador \texttt{AdamWScheduleFree}; o decaimento
+de peso foi mantido em \(10^{-4}\); e os pesos da função de perda foram fixados
+em \(\alpha_{BCE}=0{,}125\), \(\beta_{DiceBG}=0{,}157\) e
+\(\gamma_{DiceFG}=0{,}173\) para todas as normalizações e arquiteturas. Assim,
+as tabelas a seguir se concentram apenas na taxa de aprendizado, apresentada em
+unidades de \(10^{-3}\).
 
-\section{Discussão provisória}\label{sec:discussao_provisoria}
+\input{generated/results_diagset_learning_rates}
 
-A discussão final deverá responder a quatro perguntas. Primeiro, o fluxo
-preservou isolamento por paciente e rastreabilidade suficiente para sustentar as
-métricas? Segundo, as etapas de controle de qualidade removeram ruído sem
-eliminar de forma desproporcional regiões relevantes? Terceiro, a normalização
-de cor e a amostragem inteligente alteraram estabilidade de treinamento ou
-desempenho? Quarto, o \textit{ensemble} congelado melhorou a avaliação de teste
-em relação aos modelos individuais?
+A inferência final utilizou a estratégia \textit{two-stream spatial gating}. Em
+todas as normalizações, a receita final combinou oito modelos, quatro no fluxo
+semântico e quatro no fluxo espacial. A \Tabela{tab:results_diagset-ensemble-summary}
+mostra os limiares de ROI e decisão definidos na Fase 9. Os pesos individuais
+dos modelos não são duplicados em tabela, pois são apresentados de forma mais
+legível na \Figura{fig:results_diagset-ensemble-weights}. No caso de Vahadane, o
+relatório de ambiente registra o uso do \textit{backend}
+\texttt{fixed\_source}; portanto, o resultado corresponde à aproximação
+operacional congelada para esta tese, não a um ajuste canônico individual por
+\textit{patch}.
 
-Enquanto essas perguntas não forem respondidas pelos artefatos finais, a tese
-deve permanecer metodológica. Qualquer afirmação de superioridade, robustez
-clínica ou generalização externa será adicionada apenas se estiver diretamente
-apoiada por resultados, intervalos de incerteza e análise qualitativa.
+\input{generated/results_diagset_ensemble_summary}
+
+\section{Métricas finais de inferência}\label{sec:res_diagset_inferencia}
+
+A avaliação final foi realizada no conjunto de teste. As métricas micro agregam
+todos os pixels antes do cálculo, enquanto as métricas macro resumem primeiro o
+desempenho por paciente e depois agregam esses valores. Essa diferença muda a
+interpretação científica: métricas micro refletem melhor o volume global de
+pixels corretamente segmentados, mas podem ser influenciadas por pacientes ou
+lâminas com maior número de \textit{patches}; métricas macro dão peso mais
+equilibrado a cada paciente e, neste experimento, são acompanhadas por
+intervalos de confiança obtidos por \textit{bootstrap} em nível de paciente.
+
+\input{generated/results_diagset_metric_figures}
+
+No nível micro, a comparação visual foi separada por métrica para evitar um
+gráfico sobrecarregado. A \Figura{fig:results_diagset-micro-metrics} apresenta
+um painel para cada métrica, e as tabelas seguintes detalham os valores com seus
+intervalos de confiança para cada normalização. A mesma organização foi adotada
+para as métricas macro na \Figura{fig:results_diagset-macro-metrics} e nas
+tabelas correspondentes.
+
+\input{generated/results_diagset_micro_metrics}
+
+\input{generated/results_diagset_macro_metrics}
+
+No nível micro, Ruifrok obteve o maior Dice, 0,8289
+[0,7796, 0,8723], seguido por ausência de normalização e Macenko. No entanto, a
+ordenação mudou no nível macro: a ausência de normalização apresentou o maior
+Dice por paciente, 0,4744 [0,3759, 0,5726], com Reinhard e Macenko em seguida.
+Essa divergência mostra que a comparação entre normalizações não pode ser
+reduzida a uma única métrica agregada. O resultado micro favorece a segmentação
+global de pixels, enquanto o resultado macro evidencia maior heterogeneidade
+entre pacientes.
+
+O AUC foi reportado como estimativa pontual porque os artefatos finais não
+armazenam intervalo de confiança para essa métrica. A
+\Figura{fig:results_diagset-auc-thresholds} mostra apenas o AUC final por
+normalização; os limiares congelados de ROI e decisão permanecem documentados na
+\Tabela{tab:results_diagset-ensemble-summary}, que descreve a receita de
+inferência. Macenko apresentou o maior AUC pontual, 0,9603, seguido por Ruifrok,
+ausência de normalização e Reinhard. A diferença entre AUC e Dice reforça que a
+qualidade de ranqueamento das probabilidades e o desempenho após limiarização
+respondem a perguntas complementares.
+
+A métrica Rule-6 separa dois componentes distintos do erro: o Dice em pacientes
+com lesão anotada e a taxa de pacientes negativos sem predição positiva. A
+\Figura{fig:results_diagset-rule6-metrics} mostra esses componentes em gráficos
+separados, e a \Tabela{tab:results_diagset-rule6} apresenta os mesmos valores
+com intervalos de confiança e contagens de pacientes. Ausência de normalização e
+Ruifrok tiveram Dice semelhante nos pacientes positivos, ambos em torno de 0,80.
+A taxa limpa em pacientes negativos, entretanto, permaneceu baixa em todas as
+estratégias, variando de 0,0488 em Ruifrok a 0,1951 em Reinhard.
+
+\input{generated/results_diagset_rule6_metrics}
+
+As matrizes de confusão complementam essa leitura ao mostrar visualmente o
+balanço entre verdadeiros negativos, falsos positivos, falsos negativos e
+verdadeiros positivos. A \Figura{fig:results_diagset-confusion-matrices} reúne
+as imagens geradas pela inferência final para as cinco normalizações, em painéis
+maiores para preservar a legibilidade.
+
+\input{generated/results_diagset_confusion_matrix_figures}
+
+\section{Discussão dos resultados DIAGSET}\label{sec:res_diagset_discussao}
+
+Os resultados de DIAGSET sugerem que a normalização de cor não produziu uma
+melhora uniforme em todos os critérios. Ruifrok foi a melhor estratégia no Dice
+micro, Macenko teve o maior AUC pontual, e a ausência de normalização apresentou
+o maior Dice macro e o maior Dice Rule-6 em pacientes positivos. Essa
+distribuição de resultados é compatível com um cenário em que o ganho aparente
+depende do nível de agregação e do tipo de erro considerado.
+
+A principal cautela vem da diferença entre desempenho em pacientes positivos e
+controle de falsos positivos em pacientes negativos. Mesmo as estratégias com
+Dice positivo mais alto mantiveram baixa taxa limpa em negativos, o que limita
+qualquer interpretação de robustez clínica. Portanto, os resultados sustentam a
+comparação reprodutível entre normalizações dentro do protocolo DIAGSET, mas não
+autorizam afirmar superioridade geral de uma normalização para todas as coortes
+ou para uso clínico externo.
+
+Em termos metodológicos, o ponto mais forte do experimento é a rastreabilidade:
+as decisões de ingestão, limpeza, particionamento, seleção de treino,
+checkpoints, limiares, pesos do \textit{ensemble} e métricas finais permanecem
+conectadas aos artefatos que as produziram. Esse padrão será reutilizado nas
+próximas coortes para que a discussão final compare não apenas valores médios,
+mas também estabilidade, incerteza e tipos de erro sob o mesmo contrato
+experimental.

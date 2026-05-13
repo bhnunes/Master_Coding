@@ -1,0 +1,86 @@
+{
+  "results_root": "D:/Usuario/Desktop/Results_DIAGSET",
+  "results_dir": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS",
+  "sqlite_quick_check": "ok",
+  "stage2": {
+    "database": "D:/Usuario/Desktop/Results_DIAGSET/database.db",
+    "table": "DATABASE_DIAGSET",
+    "stats": {
+      "total_images": 429,
+      "total_annotations": 429,
+      "image_formats": ".ndpi",
+      "annotation_formats": ".ndpa",
+      "geojson_validated": 419,
+      "failed_or_rejected": 10,
+      "window_size": 224,
+      "stride": 112,
+      "match_percentage": "1.0",
+      "tissue_percentage": "0.3",
+      "mean_processing_minutes": 1.2217891201511517
+    }
+  },
+  "stage3": {
+    "optimization_root": "D:/Usuario/Desktop/Results_DIAGSET/Optimization_Test/Optimization_Test",
+    "pilot_sample_dir": "D:/Usuario/Desktop/Results_DIAGSET/Optimization_Test/Optimization_Test/pilot_sample",
+    "master_candidate_pool_dir": "D:/Usuario/Desktop/Results_DIAGSET/Optimization_Test/Optimization_Test/master_candidate_pool",
+    "graph_params": "D:/Usuario/Desktop/Results_DIAGSET/Optimization_Test/Optimization_Test/master_candidate_pool/graph_cleaning_params.json",
+    "cleaning_decisions": "D:/Usuario/Desktop/Results_DIAGSET/master_manifest.sqlite"
+  },
+  "normalizations": [
+    {
+      "key": "NOT_NORMALIZED",
+      "label": "Sem normalizacao",
+      "metrics": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/ENSEMBLE_METRICS_11_05_2026_14_51_19.json",
+      "final_report_md": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/FINAL_ENSEMBLE_REPORT_11_05_2026_14_51_19.md",
+      "final_report_tex": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/FINAL_ENSEMBLE_REPORT_11_05_2026_14_51_19.tex",
+      "final_report_pdf": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/FINAL_ENSEMBLE_REPORT_11_05_2026_14_51_19.pdf",
+      "evaluation_csv": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/FINAL_EVALUATION_REPORT_11_05_2026_14_51_19.csv",
+      "recipe": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/ENSEMBLE_TWO_STREAM_11_05_2026_11_39_09.json",
+      "confusion_matrix": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/NOT_NORMALIZED/INFERENCE/confusion_matrix.png"
+    },
+    {
+      "key": "REINHARD",
+      "label": "Reinhard",
+      "metrics": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/ENSEMBLE_METRICS_11_05_2026_15_16_10.json",
+      "final_report_md": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/FINAL_ENSEMBLE_REPORT_11_05_2026_15_16_10.md",
+      "final_report_tex": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/FINAL_ENSEMBLE_REPORT_11_05_2026_15_16_10.tex",
+      "final_report_pdf": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/FINAL_ENSEMBLE_REPORT_11_05_2026_15_16_10.pdf",
+      "evaluation_csv": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/FINAL_EVALUATION_REPORT_11_05_2026_15_16_10.csv",
+      "recipe": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/ENSEMBLE_TWO_STREAM_11_05_2026_12_43_48.json",
+      "confusion_matrix": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/REINHARD/INFERENCE/confusion_matrix.png"
+    },
+    {
+      "key": "RUIFROK",
+      "label": "Ruifrok",
+      "metrics": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/ENSEMBLE_METRICS_12_05_2026_13_11_34.json",
+      "final_report_md": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_11_34.md",
+      "final_report_tex": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_11_34.tex",
+      "final_report_pdf": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_11_34.pdf",
+      "evaluation_csv": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/FINAL_EVALUATION_REPORT_12_05_2026_13_11_34.csv",
+      "recipe": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/ENSEMBLE_TWO_STREAM_11_05_2026_11_42_42.json",
+      "confusion_matrix": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/RUIFROK/INFERENCE/confusion_matrix.png"
+    },
+    {
+      "key": "MACENKO",
+      "label": "Macenko",
+      "metrics": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/ENSEMBLE_METRICS_12_05_2026_13_13_22.json",
+      "final_report_md": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_13_22.md",
+      "final_report_tex": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_13_22.tex",
+      "final_report_pdf": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_13_22.pdf",
+      "evaluation_csv": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/FINAL_EVALUATION_REPORT_12_05_2026_13_13_22.csv",
+      "recipe": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/ENSEMBLE_TWO_STREAM_12_05_2026_04_20_07.json",
+      "confusion_matrix": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/MACENKO/INFERENCE/confusion_matrix.png"
+    },
+    {
+      "key": "VAHADANE",
+      "label": "Vahadane",
+      "metrics": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/ENSEMBLE_METRICS_12_05_2026_13_17_25.json",
+      "final_report_md": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_17_25.md",
+      "final_report_tex": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_17_25.tex",
+      "final_report_pdf": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/FINAL_ENSEMBLE_REPORT_12_05_2026_13_17_25.pdf",
+      "evaluation_csv": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/FINAL_EVALUATION_REPORT_12_05_2026_13_17_25.csv",
+      "recipe": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/ENSEMBLE_TWO_STREAM_12_05_2026_06_02_17.json",
+      "confusion_matrix": "D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/VAHADANE/INFERENCE/confusion_matrix.png"
+    }
+  ]
+}

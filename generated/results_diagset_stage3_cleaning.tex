@@ -1,0 +1,56 @@
+\begin{table}[!htb]
+\centering
+\caption{Amostras revisadas na Fase 3.1 para DIAGSET.}
+\label{tab:results_diagset-stage3-sampling}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Conjunto & Aprovadas & Rejeitadas & Total \\
+\midrule
+Amostra piloto & 94 & 6 & 100 \\
+Pool mestre & 367 & 18 & 385 \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize Fonte: diretorios \texttt{pilot\_sample} e \texttt{master\_candidate\_pool}.}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Parametros otimizados da Fase 3.2 para limpeza por grafos em DIAGSET.}
+\label{tab:results_diagset-stage3-graph}
+\small
+\begin{tabular}{lr}
+\toprule
+Parametro & Valor \\
+\midrule
+Intensidade de fundo & 167 \\
+$k$ & 140.0 \\
+Tamanho minimo & 97 \\
+Erosao & 3 px \\
+$\tau$ & 0.19 \\
+F1 validado & 0.6667 \\
+Pares rotulados & 385 \\
+Pares de treino & 317 \\
+Pares de teste & 68 \\
+Estado aleatorio & 42 \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize Fonte: \texttt{graph\_cleaning\_params.json}.}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Decisoes aplicadas pela Fase 3.3 no manifesto DIAGSET.}
+\label{tab:results_diagset-stage3-cleaning}
+\small
+\begin{tabular}{lrr}
+\toprule
+Grupo & Aceitas & Rejeitadas \\
+\midrule
+Total & 1\,186\,778 & 74\,047 \\
+Cancer & 221\,774 & 74\,047 \\
+Nao cancer & 965\,004 & 0 \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize As decisoes persistidas em \texttt{patch\_stage\_state} foram verificadas contra o limiar $\tau$ da Fase 3.2.}
+\end{table}
