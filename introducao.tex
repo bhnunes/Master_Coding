@@ -1,117 +1,125 @@
 \chapter{Introdução}\label{chp:Introducao}
 
-O uso de imagens histopatológicas digitais transformou a forma como lâminas
-microscópicas podem ser armazenadas, revisadas e analisadas computacionalmente.
-Em vez de restringir o exame ao microscópio físico, a digitalização de lâminas
-inteiras produz \Sigla{\textit{Whole Slide Images}}{WSI}: arquivos de alta
-resolução que preservam a estrutura do tecido em múltiplas escalas. Essa
-representação permite colaboração remota, criação de bases de pesquisa e
-desenvolvimento de métodos quantitativos de apoio à patologia. Ao mesmo tempo,
-ela introduz um desafio computacional central: uma única WSI pode conter bilhões
-de pixels, tornando inviável tratar a lâmina inteira como uma imagem comum de
-visão computacional.
+A digitalização de lâminas histológicas tem transformado a forma como amostras microscópicas são armazenadas, revisadas, compartilhadas e analisadas computacionalmente. Em vez de limitar o exame ao microscópio físico, a patologia digital permite representar a lâmina como uma \Sigla{\textit{Whole Slide Image}}{WSI}, isto é, uma imagem de alta resolução capaz de preservar a organização do tecido em múltiplas escalas. Essa representação favorece a colaboração remota, a construção de bases de pesquisa e o desenvolvimento de métodos quantitativos de apoio à análise patológica. Em contrapartida, introduz um desafio computacional expressivo: uma única WSI pode conter bilhões de pixels, o que inviabiliza seu tratamento direto como uma imagem convencional de visão computacional.
 
-Esse cenário motivou o uso de aprendizagem profunda em patologia digital. Redes
-neurais convolucionais e arquiteturas baseadas em atenção têm sido empregadas em
-tarefas como detecção, classificação e segmentação de regiões tumorais, com
-resultados relevantes em desafios públicos de câncer e em estudos de fluxo
-diagnóstico assistido por computador \cite{bejnordi2017diagnostic,bandi2019resolution,campanella2025clinical}. Ainda assim, bons modelos isolados não
-resolvem, por si só, o problema metodológico. Para que um resultado seja
-interpretável e reproduzível, é necessário explicitar como as lâminas foram
-lidas, como as anotações foram convertidas em máscaras, quais regiões foram
-rejeitadas, como pacientes foram separados entre treino e teste, que
-normalização foi aplicada, como os modelos foram selecionados e como a inferência
-final foi congelada antes da avaliação.
+Esse cenário impulsionou o uso de aprendizagem profunda em patologia digital. Redes neurais convolucionais, arquiteturas baseadas em atenção e modelos de segmentação semântica têm sido empregados em tarefas como detecção, classificação e delimitação de regiões tumorais, com resultados relevantes em desafios públicos de imagens de câncer e em estudos de apoio ao fluxo diagnóstico \cite{bejnordi2017diagnostic,bandi2019resolution,campanella2025clinical}. No entanto, o desempenho de uma arquitetura neural, isoladamente, não é suficiente para garantir validade científica. Em imagens médicas, e particularmente em WSIs, a interpretação de um resultado depende também de decisões anteriores ao treinamento: como as lâminas foram lidas, como as anotações foram convertidas em máscaras, quais regiões foram excluídas, como os pacientes foram distribuídos entre treino, validação e teste, que normalização foi aplicada, quais hiperparâmetros foram adotados e de que forma a inferência final foi definida antes da avaliação.
 
-A dificuldade aumenta porque WSIs não são apenas grandes: elas são heterogêneas.
-Diferenças de scanner, coloração, preparo histológico e protocolo de anotação
-alteram o aspecto visual das imagens e podem induzir modelos a aprenderem
-atalhos espúrios. Artefatos como dobras, marcas de caneta, regiões fora de foco
-e bolhas também podem introduzir sinais não biológicos. Por isso, o controle de
-qualidade, a rastreabilidade de dados e a separação rigorosa por paciente são
-partes essenciais da metodologia, não detalhes de implementação
-\cite{weng2024grandqc,dawood2026confounding,wilkinson2016fair}.
+A relevância dessa preocupação é reforçada pela literatura sobre reprodutibilidade em segmentação médica com aprendizagem profunda. Renard et al. \cite{renard2020variability} analisaram a descrição metodológica de estudos da área e observaram que apenas 9\% dos artigos avaliados forneciam informações suficientes sobre dados e hiperparâmetros para permitir reprodução. Os autores também identificaram lacunas na descrição de componentes essenciais do fluxo experimental, como aumento de dados, conjunto de validação, taxa de aprendizado, tamanho de lote, procedimento de otimização, regularização, implementação e infraestrutura computacional. Esses achados indicam que a reprodutibilidade não depende apenas da disponibilização de um modelo treinado ou de uma métrica final, mas da documentação sistemática das decisões que conectam os dados originais aos resultados reportados.
 
-Esta dissertação parte dessa lacuna. O objetivo não é propor uma nova arquitetura
-neural isolada, mas organizar e documentar um fluxo de trabalho computacional
-reprodutível para detecção e segmentação de câncer em WSIs. O projeto integra
-etapas de ingestão, extração de \textit{patches}, controle de qualidade,
-normalização de cor, particionamento por paciente, amostragem inteligente,
-triagem de hiperparâmetros, treinamento supervisionado, otimização de
-\textit{ensemble} e inferência final. A ênfase recai sobre a consistência do
-processo completo: cada artefato intermediário deve poder ser associado à sua
-origem, às configurações usadas e às fases downstream que o consomem.
+No caso da patologia digital, essa exigência torna-se ainda mais crítica. WSIs não são apenas imagens extensas; são também heterogêneas. Diferenças de scanner, coloração, preparo histológico, resolução, protocolo de anotação e critérios de inclusão podem alterar substancialmente o aspecto visual das amostras. Além disso, dobras de tecido, marcas de caneta, bolhas, regiões fora de foco e áreas sem conteúdo histológico podem introduzir sinais não biológicos, levando modelos a aprenderem padrões espúrios. Consequentemente, controle de qualidade, rastreabilidade de dados e separação rigorosa por paciente não devem ser tratados como detalhes de implementação, mas como componentes centrais da metodologia experimental \cite{weng2024grandqc,dawood2026confounding,wilkinson2016fair}.
+
+Esta dissertação parte dessa lacuna metodológica. O objetivo não é propor uma nova arquitetura neural como contribuição isolada, mas desenvolver e documentar um fluxo de trabalho computacional reprodutível para detecção e segmentação de câncer em WSIs. O projeto integra etapas de ingestão de lâminas e anotações, extração de \textit{patches}, controle de qualidade, curadoria de amostras, normalização de cor, particionamento por paciente, amostragem do conjunto de treino, triagem de hiperparâmetros, treinamento supervisionado, otimização de \textit{ensemble} e inferência final. A ênfase recai sobre a consistência do processo completo: cada artefato intermediário precisa ser associado à sua origem, às configurações utilizadas e às etapas posteriores que o consomem.
+
+Desse modo, o fluxo completo de análise é tratado como objeto científico. Essa escolha permite explicitar decisões frequentemente omitidas ou descritas de forma incompleta em estudos de aprendizagem profunda para segmentação médica, como estratégia de validação, critérios de exclusão de amostras, uso de aumento de dados, normalização, seleção de modelos, otimização e infraestrutura computacional. Ao organizar essas decisões em fases auditáveis e reprodutíveis, a dissertação busca oferecer uma base experimental mais confiável para avaliar modelos de segmentação em patologia digital, reduzindo o risco de vazamento de dados, escolhas pós-hoc e estimativas artificialmente otimistas de desempenho.
 
 \section{Objetivos}\label{sec:objetivos}
 
-O objetivo geral desta dissertação é desenvolver e documentar um fluxo de
-trabalho reprodutível para detecção e segmentação de câncer em WSIs, com
-separação explícita entre dados, configurações, artefatos intermediários,
-treinamento de modelos e inferência final.
+O objetivo geral desta dissertação é desenvolver, documentar e avaliar um fluxo
+de trabalho computacional reprodutível para detecção e segmentação de câncer em
+\Sigla{\textit{Whole Slide Images}}{WSI}, assegurando separação explícita entre
+dados, configurações experimentais, artefatos intermediários, treinamento de
+modelos, otimização em validação e inferência final em teste.
 
-Para atingir esse objetivo, foram definidos os seguintes objetivos específicos:
+Para alcançar esse objetivo, foram definidos os seguintes objetivos específicos:
+
 \begin{itemize}
-    \item estruturar uma etapa de ingestão capaz de transformar lâminas e
-    anotações poligonais em \textit{patches}, máscaras binárias e metadados
-    rastreáveis;
+    \item estruturar uma etapa de ingestão capaz de converter lâminas
+    histológicas digitalizadas e anotações poligonais em \textit{patches},
+    máscaras binárias e metadados rastreáveis, preservando a relação entre cada
+    amostra, sua lâmina de origem, seu identificador de paciente e sua
+    configuração de processamento;
 
-    \item incorporar controle de qualidade e regras de integridade para reduzir
-    o uso de regiões ambíguas, artefatuais ou geometricamente incompatíveis com
-    a tarefa supervisionada;
+    \item incorporar mecanismos de controle de qualidade e verificação de
+    integridade para reduzir a inclusão de regiões ambíguas, artefatuais, sem
+    conteúdo histológico suficiente ou geometricamente incompatíveis com a
+    tarefa supervisionada;
 
-    \item preservar isolamento entre pacientes durante particionamento,
-    treinamento, validação e teste, reduzindo risco de vazamento experimental;
+    \item garantir isolamento por paciente nas etapas de particionamento,
+    treinamento, validação e teste, de modo a reduzir o risco de vazamento de
+    dados e preservar a independência da avaliação experimental;
 
-    \item comparar famílias de normalização de cor e arquiteturas de
-    segmentação sem atribuir superioridade antes da consolidação dos resultados
-    finais;
+    \item comparar estratégias de normalização de cor e famílias de arquiteturas
+    de segmentação sob um mesmo protocolo experimental, evitando atribuir
+    superioridade a métodos específicos sem respaldo nas métricas e nas análises
+    consolidadas;
 
-    \item definir uma rotina de treinamento, seleção de checkpoints,
-    otimização de \textit{ensemble} e inferência que seja executável a partir de
-    artefatos versionáveis e configurações explícitas;
+    \item definir uma rotina reprodutível para treinamento, seleção de
+    \textit{checkpoints}, otimização de \textit{ensemble} e inferência final,
+    baseada em configurações explícitas, artefatos versionáveis e separação entre
+    decisões tomadas em validação e avaliação realizada em teste;
 
-    \item manter um registro textual rastreável entre metodologia, código-fonte,
-    artefatos produzidos e citações científicas.
+    \item manter rastreabilidade entre metodologia, código-fonte, configurações,
+    artefatos produzidos, métricas reportadas e referências científicas, de modo
+    que o fluxo experimental possa ser inspecionado, reproduzido e criticado.
 \end{itemize}
 
 \section{Justificativa}\label{sec:justificativa}
 
-A justificativa clínica e científica deste trabalho está na necessidade de
+A justificativa clínica e científica desta dissertação está na necessidade de
 processos confiáveis para análise computacional de câncer em patologia digital.
-Modelos de aprendizagem profunda podem auxiliar na triagem e quantificação de
-regiões suspeitas, mas sua utilidade depende da qualidade do fluxo que produz os
-dados de treinamento e da forma como os resultados são avaliados. Em bases
-histopatológicas, pequenos descuidos metodológicos podem produzir estimativas
-otimistas: por exemplo, quando \textit{patches} do mesmo paciente aparecem em
-conjuntos diferentes, quando anotações contraditórias são tratadas como verdade
-absoluta, ou quando limiares são ajustados indiretamente sobre dados de teste.
+Modelos de aprendizagem profunda podem auxiliar na triagem, delimitação e
+quantificação de regiões suspeitas; contudo, sua utilidade depende não apenas
+da arquitetura neural empregada, mas também da qualidade do fluxo experimental
+que produz os dados de treinamento e sustenta a avaliação dos resultados. Em
+bases histopatológicas, pequenos descuidos metodológicos podem gerar estimativas
+artificialmente otimistas de desempenho, como ocorre quando \textit{patches} de
+um mesmo paciente são distribuídos entre conjuntos distintos, quando anotações
+ambíguas ou contraditórias são tratadas como verdade absoluta, ou quando
+limiares e decisões de inferência são ajustados, ainda que indiretamente, a
+partir do conjunto de teste.
+
+Essa preocupação é reforçada por estudos sobre reprodutibilidade em segmentação
+médica com aprendizagem profunda. Uma revisão da área mostrou que apenas 9\%
+dos artigos avaliados descreviam suficientemente os hiperparâmetros e o conjunto
+de dados para permitir reprodução, além de apontar lacunas na descrição de
+componentes essenciais do fluxo experimental, como aumento de dados, conjunto de
+validação, taxa de aprendizado, tamanho de lote e procedimento de otimização
+\cite{renard2020variability}. De forma complementar, revisões sobre aprendizado
+de máquina em imagem médica destacam que a reprodutibilidade é condição central
+para que resultados computacionais possam ser verificados, comparados e
+reutilizados pela comunidade científica \cite{colliot2023reproducibility}.
+Assim, a confiabilidade de um experimento não depende apenas da métrica final
+reportada, mas da possibilidade de reconstruir o caminho que levou da imagem
+original à predição avaliada.
 
 Do ponto de vista computacional, o trabalho também se justifica pela necessidade
 de transformar uma sequência complexa de operações em um processo auditável.
-Lâminas inteiras exigem leitura especializada, manipulação eficiente de imagens,
-armazenamento estruturado, bancos de progresso, manifestos, checagens de
-integridade e execução em ambientes com restrição de disco e GPU. Ao documentar
-esses contratos, a dissertação busca tornar o projeto mais fácil de reproduzir,
-criticar e estender.
+Lâminas histológicas digitalizadas em alta resolução exigem leitura
+especializada, manipulação eficiente de grandes imagens, armazenamento
+estruturado, controle de progresso, manifestos, checagens de integridade e
+execução em ambientes com restrições de disco e GPU. Ao documentar esses
+contratos, a dissertação busca tornar o fluxo experimental mais transparente,
+reprodutível, criticável e extensível.
 
-Por fim, a contribuição metodológica está em tratar o fluxo completo como objeto
-de pesquisa. Em vez de relatar apenas a métrica final de um modelo, o texto
-explicita as decisões que conectam a lâmina original à máscara prevista. Essa
-posição é compatível com recomendações de reprodutibilidade computacional e com
-princípios FAIR para preservação de metadados e artefatos científicos
-\cite{wilkinson2016fair,piccolo2016tools}.
+Por fim, a contribuição metodológica está em tratar o fluxo completo como
+objeto de pesquisa. Em vez de relatar apenas a métrica final de um modelo, o
+trabalho explicita as decisões que conectam a lâmina original à máscara
+prevista: aquisição, curadoria, extração de \textit{patches}, normalização,
+particionamento por paciente, treinamento, seleção de modelos, otimização de
+\textit{ensemble} e inferência final. Essa posição é compatível com
+recomendações de reprodutibilidade computacional e com os princípios FAIR,
+segundo os quais dados, metadados, algoritmos, ferramentas e fluxos de trabalho
+devem favorecer localização, acessibilidade, interoperabilidade e reutilização
+\cite{renard2020variability,wilkinson2016fair,piccolo2016tools}.
 
 \section{Estrutura do documento}\label{sec:estrutura_documento}
 
 O restante desta dissertação está organizado da seguinte forma. O
-\Capitulo{chp:levantamento} apresenta os conceitos de patologia digital,
-WSIs, pré-processamento, normalização, segmentação semântica, métricas,
-particionamento e \textit{ensembles}. O \Capitulo{chp:desenvolvimento}
-descreve a metodologia implementada, conectando as fases executáveis do
-repositório aos seus contratos científicos. O \Capitulo{chp:resultados}
-reserva a estrutura para estatísticas de coorte, resultados de treinamento,
-otimização do \textit{ensemble}, inferência final e ablações, sem preencher
-métricas ainda não consolidadas. O \Capitulo{chp:conclusoes} apresenta uma
-conclusão provisória restrita às contribuições metodológicas verificáveis. Por
-fim, os apêndices registram pendências, mapa entre texto e código, e
-configurações que deverão ser reportadas na versão final.
+\Capitulo{chp:levantamento} apresenta os fundamentos necessários à compreensão
+do trabalho, incluindo patologia digital, imagens de lâminas inteiras,
+pré-processamento, normalização de cor, segmentação semântica, métricas de
+avaliação, particionamento experimental, reprodutibilidade e
+\textit{ensembles}. O \Capitulo{chp:desenvolvimento} descreve a metodologia
+proposta e implementada, relacionando as fases executáveis do repositório aos
+contratos científicos que orientam ingestão de dados, controle de qualidade,
+extração de amostras, particionamento, treinamento, otimização e inferência.
+
+O \Capitulo{chp:resultados} apresenta os resultados experimentais obtidos,
+incluindo estatísticas dos conjuntos de dados analisados, efeitos das etapas de
+extração e curadoria, desempenho dos modelos treinados, otimização do
+\textit{ensemble}, inferência final e análises complementares. O
+\Capitulo{chp:conclusoes} sintetiza as contribuições da dissertação, discute as
+limitações identificadas e aponta possibilidades de continuidade. Por fim, os
+apêndices complementam o texto principal com materiais de apoio, registros
+metodológicos, mapeamentos entre texto e implementação e informações adicionais
+necessárias à reprodutibilidade do fluxo experimental.
