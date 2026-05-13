@@ -1,14 +1,14 @@
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_micro_metrics.png}
-\caption{Metricas micro no conjunto de teste de DIAGSET.}
+\caption{Metricas micro/pixel-level no conjunto de teste de DIAGSET. Cada painel mostra uma metrica; os pontos representam as normalizacoes e as barras verticais indicam IC95\%.}
 \label{fig:results_diagset-micro-metrics}
 \end{figure}
 
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_macro_metrics.png}
-\caption{Metricas macro por paciente no conjunto de teste de DIAGSET.}
+\caption{Metricas macro/patient-level no conjunto de teste de DIAGSET. Cada painel resume uma metrica por normalizacao, com barras verticais representando IC95\%.}
 \label{fig:results_diagset-macro-metrics}
 \end{figure}
 
@@ -27,20 +27,20 @@
 \caption{Taxa limpa em pacientes negativos}
 \label{fig:results_diagset-rule6-neg-clean}
 \end{subfigure}
-\caption{Metricas Rule-6 no conjunto de teste de DIAGSET.}
+\caption{Metricas Rule-6 no conjunto de teste de DIAGSET. O painel esquerdo mostra o Dice em pacientes positivos, e o painel direito mostra a taxa limpa em pacientes negativos; as barras verticais indicam IC95\%.}
 \label{fig:results_diagset-rule6-metrics}
 \end{figure}
 
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=0.94\textwidth]{figuras/results_diagset_auc_thresholds.png}
-\caption{AUC no conjunto de teste de DIAGSET.}
+\caption{AUC no conjunto de teste de DIAGSET. A figura mostra apenas a estimativa pontual por normalizacao, pois os artefatos finais nao armazenaram IC95\% para AUC.}
 \label{fig:results_diagset-auc-thresholds}
 \end{figure}
 
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=0.94\textwidth]{figuras/results_diagset_ensemble_weights.png}
-\caption{Pesos dos modelos nos ensembles finais de DIAGSET.}
+\caption{Pesos dos modelos nos ensembles finais de DIAGSET. O mapa de calor mostra a contribuicao relativa de cada arquitetura e fluxo na receita congelada de inferencia.}
 \label{fig:results_diagset-ensemble-weights}
 \end{figure}

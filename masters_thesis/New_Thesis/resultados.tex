@@ -1,22 +1,23 @@
 \chapter{Resultados e discussão}\label{chp:resultados}
 
-Este capítulo apresenta os resultados finais obtidos para DIAGSET, primeira
-coorte concluída no fluxo experimental. A organização adotada aqui será
-replicada nas demais coortes: primeiro são descritas a ingestão das imagens, a
-curadoria e a rastreabilidade dos dados; em seguida, o particionamento, a
-amostragem de treino, os hiperparâmetros efetivamente usados, a receita
-congelada do \textit{ensemble} e as métricas finais de inferência. Essa sequência
-preserva a fronteira entre as decisões feitas antes do treinamento, as decisões
-feitas em validação e a avaliação final no teste.
+Este capítulo avalia como cinco estratégias de normalização de cor se
+comportaram em DIAGSET sob o mesmo protocolo de treino, otimização de
+\textit{ensemble} e inferência congelada. A questão central não é apenas qual
+normalização obteve o maior valor médio, mas se a ordenação entre estratégias se
+mantém quando a avaliação muda de pixels agregados para pacientes, AUC e
+métricas Rule-6. O resultado geral indica que nenhuma normalização domina todos
+os critérios: Ruifrok lidera o Dice micro, Macenko apresenta o maior AUC pontual
+e a ausência de normalização atinge o maior Dice macro e Rule-6 em pacientes
+positivos.
 
-Os valores reportados foram extraídos dos artefatos finais, sem recalcular
+Todas as comparações foram feitas a partir dos artefatos finais, sem recalcular
 métricas nem alterar intervalos de confiança. As métricas finais vêm dos arquivos
 \texttt{ENSEMBLE\_METRICS\_*}; os limiares e pesos vêm da receita congelada do
 \textit{ensemble}; os metadados de ingestão vêm de \texttt{database.db}; e os
 metadados de limpeza vêm dos artefatos da Fase 3 e do
 \texttt{master\_manifest.sqlite}. O manifesto passou em \texttt{PRAGMA
-quick\_check}, sustentando a rastreabilidade das tabelas geradas para este
-capítulo.
+quick\_check}, preservando a rastreabilidade entre ingestão, curadoria,
+treinamento, receita final e avaliação no teste.
 
 \section{Ingestão, curadoria e coorte}\label{sec:res_diagset_coorte}
 
@@ -64,6 +65,13 @@ Fase 6.
 
 \input{generated/results_diagset_smart_sampling}
 
+Em conjunto, esse funil define a base empírica usada nas métricas finais: a
+curadoria removeu amostras consideradas contaminadas antes da divisão por
+paciente, enquanto validação e teste permaneceram fora da seleção compacta de
+treino. Essa separação é importante porque os resultados finais devem refletir a
+receita congelada aplicada ao teste, não a redução usada para acelerar e
+controlar o treinamento.
+
 \section{Treinamento e receita final do ensemble}\label{sec:res_diagset_treinamento}
 
 Cada normalização foi avaliada com oito arquiteturas no treinamento final. As
@@ -71,7 +79,9 @@ Tabelas \ref{tab:results_diagset-training-not_normalized} a
 \ref{tab:results_diagset-training-vahadane} apresentam todos os checkpoints
 selecionados por validação, incluindo época, perda, AUPRC, AUROC e MCC. Esses
 valores documentam a seleção de modelos que alimentou a otimização posterior do
-\textit{ensemble}; eles não substituem a avaliação congelada de teste.
+\textit{ensemble}; eles não substituem a avaliação congelada de teste. Portanto,
+as tabelas desta seção descrevem o protocolo de seleção, enquanto a comparação
+entre normalizações é feita apenas na inferência final.
 
 \input{generated/results_diagset_training_tables}
 
@@ -114,6 +124,15 @@ pixels corretamente segmentados, mas podem ser influenciadas por pacientes ou
 lâminas com maior número de \textit{patches}; métricas macro dão peso mais
 equilibrado a cada paciente e, neste experimento, são acompanhadas por
 intervalos de confiança obtidos por \textit{bootstrap} em nível de paciente.
+
+Antes do detalhamento por tabela, a leitura global dos resultados mostra um
+comportamento dependente da métrica. Ruifrok apresentou o maior Dice micro,
+sugerindo melhor agregação pixel-level sob o limiar congelado; Macenko obteve o
+maior AUC pontual, indicando melhor ranqueamento probabilístico no teste; e a
+ausência de normalização liderou o Dice macro e o Dice Rule-6 em pacientes
+positivos. Essa discordância entre endpoints orienta a interpretação das figuras
+seguintes: a normalização mais favorável depende do nível de agregação e do tipo
+de erro considerado.
 
 \input{generated/results_diagset_metric_figures}
 
@@ -166,6 +185,13 @@ maiores para preservar a legibilidade.
 
 \input{generated/results_diagset_confusion_matrix_figures}
 
+O padrão visual das matrizes de confusão é coerente com a baixa taxa limpa em
+pacientes negativos: as estratégias mantêm os maiores valores de Dice nos casos
+positivos, mas ainda produzem falsos positivos suficientes para impedir uma leitura
+clínica forte do teste negativo. Assim, as matrizes não apenas documentam as
+contagens finais, mas também explicam por que Dice, AUC e Rule-6 devem ser lidos
+como endpoints complementares.
+
 \section{Discussão dos resultados DIAGSET}\label{sec:res_diagset_discussao}
 
 Os resultados de DIAGSET sugerem que a normalização de cor não produziu uma
@@ -173,7 +199,10 @@ melhora uniforme em todos os critérios. Ruifrok foi a melhor estratégia no Dic
 micro, Macenko teve o maior AUC pontual, e a ausência de normalização apresentou
 o maior Dice macro e o maior Dice Rule-6 em pacientes positivos. Essa
 distribuição de resultados é compatível com um cenário em que o ganho aparente
-depende do nível de agregação e do tipo de erro considerado.
+depende do nível de agregação e do tipo de erro considerado. A interpretação de
+Vahadane também deve permanecer vinculada ao \textit{backend}
+\texttt{fixed\_source}, isto é, à aproximação operacional congelada neste
+experimento.
 
 A principal cautela vem da diferença entre desempenho em pacientes positivos e
 controle de falsos positivos em pacientes negativos. Mesmo as estratégias com
