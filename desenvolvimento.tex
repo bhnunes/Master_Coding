@@ -919,23 +919,47 @@ metadados de hiperparâmetros, normalização, amostragem, uso de
 proveniência. AdamW e AdamW Schedule-Free são opções de otimização
 \cite{loshchilov2019decoupled,defazio2024road}.
 
-\section{Otimização do ensemble e inferência final}\label{sec:met_ensemble_inferencia}
+\section{Otimização do ensemble}\label{sec:met_otimizacao_ensemble}
 
-A Fase 9 combina modelos individuais em uma receita de \textit{ensemble} usando
-apenas pacientes de validação. A ideia geral é apoiada pela literatura de
-\textit{ensemble learning} e seleção de bibliotecas de modelos
-\cite{dietterich2000ensemble,caruana2004ensemble}, mas a implementação local usa
-dois fluxos, pesos contínuos, limiares e busca por Optuna. Antes de otimizar, a
-fase carrega metadados de modelos, verifica compatibilidade de proveniência e
-impede que checkpoints treinados sob linhagens incompatíveis sejam combinados.
+A Fase 9 transforma os modelos treinados na Fase 8 em uma receita única de
+\textit{ensemble}, usando apenas pacientes de validação. Nenhum peso de rede é
+reestimado nessa etapa e nenhum paciente de teste é consultado. A ideia geral é
+apoiada pela literatura de \textit{ensemble learning} e seleção de bibliotecas de
+modelos \cite{dietterich2000ensemble,caruana2004ensemble}, mas a implementação
+local é específica à segmentação histopatológica: em vez de escolher um único
+peso global para todos os modelos, a fase otimiza dois fluxos, pesos contínuos,
+limiares e restrições de região de interesse por Optuna.
+
+Antes de otimizar, a fase carrega os metadados produzidos pelo treinamento,
+incluindo arquitetura, codificador, checkpoint, métricas de validação e
+assinaturas de compatibilidade. Essas assinaturas registram a linhagem dos dados,
+a partição, a normalização, a amostragem inteligente, a configuração de perda e
+outros elementos que definem o contrato experimental. O otimizador seleciona
+exatamente um candidato válido por arquitetura solicitada, ordenado por uma
+métrica configurável, por padrão
+\texttt{best\_val\_auprc\_pixel\_score}. Candidatos sem seções obrigatórias de
+proveniência ou com assinatura incompatível são rejeitados antes da combinação,
+evitando que checkpoints treinados sob linhagens diferentes sejam misturados.
+
+A validação é lida a partir do \texttt{master\_manifest.sqlite}, preservando a
+linhagem dos pacientes, dos shards HDF5 canônicos e da normalização em tempo de
+execução. Internamente, esses pacientes são separados em subconjuntos disjuntos
+de otimização, calibração e, quando possível, \textit{holdout}. A separação é
+feita no nível de paciente e procura manter casos positivos e negativos nos
+subconjuntos, de modo que os pesos do ensemble, o limiar final e a estimativa
+interna de desempenho não sejam obtidos sobre exatamente os mesmos pacientes.
 
 A receita é organizada como \texttt{two\_stream\_spatial\_gating}. Modelos do
 fluxo semântico produzem uma máscara grosseira de região de interesse, enquanto
-modelos do fluxo espacial refinam a probabilidade dentro dessa região. Seja
+modelos do fluxo espacial refinam a probabilidade dentro dessa região. Por
+padrão, o fluxo semântico considera \texttt{SWIN}, \texttt{DPT},
+\texttt{SEGFORMER} e \texttt{UPERNET}, enquanto o fluxo espacial considera
+\texttt{DEEPLABV3PLUS}, \texttt{UNET++}, \texttt{FPN} e \texttt{MANET}. Seja
 $\mathcal{M}_{\mathrm{sem}}$ o conjunto semântico,
 $\mathcal{M}_{\mathrm{spa}}$ o conjunto espacial e $P_m(x)$ a probabilidade de
-primeiro plano produzida pelo modelo $m$ no pixel $x$, após TTA por espelhamento
-quando configurado \cite{moshkov2020test}. As predições ponderadas dos fluxos são:
+primeiro plano produzida pelo modelo $m$ no pixel $x$, após média de três vistas
+de teste: imagem original, espelhamento horizontal e espelhamento vertical
+\cite{moshkov2020test}. As predições ponderadas dos fluxos são:
 \begin{equation}
 \begin{array}{rcl}
 P_{\mathrm{sem}}(x) &=&
@@ -951,19 +975,22 @@ A implementação da Fase 9 pode materializar as probabilidades de validação e
 \textit{memmaps} e processar os fluxos semântico e espacial de forma escalonada
 para controlar RAM e disco. Esse cache armazena predições com TTA, máscaras de
 referência e identificadores de paciente para a mesma divisão de validação usada
-na otimização, podendo ser descartado e recriado durante a execução. Portanto, o
-cache é uma representação operacional de armazenamento e proveniência, não uma
-nova métrica nem uma etapa adicional de seleção de modelos
-\cite{wilkinson2016fair,piccolo2016tools}.
+na otimização; as probabilidades são quantizadas em 16 bits e as máscaras de
+referência em 8 bits. Na rota escalonável, a fase constrói primeiro um cache
+semântico para encontrar a ROI, descarta as predições semânticas brutas quando
+elas deixam de ser necessárias, constrói o cache espacial e pré-computa os
+componentes usados no objetivo espacial. Portanto, o cache é uma representação
+operacional de armazenamento e proveniência, não uma nova métrica nem uma etapa
+adicional de seleção de modelos \cite{wilkinson2016fair,piccolo2016tools}.
 
-A região de interesse é formada por redução de resolução, limiarização e retorno
-à grade original:
+A região de interesse é formada por redução de resolução bilinear, limiarização
+e retorno à grade original por vizinho mais próximo:
 \begin{equation}
     R(x)=
     \mathrm{Up}
     \left(
     \mathbf{1}_{[
-    \mathrm{Down}(P_{\mathrm{sem}};s)>\tau_{\mathrm{roi}}
+    \mathrm{Down}(P_{\mathrm{sem}};s)\ge\tau_{\mathrm{roi}}
     ]}
     \right)(x).
     \label{eq:roi_gate}
@@ -973,7 +1000,7 @@ interesse. A probabilidade final e a máscara binária são:
 \begin{equation}
 \begin{array}{rcl}
 P_{\mathrm{final}}(x) &=& P_{\mathrm{spa}}(x)R(x),\\[0.5em]
-\hat{Y}(x) &=& \mathbf{1}_{[P_{\mathrm{final}}(x)>\tau_{\mathrm{dec}}]}.
+\hat{Y}(x) &=& \mathbf{1}_{[P_{\mathrm{final}}(x)\ge\tau_{\mathrm{dec}}]}.
 \end{array}
 \label{eq:final_gated_prediction}
 \end{equation}
@@ -984,7 +1011,7 @@ binária final.
 A otimização é feita com Optuna/TPE \cite{akiba2019optuna,bergstra2011algorithms}.
 O fluxo semântico favorece alta recuperação de regiões positivas sem aceitar
 regiões vazias ou excessivamente permissivas. Para um paciente positivo $i$, a
-revocação da região de interesse é:
+recuperação da região de interesse é:
 \begin{equation}
     \mathrm{Rec}_{\mathrm{ROI}}^{(i)} =
     \frac{|R_i \cap Y_i|}{|Y_i|+\varepsilon}.
@@ -1004,9 +1031,15 @@ pacientes negativos:
     \lambda\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-}F_j .
     \label{eq:spatial_objective}
 \end{equation}
-Os termos $S_i$ e $F_j$ são penalidades definidas pela implementação; portanto a
-estrutura de dois fluxos deve ser descrita como desenho específico do
-repositório, não como reprodução direta de um método externo.
+Como a AUPRC é sensível ao forte desbalanceamento entre pixels positivos e
+negativos, ela é usada aqui como critério de validação para lesões esparsas
+\cite{saito2015precision}; a calibração posterior usa MCC por sua capacidade de
+combinar erros positivos e negativos em uma única medida
+\cite{matthews1975comparison}.
+O termo $S_i$ representa vazamento médio de probabilidade fora da ROI em
+pacientes positivos, e $F_j$ representa massa falso-positiva em pacientes
+negativos. Portanto, a estrutura de dois fluxos deve ser descrita como desenho
+específico do repositório, não como reprodução direta de um método externo.
 
 Após selecionar pesos e $\tau_{\mathrm{roi}}$, a Fase 9 calibra o limiar final em
 pacientes de calibração disjuntos dos pacientes usados para otimização. O limiar
@@ -1017,17 +1050,37 @@ escolhido é:
     \overline{\mathrm{MCC}}_{\mathrm{cal}}(t).
     \label{eq:threshold_calibration}
 \end{equation}
-Um subconjunto holdout interno de validação pode ser usado para relatório de
-desenvolvimento, mas não deve ser confundido com avaliação final. A saída da Fase
-9 é uma receita congelada com pesos, limiares, modelos, assinaturas,
-identificadores de checkpoints e metadados de validação.
+Um subconjunto \textit{holdout} interno de validação pode ser usado para
+relatório de desenvolvimento, mas não deve ser confundido com avaliação final. A
+saída da Fase 9 é uma receita JSON assinada com pesos, limiares, modelos
+selecionados, assinaturas, hashes de checkpoints, métricas de calibração e
+\textit{holdout},
+além dos metadados de validação necessários para reproduzir e auditar a escolha
+do ensemble.
 
-A Fase 10 consome a receita congelada e avalia o conjunto de teste. Ela valida
-assinaturas, confere hashes de checkpoints, carrega os modelos referenciados,
-aplica a regra final de decisão e produz métricas, figuras e relatórios. A fase
-não seleciona novos modelos nem reajusta pesos ou limiares. Essa separação é
-essencial para que o teste permaneça uma estimativa de desempenho fora do ciclo
-de otimização.
+\section{Inferência final}\label{sec:met_inferencia_final}
+
+A Fase 10 consome exclusivamente a receita congelada da Fase 9 e avalia o
+conjunto de teste. Ela não seleciona novos modelos, não reajusta pesos, não
+calibra novos limiares e não altera a divisão de pacientes. Antes da inferência,
+o código valida a assinatura da receita, confere hashes de checkpoints e aceita
+apenas a estratégia \texttt{two\_stream\_spatial\_gating}. A fase também compara
+a linhagem esperada pela receita com a linhagem observada do manifesto de teste,
+incluindo hash do manifesto, identificador da partição da Fase 4, método de
+normalização em tempo de execução, \textit{backend} de Vahadane quando aplicável
+e artefatos de normalização. Essa separação é essencial para que o teste
+permaneça uma estimativa de desempenho fora do ciclo de otimização
+\cite{moshkov2020test}.
+
+Os pacientes de teste são lidos do \texttt{master\_manifest.sqlite} e carregados
+a partir dos HDF5 canônicos por paciente. Quando a cópia local está habilitada,
+ela serve apenas para acelerar leitura temporária dos shards; a identidade dos
+registros avaliados continua definida pelo manifesto. Os modelos da receita são
+instanciados com as mesmas arquiteturas e codificadores usados no treinamento,
+os checkpoints são carregados de forma estrita e a inferência é executada em
+modo de avaliação. Para cada lote, a Fase 10 usa a mesma média de aumentos de
+teste da Fase 9 e reconstrói a probabilidade final pelas
+Equações~\ref{eq:streams}--\ref{eq:final_gated_prediction}.
 
 Para contagens acumuladas de pixels, as principais métricas finais são:
 \begin{equation}
@@ -1046,10 +1099,12 @@ Para contagens acumuladas de pixels, as principais métricas finais são:
 \end{equation}
 Dice e IoU descrevem sobreposição espacial, enquanto sensibilidade,
 especificidade, precisão e acurácia derivam da matriz de confusão
-\cite{seghier2024dice,sokolova2009performance}. AUROC é calculada a partir dos
-escores probabilísticos antes da limiarização, quando aplicável
-\cite{fawcett2006roc}. AUPRC complementa a avaliação em cenários desbalanceados
-\cite{saito2015precision}.
+\cite{seghier2024dice,sokolova2009performance}. O AUROC pixel-level é calculado
+a partir de histogramas dos escores probabilísticos antes da limiarização, uma
+forma de preservar a avaliação probabilística sem manter todos os pixels de
+teste em memória principal \cite{fawcett2006roc}. A AUPRC aparece na Fase 9 como
+critério de otimização espacial em validação; a Fase 10 reporta o desempenho da
+receita congelada sobre o teste.
 
 As métricas podem ser agregadas em nível micro, agrupando contagens de pixels, ou
 em nível macro, calculando a métrica por paciente e depois tomando a média. Para
@@ -1062,10 +1117,15 @@ falso-positivo:
     \mathbf{1}_{[FP_j=0]} .
     \label{eq:ncr}
 \end{equation}
-Quando houver pacientes suficientes, intervalos de confiança serão estimados por
-reamostragem bootstrap de pacientes \cite{efron1979bootstrap}. Esses intervalos
-descrevem variação empírica do conjunto avaliado e não substituem validação
-externa.
+Quando houver pelo menos 20 pacientes de teste, intervalos de confiança de 95\%
+são estimados por \textit{bootstrap} não paramétrico com 10.000 reamostragens no
+nível do paciente \cite{efron1979bootstrap}. Esses intervalos descrevem variação
+empírica do conjunto avaliado e não substituem validação externa. A fase exporta
+métricas em JSON, CSV e relatórios Markdown/LaTeX, além de uma matriz de
+confusão normalizada por linha e visualizações de amostras para auditoria
+qualitativa. O artefato de execução preserva a rastreabilidade da receita, do
+manifesto, dos checkpoints e das variáveis de ambiente não sensíveis usadas na
+avaliação final.
 
 \section{Limitações metodológicas conhecidas}\label{sec:met_limitacoes}
 
