@@ -12,7 +12,6 @@ BREW_PACKAGES=(
   git
   libomp
   openjpeg
-  openslide
   pkg-config
 )
 
@@ -108,7 +107,8 @@ configure_native_library_paths() {
 
   export PATH="$brew_prefix/bin:$PATH"
   export PKG_CONFIG_PATH="$brew_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-  export DYLD_FALLBACK_LIBRARY_PATH="$brew_prefix/lib:${DYLD_FALLBACK_LIBRARY_PATH:-/usr/local/lib:/usr/lib}"
+  export CPPFLAGS="-I$brew_prefix/opt/libomp/include ${CPPFLAGS:-}"
+  export LDFLAGS="-L$brew_prefix/opt/libomp/lib ${LDFLAGS:-}"
 }
 
 sync_python_dependencies() {

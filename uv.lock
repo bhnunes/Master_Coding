@@ -859,6 +859,7 @@ dependencies = [
     { name = "numba" },
     { name = "numpy" },
     { name = "opencv-contrib-python" },
+    { name = "openslide-bin", marker = "sys_platform == 'darwin'" },
     { name = "openslide-python" },
     { name = "optuna" },
     { name = "orjson" },
@@ -914,6 +915,7 @@ requires-dist = [
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "opencv-contrib-python", specifier = "==4.9.0.80" },
+    { name = "openslide-bin", marker = "sys_platform == 'darwin'" },
     { name = "openslide-python" },
     { name = "optuna", specifier = "==4.8.0" },
     { name = "orjson" },
@@ -1318,6 +1320,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/dd/5c/c139a7876099916879609372bfa513b7f1257f7f1a908b0bdc1c2328241b/opencv_python_headless-4.11.0.86-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0e0a27c19dd1f40ddff94976cfe43066fbbe9dfbb2ec1907d66c19caef42a57b", size = 49969856, upload-time = "2025-01-16T13:53:29.654Z" },
     { url = "https://files.pythonhosted.org/packages/95/dd/ed1191c9dc91abcc9f752b499b7928aacabf10567bb2c2535944d848af18/opencv_python_headless-4.11.0.86-cp37-abi3-win32.whl", hash = "sha256:f447d8acbb0b6f2808da71fddd29c1cdd448d2bc98f72d9bb78a7a898fc9621b", size = 29324425, upload-time = "2025-01-16T13:52:49.048Z" },
     { url = "https://files.pythonhosted.org/packages/86/8a/69176a64335aed183529207ba8bc3d329c2999d852b4f3818027203f50e6/opencv_python_headless-4.11.0.86-cp37-abi3-win_amd64.whl", hash = "sha256:6c304df9caa7a6a5710b91709dd4786bf20a74d57672b3c31f7033cc638174ca", size = 39402386, upload-time = "2025-01-16T13:52:56.418Z" },
+]
+
+[[package]]
+name = "openslide-bin"
+version = "4.0.0.13"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/b0/2e3518ed8a72927d1314527d99145a2c5b88846931e15712212d7fa13645/openslide_bin-4.0.0.13.tar.gz", hash = "sha256:a9a2e52f2f9526da41aa6cb89ee13dc0847ef73ed70afea92c3c751611bd5428", size = 19894188, upload-time = "2026-03-19T03:03:46.206Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/46/ad488e3a7416366c7ccd0034e955f6a09791aa5122ca9172fa71fe603d4c/openslide_bin-4.0.0.13-py3-none-macosx_11_0_universal2.whl", hash = "sha256:926d16482b7ff0d8dc1f91d1843a5816b463727788e53dec9cdb54dce3e76997", size = 5465247, upload-time = "2026-03-19T03:03:39.749Z" },
 ]
 
 [[package]]

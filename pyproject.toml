@@ -15,6 +15,7 @@ dependencies = [
     "opencv-contrib-python==4.9.0.80",
     "Pillow>=10.4.0",
     "openslide-python",
+    "openslide-bin; sys_platform == 'darwin'",
     "torch-staintools",
     "shapely>=2.0.0",
     "albumentations",

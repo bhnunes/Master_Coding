@@ -439,8 +439,8 @@ OpenSlide runtime rules:
 - Native Windows requires `OPENSLIDE_PATH`, and it must point to the OpenSlide `bin` folder.
 - Linux, macOS, containers, and Google Colab ignore `OPENSLIDE_PATH` and rely on the
   system OpenSlide install.
-- Native macOS should install OpenSlide through Homebrew; `setup_macos.sh` handles
-  this before syncing Python dependencies.
+- Native macOS uses the `openslide-bin` Python package for the OpenSlide dylib; this
+  avoids relying on transient shell library paths after `setup_macos.sh` exits.
 - When running from WSL, heavy reads and writes on `/mnt/c` or `/mnt/d` can be much slower than native Linux paths.
 - If your source data and outputs live on Windows disks, native Windows remains the recommended production path.
 
@@ -484,10 +484,11 @@ The bootstrap script validates `uv`, syncs dependencies from `pyproject.toml`, c
 bash setup_macos.sh
 ```
 
-The bootstrap script validates Homebrew and Xcode Command Line Tools, installs the native
-OpenSlide/OpenJPEG/GEOS runtime packages, installs `uv` when missing, syncs dependencies from
+The bootstrap script validates Homebrew and Xcode Command Line Tools, installs native
+OpenJPEG/GEOS build/runtime packages, installs `uv` when missing, syncs dependencies from
 `pyproject.toml`, uses the macOS-compatible PyTorch dependency source from the project
-configuration, and verifies `openslide`, `cv2`, and `torch` imports.
+configuration, installs the `openslide-bin` dylib package on macOS, and verifies `openslide`,
+`cv2`, and `torch` imports.
 
 ### Using Docker
 

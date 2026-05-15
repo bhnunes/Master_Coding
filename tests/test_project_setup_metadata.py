@@ -30,6 +30,7 @@ def test_pyproject_declares_repo_runtime_dependencies() -> None:
         "numba",
         "numpy",
         "opencv-contrib-python",
+        "openslide-bin",
         "openslide-python",
         "optuna",
         "pandas",
