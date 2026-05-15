@@ -1,22 +1,30 @@
-\begin{table}[!htb]
+\begin{figure}[!htb]
 \centering
-\caption{Taxas de aprendizado usadas no treinamento final Reinhard em DIAGSET.}
-\label{tab:results_diagset-learning-rates-reinhard}
-\begin{minipage}[t]{0.52\textwidth}
-\centering
-\vspace{0pt}
+
 \fbox{%
-\begin{minipage}[c][4.1cm][c]{0.92\linewidth}
+\begin{minipage}[c][8.0cm][c]{0.95\textwidth}
 \centering
-\small Placeholder do relatorio do LR finder\\[0.4em]
-\footnotesize Reinhard
+\small Placeholder do relatório do LR finder\\[0.4em]
+\footnotesize DIAGSET com normalização Reinhard
 \end{minipage}%
 }
-\end{minipage}\hfill
-\begin{minipage}[t]{0.40\textwidth}
+
+\caption[Curvas de busca de taxa de aprendizado para DIAGSET com Reinhard]{
+Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
+DIAGSET com normalização de cor pelo método de Reinhard. Cada subgráfico deverá
+apresentar a evolução da função de perda em função de $\log_{10}$ da taxa de
+aprendizado para uma arquitetura avaliada, preferencialmente com múltiplas
+execuções independentes. As curvas são utilizadas para identificar regiões de
+queda estável da perda e selecionar taxas de aprendizado candidatas para o
+treinamento final.
+}
+\label{fig:results_diagset-lr-curves-reinhard}
+\end{figure}
+
+\begin{table}[!htb]
 \centering
-\vspace{0pt}
-\small
+\caption{Taxas de aprendizado selecionadas para o treinamento final no DIAGSET com normalização Reinhard.}
+\label{tab:results_diagset-learning-rates-reinhard}
 \begin{tabular}{lr}
 \toprule
 Arquitetura & LR ($10^{-3}$) \\
@@ -24,12 +32,11 @@ Arquitetura & LR ($10^{-3}$) \\
 DEEPLABV3PLUS & 0.1 \\
 DPT & 0.06 \\
 FPN & 0.1 \\
-MANET & 1 \\
+MANET & 1.0 \\
 SEGFORMER & 0.1 \\
 SWIN & 0.3 \\
-UNET++ & 1 \\
+UNET++ & 1.0 \\
 UPERNET & 0.01 \\
 \bottomrule
 \end{tabular}
-\end{minipage}
 \end{table}
