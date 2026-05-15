@@ -151,6 +151,7 @@ Master_Coding/
 │
 ├── .env_example                     # Environment configuration template
 ├── setup_windows.ps1                # Native Windows bootstrap
+├── setup_macos.sh                   # Native macOS bootstrap
 ├── setup_colab.sh                   # One-step Google Colab bootstrap
 ├── colab_setup.md                   # Google Colab usage guide
 ├── pyproject.toml                   # Project configuration (uv)
@@ -436,7 +437,10 @@ For Phase 4 crossfold, the current optimization analysis and benchmark notes liv
 OpenSlide runtime rules:
 
 - Native Windows requires `OPENSLIDE_PATH`, and it must point to the OpenSlide `bin` folder.
-- Linux, containers, and Google Colab ignore `OPENSLIDE_PATH` and rely on the system OpenSlide install.
+- Linux, macOS, containers, and Google Colab ignore `OPENSLIDE_PATH` and rely on the
+  system OpenSlide install.
+- Native macOS should install OpenSlide through Homebrew; `setup_macos.sh` handles
+  this before syncing Python dependencies.
 - When running from WSL, heavy reads and writes on `/mnt/c` or `/mnt/d` can be much slower than native Linux paths.
 - If your source data and outputs live on Windows disks, native Windows remains the recommended production path.
 
@@ -473,6 +477,17 @@ See `colab_setup.md` for the complete Colab workflow, including Google Drive mou
 ```
 
 The bootstrap script validates `uv`, syncs dependencies from `pyproject.toml`, checks `OPENSLIDE_PATH`, and verifies `openslide`, `cv2`, and `torch` imports.
+
+### Using Native macOS
+
+```bash
+bash setup_macos.sh
+```
+
+The bootstrap script validates Homebrew and Xcode Command Line Tools, installs the native
+OpenSlide/OpenJPEG/GEOS runtime packages, installs `uv` when missing, syncs dependencies from
+`pyproject.toml`, uses macOS-compatible PyPI wheels for the PyTorch packages instead of the
+CUDA 12.6 source, and verifies `openslide`, `cv2`, and `torch` imports.
 
 ### Using Docker
 
