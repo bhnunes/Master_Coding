@@ -486,8 +486,8 @@ bash setup_macos.sh
 
 The bootstrap script validates Homebrew and Xcode Command Line Tools, installs the native
 OpenSlide/OpenJPEG/GEOS runtime packages, installs `uv` when missing, syncs dependencies from
-`pyproject.toml`, uses macOS-compatible PyPI wheels for the PyTorch packages instead of the
-CUDA 12.6 source, and verifies `openslide`, `cv2`, and `torch` imports.
+`pyproject.toml`, uses the macOS-compatible PyTorch dependency source from the project
+configuration, and verifies `openslide`, `cv2`, and `torch` imports.
 
 ### Using Docker
 
@@ -627,7 +627,7 @@ Key dependencies (defined in `pyproject.toml`):
 - **Image Processing**: OpenCV, OpenSlide, Pillow, albumentations
 - **Scientific Computing**: NumPy, Pandas, Scikit-learn, scikit-image, h5py, pyarrow
 - **Stain Normalization**: torch-staintools
-- **Model/embedding utilities**: Transformers, xformers, segmentation_models_pytorch
+- **Model/embedding utilities**: Transformers, xformers on non-macOS, segmentation_models_pytorch
 - **Optimization and reporting**: Optuna, ScheduleFree, matplotlib, mermaid-py
 
 ## License & Attribution

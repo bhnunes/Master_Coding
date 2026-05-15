@@ -4,7 +4,6 @@ set -euo pipefail
 
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 INSTALL_DEV="${SETUP_MACOS_INSTALL_DEV:-1}"
-USE_PYPI_TORCH="${SETUP_MACOS_USE_PYPI_TORCH:-1}"
 
 BREW_PACKAGES=(
   ca-certificates
@@ -35,6 +34,14 @@ ensure_macos() {
   system_name="$(uname -s)"
   if [ "$system_name" != "Darwin" ]; then
     fail "This script is for macOS. Detected: $system_name"
+  fi
+}
+
+ensure_apple_silicon() {
+  local machine
+  machine="$(uname -m)"
+  if [ "$machine" != "arm64" ]; then
+    fail "This setup currently supports Apple Silicon Macs only. Detected: $machine"
   fi
 }
 
@@ -111,18 +118,6 @@ sync_python_dependencies() {
     sync_args+=(--group dev)
   fi
 
-  # The repository's default torch source is CUDA-specific. macOS needs the PyPI wheels,
-  # which provide CPU/MPS support for supported Mac hardware.
-  if [ "$USE_PYPI_TORCH" = "1" ] \
-    || [ "$USE_PYPI_TORCH" = "true" ] \
-    || [ "$USE_PYPI_TORCH" = "TRUE" ]; then
-    sync_args+=(
-      --no-sources-package torch
-      --no-sources-package torchvision
-      --no-sources-package torchaudio
-    )
-  fi
-
   print_step "Installing Python $PYTHON_VERSION via uv"
   uv python install "$PYTHON_VERSION"
 
@@ -132,7 +127,7 @@ sync_python_dependencies() {
 
 Dependency sync failed.
 On macOS, check that the project dependency lock has macOS-compatible wheels.
-CUDA-only packages such as Linux/Windows PyTorch wheels or xformers may need platform markers.
+CUDA-only packages may need platform markers in pyproject.toml.
 EOF
     exit 1
   fi
@@ -162,6 +157,7 @@ main() {
   cd "$script_dir"
 
   ensure_macos
+  ensure_apple_silicon
   ensure_command_line_tools
   activate_homebrew
   configure_native_library_paths
