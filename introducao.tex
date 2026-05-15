@@ -1,6 +1,6 @@
 \chapter{Introdução}\label{chp:Introducao}
 
-A digitalização de lâminas histológicas tem transformado a forma como amostras microscópicas são armazenadas, revisadas, compartilhadas e analisadas computacionalmente. Em vez de limitar o exame ao microscópio físico, a patologia digital permite representar a lâmina como uma \Sigla{\textit{Whole Slide Image}}{WSI}, isto é, uma imagem de alta resolução capaz de preservar a organização do tecido em múltiplas escalas. Essa representação favorece a colaboração remota, a construção de bases de pesquisa e o desenvolvimento de métodos quantitativos de apoio à análise patológica. Em contrapartida, introduz um desafio computacional expressivo: uma única WSI pode conter bilhões de pixels, o que inviabiliza seu tratamento direto como uma imagem convencional de visão computacional.
+A digitalização de lâminas histológicas tem transformado a forma como amostras microscópicas são armazenadas, revisadas, compartilhadas e analisadas computacionalmente. Em vez de limitar o exame ao microscópio físico, a patologia digital permite representar a lâmina como uma WSI, isto é, uma imagem de alta resolução capaz de preservar a organização do tecido em múltiplas escalas. Essa representação favorece a colaboração remota, a construção de bases de pesquisa e o desenvolvimento de métodos quantitativos de apoio à análise patológica. Em contrapartida, introduz um desafio computacional expressivo: uma única WSI pode conter bilhões de pixels, o que inviabiliza seu tratamento direto como uma imagem convencional de visão computacional.
 
 Esse cenário impulsionou o uso de aprendizagem profunda em patologia digital. Redes neurais convolucionais, arquiteturas baseadas em atenção e modelos de segmentação semântica têm sido empregados em tarefas como detecção, classificação e delimitação de regiões tumorais, com resultados relevantes em desafios públicos de imagens de câncer e em estudos de apoio ao fluxo diagnóstico \cite{bejnordi2017diagnostic,bandi2019resolution,campanella2025clinical}. No entanto, o desempenho de uma arquitetura neural, isoladamente, não é suficiente para garantir validade científica. Em imagens médicas, e particularmente em WSIs, a interpretação de um resultado depende também de decisões anteriores ao treinamento: como as lâminas foram lidas, como as anotações foram convertidas em máscaras, quais regiões foram excluídas, como os pacientes foram distribuídos entre treino, validação e teste, que normalização foi aplicada, quais hiperparâmetros foram adotados e de que forma a inferência final foi definida antes da avaliação.
 
@@ -15,8 +15,7 @@ Desse modo, o fluxo completo de análise é tratado como objeto científico. Ess
 \section{Objetivos}\label{sec:objetivos}
 
 O objetivo geral desta dissertação é desenvolver, documentar e avaliar um fluxo
-de trabalho computacional reprodutível para detecção e segmentação de câncer em
-\Sigla{\textit{Whole Slide Images}}{WSI}, assegurando separação explícita entre
+de trabalho computacional reprodutível para detecção e segmentação de câncer em WSI, assegurando separação explícita entre
 dados, configurações experimentais, artefatos intermediários, treinamento de
 modelos, otimização em validação e inferência final em teste.
 
