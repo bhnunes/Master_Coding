@@ -490,34 +490,134 @@ adotado um backend com ajuste por \textit{patch}, essa escolha deve ser
 reportada separadamente, pois altera a forma como a normalização é estimada e
 aplicada.
 
-\section{Verificações de sanidade e amostragem inteligente}\label{sec:met_sanidade_amostragem}
+\section{Verificações de sanidade}\label{sec:met_sanidade}
 
-A Fase 5 atua como barreira antes do treinamento. Ela verifica colunas
-obrigatórias, existência de arquivos, decodabilidade de linhas HDF5, alinhamento
-entre imagem e máscara, compatibilidade entre rótulo e máscara, separação de
-pacientes entre conjuntos e consistência de estatísticas. Falhas críticas são
-tratadas como erros de integridade, não como avisos recuperáveis. Essa postura
-segue a proposta da dissertação: reprodutibilidade depende de contratos que
-falham de forma explícita \cite{wilkinson2016fair,piccolo2016tools}.
+A Fase 5 é uma barreira de integridade científica entre a construção das
+divisões experimentais e qualquer etapa que possa consumir essas divisões para
+treinamento. Seu objetivo não é corrigir automaticamente a base, mas rejeitar
+artefatos incompatíveis antes que erros de proveniência, vazamento entre
+conjuntos, desalinhamento de linhas HDF5 ou inconsistências semânticas sejam
+transformados em resultados quantitativos. Essa postura \textit{fail-closed}
+segue a lógica de que reprodutibilidade depende de contratos de dados
+explicitamente verificáveis \cite{wilkinson2016fair,piccolo2016tools}.
 
-A Fase 6 reduz opcionalmente o conjunto de treino efetivo, mas não altera
-validação nem teste. O estágio calcula embeddings por paciente, protege linhas
-positivas ou com pixels positivos na máscara e aplica seleção de diversidade
-somente ao subconjunto redutível. Essa política preserva exemplos positivos
-antes de reduzir regiões negativas redundantes, decisão motivada pelo
-desbalanceamento comum em tarefas de câncer \cite{he2009imbalanced}.
+A entrada da Fase 5 é o diretório produzido pela Fase 4, informado por
+\texttt{SANITY\_BASE\_DIR}. A rotina carrega \texttt{manifest.csv},
+\texttt{run\_config.json} e \texttt{split\_stats.csv}, depois separa o manifesto
+em \texttt{TRAIN}, \texttt{VALIDATION} e \texttt{TEST}. O primeiro nível de
+verificação é global: a etapa confere esquema do manifesto, linhas duplicadas,
+contrato de referência canônica aos HDF5s originais, consistência entre nomes de
+arquivo e identificadores de paciente, listas de pacientes registradas no
+\texttt{run\_config.json}, restrições da divisão, paridade entre estatísticas
+recalculadas e \texttt{split\_stats.csv}, referências de origem e linhagem da
+limpeza da Fase 3.3. Assim, o relatório testa se as tabelas que descrevem o
+experimento contam a mesma história que os artefatos persistidos.
 
-Os embeddings são extraídos por um modelo visual auto-supervisionado e usados
-como descritores de conteúdo dos \textit{patches}. Essa escolha se apoia no uso
-recente de modelos fundacionais e descritores auto-supervisionados para
-representações visuais em patologia e visão computacional
-\cite{campanella2025clinical,oquab2024dinov2}. Para decidir quantos exemplos
-avaliar por paciente, a implementação usa um orçamento adaptativo: duas amostras
-parciais são clusterizadas, a concordância entre clusterizações é medida, e o
-orçamento cresce até atingir estabilidade, limite máximo ou limite de passos.
+O segundo nível de verificação ocorre dentro de cada divisão. Para cada uma das
+três partições, a Fase 5 verifica paridade entre manifesto e disco, existência
+dos caminhos referenciados, limites de linhas nos HDF5s, decodabilidade de
+imagens e máscaras, compatibilidade de forma entre imagem e máscara, valores
+binários esperados nas máscaras e coerência entre rótulo e conteúdo da máscara.
+Esses testes são relevantes porque o armazenamento HDF5 preserva grandes
+matrizes e metadados associados, mas a validade científica do experimento ainda
+depende de cada linha continuar alinhada ao seu rótulo, paciente e arquivo de
+origem \cite{folk2011hdf5,yu2020noisy}.
 
-A concordância entre duas partições $U$ e $V$ é medida pelo índice de Rand
-ajustado, usado aqui como critério de estabilidade \cite{hubert1985comparing}:
+A Fase 5 também torna visíveis propriedades estatísticas que não são,
+isoladamente, erros fatais. O relatório apresenta presença de classes por
+divisão, balanço de classes em nível de \textit{patch}, balanço em nível de
+paciente e distribuição de \textit{patches} por paciente. Esse resumo é
+importante porque segmentação de câncer é naturalmente desbalanceada e porque
+pacientes com muitos \textit{patches} podem dominar a distribuição empírica se a
+etapa posterior não registrar esse comportamento \cite{he2009imbalanced}. A
+separação por paciente é tratada como contrato crítico: a presença do mesmo
+\texttt{patient\_id} em mais de uma divisão configura risco direto de vazamento
+entre treino, validação e teste \cite{roberts2017crossvalidation,dawood2026confounding}.
+
+O veredito final é determinado pelo pior estado observado entre as verificações.
+Se $\mathcal{C}$ representa o conjunto de checagens e
+$s(c)\in\{\mathrm{N/A},\mathrm{PASS},\mathrm{WARN},\mathrm{FAIL}\}$ representa o
+estado de cada checagem, a decisão da fase pode ser resumida como:
+\begin{equation}
+    V =
+    \begin{cases}
+        \texttt{SPLITS\ PASSED}, & \text{se } \max_{c\in\mathcal{C}} s(c)
+        \neq \mathrm{FAIL},\\
+        \texttt{SPLITS\ REJECTED}, & \text{caso contrário}.
+    \end{cases}
+    \label{eq:sanity_verdict}
+\end{equation}
+Na implementação, esse veredito é materializado no relatório
+\texttt{SCIENTIFIC INTEGRITY \& DATA QUALITY ASSURANCE REPORT}; falhas fatais ou
+qualquer veredito rejeitado encerram a execução com código de erro. Por padrão,
+algumas verificações de disco são amostradas para reduzir custo computacional,
+mas \texttt{SANITY\_FULL\_MASK\_SCAN} e \texttt{SANITY\_FULL\_SHAPE\_SCAN}
+permitem transformar as checagens de máscara e forma em varreduras completas
+quando a etapa exige maior rigor operacional.
+
+\section{Amostragem inteligente}\label{sec:met_amostragem_inteligente}
+
+A Fase 6 reduz apenas o conjunto efetivo de treino e preserva intactos os
+conjuntos de validação e teste. A etapa consulta o \texttt{master\_manifest.sqlite}
+e constrói um índice por paciente usando somente linhas com
+\texttt{split = TRAIN} e \texttt{is\_stage4\_accepted = 1}. Cada paciente deve
+apontar para um único HDF5 canônico de origem, o que mantém a seleção vinculada
+à linhagem produzida pelas fases anteriores. A saída principal não é uma nova
+definição de validação ou teste, mas o estado de seleção do treino:
+\texttt{sampling\_decision}, \texttt{is\_stage7\_selected}, artefatos laterais de
+resumo e, quando habilitado, um armazenamento compacto contendo apenas as linhas
+selecionadas para leitura eficiente nas Fases 7 e 8.
+
+A motivação científica da Fase 6 é reduzir redundância no treino sem descartar
+sinais positivos raros. Para cada paciente $p$, considere o conjunto de índices
+de treino aceitos $\mathcal{I}_p$, o rótulo binário $y_i$ e a fração de pixels
+positivos da máscara $\rho_i$. A implementação define primeiro um conjunto
+protegido:
+\begin{equation}
+    \mathcal{P}_p =
+    \left\{
+        i \in \mathcal{I}_p :
+        y_i = 1
+        \ \lor\
+        \rho_i > \tau_{\mathrm{mask}}
+    \right\},
+    \label{eq:stage6_protected_set}
+\end{equation}
+em que $\tau_{\mathrm{mask}}$ é controlado por
+\texttt{SMART\_SAMPLER\_POSITIVE\_MASK\_FRACTION\_THRESHOLD}. Por padrão,
+linhas com rótulo positivo e linhas com qualquer pixel positivo na máscara são
+mantidas antes da etapa de redução. A seleção de diversidade opera apenas sobre
+o subconjunto redutível
+$\mathcal{R}_p=\mathcal{I}_p\setminus\mathcal{P}_p$, preservando casos
+potencialmente informativos em uma tarefa marcada por forte desbalanceamento de
+classes \cite{he2009imbalanced}.
+
+Cada \textit{patch} redutível é convertido em um vetor de características por
+um extrator visual auto-supervisionado. Na configuração padrão, a Fase 6 carrega
+\texttt{owkin/phikon-v2}, executa inferência em CUDA e usa o primeiro vetor de
+\texttt{last\_hidden\_state} como representação do \textit{patch}. Em termos
+matemáticos, para uma imagem $x_i$ a etapa calcula
+$z_i=f_\theta(x_i)\in\mathbb{R}^d$. Esses vetores não são usados como
+predições de câncer; eles funcionam como descritores morfológicos para medir
+semelhança visual entre regiões do mesmo paciente. O uso de representações
+auto-supervisionadas é compatível com o emprego recente de modelos fundacionais
+e descritores visuais em patologia digital e visão computacional
+\cite{campanella2025clinical,oquab2024dinov2}.
+
+Antes de selecionar exemplos, a Fase 6 estima quantos embeddings precisam ser
+avaliados para representar o paciente. A rotina começa com
+\texttt{SMART\_SAMPLER\_N\_START}; em cada passo, amostra dois subconjuntos de
+tamanho $n$, extrai embeddings, aplica MiniBatchKMeans e mede a concordância
+entre as duas partições. Se a estabilidade média atingir
+\texttt{SMART\_SAMPLER\_STABILITY\_THRESHOLD}, o tamanho atual é aceito; caso
+contrário, $n$ cresce por \texttt{SMART\_SAMPLER\_GROWTH\_FACTOR} até alcançar
+\texttt{SMART\_SAMPLER\_N\_MAX}, o número total de linhas redutíveis ou
+\texttt{SMART\_SAMPLER\_MAX\_STEPS}. MiniBatchKMeans é usado para tornar a
+clusterização viável em subconjuntos maiores \cite{sculley2010webscale}.
+
+A estabilidade é medida pelo índice de Rand ajustado, que compara duas
+partições $U$ e $V$ descontando a concordância esperada ao acaso
+\cite{hubert1985comparing}:
 \begin{equation}
     \mathrm{ARI} =
     \frac{
@@ -533,13 +633,99 @@ ajustado, usado aqui como critério de estabilidade \cite{hubert1985comparing}:
     } .
     \label{eq:ari}
 \end{equation}
-MiniBatchKMeans é usado para tornar a clusterização viável em subconjuntos
-maiores \cite{sculley2010webscale}. Quando a opção GIST é habilitada, a
-implementação deve ser descrita como GIST-style ou inspirada em GIST, pois o
-caminho de grandes conjuntos usa pré-seleção por marcos antes da função de
-localização \cite{fahrbach2025gist}. Quando ativado, o armazenamento compacto
-\texttt{TRAIN\_SELECTED} cria HDF5s apenas com linhas selecionadas do treino,
-reduzindo I/O em ambientes com disco limitado sem modificar validação ou teste.
+Nesse contexto, $n_{ij}$ é o número de elementos simultaneamente atribuídos ao
+grupo $i$ em $U$ e ao grupo $j$ em $V$, enquanto $a_i$ e $b_j$ são os totais
+marginais. Um ARI elevado indica que subconjuntos independentes do mesmo
+paciente geram estruturas de agrupamento semelhantes, sugerindo que o orçamento
+de embeddings é suficiente para capturar a heterogeneidade visual local.
+
+No seletor padrão, a redução do conjunto redutível é clusterizada e convertida
+em uma ordem balanceada por grupos. O número de grupos é
+$k=\min(K_{\max},\max(K_{\min},\lfloor\sqrt{|\mathcal{R}_p|}\rfloor))$, com
+ajustes para pacientes muito pequenos. O orçamento alvo é limitado por
+\texttt{SMART\_SAMPLER\_M\_MAX} e cresce com a heterogeneidade estimada por
+$k$: quanto mais próximo $k$ está de $K_{\max}$, maior a fração do teto que pode
+ser retida. Quando \texttt{SMART\_SAMPLER\_ADAPTIVE\_KEEP\_ENABLED} está
+ativo, parte das linhas redutíveis é reservada como \textit{holdout} interno do
+paciente. A seleção então avalia a distância média de cada embedding de
+avaliação ao exemplo selecionado mais próximo; novos exemplos são acrescentados
+até que a melhoria relativa dessa cobertura fique abaixo de
+\texttt{SMART\_SAMPLER\_KEEP\_IMPROVEMENT\_THRESHOLD} por
+\texttt{SMART\_SAMPLER\_KEEP\_PATIENCE} passos, ou até que o orçamento máximo
+seja atingido.
+
+Quando \texttt{SMART\_SAMPLER\_USE\_GIST=True}, a etapa troca o seletor
+balanceado por uma seleção inspirada em GIST. GIST significa
+\textit{Greedy Independent Set Thresholding} e foi proposto para escolher um
+subconjunto que combine utilidade submodular e diversificação max-min
+\cite{fahrbach2025gist}. Na implementação desta dissertação, a utilidade
+submodular é uma função de localização de facilidades sobre os embeddings:
+\begin{equation}
+    L(S) =
+    \sum_{i\in\mathcal{C}}
+    \max_{j\in S}
+    s_{ij},
+    \qquad
+    s_{ij}=1-\frac{\lVert z_i-z_j\rVert_2}{D},
+    \qquad
+    D=\max_{u,v\in\mathcal{C}}\lVert z_u-z_v\rVert_2 ,
+    \label{eq:gist_facility_location}
+\end{equation}
+em que $\mathcal{C}$ é o conjunto candidato e $S$ é o subconjunto selecionado.
+O termo $L(S)$ favorece cobertura: cada candidato contribui de acordo com a
+semelhança ao representante selecionado mais próximo. A diversificação é medida
+pela menor distância entre pares selecionados:
+\begin{equation}
+    \Delta(S)=
+    \begin{cases}
+        D, & |S|\le 1,\\
+        \min_{j\neq k,\ j,k\in S}\lVert z_j-z_k\rVert_2, & |S|>1.
+    \end{cases}
+    \label{eq:gist_diversity}
+\end{equation}
+O seletor avalia candidatos segundo
+\begin{equation}
+    F(S)=L(S)+\Delta(S),
+    \label{eq:gist_objective}
+\end{equation}
+com alvo máximo definido pelo orçamento adaptativo. Esse objetivo explica a
+importância prática do caminho GIST-style: ele busca reter exemplos que cubram
+as variações visuais frequentes do paciente sem colapsar em regiões quase
+idênticas do espaço de embeddings.
+
+A construção do subconjunto GIST-style segue uma família de conjuntos
+candidatos por limiar. Primeiro, os candidatos são ordenados pela cobertura
+individual $\sum_i s_{ij}$. Em seguida, para diferentes limiares de distância
+$\tau_\ell=(1+\epsilon)^\ell\epsilon D/2$, com $\epsilon=0.1$, a rotina percorre
+essa ordem e inclui um candidato apenas se sua distância mínima aos já
+selecionados for ao menos $\tau_\ell$. Também são avaliados o conjunto guloso
+com limiar zero e o par diametral. O subconjunto final é aquele que maximiza
+$F(S)$ entre os conjuntos gerados por esses limiares, respeitando o orçamento
+de seleção.
+
+O termo GIST-style é usado deliberadamente, e não como afirmação de uma
+reprodução integral do método original. A implementação recupera a intuição de
+GIST ao combinar limiares de conjunto independente, localização de facilidades e
+diversificação; porém, em conjuntos grandes, ela primeiro limita
+$|\mathcal{C}|$ por \texttt{SMART\_SAMPLER\_GIST\_CANDIDATE\_POOL\_LIMIT}. Essa
+limitação é feita por MiniBatchKMeans: a rotina define marcos por agrupamento,
+aloca cotas por cluster, seleciona pontos próximos ao centróide, pontos
+residuais distantes e uma fração aleatória. Só depois desse conjunto de marcos o
+objetivo GIST-style é aplicado. Como o universo de busca deixa de ser o conjunto
+redutível completo, as garantias teóricas associadas ao método publicado não
+devem ser reivindicadas para o modo de grandes conjuntos.
+
+Ao final, a Fase 6 grava \texttt{train\_filtered\_selection.csv},
+\texttt{patient\_filter\_stats.csv}, \texttt{filter\_run\_config.json} e
+\texttt{filter\_summary.json}. Em seguida, registra a execução no manifesto
+mestre e atualiza atomicamente as decisões por linha, marcando exemplos como
+\texttt{protected\_kept}, \texttt{sampled\_kept} ou
+\texttt{rejected\_reducible}. Quando o armazenamento compacto
+\texttt{TRAIN\_SELECTED} está habilitado, a etapa cria HDF5s contendo somente as
+linhas selecionadas do treino, acompanhados por \texttt{index.sqlite} e
+\texttt{summary.json}. Esse artefato reduz I/O em ambientes com disco limitado,
+mas não redefine a composição científica de validação ou teste, que permanece
+presa aos HDF5s canônicos da Fase 2.
 
 \section{Triagem de taxa de aprendizado}\label{sec:met_lr_finder}
 
