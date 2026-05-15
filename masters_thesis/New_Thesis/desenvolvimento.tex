@@ -1,64 +1,54 @@
 \chapter{Metodologia}\label{chp:desenvolvimento}
 
-Este capítulo descreve a metodologia implementada no repositório que acompanha a
-dissertação. A organização segue o fluxo executável do projeto, mas a exposição é
-apresentada em forma científica: primeiro são descritos os contratos de dados,
-depois as decisões de pré-processamento, particionamento, treinamento e
-inferência. Sempre que uma escolha é específica da implementação, ela é tratada
-como decisão do repositório, não como reprodução exata de um método publicado.
+Este capítulo descreve a metodologia desenvolvida para organizar, processar e
+avaliar dados histopatológicos digitais em uma tarefa de detecção e segmentação
+de câncer. A apresentação acompanha a sequência lógica do fluxo de trabalho,
+desde a ingestão das lâminas e anotações até a inferência final, mas prioriza as
+decisões científicas que sustentam cada etapa: definição dos contratos de dados,
+controle de qualidade, extração de amostras, particionamento por paciente,
+normalização, treinamento supervisionado, otimização de \textit{ensemble} e
+avaliação em teste.
+
+A ênfase recai sobre a rastreabilidade entre dados de origem, configurações,
+artefatos intermediários e resultados experimentais. Assim, cada etapa é
+descrita não apenas como uma operação computacional, mas como uma decisão
+metodológica que influencia a validade, a reprodutibilidade e a interpretação
+dos resultados. Quando uma escolha decorre de uma necessidade prática do fluxo
+implementado, ela é apresentada como decisão metodológica desta dissertação, e não como reprodução literal de um método publicado.
 
 \section{Visão geral do fluxo de trabalho}\label{sec:met_visao_geral}
 
-O fluxo de trabalho foi construído como uma sequência de fases com entradas,
-saídas e estados intermediários explícitos. Scripts numerados na raiz do
-repositório orquestram cada etapa, enquanto a lógica reutilizável fica
-concentrada em módulos sob \texttt{helpers/}. Essa separação é metodologicamente
-relevante porque reduz a dependência de passos manuais, torna auditável o caminho
-entre uma \Sigla{\textit{Whole Slide Image}}{WSI} original e a máscara prevista
-pelo \textit{ensemble} final, e permite que verificações de proveniência sejam
-reutilizadas em diferentes pontos do pipeline. A ênfase em metadados,
-configurações executáveis e rastreabilidade é alinhada a princípios FAIR e a boas
-práticas de reprodutibilidade computacional
-\cite{wilkinson2016fair,piccolo2016tools}.
+O fluxo metodológico desta dissertação foi estruturado como uma sequência de etapas com entradas, saídas e artefatos intermediários explicitamente definidos.
+A organização do processo busca tornar rastreável o caminho entre as WSIs originais, suas anotações, os \textit{patches} extraídos, os modelos treinados e as máscaras finais produzidas pela inferência. Essa rastreabilidade é essencial
+para que resultados de segmentação não sejam interpretados apenas como saídas de um modelo, mas como produto de uma cadeia experimental passível de inspeção, repetição e crítica.
 
-O ambiente executável também faz parte da metodologia. O repositório alvo usa
-Python 3.12, dependências gerenciadas por \texttt{uv} e configuração por variáveis
-de ambiente declaradas a partir de \texttt{.env\_example}. Cada fase registra
-metadados, logs e arquivos de configuração suficientes para que a execução final
-possa ser auditada sem depender de valores implícitos no código. Assim, quando a
-dissertação reportar resultados quantitativos, valores como hardware, flags de
-normalização, amostragem, OHEM, perda sensível a artefatos e receita de
-\textit{ensemble} deverão vir dos artefatos de execução correspondentes, não de
-suposições sobre os padrões do repositório.
+A \Figura{fig:fluxo-atual} apresenta a visão geral do fluxo. O processo inicia-se com a aquisição dos \textit{patches}, etapa que envolve análise de artefatos,
+registro em banco de dados, extração das regiões de interesse e persistência dos dados em formato HDF5. Em seguida, o pré-processamento organiza a limpeza da base,
+a geração das divisões de treino, validação e teste, as verificações de sanidade, a amostragem inteligente do treino e a investigação da taxa de aprendizado. A etapa de treinamento ajusta os modelos de segmentação, enquanto o processamento \textit{on-the-fly} aplica transformações de aumento de dados, normalização, mineração de exemplos difíceis e amostragem ponderada durante o uso das amostras.
+Por fim, a etapa de otimização define a formação do \textit{ensemble}, e a etapa de inferência aplica a receita final para produzir os resultados.
 
-A \Figura{fig:fluxo-atual} resume o desenho metodológico. O processo começa com
-lâminas e anotações, passa por controle de qualidade e extração de
-\textit{patches}, consolida manifestos e HDF5, produz divisões por paciente,
-treina modelos supervisionados, otimiza um \textit{ensemble} em validação e, por
-fim, avalia uma receita congelada no teste. A tabela de fases detalha a mesma
-sequência em termos operacionais.
+Essa organização em etapas separadas tem função metodológica. Ela reduz a dependência de decisões manuais implícitas, explicita os pontos nos quais metadados são produzidos ou consumidos e evita que escolhas realizadas em uma fase sejam propagadas silenciosamente para fases posteriores. Assim, uma alteração na origem dos dados, nos filtros de qualidade, no particionamento, na normalização, na amostragem ou na receita de \textit{ensemble} deve ser
+registrada como parte da linhagem experimental, e não absorvida como detalhe invisível da implementação.
 
 \begin{figure}[!htb]
     \centering
-    \small
-    \setlength{\tabcolsep}{3pt}
-    \begin{tabular}{ccccc}
-    \fbox{\begin{minipage}{0.16\textwidth}\centering WSIs\\anotações\end{minipage}} &
-    $\rightarrow$ &
-    \fbox{\begin{minipage}{0.18\textwidth}\centering QC\\artefatos\end{minipage}} &
-    $\rightarrow$ &
-    \fbox{\begin{minipage}{0.20\textwidth}\centering patches\\máscaras\\HDF5\end{minipage}} \\
-    &&&&\\[-0.3em]
-    \multicolumn{5}{c}{$\downarrow$}\\[-0.2em]
-    \fbox{\begin{minipage}{0.16\textwidth}\centering limpeza\\por grafos\end{minipage}} &
-    $\rightarrow$ &
-    \fbox{\begin{minipage}{0.18\textwidth}\centering splits\\paciente\\normalização\end{minipage}} &
-    $\rightarrow$ &
-    \fbox{\begin{minipage}{0.20\textwidth}\centering treino\\ensemble\\inferência\end{minipage}}
-    \end{tabular}
-    \caption[Fluxo metodológico atual]{Visão macro do fluxo metodológico atual. A figura é uma síntese visual; os contratos detalhados são descritos nas seções seguintes e implementados nos scripts de Fase 1 a Fase 10.}
+    \includegraphics[width=\textwidth]{figuras/mestrado_v3.png}
+    \caption[Visão geral do fluxo metodológico]{
+    Visão geral do fluxo metodológico proposto para segmentação binária de
+    imagens histopatológicas. O processo é organizado em seis blocos principais:
+    aquisição de \textit{patches}, pré-processamento, treinamento,
+    processamento \textit{on-the-fly}, otimização e inferência. As setas indicam
+    a dependência entre etapas, enquanto os pontos de metadados representam
+    registros necessários para rastrear decisões, configurações e artefatos ao
+    longo do fluxo experimental.
+    }
     \label{fig:fluxo-atual}
 \end{figure}
+
+A \Tabela{tab:estagios_pipeline} resume os estágios metodológicos implementados
+e suas principais saídas. A tabela complementa a visão gráfica ao explicitar a
+função de cada fase no controle da proveniência dos dados e na construção da
+receita final de inferência.
 
 \begin{table}[!htb]
 \centering
@@ -82,117 +72,167 @@ Fase & Finalidade & Saída principal \\
 \end{tabular}
 \end{table}
 
-A decisão de manter esses estágios separados evita que decisões tomadas em uma
-fase sejam misturadas silenciosamente com dados de outra linhagem experimental.
-O manifesto mestre, os arquivos de configuração, as assinaturas de conteúdo e os
-metadados de checkpoints funcionam como contratos entre fases. Assim, uma troca
-de fonte, divisão, normalização, amostragem ou receita de \textit{ensemble} tende
-a ser detectada como incompatibilidade, em vez de se propagar como resultado
+O ambiente executável também integra a metodologia, pois influencia diretamente a
+reprodução do experimento. A execução utiliza Python 3.12, dependências
+gerenciadas por \texttt{uv} e variáveis de ambiente declaradas a partir de um
+arquivo de referência. Esses elementos não são tratados como detalhes acessórios:
+eles documentam as condições sob as quais os dados foram processados, os modelos
+foram treinados e os resultados foram obtidos.
+
+A ênfase em metadados, configurações, artefatos intermediários e registros de
+execução está alinhada aos princípios FAIR, segundo os quais dados e metadados
+devem ser localizáveis, acessíveis, interoperáveis e reutilizáveis
+\cite{wilkinson2016fair}. Também se aproxima de recomendações recentes para
+fluxos computacionais reprodutíveis, nas quais o próprio fluxo é tratado como
+um objeto científico que deve ser descrito, executado e reutilizado de forma
+controlada \cite{piccolo2016tools}. Desse modo, o manifesto mestre, os arquivos
+de configuração, as assinaturas de conteúdo e os metadados dos modelos funcionam
+como contratos entre fases. Uma inconsistência de fonte, divisão, normalização,
+amostragem ou receita de inferência tende, portanto, a ser detectada como
+incompatibilidade experimental, em vez de se propagar como resultado
 aparentemente válido.
 
 \section{Aquisição, ingestão e controle de qualidade}\label{sec:met_ingestao_qc}
 
 A primeira etapa metodológica trata a WSI como um objeto de dados volumoso,
-heterogêneo e sujeito a falhas de leitura. A Fase 1 processa lâminas arquivadas
-sem exigir que todo o conjunto seja extraído permanentemente para disco. Cada
-lâmina suportada é extraída temporariamente, submetida à inferência de
-artefatos, convertida em polígonos GeoJSON e removida ao final do
-processamento. O estado da execução é registrado em SQLite, permitindo retomar
-processamentos interrompidos sem duplicar artefatos.
+heterogêneo e sujeito a falhas de leitura, anotação e aquisição. Em vez de
+pressupor que todas as lâminas estejam imediatamente disponíveis em formato
+intermediário, o fluxo foi organizado para processar arquivos de entrada de
+forma controlada, registrar o estado de execução e preservar a proveniência das
+operações realizadas. Essa decisão é relevante em patologia digital porque as
+lâminas podem apresentar dimensões de gigapixel, formatos distintos,
+anotações heterogêneas e artefatos visuais capazes de afetar diretamente a
+qualidade dos \textit{patches} extraídos.
 
-As fontes de dados consideradas no projeto abrangem domínios histopatológicos
-distintos: CAMELYON16, CATCH, DiagSet e HiESD
+As fontes de dados consideradas no projeto abrangem diferentes domínios
+histopatológicos, incluindo CAMELYON16, CATCH, DiagSet e HiESD
 \cite{bejnordi2017diagnostic,wilm2022catch,koziarski2024diagset,wang2025hiesd}.
-Essas referências são usadas para proveniência e enquadramento das coortes, não
-como evidência de desempenho do repositório. A presença efetiva de cada base em
-um resultado final deve ser determinada pelo manifesto e pelos artefatos de
-execução daquela análise, pois o código define um fluxo comum de câncer versus
-não câncer, mas não fixa por si só a composição da coorte final.
+Essas bases são utilizadas como fontes públicas de proveniência e como exemplos
+de heterogeneidade em patologia digital. Sua presença em uma execução específica,
+entretanto, não é inferida apenas pela citação ou pela existência de suporte no
+código: ela deve ser determinada pelos manifestos, configurações e artefatos
+produzidos naquela análise. Assim, o fluxo define uma formulação comum de câncer
+versus não câncer, mas a composição efetiva dos conjuntos experimentais permanece
+vinculada aos registros de execução.
 
-A detecção de artefatos combina uma etapa de localização de tecido com uma etapa
-de classificação de qualidade. A motivação científica vem de trabalhos de
-controle de qualidade em WSI, como GrandQC \cite{weng2024grandqc}, e da
-observação de que regiões sem tecido ou com defeitos de aquisição podem enviesar
-modelos treinados sobre recortes pequenos da lâmina. Nesta dissertação, a saída
-da Fase 1 é usada como informação de proveniência: ela registra cobertura de
-artefatos por região, mas não transforma toda região contaminada em exclusão
-definitiva. Esse desenho preserva a interface de treinamento e permite ativar ou
-desativar perdas sensíveis a artefatos em experimentos posteriores.
+A Fase 1 realiza o controle inicial de qualidade por detecção de artefatos. Para
+evitar a extração permanente de todo o acervo para disco, cada lâmina suportada é
+processada de forma temporária: o arquivo é disponibilizado para leitura,
+submetido à inferência de artefatos, convertido em polígonos GeoJSON e removido
+ao final do processamento. O estado da execução é registrado em SQLite, o que
+permite retomar processamentos interrompidos sem duplicar saídas previamente
+geradas. Essa etapa combina localização de tecido e classificação de qualidade,
+motivada por trabalhos de controle de qualidade em WSIs, como GrandQC
+\cite{weng2024grandqc}, e pela necessidade de identificar regiões sem tecido ou
+com defeitos de aquisição antes que elas contaminem etapas posteriores do fluxo.
 
-A Fase 2 realiza a ingestão supervisionada. Ela localiza pares de lâmina e
-anotação, registra assinaturas de entrada, cria linhas pendentes no banco de
-progresso e valida se saídas pré-existentes ainda são compatíveis com a fonte
-atual. Em seguida, o motor de extração percorre uma grade de janelas definida por
-tamanho e passo. Antes de ler pixels da WSI, a janela é comparada com as
-geometrias anotadas, reduzindo I/O desnecessário em regiões sem relação com a
-tarefa. Esse padrão é coerente com fluxos de processamento de WSIs baseados em
-tecido, \textit{patches} e restrições de escala gigapixel
+Nesta dissertação, a informação de artefatos é tratada como proveniência
+experimental, e não como critério absoluto de exclusão. A saída da Fase 1
+registra a cobertura de artefatos por região e permite que experimentos
+posteriores incorporem essa informação de formas distintas, por exemplo por
+curadoria, filtragem ou perdas sensíveis a artefatos. Essa escolha evita que uma
+heurística inicial descarte definitivamente regiões potencialmente úteis, ao
+mesmo tempo em que preserva a rastreabilidade de áreas visualmente
+problemáticas.
+
+A Fase 2 realiza a ingestão supervisionada. Nessa etapa, o fluxo localiza pares
+de lâmina e anotação, registra assinaturas dos arquivos de entrada, cria estados
+pendentes no banco de progresso e verifica se saídas pré-existentes permanecem
+compatíveis com as fontes atuais. Em seguida, o motor de extração percorre uma
+grade de janelas definida por tamanho e passo. Antes de ler os pixels da WSI, a
+janela é comparada com as geometrias anotadas, reduzindo operações de I/O em
+regiões sem relação com a tarefa supervisionada. Esse padrão é coerente com
+fluxos de processamento de WSIs baseados em tecido, extração de \textit{patches}
+e controle de escala gigapixel
 \cite{munozaguirre2020pyhist,khened2021generalized,bandi2019resolution}.
 
-A interface de ingestão converte anotações heterogêneas para o mesmo contrato
-binário. O caminho atual aceita combinações como \texttt{.svs/.xml},
-\texttt{.ndpi/.ndpa}, \texttt{.tif/.json} e \texttt{.svs/.json}; quando
-\texttt{TAG=HIESD} ou \texttt{TAG=Chile} está ativo, a política de cores e o
-formato XML são resolvidos internamente pelo código. Essa conversão é uma etapa
-metodológica crítica porque transforma categorias e formatos específicos de cada
-base em rótulos \texttt{cancer} e \texttt{not\_cancer}. As citações das bases
-apoiam a proveniência dos dados, mas a regra exata de mapeamento é uma política
-do repositório.
+A ingestão também padroniza anotações heterogêneas em um contrato binário comum.
+O fluxo aceita combinações de lâminas e anotações em formatos como
+\texttt{.svs/.xml}, \texttt{.ndpi/.ndpa}, \texttt{.tif/.json} e
+\texttt{.svs/.json}. Em bases específicas, como HiESD ou conjuntos identificados
+por políticas próprias de anotação, regras internas definem como cores, classes
+e estruturas XML são interpretadas. Essa conversão é metodologicamente crítica:
+categorias originais de cada base são mapeadas para rótulos \texttt{cancer} e
+\texttt{not\_cancer}. As citações das bases sustentam a proveniência dos dados,
+mas a regra exata de mapeamento é uma decisão do fluxo desta dissertação.
 
-Um \textit{patch} só é aceito quando satisfaz três condições. Primeiro, a janela
-precisa ter associação semântica não ambígua a uma classe. Segundo, deve conter
-conteúdo tecidual suficiente, estimado por limiarização em HSV, limiar de Otsu e
-operações morfológicas, como discutido na
-\Secao{sec:preprocessamento_patologia}. Terceiro, sua identidade precisa seguir
+Um \textit{patch} é aceito apenas quando satisfaz três condições. Primeiro, a
+janela deve possuir associação semântica não ambígua com uma classe. Segundo,
+deve conter conteúdo tecidual suficiente, estimado por limiarização em HSV,
+método de Otsu e operações morfológicas, conforme discutido na
+\Secao{sec:preprocessamento_patologia}. Terceiro, sua identidade deve obedecer a
 um contrato determinístico de nome, rótulo, coordenada e proveniência. A
-\Figura{fig:patch-mask} ilustra o produto elementar dessa etapa: um recorte RGB e
-sua máscara binária correspondente.
+\Figura{fig:patch-mask} ilustra o produto elementar dessa etapa: um
+\textit{patch} histológico e sua máscara binária correspondente.
 
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=0.55\textwidth]{figuras/image_plus_mask.png}
-    \caption[Exemplo de \textit{patch} e máscara]{Exemplo qualitativo de pareamento entre \textit{patch} histológico e máscara binária de supervisão. A figura é ilustrativa e não representa resultado quantitativo final.}
+    \caption[Exemplo de \textit{patch} e máscara]{Exemplo qualitativo de
+    pareamento entre \textit{patch} histológico e máscara binária de supervisão.
+    A imagem representa a unidade básica utilizada no treinamento supervisionado:
+    um recorte RGB extraído da WSI e sua respectiva máscara binária alinhada
+    espacialmente.}
     \label{fig:patch-mask}
 \end{figure}
 
-As máscaras de câncer são persistidas como máscaras binárias. Amostras não
-cancerosas recebem máscaras zeradas, preservando a mesma estrutura de dados. Os
-arquivos HDF5 mantêm alinhamento por linha entre \texttt{images},
-\texttt{masks}, \texttt{labels}, \texttt{patient\_ids} e \texttt{filenames}. O
-uso de HDF5 é justificado pelo acesso estruturado a matrizes grandes e metadados
-\cite{folk2011hdf5}. A estabilidade desses nomes é um contrato científico: se
-imagem, máscara, rótulo e identificador se desalinharem, as fases de limpeza,
-treino e avaliação perdem validade.
+As máscaras de câncer são persistidas como máscaras binárias, enquanto amostras
+não cancerosas recebem máscaras zeradas, preservando a mesma estrutura de dados
+para todas as classes. Os arquivos HDF5 mantêm alinhamento por linha entre
+\texttt{images}, \texttt{masks}, \texttt{labels}, \texttt{patient\_ids} e
+\texttt{filenames}. O uso de HDF5 é adequado ao armazenamento estruturado de
+matrizes grandes e metadados associados \cite{folk2011hdf5}. A estabilidade
+desse alinhamento constitui um contrato científico: se imagem, máscara, rótulo,
+identificador de paciente e nome de arquivo forem desalinhados, as fases de
+limpeza, treinamento e avaliação deixam de representar o problema supervisionado
+definido.
 
 A Fase 2 também trata anotações contraditórias como problema de integridade. Se
-regiões positivas e negativas se sobrepõem com área positiva, o alvo supervisionado
-fica ambíguo. O fluxo remove os polígonos conflitantes no momento de finalização
-das anotações, preservando regiões independentes da mesma lâmina. A literatura
-sobre rótulos ruidosos em segmentação médica motiva essa cautela geral
-\cite{yu2020noisy}; a regra exata, entretanto, é uma política local de
-integridade, não uma reprodução de um critério externo.
+regiões positivas e negativas se sobrepõem com área positiva, o alvo
+supervisionado torna-se ambíguo. Nesses casos, o fluxo remove os polígonos
+conflitantes durante a finalização das anotações, preservando regiões
+independentes da mesma lâmina quando possível. A literatura sobre rótulos
+ruidosos em segmentação médica motiva essa cautela geral \cite{yu2020noisy};
+contudo, a regra específica de resolução de conflitos é uma política local de
+integridade, definida para manter a coerência do contrato binário adotado.
 
-O manifesto mestre é tratado como contrato durável, não como índice auxiliar.
-Assinaturas de entrada, linhagem de arquivos, estado de extração e referências a
-linhas HDF5 são persistidas para que estágios posteriores possam falhar de forma
-explícita caso uma decisão antiga seja aplicada a dados regenerados. Esse desenho
-apoia reprodutibilidade e rastreabilidade, conforme as recomendações de FAIR
+Por fim, o manifesto mestre é tratado como um contrato durável entre as fases,
+e não como um índice auxiliar. Assinaturas de entrada, linhagem de arquivos,
+estado de extração e referências às linhas HDF5 são persistidos para que etapas
+posteriores possam detectar incompatibilidades de forma explícita. Dessa forma,
+uma decisão tomada sobre dados antigos ou regenerados não deve ser aplicada
+silenciosamente a uma nova linhagem experimental. Esse desenho reforça a
+rastreabilidade do fluxo e está alinhado aos princípios FAIR para preservação de
+metadados e reutilização controlada de artefatos científicos
 \cite{wilkinson2016fair}.
 
-\section{Tratamento de ambiguidade e limpeza por grafos}\label{sec:met_limpeza_grafos}
+\section{Tratamento de ambiguidade e limpeza por grafos}
+\label{sec:met_limpeza_grafos}
 
-A qualidade da anotação é tão importante quanto a qualidade visual da lâmina.
-Depois da extração inicial, as Fases 3.1 a 3.3 tratam contaminação por fundo em
-amostras cancerosas. A Fase 3.1 seleciona um subconjunto para revisão humana,
-preservando pareamento entre imagem, máscara e proveniência. A Fase 3.2 ajusta
-parâmetros de uma regra automática com base nas decisões revisadas. A Fase 3.3
-aplica essa regra ao conjunto canceroso completo sem reescrever os HDF5 originais.
+A qualidade das anotações supervisionadas é tão importante quanto a qualidade
+visual das lâminas. Após a extração inicial dos \textit{patches}, as
+Fases 3.1 a 3.3 tratam um problema específico observado em amostras cancerosas:
+a presença de regiões anotadas como positivas, mas visualmente contaminadas por
+fundo, vidro ou baixo conteúdo tecidual. Nesses casos, a máscara pode indicar
+câncer, mas parte relevante da região de interesse não contém tecido
+informativo. Se essas amostras forem usadas sem curadoria, o modelo pode
+aprender associações espúrias entre a classe positiva e padrões não biológicos.
 
-A Fase 3.1 organiza a revisão a partir de grupos inferidos dos nomes das
-amostras, usando o identificador de paciente quando disponível. Seja $s$ o
-\textit{stem} de um \textit{patch} e $g(s)$ a função de agrupamento. Após
-selecionar um representante por grupo, o número mínimo de itens a revisar é
+O tratamento adotado combina revisão humana, ajuste automático de parâmetros e
+aplicação reprodutível da regra consolidada. A Fase 3.1 seleciona um subconjunto
+de amostras cancerosas para revisão manual, preservando o pareamento entre
+imagem, máscara e proveniência. A Fase 3.2 utiliza as decisões revisadas para
+ajustar uma regra automática de contaminação por fundo. Por fim, a Fase 3.3
+aplica a regra ao conjunto canceroso completo, sem reescrever os arquivos HDF5
+gerados na etapa de ingestão. Assim, a decisão de curadoria é mantida como
+estado de manifesto, separada dos dados extraídos originalmente.
+
+A seleção para revisão humana é organizada a partir de grupos inferidos dos
+nomes das amostras, priorizando o identificador de paciente quando disponível.
+Seja $s$ o \textit{stem} de um \textit{patch} e $g(s)$ a função de agrupamento.
+Após selecionar representantes por grupo, o número mínimo de itens a revisar é
 estimado pela fórmula de Cochran para proporções \cite{charan2013sample}:
+
 \begin{equation}
     n_{\mathrm{req}} =
     \left\lceil
@@ -200,18 +240,86 @@ estimado pela fórmula de Cochran para proporções \cite{charan2013sample}:
     \right\rceil ,
     \label{eq:cochran}
 \end{equation}
-em que $z$ é o quantil normal associado ao nível de confiança, $p$ é a proporção
-assumida e $e$ é a margem de erro desejada. A implementação cria subconjuntos
-não sobrepostos para piloto e conjunto mestre de revisão; essa separação e a
-semente fixa são decisões reprodutíveis do repositório.
 
-A revisão humana produz decisões \texttt{APPROVED} e \texttt{REJECTED}. A
-Fase 3.2 usa essas decisões para ajustar uma regra de contaminação por fundo. O
-primeiro passo é erodir opcionalmente a região de interesse, reduzindo a
-influência de pixels de borda. Em seguida, a imagem é segmentada por uma
-formulação baseada em Felzenszwalb e Huttenlocher
-\cite{felzenszwalb2004efficient}. Para cada segmento $S_j$, calcula-se a
+em que $z$ é o quantil normal associado ao nível de confiança, $p$ é a proporção
+assumida e $e$ é a margem de erro desejada. A implementação separa amostras de
+piloto e amostras do conjunto mestre de revisão em subconjuntos não sobrepostos,
+com semente fixa, para tornar a seleção reprodutível.
+
+A revisão humana atribui a cada amostra uma decisão \texttt{APPROVED} ou
+\texttt{REJECTED}. Amostras aprovadas correspondem a regiões nas quais a máscara
+positiva é considerada compatível com conteúdo tecidual suficiente. Amostras
+rejeitadas correspondem a regiões em que a anotação positiva é considerada
+contaminada por fundo ou visualmente inadequada para treinamento supervisionado.
+A \Figura{fig:limpeza-grafos-exemplos} ilustra a lógica dessa etapa, com
+exemplos qualitativos de amostras aprovadas e rejeitadas.
+
+\begin{figure}[!htb]
+    \centering
+
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo aprovado 1.
+        \includegraphics[width=\linewidth]{figuras/Aprovado_1.png}
+        \caption{Aprovado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo aprovado 2.
+        \includegraphics[width=\linewidth]{figuras/Aprovado_2.png}
+        \caption{Aprovado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo aprovado 3.
+        \includegraphics[width=\linewidth]{figuras/Aprovado_3.png}
+        \caption{Aprovado}
+    \end{subfigure}
+
+    \vspace{0.8em}
+
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo rejeitado 1.
+        \includegraphics[width=\linewidth]{figuras/Rejeitado_1.png}
+        \caption{Rejeitado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo rejeitado 2.
+        \includegraphics[width=\linewidth]{figuras/Rejeitado_2.png}
+        \caption{Rejeitado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo rejeitado 3.
+        \includegraphics[width=\linewidth]{figuras/Rejeitado_3.png}
+        \caption{Rejeitado}
+    \end{subfigure}
+
+    \caption[Exemplos de amostras aprovadas e rejeitadas na etapa de curadoria]{
+    Exemplos qualitativos da revisão de amostras cancerosas. A primeira linha
+    representa amostras aprovadas, nas quais a região anotada como positiva
+    apresenta conteúdo tecidual compatível com a tarefa supervisionada. A segunda
+    linha representa amostras rejeitadas, nas quais a região positiva apresenta
+    contaminação por fundo, vidro ou baixo conteúdo histológico. A figura ilustra
+    o critério de curadoria usado para ajustar a regra automática de limpeza por
+    grafos.
+    }
+    \label{fig:limpeza-grafos-exemplos}
+\end{figure}
+
+A Fase 3.2 utiliza as decisões \texttt{APROVADO} e \texttt{REJEITADO} para
+ajustar uma regra automática de contaminação. Primeiro, a região de interesse
+pode ser erodida para reduzir a influência de pixels de borda. Em seguida, a
+imagem é segmentada por uma formulação baseada em grafos, conforme o método de
+\textcite{felzenszwalb2004efficient}. Para cada segmento $S_j$, calcula-se a
 intensidade média:
+
 \begin{equation}
     I_j =
     \frac{1}{3}
@@ -220,24 +328,31 @@ intensidade média:
     \right).
     \label{eq:intensidade_segmento}
 \end{equation}
-Segmentos com $I_j>T_{\mathrm{bg}}$ são marcados como semelhantes a fundo.
 
-O escore de contaminação mede a fração da região de interesse que cai em
-segmentos classificados como fundo:
+Segmentos com $I_j>T_{\mathrm{bg}}$ são classificados como semelhantes a fundo,
+em que $T_{\mathrm{bg}}$ representa o limiar de intensidade adotado para essa
+decisão. A partir dessa classificação, calcula-se um escore de contaminação
+como a fração da região de interesse que pertence a segmentos classificados como
+fundo:
+
 \begin{equation}
     c = \frac{\sum_x B(x)R(x)}{\sum_x R(x)} ,
     \label{eq:contaminacao}
 \end{equation}
-em que $R(x)$ indica a região de interesse após erosão e $B(x)$ indica se o
-segmento que contém o pixel $x$ foi classificado como fundo. O escore $c$ é
-interpretável como fração operacional de fundo dentro da anotação, mas não é uma
-medida clínica.
 
-Os parâmetros de segmentação e o limiar de rejeição são escolhidos por otimização
-Bayesiana com validação agrupada
-\cite{snoek2012practical,roberts2017crossvalidation}. A função de seleção usa a
-classe \texttt{Rejected} como alvo de interesse. Para um limiar $\tau$, o F1 da
-classe rejeitada é:
+em que $R(x)$ indica a região de interesse após a eventual erosão e $B(x)$
+indica se o segmento que contém o pixel $x$ foi classificado como fundo. O escore
+$c$ é interpretado como uma fração operacional de fundo dentro da anotação
+positiva. Ele não representa uma medida clínica, mas um critério de curadoria
+para reduzir a presença de amostras contaminadas no treinamento.
+
+Os parâmetros de segmentação e o limiar de rejeição são selecionados por
+otimização Bayesiana com validação agrupada
+\cite{snoek2012practical,roberts2017crossvalidation}. A classe
+\texttt{REJECTED} é tratada como alvo de interesse, pois o objetivo é identificar
+amostras contaminadas sem rejeitar indevidamente amostras aprovadas. Para um
+limiar $\tau$, o F1 da classe rejeitada é definido como:
+
 \begin{equation}
     F1_{\mathrm{rej}}(\tau) =
     \frac{
@@ -249,92 +364,131 @@ classe rejeitada é:
     } .
     \label{eq:f1_rejeitada}
 \end{equation}
-Esse critério resume o compromisso entre recuperar amostras contaminadas e não
-rejeitar amostras aceitas indevidamente \cite{sokolova2009performance}. A regra
-final rejeita uma amostra quando:
+
+Esse critério resume o compromisso entre recuperar amostras contaminadas e
+preservar amostras visualmente adequadas \cite{sokolova2009performance}. A regra
+consolidada rejeita uma amostra quando seu escore de contaminação excede o
+limiar selecionado:
+
 \begin{equation}
     \hat{y}=\mathrm{Rejeitada}
     \quad \text{se, e somente se,} \quad
     c>\tau .
     \label{eq:regra_rejeicao}
 \end{equation}
+
 Valores exatamente iguais a $\tau$ permanecem aceitos pelo contrato atual. Essa
-decisão deve ficar explícita porque pequenas diferenças em desigualdades podem
-alterar linhas na fronteira do critério.
+condição é explicitada porque pequenas diferenças na desigualdade usada na regra
+podem alterar decisões em amostras localizadas na fronteira do critério.
 
 A Fase 3.3 aplica o parâmetro consolidado aos registros cancerosos aceitos pela
-extração. Registros não cancerosos são mantidos sem pontuação por grafo, pois o
-objetivo desse estágio é reduzir contaminação em máscaras positivas. As decisões
-são gravadas em estado de manifesto e relatórios auxiliares, preservando os HDF5
-da Fase 2 como fonte canônica de pixels. Essa escolha separa dado bruto extraído
-de decisão de curadoria, reduzindo o risco de perder a linhagem original
+extração inicial. Registros não cancerosos são preservados sem pontuação por
+grafo, pois o objetivo dessa etapa é reduzir contaminação em máscaras positivas.
+As decisões de curadoria são registradas no manifesto e em relatórios
+auxiliares, enquanto os HDF5 produzidos na Fase 2 permanecem como fonte canônica
+dos pixels. Essa separação entre dado extraído e decisão de curadoria preserva a
+linhagem original, facilita auditoria posterior e está alinhada aos princípios
+FAIR de rastreabilidade e reutilização controlada de artefatos científicos
 \cite{wilkinson2016fair}.
 
-\section{Empacotamento, particionamento e normalização}\label{sec:met_particionamento_normalizacao}
+\section{Empacotamento, particionamento e normalização}
+\label{sec:met_particionamento_normalizacao}
 
-Após extração e limpeza, o empacotamento consolida linhas aceitas em uma fonte
-canônica para as fases seguintes. Essa etapa não redimensiona imagens nem altera
-máscaras; ela preserva os arrays produzidos pela extração e copia metadados
-necessários para rastreabilidade. O objetivo é transformar um conjunto de
-saídas por lâmina em uma representação downstream com identidade por linha e
-contratos verificáveis.
+Após a extração inicial e a curadoria das amostras, o fluxo consolida os
+registros aceitos em uma representação canônica para as etapas seguintes. Essa
+etapa de empacotamento não redimensiona imagens nem modifica máscaras; sua
+função é preservar os arrays produzidos na extração e reunir os metadados
+necessários à rastreabilidade. Assim, saídas originalmente organizadas por
+lâmina são convertidas em uma estrutura downstream com identidade por linha,
+na qual cada amostra mantém associação explícita com imagem, máscara, rótulo,
+identificador de paciente, arquivo de origem e parâmetros de processamento.
 
-A Fase 4 cria uma única divisão \texttt{TRAIN}, \texttt{VALIDATION} e
-\texttt{TEST}. A unidade de isolamento é o identificador de paciente persistido
-durante a ingestão. Todas as linhas do mesmo identificador permanecem no mesmo
-conjunto, reduzindo risco de vazamento por correlação entre \textit{patches}
-\cite{roberts2017crossvalidation,dawood2026confounding}. Essa proteção é exata
-em relação ao identificador armazenado, mas depende da premissa operacional de
-que ele represente adequadamente a unidade biológica de paciente.
+A Fase 4 define uma única divisão experimental em \texttt{TRAIN},
+\texttt{VALIDATION} e \texttt{TEST}. A unidade de isolamento é o identificador
+de paciente persistido durante a ingestão. Todas as amostras associadas ao mesmo
+identificador permanecem no mesmo conjunto, reduzindo o risco de vazamento por
+correlação entre \textit{patches} derivados da mesma lâmina, caso ou paciente.
+Essa decisão é particularmente importante em patologia digital, pois diferentes
+recortes de uma mesma WSI podem compartilhar padrões visuais, técnicos e
+biológicos. A proteção é exata em relação ao identificador armazenado, mas
+depende da premissa operacional de que esse identificador represente
+adequadamente a unidade biológica de paciente
+\cite{roberts2017crossvalidation,dawood2026confounding}.
 
-A busca da divisão usa Optuna/TPE para explorar ordens de alocação de pacientes
+Além de preservar o isolamento por paciente, a divisão busca manter distribuições
+compatíveis de classe entre treino, validação e teste. Para isso, a Fase 4 usa
+Optuna com amostragem TPE para explorar ordens de alocação de pacientes
 \cite{akiba2019optuna,bergstra2011algorithms}. Em termos abstratos, a função de
-custo penaliza diferenças entre a razão de câncer de cada conjunto e a razão
-global:
+custo penaliza desvios entre a razão de amostras cancerosas em cada conjunto e a
+razão global:
+
 \begin{equation}
     J_{\mathrm{split}} =
     \sum_{s \in \{\mathrm{TRAIN},\mathrm{VALIDATION},\mathrm{TEST}\}}
     \left| r_s - r_{\mathrm{global}} \right| ,
     \label{eq:split_objective}
 \end{equation}
-em que $r_s$ é a fração de amostras cancerosas no conjunto $s$. O objetivo exato
-também respeita restrições de contagem e presença de classes; por isso a equação
-resume a lógica científica, não todos os detalhes de implementação.
 
-Além do objetivo de busca, a Fase 4 registra estatísticas de verificação. Quando
-se compara a distribuição observada de classes em cada divisão com a distribuição
-esperada sob a razão global, o valor bruto de qui-quadrado é:
+em que $r_s$ é a fração de amostras cancerosas no conjunto $s$ e
+$r_{\mathrm{global}}$ é a fração correspondente no conjunto completo antes da
+divisão. A equação resume a lógica científica da busca; a implementação também
+considera restrições de contagem e presença de classes, evitando divisões
+formalmente balanceadas, mas inviáveis para treinamento ou avaliação.
+
+A qualidade da divisão é registrada por estatísticas de verificação. Uma delas é
+o valor bruto de qui-quadrado, calculado a partir da diferença entre as contagens
+observadas em cada divisão e as contagens esperadas sob a razão global:
+
 \begin{equation}
     \chi^2 =
     \sum_i \frac{(O_i-E_i)^2}{E_i},
     \label{eq:qui_quadrado}
 \end{equation}
-em que $O_i$ e $E_i$ são contagens observadas e esperadas. Esse valor é usado
-como diagnóstico de equilíbrio, não como teste inferencial de hipótese, a menos
-que premissas estatísticas adicionais sejam explicitadas \cite{pearson1900criterion}.
 
-A mesma fase seleciona \textit{templates} de normalização usando apenas o
-conjunto de treino. Para cada candidato, calcula-se a entropia em escala de
-cinza:
+em que $O_i$ e $E_i$ representam, respectivamente, as contagens observadas e
+esperadas para a categoria $i$. Nesta dissertação, esse valor é usado como
+diagnóstico de equilíbrio entre conjuntos, e não como teste inferencial formal
+de hipótese. Essa distinção é importante porque a interpretação inferencial do
+qui-quadrado exige premissas estatísticas adicionais, enquanto, no fluxo
+proposto, sua função é descritiva e operacional \cite{pearson1900criterion}.
+
+A mesma fase seleciona os \textit{templates} usados para normalização de cor.
+Para evitar vazamento de informação, esses \textit{templates} são escolhidos
+exclusivamente a partir do conjunto de treino. Para cada candidato, calcula-se a
+entropia da imagem em escala de cinza:
+
 \begin{equation}
     H(X)=-\sum_i p_i\log_2(p_i),
     \label{eq:entropia}
 \end{equation}
-em que $p_i$ é a frequência relativa do nível de intensidade $i$
-\cite{shannon1948mathematical}. A escolha por alta entropia é uma heurística
-para priorizar \textit{patches} visualmente informativos; ela não constitui uma
-prova de que o \textit{template} seja biologicamente ótimo.
 
-Os estados de Reinhard, Ruifrok, Macenko e Vahadane são persistidos como
-artefatos de referência
+em que $p_i$ é a frequência relativa do nível de intensidade $i$. A entropia de
+Shannon quantifica a incerteza associada a uma distribuição de probabilidades e,
+nesse contexto, é usada como heurística para priorizar \textit{patches}
+visualmente informativos \cite{shannon1948mathematical}. Essa escolha não deve
+ser interpretada como evidência de que o \textit{template} seja biologicamente
+ótimo; ela apenas define um critério reprodutível para selecionar imagens de
+referência com maior diversidade de intensidades.
+
+Os estados de normalização de Reinhard, Ruifrok, Macenko e Vahadane são então
+persistidos como artefatos de referência
 \cite{reinhard2001color,ruifrok2001quantification,macenko2009method,vahadane2016structure}.
-A motivação para normalização vem da variabilidade de coloração e aquisição em
-histopatologia \cite{tellez2019augmentation,duenweg2023scanner}. A normalização
-efetiva é aplicada em tempo de execução nas fases downstream por meio de
-\texttt{RUNTIME\_NORMALIZATION\_METHOD}; a Fase 4 não reescreve todos os pixels
-normalizados antecipadamente. Para VAHADANE, o backend padrão
-\texttt{fixed\_source} é uma aproximação por matriz fixa. O backend com ajuste
-por \textit{patch} deve ser reportado separadamente caso seja usado.
+Essa etapa é motivada pela variabilidade de coloração, preparo histológico e
+aquisição em patologia digital, que pode induzir modelos a aprenderem diferenças
+técnicas em vez de padrões morfológicos relevantes
+\cite{tellez2019augmentation,duenweg2023scanner}. Ao registrar os estados de
+normalização separadamente da divisão experimental, o fluxo permite comparar
+diferentes métodos sob o mesmo particionamento por paciente.
+
+A normalização efetiva é aplicada em tempo de execução nas fases downstream por
+meio de \texttt{RUNTIME\_NORMALIZATION\_METHOD}; a Fase 4 não materializa cópias
+normalizadas de todos os pixels antecipadamente. Essa decisão reduz redundância
+de armazenamento e preserva a possibilidade de avaliar diferentes estratégias de
+normalização sem regenerar a divisão de pacientes. Para Vahadane, o backend
+padrão \texttt{fixed\_source} utiliza uma aproximação por matriz fixa. Caso seja
+adotado um backend com ajuste por \textit{patch}, essa escolha deve ser
+reportada separadamente, pois altera a forma como a normalização é estimada e
+aplicada.
 
 \section{Verificações de sanidade e amostragem inteligente}\label{sec:met_sanidade_amostragem}
 
