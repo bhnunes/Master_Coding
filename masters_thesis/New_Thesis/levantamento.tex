@@ -18,7 +18,7 @@ computacional.
 
 A patologia digital utiliza lâminas histológicas digitalizadas para visualização,
 armazenamento, compartilhamento e análise computacional. Nesse contexto, a
-\Sigla{\textit{Whole Slide Image}}{WSI} constitui a principal representação
+WSI constitui a principal representação
 computacional da lâmina: uma imagem digital em múltiplas resoluções, capaz de
 preservar a organização do tecido em escala microscópica. Diferentemente de
 imagens convencionais em visão computacional, uma WSI pode atingir escala de
@@ -458,7 +458,7 @@ biológicas, mas tornar o treinamento menos sensível a variações compatíveis
 o processo de aquisição das imagens. Para isso, as transformações devem preservar
 a correspondência entre imagem e máscara: qualquer operação espacial aplicada ao
 \textit{patch} precisa ser aplicada de forma equivalente à respectiva máscara de
-segmentação. Bibliotecas como Albumentations são adequadas para esse cenário por
+segmentação. Bibliotecas como \textit{Albumentations} são adequadas para esse cenário por
 permitirem compor transformações geométricas e fotométricas de maneira eficiente
 e consistente entre imagens e anotações
 \cite{buslaev2020albumentations,dossantos2023augmentation,shorten2019survey}.
@@ -496,12 +496,9 @@ e consistente entre imagens e anotações
         \caption{Variação HSV}
     \end{subfigure}\hfill
     \begin{subfigure}{0.24\textwidth}
-        \centering
-        \vspace{1.7em}
-        \rule{0.8\linewidth}{0.35pt}\\[0.4em]
-        \small Transformações configuráveis
-        \vspace{1.7em}
-    \end{subfigure}
+        \includegraphics[width=\linewidth]{figuras/example_coarse_dropout.png}
+        \caption{Descarte de Região}
+    \end{subfigure}\hfill
     \caption[Exemplos de aumento de dados]{Exemplos qualitativos de
     transformações de aumento de dados relevantes para histopatologia. As
     transformações ilustram variações geométricas e fotométricas que podem ser
@@ -898,7 +895,7 @@ A curva precisão-revocação, por sua vez, relaciona precisão e revocação:
 \begin{equation}\label{eq:precision-recall}
     \mathrm{Precis\tilde{a}o}(t)=\frac{TP(t)}{TP(t)+FP(t)},
     \qquad
-    \mathrm{Revoca\c{c}\tilde{a}o}(t)=\frac{TP(t)}{TP(t)+FN(t)}.
+    \text{Revoca\c{c}\~ao}(t)=\frac{TP(t)}{TP(t)+FN(t)}.
 \end{equation}
 
 A AUPRC corresponde à área sob essa curva. Em tarefas com forte
