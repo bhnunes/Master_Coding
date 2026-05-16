@@ -301,6 +301,17 @@ def test_validate_split_class_guardrails_rejects_one_class_test_split() -> None:
         validate_split_class_guardrails(split_stats)
 
 
+def test_validate_split_class_guardrails_rejects_one_class_train_split() -> None:
+    split_stats = {
+        "TRAIN": {"cancer_samples": 0, "non_cancer_samples": 10},
+        "VALIDATION": {"cancer_samples": 3, "non_cancer_samples": 2},
+        "TEST": {"cancer_samples": 3, "non_cancer_samples": 2},
+    }
+
+    with pytest.raises(ValueError, match="TRAIN split must contain both classes"):
+        validate_split_class_guardrails(split_stats)
+
+
 def test_validate_final_split_patient_counts_rejects_mismatched_quota() -> None:
     split_stats = {
         "TRAIN": {"patient_count": 10},

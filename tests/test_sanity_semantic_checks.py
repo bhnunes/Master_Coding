@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from helpers.sanity.disk_checks import IndexedInspection
-from helpers.sanity.semantic_checks import check_mask_label_semantics
+from helpers.sanity.semantic_checks import check_mask_label_semantics, check_split_class_presence
 
 
 def _manifest_row(
@@ -64,9 +64,7 @@ def test_check_mask_label_semantics_fails_for_empty_cancer_hdf5_mask(tmp_path: P
 
 def test_check_mask_label_semantics_accepts_precomputed_row_inspections(tmp_path: Path) -> None:
     manifest_df = pd.DataFrame(
-        [
-            _manifest_row(tmp_path / "missing.h5", label=0, filename="PATIENT_1_PATCH_001.png")
-        ]
+        [_manifest_row(tmp_path / "missing.h5", label=0, filename="PATIENT_1_PATCH_001.png")]
     )
 
     result = check_mask_label_semantics(
@@ -86,5 +84,32 @@ def test_check_mask_label_semantics_accepts_precomputed_row_inspections(tmp_path
             )
         },
     )
+
+    assert result.status == "PASS"
+
+
+def test_check_split_class_presence_fails_for_one_class_split() -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {"label": 0, "filename": "negative_1.png"},
+            {"label": 0, "filename": "negative_2.png"},
+        ]
+    )
+
+    result = check_split_class_presence(manifest_df)
+
+    assert result.status == "FAIL"
+    assert "Only one class" in result.details
+
+
+def test_check_split_class_presence_passes_when_both_classes_exist() -> None:
+    manifest_df = pd.DataFrame(
+        [
+            {"label": 0, "filename": "negative_1.png"},
+            {"label": 1, "filename": "positive_1.png"},
+        ]
+    )
+
+    result = check_split_class_presence(manifest_df)
 
     assert result.status == "PASS"

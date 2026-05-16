@@ -156,4 +156,4 @@ def check_split_class_presence(manifest_split: pd.DataFrame) -> CheckResult:
     labels = set(manifest_split["label"].astype(int).unique().tolist())
     if labels == {0, 1}:
         return CheckResult("PASS", "Both classes are present in this split.")
-    return CheckResult("WARN", f"Only one class is present in this split: {sorted(labels)}")
+    return CheckResult("FAIL", f"Only one class is present in this split: {sorted(labels)}")

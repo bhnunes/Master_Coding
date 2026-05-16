@@ -280,9 +280,9 @@ def validate_split_patient_counts(
 
 
 def validate_split_class_guardrails(split_stats: dict[str, dict[str, Any]]) -> None:
-    """Fail fast when TEST or VALIDATION ends up with only one class."""
+    """Fail fast when any final split ends up with only one class."""
 
-    for split_name in ("TEST", "VALIDATION"):
+    for split_name in ("TRAIN", "VALIDATION", "TEST"):
         split_details = split_stats[split_name]
         cancer_samples = int(split_details["cancer_samples"])
         non_cancer_samples = int(split_details["non_cancer_samples"])
