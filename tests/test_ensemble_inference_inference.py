@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,6 +19,24 @@ EXPECTED_AUC = 0.75
 SECOND_SAMPLE_ID = 2
 THIRD_SAMPLE_ID = 3
 VISUALIZATION_SAMPLE_COUNT = 2
+
+
+class _RecordingProgress:
+    def __init__(self, iterable: Iterable[Any], *, desc: str = "", unit: str = "") -> None:
+        self.iterable = iterable
+        self.desc = desc
+        self.unit = unit
+        self.postfixes: list[dict[str, Any]] = []
+        self.closed = False
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.iterable)
+
+    def set_postfix(self, **kwargs: Any) -> None:
+        self.postfixes.append(kwargs)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _analysis_config() -> inference.EnsembleAnalysisConfig:
@@ -93,6 +112,43 @@ def test_autocast_context_returns_nullcontext_on_cpu() -> None:
     context = inference._autocast_context(torch.zeros((1, 3, 2, 2)), use_amp=True)
 
     assert isinstance(context, contextlib.nullcontext)
+
+
+def test_progress_file_uses_real_terminal_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_stream = object()
+    monkeypatch.setattr("helpers.ensemble_inference.inference.sys.__stderr__", fake_stream)
+
+    assert inference._progress_file() is fake_stream
+
+
+def test_progress_iterable_uses_live_progress_friendly_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_tqdm(iterable: Iterable[Any], **kwargs: Any) -> _RecordingProgress:
+        seen["iterable"] = iterable
+        seen["kwargs"] = kwargs
+        return _RecordingProgress(iterable)
+
+    monkeypatch.setattr(inference, "tqdm", fake_tqdm)
+    monkeypatch.setattr(inference, "_progress_file", lambda: "stream")
+    values = [1, 2]
+
+    progress = inference._progress_iterable(values, desc="Inference TEST", unit="batch")
+
+    assert list(progress) == values
+    assert seen["iterable"] == values
+    assert seen["kwargs"] == {
+        "total": 2,
+        "desc": "Inference TEST",
+        "unit": "batch",
+        "leave": False,
+        "mininterval": 0.5,
+        "dynamic_ncols": True,
+        "position": 0,
+        "file": "stream",
+    }
 
 
 def test_predict_with_tta_batched_handles_single_channel_logits() -> None:
@@ -269,6 +325,63 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
             "min_patient_positive_patches": 1,
         },
         "weights": None,
+    }
+
+
+def test_analyze_ensemble_metrics_reports_live_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    progresses: list[_RecordingProgress] = []
+
+    def fake_progress_iterable(
+        iterable: Iterable[Any],
+        *,
+        desc: str,
+        unit: str,
+    ) -> _RecordingProgress:
+        progress = _RecordingProgress(iterable, desc=desc, unit=unit)
+        progresses.append(progress)
+        return progress
+
+    monkeypatch.setattr(inference, "_progress_iterable", fake_progress_iterable)
+    monkeypatch.setattr(
+        inference,
+        "compute_two_stream_probabilities",
+        lambda models, meta, images, roi_threshold, roi_scale: torch.zeros(
+            (images.shape[0], images.shape[2], images.shape[3]),
+            dtype=torch.float32,
+        ),
+    )
+    monkeypatch.setattr(inference, "summarize_patient_metrics", lambda stats, seed: {})
+    monkeypatch.setattr(inference, "compute_auc_from_histograms", lambda pos, neg: 0.5)
+
+    test_loader = cast(
+        Any,
+        [
+            None,
+            (
+                torch.zeros((1, 3, 2, 2), dtype=torch.uint8),
+                torch.zeros((1, 2, 2), dtype=torch.uint8),
+                ["patient-progress"],
+                ["progress.png"],
+            ),
+        ],
+    )
+
+    inference.analyze_ensemble_metrics(
+        [nn.Identity()],
+        [{"stream_role": "semantic", "weight": 1.0}],
+        test_loader,
+        _analysis_config(),
+    )
+
+    assert len(progresses) == 1
+    assert progresses[0].desc == "Inference TEST"
+    assert progresses[0].unit == "batch"
+    assert progresses[0].closed is True
+    assert progresses[0].postfixes[-1] == {
+        "samples": 1,
+        "patients": 1,
+        "skipped": 1,
+        "refresh": False,
     }
 
 
@@ -561,3 +674,83 @@ def test_export_visualizations_ranks_worst_dice_across_batches(
         "worst_dice_02__p2__f2.png",
     ]
     assert all(path.exists() for path in output_paths)
+
+
+def test_export_visualizations_reports_scan_rank_and_render_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    progresses: list[_RecordingProgress] = []
+
+    def fake_progress_iterable(
+        iterable: Iterable[Any],
+        *,
+        desc: str,
+        unit: str,
+    ) -> _RecordingProgress:
+        progress = _RecordingProgress(iterable, desc=desc, unit=unit)
+        progresses.append(progress)
+        return progress
+
+    def fake_render(
+        sample: inference.VisualizationSample,
+        *,
+        rank: int,
+        config: inference.VisualizationExportConfig,
+    ) -> Path:
+        del sample
+        path = config.output_dir / f"sample_{rank}.png"
+        path.write_text("rendered", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(inference, "_progress_iterable", fake_progress_iterable)
+    monkeypatch.setattr(inference, "_render_visualization_sample", fake_render)
+    monkeypatch.setattr(
+        inference,
+        "compute_two_stream_probabilities",
+        lambda models, meta, images, roi_threshold, roi_scale: torch.ones(
+            (images.shape[0], images.shape[2], images.shape[3]),
+            dtype=torch.float32,
+        ),
+    )
+    dataloader = cast(
+        Any,
+        [
+            (
+                torch.ones((1, 3, 2, 2), dtype=torch.float32),
+                torch.ones((1, 2, 2), dtype=torch.uint8),
+                ["patient-progress"],
+                ["progress.png"],
+            )
+        ],
+    )
+
+    output_paths = inference.export_visualizations(
+        [nn.Identity()],
+        dataloader,
+        inference.VisualizationExportConfig(
+            device=torch.device("cpu"),
+            roi_threshold=0.5,
+            decision_threshold=0.5,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=0,
+                min_patient_positive_patches=1,
+            ),
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            constituent_models_info=[{"stream_role": "semantic", "weight": 1.0}],
+            gpu_normalizer=_IdentityNormalizer(),
+            output_dir=tmp_path,
+            num_samples=1,
+        ),
+    )
+
+    assert [progress.desc for progress in progresses] == [
+        "Visualization counts",
+        "Visualization ranking",
+        "Visualization render",
+    ]
+    assert [progress.unit for progress in progresses] == ["batch", "batch", "sample"]
+    assert all(progress.closed for progress in progresses)
+    assert output_paths == [tmp_path / "sample_1.png"]
