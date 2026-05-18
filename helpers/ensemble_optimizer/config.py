@@ -18,6 +18,12 @@ from helpers.training.registry import load_training_model_registry
 VALID_SORT_METRICS = {"best_validation_DICE", "best_val_auprc_pixel_score"}
 VALID_SPATIAL_PATIENT_POLICIES = {"positive_only", "all"}
 DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024
+DEFAULT_DECISION_THRESHOLD_MIN = 0.50
+DEFAULT_DECISION_THRESHOLD_MAX = 0.95
+DEFAULT_DECISION_THRESHOLD_STEP = 0.01
+DEFAULT_POS_DICE_DROP_TOLERANCE = 0.02
+DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES = (0, 16, 32, 64, 128, 256)
+DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES = (1, 2, 3, 5, 10)
 
 
 def _parse_bool(value: str | None, *, default: bool) -> bool:
@@ -39,6 +45,18 @@ def _parse_non_negative_int(value: str | None, *, default: int, variable_name: s
 
 def _parse_float(value: str | None, *, default: float) -> float:
     return float(str(default) if value is None or value.strip() == "" else value)
+
+
+def _parse_int_tuple(
+    value: str | None, *, default: tuple[int, ...], variable_name: str
+) -> tuple[int, ...]:
+    if value is None or value.strip() == "":
+        parsed = default
+    else:
+        parsed = tuple(int(part.strip()) for part in value.split(",") if part.strip())
+    if not parsed:
+        raise ValueError(f"{variable_name} must contain at least one integer candidate.")
+    return tuple(dict.fromkeys(parsed))
 
 
 def _parse_choice(value: str | None, *, default: str, valid: set[str]) -> str:
@@ -129,6 +147,14 @@ class EnsembleOptimizerConfig:
     runtime_vahadane_backend: str = "fixed_source"
     log_folder: Path = Path("logs")
     log_file_name: str = "ensemble_optimizer.log"
+    decision_threshold_min: float = DEFAULT_DECISION_THRESHOLD_MIN
+    decision_threshold_max: float = DEFAULT_DECISION_THRESHOLD_MAX
+    decision_threshold_step: float = DEFAULT_DECISION_THRESHOLD_STEP
+    pos_dice_drop_tolerance: float = DEFAULT_POS_DICE_DROP_TOLERANCE
+    min_component_area_px_candidates: tuple[int, ...] = DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES
+    min_patient_positive_patches_candidates: tuple[int, ...] = (
+        DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES
+    )
 
     @property
     def log_path(self) -> Path:
@@ -139,6 +165,28 @@ class EnsembleOptimizerConfig:
             self.semantic_architectures,
             self.spatial_architectures,
         )
+        if not 0.0 <= self.decision_threshold_min <= 1.0:
+            raise ValueError("decision_threshold_min must be within [0, 1].")
+        if not 0.0 <= self.decision_threshold_max <= 1.0:
+            raise ValueError("decision_threshold_max must be within [0, 1].")
+        if self.decision_threshold_min > self.decision_threshold_max:
+            raise ValueError("decision_threshold_min cannot exceed decision_threshold_max.")
+        if self.decision_threshold_step <= 0.0:
+            raise ValueError("decision_threshold_step must be greater than 0.")
+        if self.pos_dice_drop_tolerance < 0.0:
+            raise ValueError("pos_dice_drop_tolerance must be greater than or equal to 0.")
+        if any(candidate < 0 for candidate in self.min_component_area_px_candidates):
+            raise ValueError("min_component_area_px_candidates cannot contain negative values.")
+        if any(candidate < 1 for candidate in self.min_patient_positive_patches_candidates):
+            raise ValueError(
+                "min_patient_positive_patches_candidates must contain positive integers."
+            )
+        if 0 not in self.min_component_area_px_candidates:
+            raise ValueError("min_component_area_px_candidates must include 0 for the baseline.")
+        if 1 not in self.min_patient_positive_patches_candidates:
+            raise ValueError(
+                "min_patient_positive_patches_candidates must include 1 for the baseline."
+            )
 
 
 def load_ensemble_optimizer_config(
@@ -229,6 +277,32 @@ def load_ensemble_optimizer_config(
         ),
         num_trials_semantic=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC"), default=50),
         num_trials_spatial=_parse_int(values.get("ENSEMBLE_OPT_NUM_TRIALS_SPATIAL"), default=50),
+        decision_threshold_min=_parse_float(
+            values.get("ENSEMBLE_OPT_DECISION_THRESHOLD_MIN"),
+            default=DEFAULT_DECISION_THRESHOLD_MIN,
+        ),
+        decision_threshold_max=_parse_float(
+            values.get("ENSEMBLE_OPT_DECISION_THRESHOLD_MAX"),
+            default=DEFAULT_DECISION_THRESHOLD_MAX,
+        ),
+        decision_threshold_step=_parse_float(
+            values.get("ENSEMBLE_OPT_DECISION_THRESHOLD_STEP"),
+            default=DEFAULT_DECISION_THRESHOLD_STEP,
+        ),
+        pos_dice_drop_tolerance=_parse_float(
+            values.get("ENSEMBLE_OPT_POS_DICE_DROP_TOLERANCE"),
+            default=DEFAULT_POS_DICE_DROP_TOLERANCE,
+        ),
+        min_component_area_px_candidates=_parse_int_tuple(
+            values.get("ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES"),
+            default=DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES,
+            variable_name="ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES",
+        ),
+        min_patient_positive_patches_candidates=_parse_int_tuple(
+            values.get("ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES"),
+            default=DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES,
+            variable_name="ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES",
+        ),
         optimization_cache_max_bytes=_parse_non_negative_int(
             values.get("ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES"),
             default=DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES,

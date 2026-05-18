@@ -19,6 +19,16 @@ from helpers.ensemble_inference.metrics import (
     mask_to_binary_indices,
     summarize_patient_metrics,
 )
+from helpers.ensemble_postprocessing import (
+    PostprocessingConfig,
+    apply_patient_positive_patch_suppression,
+    build_suppressed_patient_set,
+    confusion_counts_from_binary_masks,
+    count_positive_prediction_patches,
+    postprocessing_config_to_payload,
+    threshold_and_filter_components,
+    truth_pixel_counts,
+)
 from helpers.runtime_platform import load_headless_matplotlib_pyplot
 
 _FILENAME_SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
@@ -31,6 +41,7 @@ class EnsembleAnalysisConfig:
     device: torch.device
     roi_threshold: float
     decision_threshold: float
+    postprocessing_config: PostprocessingConfig
     roi_scale: int
     train_mean: list[float]
     train_std: list[float]
@@ -43,6 +54,7 @@ class VisualizationExportConfig:
     device: torch.device
     roi_threshold: float
     decision_threshold: float
+    postprocessing_config: PostprocessingConfig
     roi_scale: int
     train_mean: list[float]
     train_std: list[float]
@@ -70,16 +82,6 @@ class VisualizationSample:
     pred_mask: np.ndarray[Any, Any]
     true_mask: np.ndarray[Any, Any]
     probability: np.ndarray[Any, Any]
-
-
-def _compute_confusion_counts(
-    pred_mask: torch.Tensor, true_mask: torch.Tensor
-) -> tuple[int, int, int, int]:
-    pred_uint8 = pred_mask.to(torch.uint8)
-    true_uint8 = true_mask.to(torch.uint8)
-    conf = pred_uint8.mul(2).add_(true_uint8)
-    counts = torch.bincount(conf.view(-1), minlength=4).cpu().tolist()
-    return int(counts[3]), int(counts[2]), int(counts[1]), int(counts[0])
 
 
 def _sanitize_path_component(value: str) -> str:
@@ -208,6 +210,10 @@ def analyze_ensemble_metrics(
         model.eval()
 
     stats_by_patient: dict[str, list[dict[str, int]]] = defaultdict(list)
+    truth_counts_by_patient: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"positive": 0, "negative": 0}
+    )
+    positive_patch_counts: dict[str, int] = defaultdict(int)
     auc_bins = 4096
     auc_pos_hist = torch.zeros(auc_bins, dtype=torch.int64, device=config.device)
     auc_neg_hist = torch.zeros(auc_bins, dtype=torch.int64, device=config.device)
@@ -232,29 +238,52 @@ def analyze_ensemble_metrics(
         auc_pos_hist.add_(torch.bincount(flat_bins[flat_true], minlength=auc_bins))
         auc_neg_hist.add_(torch.bincount(flat_bins[~flat_true], minlength=auc_bins))
 
-        pred_gpu = (final_probs > config.decision_threshold).to(torch.uint8)
-        conf_vec = pred_gpu.mul(2).add_(true_gpu).view(pred_gpu.size(0), -1)
+        final_probs_np = final_probs.detach().cpu().numpy().astype(np.float32)
+        true_np = true_gpu.cpu().numpy().astype(np.uint8)
+        pred_np = threshold_and_filter_components(
+            final_probs_np,
+            decision_threshold=config.decision_threshold,
+            min_component_area_px=config.postprocessing_config.min_component_area_px,
+        )
         for index, patient_id in enumerate(patient_ids):
-            counts = torch.bincount(conf_vec[index], minlength=4).cpu().tolist()
-            stats_by_patient[patient_id].append(
-                {
-                    "tn": int(counts[0]),
-                    "fn": int(counts[1]),
-                    "fp": int(counts[2]),
-                    "tp": int(counts[3]),
-                }
+            patient_id_str = str(patient_id)
+            stats_by_patient[patient_id_str].append(
+                confusion_counts_from_binary_masks(pred_np[index], true_np[index])
+            )
+            truth_counts = truth_pixel_counts(true_np[index])
+            truth_counts_by_patient[patient_id_str]["positive"] += truth_counts["positive"]
+            truth_counts_by_patient[patient_id_str]["negative"] += truth_counts["negative"]
+            positive_patch_counts[patient_id_str] += count_positive_prediction_patches(
+                pred_np[index]
             )
 
-    summary = summarize_patient_metrics(stats_by_patient, seed=config.seed)
+    postprocessed_stats = apply_patient_positive_patch_suppression(
+        stats_by_patient,
+        truth_counts_by_patient,
+        positive_patch_counts,
+        min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
+    )
+    summary = summarize_patient_metrics(postprocessed_stats, seed=config.seed)
     summary["auc"] = compute_auc_from_histograms(auc_pos_hist, auc_neg_hist)
+    summary["auc_source"] = "raw_probabilities_before_hard_postprocessing"
     summary["normalization"] = {
         "mean": [float(x) for x in config.train_mean],
         "std": [float(x) for x in config.train_std],
     }
+    summary["postprocessing"] = postprocessing_config_to_payload(config.postprocessing_config)
+    summary["postprocessing"]["suppressed_patient_count"] = len(
+        build_suppressed_patient_set(
+            positive_patch_counts,
+            min_patient_positive_patches=(
+                config.postprocessing_config.min_patient_positive_patches
+            ),
+        )
+    )
     summary["ensemble"] = {
         "method": "two_stream_spatial_gating",
         "roi_threshold": float(config.roi_threshold),
         "decision_threshold": float(config.decision_threshold),
+        "postprocessing": postprocessing_config_to_payload(config.postprocessing_config),
         "weights": None,
     }
     return summary
@@ -282,6 +311,7 @@ def _collect_visualization_candidates(
     *,
     config: VisualizationExportConfig,
     sample_index_start: int,
+    suppressed_patients: set[str],
 ) -> tuple[list[VisualizationSample], int]:
     actual = batch.images.shape[0]
     if actual <= 0:
@@ -296,23 +326,31 @@ def _collect_visualization_candidates(
         roi_threshold=config.roi_threshold,
         roi_scale=config.roi_scale,
     )
-    pred_masks = (final_probs > config.decision_threshold).to(torch.uint8)
     true_masks = mask_to_binary_indices(batch.masks.to(config.device, non_blocking=True))
     images_np = images_norm.cpu().numpy()
-    pred_masks_np = pred_masks.cpu().numpy().astype(np.uint8)
     true_masks_np = true_masks.cpu().numpy().astype(np.uint8)
-    probs_np = final_probs.cpu().numpy()
+    probs_np = final_probs.cpu().numpy().astype(np.float32)
+    pred_masks_np = threshold_and_filter_components(
+        probs_np,
+        decision_threshold=config.decision_threshold,
+        min_component_area_px=config.postprocessing_config.min_component_area_px,
+    )
 
     samples: list[VisualizationSample] = []
     sample_index = sample_index_start
     for index in range(actual):
-        tp, fp, fn, tn = _compute_confusion_counts(pred_masks[index], true_masks[index])
-        dice = float(calculate_metrics(tp, fp, fn, tn)["dice"])
+        patient_id = batch.patient_ids[index]
+        if patient_id in suppressed_patients:
+            pred_masks_np[index] = np.zeros_like(pred_masks_np[index], dtype=np.uint8)
+        counts = confusion_counts_from_binary_masks(pred_masks_np[index], true_masks_np[index])
+        dice = float(
+            calculate_metrics(counts["tp"], counts["fp"], counts["fn"], counts["tn"])["dice"]
+        )
         samples.append(
             VisualizationSample(
                 dice=dice,
                 sample_index=sample_index,
-                patient_id=batch.patient_ids[index],
+                patient_id=patient_id,
                 filename=batch.filenames[index],
                 image=images_np[index],
                 pred_mask=pred_masks_np[index],
@@ -322,6 +360,36 @@ def _collect_visualization_candidates(
         )
         sample_index += 1
     return samples, sample_index
+
+
+def _collect_visualization_positive_patch_counts(
+    models_list: list[nn.Module],
+    dataloader: DataLoader[Any],
+    config: VisualizationExportConfig,
+) -> dict[str, int]:
+    positive_patch_counts: dict[str, int] = defaultdict(int)
+    for batch_data in dataloader:
+        batch = _unpack_visualization_batch(batch_data)
+        if batch is None or batch.images.shape[0] <= 0:
+            continue
+        images_norm = config.gpu_normalizer(batch.images.to(config.device, non_blocking=True))
+        final_probs = compute_two_stream_probabilities(
+            models_list,
+            config.constituent_models_info,
+            images_norm,
+            roi_threshold=config.roi_threshold,
+            roi_scale=config.roi_scale,
+        )
+        predictions = threshold_and_filter_components(
+            final_probs.cpu().numpy().astype(np.float32),
+            decision_threshold=config.decision_threshold,
+            min_component_area_px=config.postprocessing_config.min_component_area_px,
+        )
+        for index, patient_id in enumerate(batch.patient_ids):
+            positive_patch_counts[str(patient_id)] += count_positive_prediction_patches(
+                predictions[index]
+            )
+    return positive_patch_counts
 
 
 def _update_ranked_samples(
@@ -396,6 +464,15 @@ def export_visualizations(
         return []
     ranked_samples: list[VisualizationSample] = []
     sample_index = 0
+    positive_patch_counts = _collect_visualization_positive_patch_counts(
+        models_list,
+        dataloader,
+        config,
+    )
+    suppressed_patients = build_suppressed_patient_set(
+        positive_patch_counts,
+        min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
+    )
 
     for batch_data in dataloader:
         batch = _unpack_visualization_batch(batch_data)
@@ -406,6 +483,7 @@ def export_visualizations(
             batch,
             config=config,
             sample_index_start=sample_index,
+            suppressed_patients=suppressed_patients,
         )
         _update_ranked_samples(ranked_samples, candidates, num_samples=config.num_samples)
 

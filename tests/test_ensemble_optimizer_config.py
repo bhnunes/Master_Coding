@@ -64,6 +64,12 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_SPATIAL_ARCHITECTURES": "fpn, manet",
             "ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC": "11",
             "ENSEMBLE_OPT_NUM_TRIALS_SPATIAL": "13",
+            "ENSEMBLE_OPT_DECISION_THRESHOLD_MIN": "0.55",
+            "ENSEMBLE_OPT_DECISION_THRESHOLD_MAX": "0.85",
+            "ENSEMBLE_OPT_DECISION_THRESHOLD_STEP": "0.05",
+            "ENSEMBLE_OPT_POS_DICE_DROP_TOLERANCE": "0.03",
+            "ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES": "0,16,16,64",
+            "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES": "1,3,5",
             "ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES": str(EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES),
             "ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES": str(LOCAL_SHARD_CACHE_MAX_BYTES),
         }
@@ -86,6 +92,12 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.spatial_architectures == ("FPN", "MANET")
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
+    assert config.decision_threshold_min == pytest.approx(0.55)
+    assert config.decision_threshold_max == pytest.approx(0.85)
+    assert config.decision_threshold_step == pytest.approx(0.05)
+    assert config.pos_dice_drop_tolerance == pytest.approx(0.03)
+    assert config.min_component_area_px_candidates == (0, 16, 64)
+    assert config.min_patient_positive_patches_candidates == (1, 3, 5)
     assert config.optimization_cache_max_bytes == EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.local_shard_cache_max_bytes == LOCAL_SHARD_CACHE_MAX_BYTES
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
@@ -111,6 +123,12 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.sort_metric == "best_val_auprc_pixel_score"
     assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
+    assert config.decision_threshold_min == pytest.approx(0.50)
+    assert config.decision_threshold_max == pytest.approx(0.95)
+    assert config.decision_threshold_step == pytest.approx(0.01)
+    assert config.pos_dice_drop_tolerance == pytest.approx(0.02)
+    assert config.min_component_area_px_candidates == (0, 16, 32, 64, 128, 256)
+    assert config.min_patient_positive_patches_candidates == (1, 2, 3, 5, 10)
     assert config.optimization_cache_max_bytes == DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.local_shard_cache_max_bytes == 0
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
@@ -179,6 +197,32 @@ def test_load_ensemble_optimizer_config_allows_explicit_positive_only_policy(
     )
 
     assert config.spatial_patient_policy == "positive_only"
+
+
+def test_load_ensemble_optimizer_config_requires_unfiltered_rule6_baseline(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="must include 0"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES": "16,64",
+            }
+        )
+
+    with pytest.raises(ValueError, match="must include 1"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES": "2,3",
+            }
+        )
 
 
 def test_load_ensemble_optimizer_config_rejects_semantic_spatial_overlap(

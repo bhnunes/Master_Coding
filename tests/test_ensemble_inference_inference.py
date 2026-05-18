@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from helpers.ensemble_inference import inference
+from helpers.ensemble_postprocessing import PostprocessingConfig
 from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_MATPLOTLIB_BACKEND
 
 ANALYSIS_SEED = 17
@@ -24,6 +25,10 @@ def _analysis_config() -> inference.EnsembleAnalysisConfig:
         device=torch.device("cpu"),
         roi_threshold=0.33,
         decision_threshold=0.67,
+        postprocessing_config=PostprocessingConfig(
+            min_component_area_px=0,
+            min_patient_positive_patches=1,
+        ),
         roi_scale=2,
         train_mean=[0.1, 0.2, 0.3],
         train_std=[0.4, 0.5, 0.6],
@@ -39,6 +44,10 @@ def _visualization_config(
         device=torch.device("cpu"),
         roi_threshold=0.5,
         decision_threshold=0.5,
+        postprocessing_config=PostprocessingConfig(
+            min_component_area_px=0,
+            min_patient_positive_patches=1,
+        ),
         roi_scale=2,
         train_mean=[0.1, 0.2, 0.3],
         train_std=[0.4, 0.5, 0.6],
@@ -246,11 +255,19 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
         "patient-b": [{"tn": 2, "fn": 0, "fp": 1, "tp": 1}],
     }
     assert summary["auc"] == EXPECTED_AUC
+    assert summary["auc_source"] == "raw_probabilities_before_hard_postprocessing"
+    assert summary["postprocessing"]["min_component_area_px"] == 0
+    assert summary["postprocessing"]["min_patient_positive_patches"] == 1
     assert summary["normalization"] == {"mean": [0.1, 0.2, 0.3], "std": [0.4, 0.5, 0.6]}
     assert summary["ensemble"] == {
         "method": "two_stream_spatial_gating",
         "roi_threshold": 0.33,
         "decision_threshold": 0.67,
+        "postprocessing": {
+            "method": "threshold_components_patient_suppression",
+            "min_component_area_px": 0,
+            "min_patient_positive_patches": 1,
+        },
         "weights": None,
     }
 
@@ -298,6 +315,10 @@ def test_analyze_ensemble_metrics_uses_declared_threshold_for_hard_predictions(
             device=torch.device("cpu"),
             roi_threshold=0.25,
             decision_threshold=0.5,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=0,
+                min_patient_positive_patches=1,
+            ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
             train_std=[0.4, 0.5, 0.6],
@@ -308,6 +329,73 @@ def test_analyze_ensemble_metrics_uses_declared_threshold_for_hard_predictions(
 
     assert captured["seed"] == ANALYSIS_SEED
     assert captured["stats"] == {"patient-threshold": [{"tn": 1, "fn": 1, "fp": 1, "tp": 1}]}
+
+
+def test_analyze_ensemble_metrics_applies_frozen_patient_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_summary(
+        stats_by_patient: dict[str, list[dict[str, int]]], *, seed: int
+    ) -> dict[str, Any]:
+        del seed
+        captured["stats"] = stats_by_patient
+        return {}
+
+    monkeypatch.setattr(
+        inference,
+        "compute_two_stream_probabilities",
+        lambda models, meta, images, roi_threshold, roi_scale: torch.tensor(
+            [
+                [[0.9, 0.1], [0.1, 0.1]],
+                [[0.1, 0.1], [0.1, 0.1]],
+            ],
+            dtype=torch.float32,
+        ),
+    )
+    monkeypatch.setattr(inference, "summarize_patient_metrics", fake_summary)
+    monkeypatch.setattr(inference, "compute_auc_from_histograms", lambda pos, neg: 0.5)
+
+    test_loader = cast(
+        Any,
+        [
+            (
+                torch.zeros((2, 3, 2, 2), dtype=torch.uint8),
+                torch.tensor(
+                    [
+                        [[1, 0], [0, 0]],
+                        [[0, 0], [0, 0]],
+                    ],
+                    dtype=torch.uint8,
+                ),
+                ["patient-suppress", "patient-suppress"],
+                ["a.png", "b.png"],
+            ),
+        ],
+    )
+
+    inference.analyze_ensemble_metrics(
+        [nn.Identity()],
+        [{"stream_role": "semantic", "weight": 1.0}],
+        test_loader,
+        inference.EnsembleAnalysisConfig(
+            device=torch.device("cpu"),
+            roi_threshold=0.25,
+            decision_threshold=0.5,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=0,
+                min_patient_positive_patches=2,
+            ),
+            roi_scale=2,
+            train_mean=[0.1, 0.2, 0.3],
+            train_std=[0.4, 0.5, 0.6],
+            gpu_normalizer=_IdentityNormalizer(),
+            seed=ANALYSIS_SEED,
+        ),
+    )
+
+    assert captured["stats"] == {"patient-suppress": [{"tp": 0, "fp": 0, "fn": 1, "tn": 7}]}
 
 
 def test_export_visualizations_returns_empty_for_nonpositive_sample_count(tmp_path: Path) -> None:
@@ -376,6 +464,10 @@ def test_export_visualizations_writes_requested_number_of_pngs(
             device=torch.device("cpu"),
             roi_threshold=0.5,
             decision_threshold=0.5,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=0,
+                min_patient_positive_patches=1,
+            ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
             train_std=[0.4, 0.5, 0.6],
@@ -450,6 +542,10 @@ def test_export_visualizations_ranks_worst_dice_across_batches(
             device=torch.device("cpu"),
             roi_threshold=0.5,
             decision_threshold=0.5,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=0,
+                min_patient_positive_patches=1,
+            ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
             train_std=[0.4, 0.5, 0.6],

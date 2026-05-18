@@ -37,6 +37,7 @@ from helpers.ensemble_inference.reporting import (
     write_ensemble_report_latex,
     write_ensemble_report_markdown,
 )
+from helpers.ensemble_postprocessing import postprocessing_config_to_payload
 from helpers.provenance import (
     collect_runtime_environment,
     hash_file_sha256,
@@ -279,6 +280,9 @@ def _write_run_config(
             "test_dataset_provenance": preparation.test_dataset_provenance,
             "roi_threshold": preparation.recipe.roi_threshold,
             "decision_threshold": preparation.recipe.decision_threshold,
+            "postprocessing_config": postprocessing_config_to_payload(
+                preparation.recipe.postprocessing_config
+            ),
             "output_dir": str(output_dir),
             "recipe_copy_path": str(preparation.recipe_copy_path),
             "recipe_sha256": hash_file_sha256(preparation.recipe_copy_path),
@@ -331,6 +335,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
             device=device,
             roi_threshold=preparation.recipe.roi_threshold,
             decision_threshold=preparation.recipe.decision_threshold,
+            postprocessing_config=preparation.recipe.postprocessing_config,
             roi_scale=preparation.recipe.roi_scale,
             train_mean=IMAGENET_MEAN,
             train_std=IMAGENET_STD,
@@ -368,6 +373,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
                 device=device,
                 roi_threshold=preparation.recipe.roi_threshold,
                 decision_threshold=preparation.recipe.decision_threshold,
+                postprocessing_config=preparation.recipe.postprocessing_config,
                 roi_scale=preparation.recipe.roi_scale,
                 train_mean=IMAGENET_MEAN,
                 train_std=IMAGENET_STD,

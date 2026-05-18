@@ -42,6 +42,7 @@ LOW_CACHE_VALUE = 1000
 MID_CACHE_VALUE = 2000
 HIGH_CACHE_VALUE = 3000
 TOP_CACHE_VALUE = 4000
+RULE6_COMPONENT_AREA_CANDIDATE = 2
 
 
 class _ConstantBinaryModel(nn.Module):
@@ -371,9 +372,13 @@ def test_prepare_optimization_builds_memory_capped_patient_caches(
         optimization,
         "build_indices_and_local_map",
         lambda selected_patients, patient_map: (
-            np.array([0]) if selected_patients == {"p1"} else np.array([1]),
-            {"p1": slice(0, 1)} if selected_patients == {"p1"} else {"p2": slice(0, 1)},
-            ["p1"] if selected_patients == {"p1"} else ["p2"],
+            np.array([0])
+            if selected_patients == {"p1"}
+            else (np.array([], dtype=np.int64) if not selected_patients else np.array([1])),
+            {"p1": slice(0, 1)}
+            if selected_patients == {"p1"}
+            else ({} if not selected_patients else {"p2": slice(0, 1)}),
+            ["p1"] if selected_patients == {"p1"} else ([] if not selected_patients else ["p2"]),
         ),
     )
     semantic_model = _ConstantBinaryModel(0.0, arch_name="SWIN")
@@ -470,10 +475,13 @@ def test_normalize_weights_returns_probabilities_summing_to_one() -> None:
     assert normalized[0] == pytest.approx(0.5)
 
 
-def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> None:
+def test_calibrate_decision_threshold_selects_higher_rule6_candidate(
+    tmp_path: Path,
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
     truths = np.array(
         [
-            [[1, 0], [0, 0]],
+            [[1, 1], [1, 1]],
             [[0, 0], [0, 0]],
         ],
         dtype=np.uint8,
@@ -484,13 +492,13 @@ def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> N
             np.array(
                 [
                     np.full((2, 2), 65535, dtype=np.uint16),
-                    np.zeros((2, 2), dtype=np.uint16),
+                    np.full((2, 2), 65535, dtype=np.uint16),
                 ]
             ),
             np.array(
                 [
-                    np.array([[39321, 13107], [13107, 13107]], dtype=np.uint16),
-                    np.array([[26214, 26214], [26214, 26214]], dtype=np.uint16),
+                    np.full((2, 2), 52428, dtype=np.uint16),
+                    np.array([[52428, 0], [0, 0]], dtype=np.uint16),
                 ]
             ),
         ],
@@ -505,7 +513,7 @@ def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> N
         for path in prediction_paths
     ]
 
-    threshold, metrics = _calibrate_decision_threshold(
+    result = _calibrate_decision_threshold(
         optimization.ThresholdCalibrationConfig(
             patient_ids=["p1", "p2"],
             local_map={"p1": slice(0, 1), "p2": slice(1, 2)},
@@ -518,13 +526,102 @@ def test_calibrate_decision_threshold_maximizes_patient_mcc(tmp_path: Path) -> N
             spatial_weights=[1.0],
             roi_context_scale=1,
             roi_threshold=0.5,
+            optimizer_config=replace(
+                optimizer_config,
+                decision_threshold_min=0.5,
+                decision_threshold_max=0.5,
+                decision_threshold_step=0.1,
+                min_component_area_px_candidates=(0, RULE6_COMPONENT_AREA_CANDIDATE),
+                min_patient_positive_patches_candidates=(1,),
+            ),
         )
     )
 
-    assert threshold == pytest.approx(0.2)
-    assert metrics["Calibration_best_mcc"] == pytest.approx(0.5)
-    assert metrics["Calibration_n_positive_patients"] == 1
-    assert metrics["Calibration_n_negative_patients"] == 1
+    assert result.decision_threshold == pytest.approx(0.5)
+    assert result.postprocessing_config.min_component_area_px == RULE6_COMPONENT_AREA_CANDIDATE
+    assert result.postprocessing_config.min_patient_positive_patches == 1
+    assert result.metrics["Calibration_metric"] == "Macro_Rule6_Dice"
+    assert result.metrics["Calibration_macro_rule6"] == pytest.approx(1.0)
+    assert result.metrics["Calibration_n_positive_patients"] == 1
+    assert result.metrics["Calibration_n_negative_patients"] == 1
+    assert result.summary["selected"]["min_component_area_px"] == RULE6_COMPONENT_AREA_CANDIDATE
+
+
+def test_calibrate_decision_threshold_rejects_positive_dice_drop(
+    tmp_path: Path,
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    truths = np.array(
+        [
+            [[1, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    spatial_predictions = np.array(
+        [
+            [[52428, 0], [0, 0]],
+            [[52428, 0], [0, 0]],
+            [[52428, 0], [0, 0]],
+            [[52428, 0], [0, 0]],
+            [[52428, 0], [0, 0]],
+        ],
+        dtype=np.uint16,
+    )
+    cache_payload = _write_prediction_cache(
+        tmp_path / "pred-cache",
+        predictions=[
+            np.full((5, 2, 2), UINT16_MAX, dtype=np.uint16),
+            spatial_predictions,
+        ],
+        truths=truths,
+        patient_ids=["p1", "p2", "p3", "p4", "p5"],
+    )
+    prediction_paths, _truth_path, _pids_path, total_samples, height, width, truth_memmap = (
+        cache_payload
+    )
+    prediction_memmaps = [
+        np.memmap(path, dtype="uint16", mode="r", shape=(total_samples, height, width))
+        for path in prediction_paths
+    ]
+
+    result = _calibrate_decision_threshold(
+        optimization.ThresholdCalibrationConfig(
+            patient_ids=["p1", "p2", "p3", "p4", "p5"],
+            local_map={
+                "p1": slice(0, 1),
+                "p2": slice(1, 2),
+                "p3": slice(2, 3),
+                "p4": slice(3, 4),
+                "p5": slice(4, 5),
+            },
+            global_indices=np.array([0, 1, 2, 3, 4]),
+            truth_memmap=truth_memmap,
+            prediction_memmaps=prediction_memmaps,
+            semantic_indices=[0],
+            semantic_weights=[1.0],
+            spatial_indices=[1],
+            spatial_weights=[1.0],
+            roi_context_scale=1,
+            roi_threshold=0.5,
+            optimizer_config=replace(
+                optimizer_config,
+                decision_threshold_min=0.5,
+                decision_threshold_max=0.5,
+                decision_threshold_step=0.1,
+                pos_dice_drop_tolerance=0.02,
+                min_component_area_px_candidates=(0, RULE6_COMPONENT_AREA_CANDIDATE),
+                min_patient_positive_patches_candidates=(1,),
+            ),
+        )
+    )
+
+    assert result.postprocessing_config.min_component_area_px == 0
+    assert result.metrics["Calibration_positive_dice"] == pytest.approx(1.0)
+    assert result.summary["rejected_candidate_count"] == 1
 
 
 def test_spatial_objective_precompute_matches_full_image_objective(
@@ -918,9 +1015,13 @@ def test_run_two_stream_optimization_raises_clear_error_when_semantic_trials_all
         optimization,
         "build_indices_and_local_map",
         lambda selected_patients, patient_map: (
-            np.array([0]) if selected_patients == {"p1"} else np.array([1]),
-            {"p1": slice(0, 1)} if selected_patients == {"p1"} else {"p2": slice(0, 1)},
-            ["p1"] if selected_patients == {"p1"} else ["p2"],
+            np.array([0])
+            if selected_patients == {"p1"}
+            else (np.array([], dtype=np.int64) if not selected_patients else np.array([1])),
+            {"p1": slice(0, 1)}
+            if selected_patients == {"p1"}
+            else ({} if not selected_patients else {"p2": slice(0, 1)}),
+            ["p1"] if selected_patients == {"p1"} else ([] if not selected_patients else ["p2"]),
         ),
     )
 
@@ -981,9 +1082,13 @@ def test_run_two_stream_optimization_falls_back_to_semantic_models_for_spatial_s
         optimization,
         "build_indices_and_local_map",
         lambda selected_patients, patient_map: (
-            np.array([0]) if selected_patients == {"p1"} else np.array([1]),
-            {"p1": slice(0, 1)} if selected_patients == {"p1"} else {"p2": slice(0, 1)},
-            ["p1"] if selected_patients == {"p1"} else ["p2"],
+            np.array([0])
+            if selected_patients == {"p1"}
+            else (np.array([], dtype=np.int64) if not selected_patients else np.array([1])),
+            {"p1": slice(0, 1)}
+            if selected_patients == {"p1"}
+            else ({} if not selected_patients else {"p2": slice(0, 1)}),
+            ["p1"] if selected_patients == {"p1"} else ([] if not selected_patients else ["p2"]),
         ),
     )
 
@@ -1079,8 +1184,8 @@ def test_run_two_stream_optimization_staged_cleans_raw_prediction_cache(
         cast(Any, _ListLoader(0, [])),
         device=torch.device("cpu"),
         predefined_split=HoldoutSplit(
-            optimization_patients={"p1", "p2"},
-            calibration_patients={"p3"},
+            optimization_patients={"p1"},
+            calibration_patients={"p2", "p3"},
             holdout_patients={"p4"},
             positive_patients={"p1", "p3", "p4"},
             negative_patients={"p2"},
@@ -1091,7 +1196,8 @@ def test_run_two_stream_optimization_staged_cleans_raw_prediction_cache(
     assert result.semantic_indices == [0]
     assert result.spatial_indices == [1]
     assert {path.name for path in optimizer_config.pred_cache_dir.rglob("*.dat")} == set()
-    assert {"p1", "p2"} in factory_calls
+    assert {"p1"} in factory_calls
+    assert {"p2"} in factory_calls
     assert {"p3"} in factory_calls
     assert {"p4"} in factory_calls
     assert None not in factory_calls
@@ -1179,7 +1285,9 @@ def test_run_two_stream_optimization_returns_holdout_metrics_for_positive_only_p
     assert result.spatial_indices == [1]
     assert result.roi_threshold == DEFAULT_THRESHOLD
     assert result.decision_threshold == DEFAULT_THRESHOLD
-    assert result.calibration_metrics["Calibration_metric"] == "Patient_MCC"
+    assert result.postprocessing_config.min_component_area_px == 0
+    assert result.postprocessing_config.min_patient_positive_patches == 1
+    assert result.calibration_metrics["Calibration_metric"] == "Macro_Rule6_Dice"
     assert result.holdout_metrics["Macro_AUPRC_in_ROI"] == pytest.approx(0.75)
     assert result.holdout_metrics["Macro_Spill"] == pytest.approx(0.0)
     assert result.holdout_metrics["N_eval_patients"] == 1

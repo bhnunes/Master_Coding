@@ -6,7 +6,7 @@ import logging
 import shutil
 import sys
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -26,6 +26,14 @@ from helpers.ensemble_optimizer.splitting import (
     HoldoutSplit,
     build_holdout_split,
     build_indices_and_local_map,
+)
+from helpers.ensemble_postprocessing import (
+    PostprocessingConfig,
+    confusion_counts_from_binary_masks,
+    count_positive_prediction_patches,
+    postprocessing_config_to_payload,
+    threshold_and_filter_components,
+    truth_pixel_counts,
 )
 from helpers.training.gpu import GPUNormalizer
 from helpers.training.runtime import autocast_ctx, setup_precision
@@ -125,7 +133,9 @@ class OptimizationResult:
     spatial_weights: list[float]
     roi_threshold: float
     decision_threshold: float
+    postprocessing_config: PostprocessingConfig
     calibration_metrics: dict[str, float | int | str]
+    validation_calibration_summary: dict[str, Any]
     holdout_metrics: dict[str, float | int | str]
 
 
@@ -153,6 +163,7 @@ class ThresholdCalibrationConfig:
     spatial_weights: list[float]
     roi_context_scale: int
     roi_threshold: float
+    optimizer_config: EnsembleOptimizerConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +198,31 @@ class HoldoutEvaluation:
     macro_spill: float
     holdout_objective: float
     metrics: dict[str, float | int | str]
+
+
+@dataclass(frozen=True)
+class _Rule6CandidateKey:
+    threshold: float
+    min_component_area_px: int
+    min_patient_positive_patches: int
+
+
+@dataclass(frozen=True)
+class _Rule6CandidateScore:
+    key: _Rule6CandidateKey
+    macro_rule6: float
+    positive_dice: float
+    negative_clean_rate: float
+    positive_patient_count: int
+    negative_patient_count: int
+
+
+@dataclass(frozen=True)
+class _Rule6CalibrationResult:
+    decision_threshold: float
+    postprocessing_config: PostprocessingConfig
+    metrics: dict[str, float | int | str]
+    summary: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -631,47 +667,328 @@ def _compute_negative_false_positive_mass(
     return float(np.mean(patient_prediction))
 
 
-def _compute_mcc(tp: float, fp: float, fn: float, tn: float) -> float:
-    numerator = (tp * tn) - (fp * fn)
-    denominator = float((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-    if denominator <= 0.0:
-        return 0.0
-    return float(numerator / np.sqrt(denominator))
+def _dice_from_counts(counts: dict[str, int]) -> float:
+    tp = float(counts["tp"])
+    fp = float(counts["fp"])
+    fn = float(counts["fn"])
+    if tp + fn == 0.0:
+        return 1.0 if tp + fp == 0.0 else 0.0
+    denominator = (2.0 * tp) + fp + fn
+    return float((2.0 * tp) / denominator) if denominator > 0.0 else 0.0
 
 
-def _compute_patient_confusion_at_threshold(
-    probabilities: npt.NDArray[np.float32],
-    truth: npt.NDArray[np.uint8],
-    roi_mask: npt.NDArray[np.uint8],
-    threshold: float,
-) -> tuple[int, int, int, int]:
-    gated_probabilities = probabilities * roi_mask.astype(np.float32)
-    predictions = gated_probabilities > threshold
-    truth_bool = truth.astype(bool)
-    tn = int(np.sum(~predictions & ~truth_bool))
-    fn = int(np.sum(~predictions & truth_bool))
-    fp = int(np.sum(predictions & ~truth_bool))
-    tp = int(np.sum(predictions & truth_bool))
-    return tp, fp, fn, tn
+def _rule6_threshold_values(config: EnsembleOptimizerConfig) -> tuple[float, ...]:
+    values: list[float] = []
+    current = config.decision_threshold_min
+    while current <= config.decision_threshold_max + (config.decision_threshold_step / 2.0):
+        values.append(round(float(current), 6))
+        current += config.decision_threshold_step
+    return tuple(values)
+
+
+def _rule6_candidate_keys(config: EnsembleOptimizerConfig) -> tuple[_Rule6CandidateKey, ...]:
+    return tuple(
+        _Rule6CandidateKey(
+            threshold=threshold,
+            min_component_area_px=min_component_area_px,
+            min_patient_positive_patches=min_patient_positive_patches,
+        )
+        for threshold in _rule6_threshold_values(config)
+        for min_component_area_px in config.min_component_area_px_candidates
+        for min_patient_positive_patches in config.min_patient_positive_patches_candidates
+    )
+
+
+def _zero_rule6_calibration_result(config: EnsembleOptimizerConfig) -> _Rule6CalibrationResult:
+    postprocessing_config = PostprocessingConfig(
+        min_component_area_px=0,
+        min_patient_positive_patches=1,
+    )
+    summary: dict[str, Any] = {
+        "objective": "balanced_rule6",
+        "status": "no_calibration_patients",
+        "candidate_grid": _rule6_candidate_grid_summary(config),
+        "selected": {
+            "decision_threshold": float(config.decision_threshold_min),
+            **postprocessing_config_to_payload(postprocessing_config),
+        },
+    }
+    return _Rule6CalibrationResult(
+        decision_threshold=float(config.decision_threshold_min),
+        postprocessing_config=postprocessing_config,
+        metrics={
+            "Calibration_metric": "Macro_Rule6_Dice",
+            "Calibration_objective": "balanced_rule6",
+            "Calibration_threshold": float(config.decision_threshold_min),
+            "Calibration_macro_rule6": 0.0,
+            "Calibration_positive_dice": 0.0,
+            "Calibration_negative_clean_rate": 0.0,
+            "Calibration_min_component_area_px": 0,
+            "Calibration_min_patient_positive_patches": 1,
+            "Calibration_n_patients": 0,
+            "Calibration_n_positive_patients": 0,
+            "Calibration_n_negative_patients": 0,
+        },
+        summary=summary,
+    )
+
+
+def _rule6_candidate_grid_summary(config: EnsembleOptimizerConfig) -> dict[str, Any]:
+    thresholds = _rule6_threshold_values(config)
+    return {
+        "decision_threshold_min": float(config.decision_threshold_min),
+        "decision_threshold_max": float(config.decision_threshold_max),
+        "decision_threshold_step": float(config.decision_threshold_step),
+        "decision_threshold_values": [float(value) for value in thresholds],
+        "min_component_area_px_candidates": [
+            int(value) for value in config.min_component_area_px_candidates
+        ],
+        "min_patient_positive_patches_candidates": [
+            int(value) for value in config.min_patient_positive_patches_candidates
+        ],
+        "candidate_count": int(
+            len(thresholds)
+            * len(config.min_component_area_px_candidates)
+            * len(config.min_patient_positive_patches_candidates)
+        ),
+    }
+
+
+def _score_rule6_candidate(
+    *,
+    key: _Rule6CandidateKey,
+    positive_dice_total: float,
+    negative_clean_total: float,
+    positive_patient_count: int,
+    negative_patient_count: int,
+) -> _Rule6CandidateScore:
+    total_patients = positive_patient_count + negative_patient_count
+    positive_dice = (
+        float(positive_dice_total / positive_patient_count) if positive_patient_count > 0 else 0.0
+    )
+    negative_clean_rate = (
+        float(negative_clean_total / negative_patient_count) if negative_patient_count > 0 else 0.0
+    )
+    macro_rule6 = (
+        float((positive_dice_total + negative_clean_total) / total_patients)
+        if total_patients > 0
+        else 0.0
+    )
+    return _Rule6CandidateScore(
+        key=key,
+        macro_rule6=macro_rule6,
+        positive_dice=positive_dice,
+        negative_clean_rate=negative_clean_rate,
+        positive_patient_count=positive_patient_count,
+        negative_patient_count=negative_patient_count,
+    )
+
+
+def _candidate_sort_key(
+    candidate: _Rule6CandidateScore,
+) -> tuple[float, float, float, float, int, float]:
+    return (
+        candidate.macro_rule6,
+        candidate.negative_clean_rate,
+        candidate.positive_dice,
+        -float(candidate.key.min_component_area_px),
+        -int(candidate.key.min_patient_positive_patches),
+        -float(candidate.key.threshold),
+    )
+
+
+def _candidate_to_summary(candidate: _Rule6CandidateScore) -> dict[str, float | int]:
+    return {
+        "decision_threshold": float(candidate.key.threshold),
+        "min_component_area_px": int(candidate.key.min_component_area_px),
+        "min_patient_positive_patches": int(candidate.key.min_patient_positive_patches),
+        "macro_rule6": float(candidate.macro_rule6),
+        "positive_dice": float(candidate.positive_dice),
+        "negative_clean_rate": float(candidate.negative_clean_rate),
+        "positive_patient_count": int(candidate.positive_patient_count),
+        "negative_patient_count": int(candidate.negative_patient_count),
+    }
+
+
+def _calibrate_rule6_from_patient_predictions(
+    *,
+    optimizer_config: EnsembleOptimizerConfig,
+    patient_predictions: Iterable[
+        tuple[str, npt.NDArray[np.float32], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]
+    ],
+) -> _Rule6CalibrationResult:
+    candidate_keys = _rule6_candidate_keys(optimizer_config)
+    positive_dice_totals = np.zeros(len(candidate_keys), dtype=np.float64)
+    negative_clean_totals = np.zeros(len(candidate_keys), dtype=np.float64)
+    positive_patient_count = 0
+    negative_patient_count = 0
+    processed_patients = 0
+
+    threshold_values = _rule6_threshold_values(optimizer_config)
+    area_candidates = optimizer_config.min_component_area_px_candidates
+    patch_candidates = optimizer_config.min_patient_positive_patches_candidates
+    candidate_index = {key: index for index, key in enumerate(candidate_keys)}
+
+    for _patient_id, spatial_prediction, patient_truth, roi_mask in patient_predictions:
+        processed_patients += 1
+        gated_prediction = cast(
+            npt.NDArray[np.float32],
+            spatial_prediction.astype(np.float32) * roi_mask.astype(np.float32),
+        )
+        truth_counts = truth_pixel_counts(patient_truth)
+        is_positive_patient = truth_counts["positive"] > 0
+        if is_positive_patient:
+            positive_patient_count += 1
+        else:
+            negative_patient_count += 1
+
+        suppressed_counts = {
+            "tp": 0,
+            "fp": 0,
+            "fn": int(truth_counts["positive"]),
+            "tn": int(truth_counts["negative"]),
+        }
+        for threshold in threshold_values:
+            for min_component_area_px in area_candidates:
+                predictions = threshold_and_filter_components(
+                    gated_prediction,
+                    decision_threshold=threshold,
+                    min_component_area_px=min_component_area_px,
+                )
+                positive_patch_count = count_positive_prediction_patches(predictions)
+                unsuppressed_counts = confusion_counts_from_binary_masks(
+                    predictions,
+                    patient_truth,
+                )
+                for min_patient_positive_patches in patch_candidates:
+                    key = _Rule6CandidateKey(
+                        threshold=threshold,
+                        min_component_area_px=min_component_area_px,
+                        min_patient_positive_patches=min_patient_positive_patches,
+                    )
+                    index = candidate_index[key]
+                    counts = (
+                        suppressed_counts
+                        if positive_patch_count < min_patient_positive_patches
+                        else unsuppressed_counts
+                    )
+                    if is_positive_patient:
+                        positive_dice_totals[index] += _dice_from_counts(counts)
+                    else:
+                        negative_clean_totals[index] += 1.0 if counts["fp"] == 0 else 0.0
+
+    if processed_patients == 0:
+        return _zero_rule6_calibration_result(optimizer_config)
+    if positive_patient_count == 0 or negative_patient_count == 0:
+        raise RuntimeError(
+            "balanced_rule6 calibration requires at least one positive and one negative "
+            "calibration patient."
+        )
+
+    scores = [
+        _score_rule6_candidate(
+            key=key,
+            positive_dice_total=float(positive_dice_totals[index]),
+            negative_clean_total=float(negative_clean_totals[index]),
+            positive_patient_count=positive_patient_count,
+            negative_patient_count=negative_patient_count,
+        )
+        for index, key in enumerate(candidate_keys)
+    ]
+    baseline_candidates = [
+        score
+        for score in scores
+        if score.key.min_component_area_px == 0 and score.key.min_patient_positive_patches == 1
+    ]
+    baseline = max(baseline_candidates, key=_candidate_sort_key)
+    minimum_allowed_positive_dice = (
+        baseline.positive_dice - optimizer_config.pos_dice_drop_tolerance
+    )
+    accepted_candidates = [
+        score for score in scores if score.positive_dice >= minimum_allowed_positive_dice
+    ]
+    selected = max(accepted_candidates, key=_candidate_sort_key)
+    postprocessing_config = PostprocessingConfig(
+        min_component_area_px=selected.key.min_component_area_px,
+        min_patient_positive_patches=selected.key.min_patient_positive_patches,
+    )
+    summary = {
+        "objective": "balanced_rule6",
+        "positive_dice_drop_tolerance": float(optimizer_config.pos_dice_drop_tolerance),
+        "minimum_allowed_positive_dice": float(minimum_allowed_positive_dice),
+        "candidate_grid": _rule6_candidate_grid_summary(optimizer_config),
+        "baseline_unfiltered": _candidate_to_summary(baseline),
+        "selected": _candidate_to_summary(selected),
+        "postprocessing_config": postprocessing_config_to_payload(postprocessing_config),
+        "accepted_candidate_count": int(len(accepted_candidates)),
+        "rejected_candidate_count": int(len(scores) - len(accepted_candidates)),
+    }
+    return _Rule6CalibrationResult(
+        decision_threshold=float(selected.key.threshold),
+        postprocessing_config=postprocessing_config,
+        metrics={
+            "Calibration_metric": "Macro_Rule6_Dice",
+            "Calibration_objective": "balanced_rule6",
+            "Calibration_threshold": float(selected.key.threshold),
+            "Calibration_macro_rule6": float(selected.macro_rule6),
+            "Calibration_positive_dice": float(selected.positive_dice),
+            "Calibration_negative_clean_rate": float(selected.negative_clean_rate),
+            "Calibration_baseline_positive_dice": float(baseline.positive_dice),
+            "Calibration_positive_dice_drop_tolerance": float(
+                optimizer_config.pos_dice_drop_tolerance
+            ),
+            "Calibration_min_component_area_px": int(selected.key.min_component_area_px),
+            "Calibration_min_patient_positive_patches": int(
+                selected.key.min_patient_positive_patches
+            ),
+            "Calibration_n_patients": int(positive_patient_count + negative_patient_count),
+            "Calibration_n_positive_patients": int(positive_patient_count),
+            "Calibration_n_negative_patients": int(negative_patient_count),
+            "Calibration_accepted_candidate_count": int(len(accepted_candidates)),
+            "Calibration_rejected_candidate_count": int(len(scores) - len(accepted_candidates)),
+        },
+        summary=summary,
+    )
 
 
 def _calibrate_decision_threshold(
     config: ThresholdCalibrationConfig,
-) -> tuple[float, dict[str, float | int | str]]:
-    if not config.patient_ids:
-        return 0.5, {
-            "Calibration_metric": "Patient_MCC",
-            "Calibration_threshold": 0.5,
-            "Calibration_best_mcc": 0.0,
-            "Calibration_n_patients": 0,
-            "Calibration_n_positive_patients": 0,
-            "Calibration_n_negative_patients": 0,
-        }
+) -> _Rule6CalibrationResult:
+    optimizer_config = config.optimizer_config or EnsembleOptimizerConfig(
+        master_manifest_path=Path("."),
+        metadata_dir=Path("."),
+        output_dir=Path("."),
+        local_data_dir=Path("."),
+        pred_cache_dir=Path("."),
+        stage_input_locally=True,
+        overwrite_output=True,
+        seed=24,
+        batch_size=32,
+        workers=1,
+        sort_metric="best_val_auprc_pixel_score",
+        val_calibration_frac=0.25,
+        val_holdout_frac=0.20,
+        semantic_architectures=("SWIN",),
+        spatial_architectures=("FPN",),
+        roi_context_scale=config.roi_context_scale,
+        roi_max_median=0.60,
+        roi_empty_max=0.50,
+        roi_min_pos_recall=0.80,
+        spill_penalty_lambda=0.10,
+        spatial_patient_policy="all",
+        num_trials_semantic=1,
+        num_trials_spatial=1,
+    )
 
-    positive_patients = 0
-    negative_patients = 0
-    thresholds = np.linspace(0.05, 0.95, 19)
-    threshold_score_sums = np.zeros(thresholds.shape, dtype=np.float64)
+    return _calibrate_rule6_from_patient_predictions(
+        optimizer_config=optimizer_config,
+        patient_predictions=_iter_cached_rule6_patient_predictions(config),
+    )
+
+
+def _iter_cached_rule6_patient_predictions(
+    config: ThresholdCalibrationConfig,
+) -> Iterable[tuple[str, npt.NDArray[np.float32], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]]:
     for patient_id in config.patient_ids:
         local_slice = config.local_map[patient_id]
         patient_global_indices = config.global_indices[local_slice]
@@ -699,32 +1016,7 @@ def _calibrate_decision_threshold(
             config.spatial_weights,
         )
         patient_truth = config.truth_memmap[patient_global_indices].astype(np.uint8)
-        if np.any(patient_truth):
-            positive_patients += 1
-        else:
-            negative_patients += 1
-        for threshold_index, threshold in enumerate(thresholds):
-            tp, fp, fn, tn = _compute_patient_confusion_at_threshold(
-                spatial_prediction,
-                patient_truth,
-                roi_mask,
-                float(threshold),
-            )
-            threshold_score_sums[threshold_index] += _compute_mcc(tp, fp, fn, tn)
-
-    threshold_means = threshold_score_sums / max(1, len(config.patient_ids))
-    best_index = int(np.argmax(threshold_means))
-    best_threshold = float(thresholds[best_index])
-    best_mcc = float(threshold_means[best_index])
-
-    return best_threshold, {
-        "Calibration_metric": "Patient_MCC",
-        "Calibration_threshold": best_threshold,
-        "Calibration_best_mcc": float(best_mcc if np.isfinite(best_mcc) else 0.0),
-        "Calibration_n_patients": len(config.patient_ids),
-        "Calibration_n_positive_patients": positive_patients,
-        "Calibration_n_negative_patients": negative_patients,
-    }
+        yield patient_id, spatial_prediction, patient_truth, roi_mask
 
 
 def _collect_truth_from_dataloader(dataloader: DataLoader[Any]) -> npt.NDArray[np.uint8]:
@@ -802,21 +1094,21 @@ def _calibrate_decision_threshold_streaming(
     context: _StreamingPredictionContext,
     *,
     patient_ids: list[str],
-) -> tuple[float, dict[str, float | int | str]]:
-    if not patient_ids:
-        return 0.5, {
-            "Calibration_metric": "Patient_MCC",
-            "Calibration_threshold": 0.5,
-            "Calibration_best_mcc": 0.0,
-            "Calibration_n_patients": 0,
-            "Calibration_n_positive_patients": 0,
-            "Calibration_n_negative_patients": 0,
-        }
+) -> _Rule6CalibrationResult:
+    return _calibrate_rule6_from_patient_predictions(
+        optimizer_config=context.config,
+        patient_predictions=_iter_streaming_rule6_patient_predictions(
+            context,
+            patient_ids=patient_ids,
+        ),
+    )
 
-    positive_patients = 0
-    negative_patients = 0
-    thresholds = np.linspace(0.05, 0.95, 19)
-    threshold_score_sums = np.zeros(thresholds.shape, dtype=np.float64)
+
+def _iter_streaming_rule6_patient_predictions(
+    context: _StreamingPredictionContext,
+    *,
+    patient_ids: list[str],
+) -> Iterable[tuple[str, npt.NDArray[np.float32], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]]:
     for patient_id in patient_ids:
         dataloader = context.dataloader_factory({patient_id})
         semantic_prediction, patient_truth = _stream_weighted_prediction_for_patient(
@@ -843,31 +1135,7 @@ def _calibrate_decision_threshold_streaming(
             .numpy()
             .astype(np.uint8)
         )
-        if np.any(patient_truth):
-            positive_patients += 1
-        else:
-            negative_patients += 1
-        for threshold_index, threshold in enumerate(thresholds):
-            tp, fp, fn, tn = _compute_patient_confusion_at_threshold(
-                spatial_prediction,
-                patient_truth,
-                roi_mask,
-                float(threshold),
-            )
-            threshold_score_sums[threshold_index] += _compute_mcc(tp, fp, fn, tn)
-
-    threshold_means = threshold_score_sums / max(1, len(patient_ids))
-    best_index = int(np.argmax(threshold_means))
-    best_threshold = float(thresholds[best_index])
-    best_mcc = float(threshold_means[best_index])
-    return best_threshold, {
-        "Calibration_metric": "Patient_MCC",
-        "Calibration_threshold": best_threshold,
-        "Calibration_best_mcc": float(best_mcc if np.isfinite(best_mcc) else 0.0),
-        "Calibration_n_patients": len(patient_ids),
-        "Calibration_n_positive_patients": positive_patients,
-        "Calibration_n_negative_patients": negative_patients,
-    }
+        yield patient_id, spatial_prediction, patient_truth, roi_mask
 
 
 def _build_patient_map(patient_ids: list[str]) -> dict[str, list[int]]:
@@ -2039,19 +2307,21 @@ def _run_two_stream_optimization_staged(
     )
     calibration_patients = sorted(predefined_split.calibration_patients)
     LOGGER.info("Calibrating decision threshold on %s patients.", len(calibration_patients))
-    decision_threshold, calibration_metrics = _calibrate_decision_threshold_streaming(
+    calibration_result = _calibrate_decision_threshold_streaming(
         streaming_context,
         patient_ids=calibration_patients,
     )
     LOGGER.info(
-        "Calibration complete: threshold=%.4f best_mcc=%.4f.",
-        decision_threshold,
-        float(cast(float, calibration_metrics.get("Calibration_best_mcc", 0.0))),
+        "Calibration complete: threshold=%.4f macro_rule6=%.4f min_area=%s min_patches=%s.",
+        calibration_result.decision_threshold,
+        float(cast(float, calibration_result.metrics.get("Calibration_macro_rule6", 0.0))),
+        calibration_result.postprocessing_config.min_component_area_px,
+        calibration_result.postprocessing_config.min_patient_positive_patches,
     )
     holdout_evaluation = _evaluate_holdout_streaming(
         streaming_context,
         patient_ids=sorted(predefined_split.holdout_patients),
-        decision_threshold=decision_threshold,
+        decision_threshold=calibration_result.decision_threshold,
     )
     shutil.rmtree(config.pred_cache_dir, ignore_errors=True)
     config.pred_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -2061,8 +2331,10 @@ def _run_two_stream_optimization_staged(
         semantic_weights=best_semantic_weights,
         spatial_weights=best_spatial_weights,
         roi_threshold=best_roi_threshold,
-        decision_threshold=decision_threshold,
-        calibration_metrics=calibration_metrics,
+        decision_threshold=calibration_result.decision_threshold,
+        postprocessing_config=calibration_result.postprocessing_config,
+        calibration_metrics=calibration_result.metrics,
+        validation_calibration_summary=calibration_result.summary,
         holdout_metrics=holdout_evaluation.metrics,
     )
 
@@ -2122,7 +2394,7 @@ def run_two_stream_optimization(
         "Calibrating decision threshold on %s patients.",
         len(prepared.calibration_patients),
     )
-    decision_threshold, calibration_metrics = _calibrate_decision_threshold(
+    calibration_result = _calibrate_decision_threshold(
         ThresholdCalibrationConfig(
             patient_ids=prepared.calibration_patients,
             local_map=prepared.calibration_local_map,
@@ -2135,12 +2407,15 @@ def run_two_stream_optimization(
             spatial_weights=best_spatial_weights,
             roi_context_scale=config.roi_context_scale,
             roi_threshold=best_roi_threshold,
+            optimizer_config=config,
         )
     )
     LOGGER.info(
-        "Calibration complete: threshold=%.4f best_mcc=%.4f.",
-        decision_threshold,
-        float(cast(float, calibration_metrics.get("Calibration_best_mcc", 0.0))),
+        "Calibration complete: threshold=%.4f macro_rule6=%.4f min_area=%s min_patches=%s.",
+        calibration_result.decision_threshold,
+        float(cast(float, calibration_result.metrics.get("Calibration_macro_rule6", 0.0))),
+        calibration_result.postprocessing_config.min_component_area_px,
+        calibration_result.postprocessing_config.min_patient_positive_patches,
     )
     holdout_evaluation = _evaluate_holdout(
         config,
@@ -2148,7 +2423,7 @@ def run_two_stream_optimization(
         best_semantic_weights=best_semantic_weights,
         best_spatial_weights=best_spatial_weights,
         best_roi_threshold=best_roi_threshold,
-        decision_threshold=decision_threshold,
+        decision_threshold=calibration_result.decision_threshold,
     )
     return OptimizationResult(
         semantic_indices=prepared.semantic_indices,
@@ -2156,7 +2431,9 @@ def run_two_stream_optimization(
         semantic_weights=best_semantic_weights,
         spatial_weights=best_spatial_weights,
         roi_threshold=best_roi_threshold,
-        decision_threshold=decision_threshold,
-        calibration_metrics=calibration_metrics,
+        decision_threshold=calibration_result.decision_threshold,
+        postprocessing_config=calibration_result.postprocessing_config,
+        calibration_metrics=calibration_result.metrics,
+        validation_calibration_summary=calibration_result.summary,
         holdout_metrics=holdout_evaluation.metrics,
     )

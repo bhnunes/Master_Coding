@@ -19,9 +19,17 @@ from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_M
 
 def _sample_recipe() -> dict[str, object]:
     return {
+        "recipe_schema_version": 2,
+        "calibration_objective": "balanced_rule6",
         "ensemble_strategy": "two_stream_spatial_gating",
         "roi_config": {"threshold": 0.33, "scale": 4},
         "decision_config": {"threshold": 0.57},
+        "postprocessing_config": {
+            "method": "threshold_components_patient_suppression",
+            "min_component_area_px": 16,
+            "min_patient_positive_patches": 3,
+        },
+        "validation_calibration_summary": {"objective": "balanced_rule6"},
         "model_registry": [
             {
                 "architecture": "SWIN",
@@ -41,6 +49,7 @@ def _sample_metrics() -> dict[str, object]:
         "micro_averaged_metrics": {"point_estimate": point_estimate, "ci": ci},
         "macro_averaged_metrics": {"point_estimate": point_estimate, "ci": ci},
         "auc": 0.91,
+        "auc_source": "raw_probabilities_before_hard_postprocessing",
         "confusion_matrix": {"tp": 8, "fp": 2, "fn": 1, "tn": 9},
         "bootstrap": {"ran": True, "n_patients": 24, "n_bootstrap_samples": 10000, "seed": 24},
         "macro_dice_rule6_split": {
@@ -69,6 +78,7 @@ def test_export_results_to_csv_writes_report(tmp_path: Path) -> None:
     assert csv_path.name == "FINAL_EVALUATION_REPORT_2026-03-20_12_00_00.csv"
     assert "Ensemble Composition" in csv_path.read_text(encoding="utf-8")
     assert "Decision Threshold" in csv_path.read_text(encoding="utf-8")
+    assert "Min Component Area" in csv_path.read_text(encoding="utf-8")
 
 
 def test_save_confusion_matrix_png_replaces_colab_inline_backend(
@@ -107,6 +117,7 @@ def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:
     assert pdf_path.exists()
     assert "Ensemble Final Evaluation Report" in tex_path.read_text(encoding="utf-8")
     assert "Decision Threshold" in tex_path.read_text(encoding="utf-8")
+    assert "Minimum Component Area" in tex_path.read_text(encoding="utf-8")
 
 
 def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
@@ -137,6 +148,7 @@ def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
     assert markdown_path.exists()
     assert "# Ensemble Final Evaluation Report" in contents
     assert "## Final Metrics (Micro / Pixel-Level)" in contents
+    assert "Minimum Component Area" in contents
     assert "## Environment Variables Used For This Project" in contents
     assert "| ARTIFACT_DEVICE | cuda |" in contents
     assert "| WINDOW_SIZE | 224 |" in contents

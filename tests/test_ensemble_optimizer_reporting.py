@@ -6,9 +6,13 @@ from helpers.ensemble_optimizer.reporting import (
     build_recipe_metadata,
     write_recipe_metadata,
 )
+from helpers.ensemble_postprocessing import PostprocessingConfig
 
 ROI_THRESHOLD = 0.33
 DECISION_THRESHOLD = 0.57
+RECIPE_SCHEMA_VERSION = 2
+MIN_COMPONENT_AREA_PX = 16
+MIN_PATIENT_POSITIVE_PATCHES = 3
 
 
 def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> None:
@@ -41,9 +45,14 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
             roi_context_scale=4,
             roi_threshold=ROI_THRESHOLD,
             decision_threshold=DECISION_THRESHOLD,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=MIN_COMPONENT_AREA_PX,
+                min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+            ),
             spill_penalty_lambda=0.1,
             spatial_patient_policy="positive_only",
-            calibration_metrics={"Calibration_best_mcc": 0.61},
+            calibration_metrics={"Calibration_macro_rule6": 0.61},
+            validation_calibration_summary={"objective": "balanced_rule6"},
             holdout_metrics={"Macro_AUPRC_in_ROI": 0.7},
             generated_at="2026-03-20_10_00_00",
             compatibility_signature="compat-a",
@@ -56,11 +65,20 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
 
     assert output_path == tmp_path / "ENSEMBLE_TWO_STREAM_2026-03-20_10_00_00.json"
     assert payload["ensemble_strategy"] == "two_stream_spatial_gating"
+    assert payload["recipe_schema_version"] == RECIPE_SCHEMA_VERSION
+    assert payload["calibration_objective"] == "balanced_rule6"
     assert payload["roi_config"]["threshold"] == ROI_THRESHOLD
     assert payload["decision_config"]["threshold"] == DECISION_THRESHOLD
+    assert payload["decision_config"]["method"] == "balanced_rule6_calibration"
+    assert payload["postprocessing_config"]["min_component_area_px"] == MIN_COMPONENT_AREA_PX
+    assert (
+        payload["postprocessing_config"]["min_patient_positive_patches"]
+        == MIN_PATIENT_POSITIVE_PATCHES
+    )
     assert payload["model_registry"][0]["stream_role"] == "semantic"
     assert payload["model_registry"][1]["stream_role"] == "spatial"
-    assert payload["calibration_metrics"] == {"Calibration_best_mcc": 0.61}
+    assert payload["calibration_metrics"] == {"Calibration_macro_rule6": 0.61}
+    assert payload["validation_calibration_summary"] == {"objective": "balanced_rule6"}
     assert "holdout_metrics" in payload
     assert payload["compatibility_signature"] == "compat-a"
     assert payload["provenance"]["validation"] == {"dataset_sha256": "val-sha"}
@@ -78,9 +96,14 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
             roi_context_scale=4,
             roi_threshold=ROI_THRESHOLD,
             decision_threshold=DECISION_THRESHOLD,
+            postprocessing_config=PostprocessingConfig(
+                min_component_area_px=MIN_COMPONENT_AREA_PX,
+                min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+            ),
             spill_penalty_lambda=0.1,
             spatial_patient_policy="positive_only",
             calibration_metrics={},
+            validation_calibration_summary={"objective": "balanced_rule6"},
             holdout_metrics={},
             generated_at="2026-03-20_10_00_00",
             compatibility_signature="compat-a",

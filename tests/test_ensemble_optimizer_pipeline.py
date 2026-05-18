@@ -14,9 +14,12 @@ from helpers.ensemble_optimizer.pipeline import (
     _execute_pipeline,
     run_ensemble_optimizer_pipeline,
 )
+from helpers.ensemble_postprocessing import PostprocessingConfig
 
 DECISION_THRESHOLD = 0.6
 METADATA_SORT_METRIC_VALUE = 0.2
+MIN_COMPONENT_AREA_PX = 16
+MIN_PATIENT_POSITIVE_PATCHES = 3
 
 
 @pytest.fixture(autouse=True)
@@ -163,7 +166,12 @@ def test_execute_pipeline_records_strict_metadata_selection_in_run_config(
                 "spatial_weights": [1.0],
                 "roi_threshold": 0.4,
                 "decision_threshold": 0.6,
+                "postprocessing_config": PostprocessingConfig(
+                    min_component_area_px=MIN_COMPONENT_AREA_PX,
+                    min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                ),
                 "calibration_metrics": {"Calibration_best_mcc": 0.55},
+                "validation_calibration_summary": {"objective": "balanced_rule6"},
                 "holdout_metrics": {"Macro_AUPRC_in_ROI": 0.7},
             },
         )(),
@@ -188,7 +196,13 @@ def test_execute_pipeline_records_strict_metadata_selection_in_run_config(
     assert run_config["calibration_patients"] == ["p4"]
     assert run_config["holdout_patients"] == ["p3"]
     assert run_config["decision_threshold"] == DECISION_THRESHOLD
+    assert run_config["postprocessing_config"]["min_component_area_px"] == MIN_COMPONENT_AREA_PX
+    assert (
+        run_config["postprocessing_config"]["min_patient_positive_patches"]
+        == MIN_PATIENT_POSITIVE_PATCHES
+    )
     assert run_config["calibration_metrics"] == {"Calibration_best_mcc": 0.55}
+    assert run_config["validation_calibration_summary"] == {"objective": "balanced_rule6"}
     assert run_config["validation_master_manifest_path"].endswith("master_manifest.sqlite")
     assert run_config["model_selection_strategy"] == (
         "strict_unique_metadata_per_requested_architecture"
@@ -336,7 +350,12 @@ def test_execute_pipeline_logs_phase_summaries(
                 "spatial_weights": [1.0],
                 "roi_threshold": 0.4,
                 "decision_threshold": 0.6,
+                "postprocessing_config": PostprocessingConfig(
+                    min_component_area_px=MIN_COMPONENT_AREA_PX,
+                    min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                ),
                 "calibration_metrics": {"Calibration_best_mcc": 0.55},
+                "validation_calibration_summary": {"objective": "balanced_rule6"},
                 "holdout_metrics": {"Macro_AUPRC_in_ROI": 0.7, "Objective_Composite": 0.7},
             },
         )(),
@@ -477,7 +496,12 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
                 "spatial_weights": [1.0],
                 "roi_threshold": 0.4,
                 "decision_threshold": 0.6,
+                "postprocessing_config": PostprocessingConfig(
+                    min_component_area_px=MIN_COMPONENT_AREA_PX,
+                    min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                ),
                 "calibration_metrics": {"Calibration_best_mcc": 0.55},
+                "validation_calibration_summary": {"objective": "balanced_rule6"},
                 "holdout_metrics": {"Macro_AUPRC_in_ROI": 0.7},
             },
         )(),

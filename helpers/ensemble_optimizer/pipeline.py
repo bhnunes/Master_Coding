@@ -29,6 +29,7 @@ from helpers.ensemble_optimizer.reporting import (
     write_recipe_metadata,
 )
 from helpers.ensemble_optimizer.splitting import HoldoutSplit, build_holdout_split
+from helpers.ensemble_postprocessing import postprocessing_config_to_payload
 from helpers.provenance import build_split_fingerprint
 from helpers.training.device import require_cuda_device
 from helpers.training.runtime import seed_everything
@@ -189,9 +190,11 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             roi_context_scale=config.roi_context_scale,
             roi_threshold=optimization_result.roi_threshold,
             decision_threshold=optimization_result.decision_threshold,
+            postprocessing_config=optimization_result.postprocessing_config,
             spill_penalty_lambda=config.spill_penalty_lambda,
             spatial_patient_policy=config.spatial_patient_policy,
             calibration_metrics=optimization_result.calibration_metrics,
+            validation_calibration_summary=optimization_result.validation_calibration_summary,
             holdout_metrics=optimization_result.holdout_metrics,
             generated_at=timestamp,
             compatibility_signature=compatibility_signature,
@@ -214,7 +217,11 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             "compatibility_signature": compatibility_signature,
             "roi_threshold": optimization_result.roi_threshold,
             "decision_threshold": optimization_result.decision_threshold,
+            "postprocessing_config": postprocessing_config_to_payload(
+                optimization_result.postprocessing_config
+            ),
             "calibration_metrics": optimization_result.calibration_metrics,
+            "validation_calibration_summary": optimization_result.validation_calibration_summary,
             "validation_provenance": validation_provenance,
             "split_fingerprint": split_fingerprint,
             "model_selection_strategy": _MODEL_SELECTION_STRATEGY,

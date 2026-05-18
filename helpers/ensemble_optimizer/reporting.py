@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
+from helpers.ensemble_postprocessing import PostprocessingConfig, postprocessing_config_to_payload
 from helpers.provenance import hash_file_sha256, hash_json_payload
 
 
@@ -21,9 +22,11 @@ class RecipeMetadataConfig:
     roi_context_scale: int
     roi_threshold: float
     decision_threshold: float
+    postprocessing_config: PostprocessingConfig
     spill_penalty_lambda: float
     spatial_patient_policy: str
     calibration_metrics: dict[str, float | int | str]
+    validation_calibration_summary: dict[str, Any]
     holdout_metrics: dict[str, float | int | str]
     generated_at: str
     compatibility_signature: str
@@ -95,6 +98,8 @@ def build_recipe_metadata(config: RecipeMetadataConfig) -> dict[str, Any]:
     stream_order = {"semantic": 0, "spatial": 1, "none": 2}
     model_registry.sort(key=lambda item: (stream_order[item["stream_role"]], -item["weight"]))
     payload = {
+        "recipe_schema_version": 2,
+        "calibration_objective": "balanced_rule6",
         "experiment_id": f"two_stream_opt_{config.generated_at}",
         "datetime": config.generated_at,
         "ensemble_strategy": "two_stream_spatial_gating",
@@ -105,17 +110,19 @@ def build_recipe_metadata(config: RecipeMetadataConfig) -> dict[str, Any]:
             "threshold": config.roi_threshold,
         },
         "decision_config": {
-            "method": "patient_mcc_calibration",
+            "method": "balanced_rule6_calibration",
             "threshold": config.decision_threshold,
-            "metric": "Patient_MCC",
+            "metric": "Macro_Rule6_Dice",
             "operator": ">",
         },
+        "postprocessing_config": postprocessing_config_to_payload(config.postprocessing_config),
         "spatial_config": {
             "spill_lambda": config.spill_penalty_lambda,
             "patient_policy": config.spatial_patient_policy,
         },
         "model_registry": model_registry,
         "calibration_metrics": config.calibration_metrics,
+        "validation_calibration_summary": config.validation_calibration_summary,
         "holdout_metrics": config.holdout_metrics,
         "provenance": {
             "validation": config.validation_provenance,

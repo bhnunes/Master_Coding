@@ -67,7 +67,11 @@ class EnsembleReportContent:
     ensemble_strategy: str
     roi_threshold: str
     decision_threshold: str
+    postprocessing_method: str
+    min_component_area_px: str
+    min_patient_positive_patches: str
     auc: str
+    auc_source: str
     normalization_mean: str
     normalization_std: str
     composition_rows: tuple[ReportCompositionRow, ...]
@@ -173,20 +177,34 @@ def export_results_to_csv(
             "Ensemble Recipe Path",
             "Master Manifest Path",
             "Evaluation Set",
+            "Recipe Schema Version",
+            "Calibration Objective",
             "Random Seed",
             "Batch Size",
             "ROI Gate Threshold",
             "Decision Threshold",
+            "Post-processing Method",
+            "Min Component Area (px)",
+            "Min Patient Positive Patches",
+            "AUC Source",
         ],
         "Value": [
             config.timestamp,
             str(config.recipe_path),
             str(config.dataset_dir),
             "TEST",
+            ensemble_recipe.get("recipe_schema_version", "FAILED"),
+            ensemble_recipe.get("calibration_objective", "FAILED"),
             config.seed,
             config.batch_size,
             ensemble_recipe.get("roi_config", {}).get("threshold", "FAILED"),
             ensemble_recipe.get("decision_config", {}).get("threshold", "FAILED"),
+            ensemble_recipe.get("postprocessing_config", {}).get("method", "FAILED"),
+            ensemble_recipe.get("postprocessing_config", {}).get("min_component_area_px", "FAILED"),
+            ensemble_recipe.get("postprocessing_config", {}).get(
+                "min_patient_positive_patches", "FAILED"
+            ),
+            metrics_results.get("auc_source", "raw_probabilities_before_hard_postprocessing"),
         ],
     }
     config_df = pd.DataFrame(config_data)
@@ -375,13 +393,20 @@ def _build_report_content(
     neg_clean = rule6.get("neg_clean_rate", {})
     comp_models = ensemble_recipe.get("model_registry", [])
     confusion = ensemble_metrics.get("confusion_matrix", {})
+    postprocessing = ensemble_recipe.get("postprocessing_config", {})
 
     return EnsembleReportContent(
         timestamp=timestamp,
         ensemble_strategy=str(ensemble_recipe.get("ensemble_strategy", "NA")),
         roi_threshold=_fmt_float(ensemble_recipe.get("roi_config", {}).get("threshold")),
         decision_threshold=_fmt_float(ensemble_recipe.get("decision_config", {}).get("threshold")),
+        postprocessing_method=str(postprocessing.get("method", "NA")),
+        min_component_area_px=str(postprocessing.get("min_component_area_px", "NA")),
+        min_patient_positive_patches=str(postprocessing.get("min_patient_positive_patches", "NA")),
         auc=_fmt_float(ensemble_metrics.get("auc")),
+        auc_source=str(
+            ensemble_metrics.get("auc_source", "raw_probabilities_before_hard_postprocessing")
+        ),
         normalization_mean=f"[{train_mean[0]:.6f}, {train_mean[1]:.6f}, {train_mean[2]:.6f}]",
         normalization_std=f"[{train_std[0]:.6f}, {train_std[1]:.6f}, {train_std[2]:.6f}]",
         composition_rows=tuple(
@@ -452,7 +477,13 @@ def write_ensemble_report_latex(
         rf"\item Ensemble Strategy: {_tex_escape(report_content.ensemble_strategy)}",
         rf"\item ROI Gate Threshold: {report_content.roi_threshold}",
         rf"\item Decision Threshold: {report_content.decision_threshold}",
-        rf"\item AUC: {report_content.auc}",
+        rf"\item Post-processing: {_tex_escape(report_content.postprocessing_method)}",
+        rf"\item Minimum Component Area: {_tex_escape(report_content.min_component_area_px)} px",
+        (
+            rf"\item Minimum Patient Positive Patches: "
+            rf"{_tex_escape(report_content.min_patient_positive_patches)}"
+        ),
+        rf"\item AUC: {report_content.auc} ({_tex_escape(report_content.auc_source)})",
         r"\end{itemize}",
         r"\section*{Normalization Statistics}",
         rf"Mean: {report_content.normalization_mean}\\",
@@ -565,7 +596,10 @@ def write_ensemble_report_markdown(
         f"- Ensemble Strategy: {report_content.ensemble_strategy}",
         f"- ROI Gate Threshold: {report_content.roi_threshold}",
         f"- Decision Threshold: {report_content.decision_threshold}",
-        f"- AUC: {report_content.auc}",
+        f"- Post-processing: {report_content.postprocessing_method}",
+        f"- Minimum Component Area: {report_content.min_component_area_px} px",
+        f"- Minimum Patient Positive Patches: {report_content.min_patient_positive_patches}",
+        f"- AUC: {report_content.auc} ({report_content.auc_source})",
         "",
         "## Normalization Statistics",
         f"Mean: {report_content.normalization_mean}",
