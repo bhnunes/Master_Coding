@@ -1,19 +1,309 @@
 \prefacesection{Lista de Símbolos}
 
-\begin{table}[!ht]
-  \begin{tabular}{p{3.0cm}p{12.0cm}}
-    $\alpha$ & Peso do termo de entropia cruzada binária da classe positiva na função de perda híbrida.\\
-    $\beta$ & Peso do termo Dice associado à classe de fundo na função de perda híbrida.\\
-    $\gamma$ & Peso do termo Dice associado à classe positiva na função de perda híbrida.\\
-    $c$ & Escore de contaminação por fundo na região de interesse durante a limpeza baseada em grafos.\\
-    $\tau$ & Limiar de rejeição aplicado ao escore de contaminação na Fase 3.3.\\
-    $H(X)$ & Entropia de Shannon usada na seleção heurística de \textit{templates} da Fase 4.\\
-    $p_i$ & Frequência relativa, probabilidade predita ou probabilidade de pixel, conforme definido localmente em cada equação.\\
-    $Q$, $K$, $V$ & Matrizes de consulta, chave e valor no mecanismo de atenção.\\
-    $d_k$ & Dimensão das chaves no cálculo de atenção escalada.\\
-    $\mathrm{OD}$ & Densidade óptica usada em normalização e separação de corantes.\\
-    $t$ & Limiar genérico de binarização ou decisão.\\
-    $w_m$ & Peso atribuído ao modelo $m$ na combinação do \textit{ensemble}.\\
-    $TP$, $FP$, $TN$, $FN$ & Contagens de verdadeiros positivos, falsos positivos, verdadeiros negativos e falsos negativos.\\
-  \end{tabular}
-\end{table}
+\begingroup
+\renewcommand{\arraystretch}{1.15}
+\begin{longtable}{p{3.0cm}p{12.0cm}}
+  \textbf{Símbolo} & \textbf{Descrição}\\
+  \hline
+  \endfirsthead
+  \textbf{Símbolo} & \textbf{Descrição}\\
+  \hline
+  \endhead
+
+  $i$, $j$, $h$, $w$, $\ell$, $m$, $u$, $v$ &
+  Índices genéricos utilizados para representar pixels, classes, grupos,
+  limiares, modelos ou candidatos, conforme definido no contexto de cada equação.\\
+
+  $x$, $y$, $x_i$ &
+  Coordenadas espaciais, pixel ou amostra de entrada, conforme o contexto
+  da formulação.\\
+
+  $f(x,y)$, $g(x,y)$ &
+  Intensidade do pixel ou canal antes da limiarização e máscara binária
+  resultante após a aplicação do limiar.\\
+
+  $t$ &
+  Limiar genérico usado em binarização, decisão ou varredura de métricas.\\
+
+  $A$, $B$ &
+  Máscara binária e elemento estruturante em operações morfológicas. Quando
+  indicado no texto, $B(x)$ representa se o pixel $x$ pertence a uma região
+  classificada como fundo.\\
+
+  $\ominus$, $\oplus$, $\circ$, $\bullet$ &
+  Operadores morfológicos de erosão, dilatação, abertura e fechamento,
+  respectivamente.\\
+
+  $G=(V,E)$ &
+  Grafo não direcionado usado na segmentação baseada em grafos, em que $V$
+  representa os vértices e $E$ representa as arestas.\\
+
+  $C$, $C_1$, $C_2$ &
+  Componentes ou regiões consideradas na formulação de segmentação baseada em
+  grafos.\\
+
+  $\mathrm{MST}(C,E)$ &
+  Árvore geradora mínima do componente $C$ no grafo definido pelas arestas $E$.\\
+
+  $\mathrm{Int}(C)$, $\mathrm{Dif}(C_1,C_2)$, $\mathrm{MInt}(C_1,C_2)$ &
+  Diferença interna de um componente, diferença entre componentes e critério
+  mínimo de separação usado na regra de fusão da segmentação por grafos.\\
+
+  $w(e)$, $w(v_i,v_j)$ &
+  Peso de uma aresta ou dissimilaridade entre vértices vizinhos no grafo.\\
+
+  $k$ &
+  Parâmetro de escala da segmentação por grafos ou número de agrupamentos,
+  conforme definido localmente.\\
+
+  $\tau$, $\tau(C)$ &
+  Limiar de rejeição aplicado ao escore de contaminação ou termo de ajuste
+  dependente do tamanho do componente na segmentação por grafos.\\
+
+  $S_j$ &
+  Segmento $j$ produzido pela segmentação baseada em grafos.\\
+
+  $I_j$ &
+  Intensidade média do segmento $S_j$, usada na identificação de regiões
+  semelhantes a fundo.\\
+
+  $\overline{R}_{S_j}$, $\overline{G}_{S_j}$, $\overline{B}_{S_j}$ &
+  Médias dos canais vermelho, verde e azul no segmento $S_j$.\\
+
+  $T_{\mathrm{bg}}$ &
+  Limiar de intensidade utilizado para classificar um segmento como fundo.\\
+
+  $R(x)$ &
+  Região de interesse associada ao pixel $x$, utilizada na curadoria por
+  contaminação ou na inferência com \textit{ensemble} em dois fluxos.\\
+
+  $c$ &
+  Escore de contaminação por fundo na região de interesse. Em equações locais,
+  também pode representar uma classe.\\
+
+  $F1_{\mathrm{rej}}(\tau)$ &
+  F1 da classe rejeitada, calculado para o limiar de contaminação $\tau$.\\
+
+  $n_{\mathrm{req}}$, $z$, $p$, $e$ &
+  Tamanho mínimo de revisão estimado pela fórmula de Cochran, quantil normal,
+  proporção assumida e margem de erro.\\
+
+  $s$, $g(s)$ &
+  \textit{Stem} de um \textit{patch} e função de agrupamento usada na seleção de
+  amostras para revisão. Quando indicado no texto, $s$ também representa a escala
+  de contexto na inferência.\\
+
+  $I$, $I_0$, $I_c$, $I'_c$ &
+  Intensidade observada, intensidade de referência, intensidade do canal $c$ e
+  intensidade transformada após normalização de cor.\\
+
+  $\mu_{s,c}$, $\mu_{t,c}$ &
+  Médias do canal $c$ na imagem de origem e na imagem-alvo.\\
+
+  $\sigma_{s,c}$, $\sigma_{t,c}$ &
+  Desvios padrão do canal $c$ na imagem de origem e na imagem-alvo.\\
+
+  $\mathrm{OD}$ &
+  Densidade óptica usada na normalização e na separação de corantes
+  histológicos.\\
+
+  $\epsilon$, $\varepsilon$ &
+  Termos de estabilização numérica empregados em normalização, funções de perda
+  ou métricas.\\
+
+  $\mathcal{L}$ &
+  Função de perda total utilizada no treinamento supervisionado.\\
+
+  $\mathcal{L}_{\mathrm{BCE}}$, $\mathcal{L}_{\mathrm{BCE},\mathrm{fg}}$ &
+  Termo de entropia cruzada binária, incluindo sua forma associada à classe
+  positiva ou primeiro plano.\\
+
+  $\mathcal{L}_{\mathrm{Dice,bg}}$, $\mathcal{L}_{\mathrm{Dice,fg}}$,
+  $\mathcal{L}_{\mathrm{Dice},c}$ &
+  Termos Dice associados ao fundo, ao primeiro plano ou à classe genérica $c$.\\
+
+  $\alpha$, $\beta$, $\gamma$ &
+  Pesos dos termos da perda híbrida. Nos resultados, também aparecem como
+  $\alpha_{\mathrm{BCE}}$, $\beta_{\mathrm{DiceBG}}$ e
+  $\gamma_{\mathrm{DiceFG}}$.\\
+
+  $\theta_t$ &
+  Parâmetros do modelo no passo de otimização $t$.\\
+
+  $\eta$, $\eta_t$, $\eta_0$, $\eta_{\max}$ &
+  Taxa de aprendizado, taxa na iteração $t$, taxa inicial e taxa máxima usada no
+  teste de faixa.\\
+
+  $\hat{m}_t$, $\hat{v}_t$ &
+  Estimativas corrigidas do primeiro e do segundo momento dos gradientes no Adam
+  ou AdamW.\\
+
+  $\lambda$ &
+  Intensidade do decaimento de peso ou termo de penalização em funções objetivo.\\
+
+  $L_2$ &
+  Penalização baseada na norma quadrática dos parâmetros.\\
+
+  $Q$, $K$, $V$ &
+  Matrizes de consulta, chave e valor no mecanismo de atenção. Quando indicado
+  localmente, $V$ também pode representar veredito ou partição.\\
+
+  $d_k$ &
+  Dimensão das chaves no cálculo da atenção escalada.\\
+
+  $J_{\mathrm{split}}$ &
+  Função de custo usada para avaliar o balanceamento das partições de treino,
+  validação e teste.\\
+
+  $r_s$, $r_{\mathrm{global}}$ &
+  Fração de amostras cancerosas no conjunto $s$ e no conjunto completo antes do
+  particionamento.\\
+
+  $\chi^2$, $O_i$, $E_i$ &
+  Estatística de qui-quadrado usada como diagnóstico descritivo, contagens
+  observadas e contagens esperadas.\\
+
+  $H(X)$ &
+  Entropia de Shannon usada na seleção heurística de \textit{templates}.\\
+
+  $X$, $p_i$ &
+  Variável aleatória, imagem ou distribuição de frequências, conforme a equação;
+  $p_i$ pode representar frequência relativa, probabilidade predita ou
+  probabilidade de pixel.\\
+
+  $\mathcal{C}$, $V$, $s(c)$ &
+  Conjunto de verificações, veredito final e estado de uma verificação $c$.\\
+
+  $\mathcal{I}_p$, $\mathcal{P}_p$, $\mathcal{R}_p$ &
+  Índices de treino aceitos do paciente $p$, subconjunto protegido e subconjunto
+  redutível na etapa de amostragem inteligente.\\
+
+  $y_i$, $\rho_i$, $\tau_{\mathrm{mask}}$ &
+  Rótulo binário da amostra $i$, fração de pixels positivos na máscara e limiar
+  de fração positiva usado para proteger amostras na seleção de treino.\\
+
+  $z_i$, $f_\theta(x_i)$, $\mathbb{R}^d$ &
+  Embedding da imagem $x_i$, extrator parametrizado por $\theta$ e espaço vetorial
+  de dimensão $d$.\\
+
+  $n$, $N$, $N_{\mathrm{pix}}$, $H$, $W$ &
+  Número de amostras, total de itens, total de pixels e dimensões espaciais
+  utilizadas em perdas, métricas e procedimentos de amostragem.\\
+
+  $\mathrm{ARI}$, $U$, $V$, $n_{ij}$, $a_i$, $b_j$ &
+  Índice de Rand ajustado, partições comparadas, contagens conjuntas e totais
+  marginais.\\
+
+  $K_{\min}$, $K_{\max}$, $K$ &
+  Limites mínimo e máximo de agrupamentos ou número de pixels retidos pelo
+  \textit{Online Hard Example Mining}, conforme o contexto.\\
+
+  $\mathcal{C}$, $S$ &
+  Conjunto candidato e subconjunto selecionado na seleção baseada em diversidade.\\
+
+  $L(S)$, $s_{ij}$, $D$ &
+  Função de localização de facilidades, similaridade entre candidatos e distância
+  máxima usada para normalização.\\
+
+  $\Delta(S)$, $F(S)$ &
+  Termo de diversidade max-min e função objetivo combinada da seleção baseada em
+  diversidade.\\
+
+  $\tau_\ell$ &
+  Limiar de distância usado na construção de subconjuntos independentes na
+  seleção baseada em diversidade.\\
+
+  $q_i$, $w_{y_i}$ &
+  Probabilidade de sorteio da amostra $i$ e peso associado à sua classe no
+  amostrador ponderado.\\
+
+  $p_{\mathrm{fg},h,w}$, $g_{\mathrm{fg},h,w}$ &
+  Probabilidade prevista de primeiro plano e alvo binário no pixel $(h,w)$.\\
+
+  $p_{c,h,w}$, $g_{c,h,w}$ &
+  Probabilidade prevista e alvo binário para a classe $c$ no pixel $(h,w)$.\\
+
+  $\mathcal{L}_{\mathrm{art}}$, $a_{\max}$, $a_j$ &
+  Perda ajustada por artefato, maior cobertura de artefato na amostra e cobertura
+  do artefato $j$.\\
+
+  $r$ &
+  Fração de retenção usada no \textit{Online Hard Example Mining}.\\
+
+  $\mathbf{z}$, $z_c$, $p_c$, $C$ &
+  Vetor de logits, logit da classe $c$, probabilidade após \textit{softmax} e
+  número de classes.\\
+
+  $\hat{y}$, $\hat{y}_i(t)$, $\hat{g}_{j,i}(t)$, $\hat{Y}(x)$ &
+  Decisão prevista de rejeição, predição binária para o pixel $i$, predição
+  binária em validação e máscara final prevista.\\
+
+  $\mathbb{I}(\cdot)$, $\mathbf{1}_{[\cdot]}$ &
+  Funções indicadoras usadas para construir máscaras binárias ou expressar
+  condições lógicas.\\
+
+  $TP$, $FP$, $TN$, $FN$ &
+  Contagens de verdadeiros positivos, falsos positivos, verdadeiros negativos e
+  falsos negativos. Subíndices indicam contagens por limiar, paciente ou classe,
+  quando aplicável.\\
+
+  $\mathrm{Dice}$, $\mathrm{IoU}$ &
+  Métricas de sobreposição espacial entre a predição e a máscara de referência.\\
+
+  $\mathrm{MCC}$, $\overline{\mathrm{MCC}}_{\mathrm{cal}}(t)$ &
+  Coeficiente de correlação de Matthews e sua média em pacientes de calibração
+  para o limiar $t$.\\
+
+  $\mathrm{TPR}$, $\mathrm{FPR}$ &
+  Taxa de verdadeiros positivos e taxa de falsos positivos usadas na curva ROC.\\
+
+  $\mathrm{Precision}$, $\mathrm{Recall}$ &
+  Precisão e revocação calculadas em função do limiar de decisão.\\
+
+  $\mathrm{AUPRC}$, $\mathrm{AUROC}$ &
+  Áreas sob as curvas precisão-revocação e ROC.\\
+
+  $\mathcal{M}_{\mathrm{sem}}$, $\mathcal{M}_{\mathrm{spa}}$ &
+  Conjuntos de modelos associados aos fluxos semântico e espacial do
+  \textit{ensemble}.\\
+
+  $P_m(x)$ &
+  Probabilidade de primeiro plano produzida pelo modelo $m$ no pixel $x$.\\
+
+  $w_m$, $w_m^{\mathrm{sem}}$, $w_m^{\mathrm{spa}}$ &
+  Peso atribuído ao modelo $m$ na combinação do \textit{ensemble}, incluindo os
+  pesos específicos dos fluxos semântico e espacial.\\
+
+  $P_{\mathrm{sem}}(x)$, $P_{\mathrm{spa}}(x)$, $P_{\mathrm{final}}(x)$ &
+  Probabilidades agregadas dos fluxos semântico e espacial e probabilidade final
+  após aplicação da região de interesse.\\
+
+  $\mathrm{Down}(\cdot;s)$, $\mathrm{Up}(\cdot)$ &
+  Operadores de redução por escala de contexto $s$ e retorno à resolução
+  original.\\
+
+  $\tau_{\mathrm{roi}}$, $\tau_{\mathrm{dec}}$, $\tau_{\mathrm{dec}}^\star$ &
+  Limiar da região de interesse, limiar de decisão final e limiar calibrado por
+  maximização do MCC.\\
+
+  $Y_i$, $R_i$, $\mathrm{Rec}_{\mathrm{ROI}}^{(i)}$ &
+  Máscara de referência do paciente $i$, região de interesse proposta e
+  recuperação da região de interesse para esse paciente.\\
+
+  $J_{\mathrm{spa}}$ &
+  Função objetivo usada para otimizar o fluxo espacial do \textit{ensemble}.\\
+
+  $\mathcal{P}_+$, $\mathcal{P}_-$ &
+  Conjuntos de pacientes positivos e negativos usados na otimização ou no
+  relatório de inferência.\\
+
+  $S_i$, $F_j$, $FP_j$ &
+  Vazamento médio de probabilidade fora da região de interesse em paciente
+  positivo, massa falso-positiva em paciente negativo e número de falsos
+  positivos no paciente $j$.\\
+
+  $\mathrm{NCR}$ &
+  Taxa de pacientes negativos sem predição positiva.\\
+
+\end{longtable}
+\endgroup
