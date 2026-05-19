@@ -25,6 +25,10 @@ def _parse_int(value: str | None, *, default: int) -> int:
     return int(str(default) if value is None or value.strip() == "" else value)
 
 
+def _parse_float(value: str | None, *, default: float) -> float:
+    return float(str(default) if value is None or value.strip() == "" else value)
+
+
 def _parse_required_path(
     value: str | None,
     variable_name: str,
@@ -62,6 +66,7 @@ class EnsembleInferenceConfig:
     export_csv: bool
     export_latex: bool
     export_visualizations: bool
+    patch_positive_area_fraction_threshold: float = 0.0
     runtime_normalization_method: str = "NOT_NORMALIZED"
     runtime_vahadane_backend: str = "fixed_source"
     log_folder: Path = Path("logs")
@@ -79,6 +84,14 @@ def load_ensemble_inference_config(
 ) -> EnsembleInferenceConfig:
     values = env if env is not None else os.environ
     workers_default = os.cpu_count() or 1
+    patch_positive_area_fraction_threshold = _parse_float(
+        values.get("ENSEMBLE_INFER_PATCH_POSITIVE_AREA_FRACTION_THRESHOLD"),
+        default=0.0,
+    )
+    if not 0.0 <= patch_positive_area_fraction_threshold <= 1.0:
+        raise ValueError(
+            "ENSEMBLE_INFER_PATCH_POSITIVE_AREA_FRACTION_THRESHOLD must be between 0.0 and 1.0."
+        )
 
     return EnsembleInferenceConfig(
         recipe_path=_parse_required_path(
@@ -124,6 +137,7 @@ def load_ensemble_inference_config(
             values.get("ENSEMBLE_INFER_EXPORT_VISUALIZATIONS"),
             default=True,
         ),
+        patch_positive_area_fraction_threshold=patch_positive_area_fraction_threshold,
         runtime_normalization_method=parse_runtime_normalization_method(
             values.get(RUNTIME_NORMALIZATION_METHOD_ENV_VAR)
         ),

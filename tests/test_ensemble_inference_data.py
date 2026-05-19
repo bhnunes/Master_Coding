@@ -262,14 +262,14 @@ def test_test_dataset_reads_canonical_rows_in_manifest_order(
     )
 
     dataset = inference_data.TestDataset(layout)
-    first_image, first_mask, first_patient_id, first_filename = cast(
-        tuple[torch.Tensor, torch.Tensor, str, str], dataset[0]
+    first_image, first_mask, first_patient_id, first_filename, first_label = cast(
+        tuple[torch.Tensor, torch.Tensor, str, str, int], dataset[0]
     )
-    second_image, second_mask, second_patient_id, second_filename = cast(
-        tuple[torch.Tensor, torch.Tensor, str, str], dataset[1]
+    second_image, second_mask, second_patient_id, second_filename, second_label = cast(
+        tuple[torch.Tensor, torch.Tensor, str, str, int], dataset[1]
     )
-    third_image, third_mask, third_patient_id, third_filename = cast(
-        tuple[torch.Tensor, torch.Tensor, str, str], dataset[2]
+    third_image, third_mask, third_patient_id, third_filename, third_label = cast(
+        tuple[torch.Tensor, torch.Tensor, str, str, int], dataset[2]
     )
 
     assert int(first_image[0, 0, 0]) == FIRST_IMAGE_PIXEL
@@ -284,6 +284,9 @@ def test_test_dataset_reads_canonical_rows_in_manifest_order(
     assert first_filename == "p1_0.png"
     assert second_filename == "p1_1.png"
     assert third_filename == "p2_0.png"
+    assert first_label == 1
+    assert second_label == 0
+    assert third_label == 0
 
 
 def test_test_dataset_returns_none_triplet_when_transform_fails(
@@ -313,7 +316,7 @@ def test_test_dataset_returns_none_triplet_when_transform_fails(
 
     dataset = inference_data.TestDataset(layout)
 
-    assert dataset[0] == (None, None, None, None)
+    assert dataset[0] == (None, None, None, None, None)
 
 
 def test_test_dataset_state_reset_clears_open_handles(
@@ -345,19 +348,20 @@ def test_collate_test_batch_filters_invalid_items() -> None:
     mask = torch.zeros((4, 4), dtype=torch.uint8)
 
     batch = inference_data.collate_test_batch(
-        [(image, mask, "p1", "f1.png"), (None, None, None, None), None]
+        [(image, mask, "p1", "f1.png", 1), (None, None, None, None, None), None]
     )
 
     assert batch is not None
-    images, masks, patient_ids, filenames = batch
+    images, masks, patient_ids, filenames, labels = batch
     assert tuple(images.shape) == (1, 3, 4, 4)
     assert tuple(masks.shape) == (1, 4, 4)
     assert patient_ids == ["p1"]
     assert filenames == ["f1.png"]
+    assert labels.tolist() == [1]
 
 
 def test_collate_test_batch_returns_none_when_all_items_invalid() -> None:
-    assert inference_data.collate_test_batch([(None, None, None, None), None]) is None
+    assert inference_data.collate_test_batch([(None, None, None, None, None), None]) is None
 
 
 def test_create_test_dataloader_sets_worker_dependent_flags(

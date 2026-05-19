@@ -20,6 +20,8 @@ from helpers.training.stain_normalization import (
     resolve_stage4_split_bundle_id,
 )
 
+_BATCH_WITH_LABELS_LENGTH = 5
+
 
 @dataclass(frozen=True)
 class TestDatasetLayout:
@@ -132,7 +134,10 @@ class TestDataset(Dataset[Any]):
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, str, str | None] | tuple[None, None, None, None]:
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor, str, str | None, int]
+        | tuple[None, None, None, None, None]
+    ):
         try:
             image, mask, patient_id, filename = cast(
                 tuple[torch.Tensor, torch.Tensor, str, str],
@@ -144,10 +149,10 @@ class TestDataset(Dataset[Any]):
             self._opened_pid = self.base_dataset._opened_pid
             self._opened_shard_path = self.base_dataset._opened_shard_path
             self._atexit_registered = self.base_dataset._atexit_registered
-            return image, mask, patient_id, filename
+            return image, mask, patient_id, filename, int(self.records[idx].label)
         except Exception as error:
             print(f"Error on test index {idx}: {error}")
-            return None, None, None, None
+            return None, None, None, None, None
 
     def close(self) -> None:
         self.base_dataset.close()
@@ -189,7 +194,10 @@ def collate_test_batch(batch: list[Any]) -> Any:
     masks = default_collate([item[1] for item in filtered])
     patient_ids = [item[2] for item in filtered]
     filenames = [item[3] for item in filtered]
-    return images, masks, patient_ids, filenames
+    if len(filtered[0]) < _BATCH_WITH_LABELS_LENGTH:
+        return images, masks, patient_ids, filenames
+    labels = default_collate([int(item[4]) for item in filtered])
+    return images, masks, patient_ids, filenames, labels
 
 
 def create_test_dataloader(

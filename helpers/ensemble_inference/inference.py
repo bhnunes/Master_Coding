@@ -19,7 +19,10 @@ from tqdm import tqdm
 from helpers.ensemble_inference.metrics import (
     calculate_metrics,
     compute_auc_from_histograms,
+    confusion_counts_from_patch_labels,
     mask_to_binary_indices,
+    patch_labels_from_binary_masks,
+    summarize_patch_classification_metrics,
     summarize_patient_metrics,
 )
 from helpers.ensemble_postprocessing import (
@@ -37,7 +40,11 @@ from helpers.runtime_platform import load_headless_matplotlib_pyplot
 _FILENAME_SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 _NEGLIGIBLE_MODEL_WEIGHT = 1e-8
 _BATCH_WITHOUT_FILENAMES = 3
+_PATCH_METADATA_LABEL_INDEX = 1
+_AUC_BINS = 4096
 _PROGRESS_MIN_INTERVAL_SECONDS = 0.5
+_PATCH_GT_RULE_MANIFEST = "stage2_manifest_label_after_extraction_overlap_rule"
+_PATCH_GT_RULE_MASK_FALLBACK = "binary_mask_has_positive_pixel_fallback"
 
 
 def _progress_file() -> Any:
@@ -85,6 +92,7 @@ class EnsembleAnalysisConfig:
     train_std: list[float]
     gpu_normalizer: nn.Module
     seed: int
+    patch_positive_area_fraction_threshold: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -120,6 +128,20 @@ class VisualizationSample:
     pred_mask: np.ndarray[Any, Any]
     true_mask: np.ndarray[Any, Any]
     probability: np.ndarray[Any, Any]
+
+
+@dataclass
+class _MetricAccumulator:
+    stats_by_patient: dict[str, list[dict[str, int]]]
+    truth_counts_by_patient: dict[str, dict[str, int]]
+    patch_stats_by_patient: dict[str, list[dict[str, int]]]
+    patch_truth_counts_by_patient: dict[str, dict[str, int]]
+    positive_patch_counts: dict[str, int]
+    patch_ground_truth_sources: set[str]
+    auc_pos_hist: torch.Tensor
+    auc_neg_hist: torch.Tensor
+    processed_samples: int = 0
+    skipped_batches: int = 0
 
 
 def _sanitize_path_component(value: str) -> str:
@@ -237,6 +259,183 @@ def compute_two_stream_probabilities(
     return final_probs
 
 
+def _patch_truth_labels_from_batch(
+    metadata: list[Any],
+    true_masks: np.ndarray[Any, Any],
+) -> tuple[np.ndarray[Any, Any], str]:
+    if (
+        len(metadata) > _PATCH_METADATA_LABEL_INDEX
+        and metadata[_PATCH_METADATA_LABEL_INDEX] is not None
+    ):
+        labels = metadata[_PATCH_METADATA_LABEL_INDEX]
+        labels_np = labels.detach().cpu().numpy() if torch.is_tensor(labels) else np.asarray(labels)
+        truth_labels = labels_np.astype(bool).ravel()
+        source = _PATCH_GT_RULE_MANIFEST
+    else:
+        truth_labels = patch_labels_from_binary_masks(
+            true_masks,
+            positive_area_fraction_threshold=0.0,
+        )
+        source = _PATCH_GT_RULE_MASK_FALLBACK
+
+    if truth_labels.shape[0] != true_masks.shape[0]:
+        raise ValueError(
+            "Patch-level truth labels do not match the current batch size: "
+            f"{truth_labels.shape[0]} != {true_masks.shape[0]}."
+        )
+    return truth_labels, source
+
+
+def _build_metric_accumulator(config: EnsembleAnalysisConfig) -> _MetricAccumulator:
+    return _MetricAccumulator(
+        stats_by_patient=defaultdict(list),
+        truth_counts_by_patient=defaultdict(lambda: {"positive": 0, "negative": 0}),
+        patch_stats_by_patient=defaultdict(list),
+        patch_truth_counts_by_patient=defaultdict(lambda: {"positive": 0, "negative": 0}),
+        positive_patch_counts=defaultdict(int),
+        patch_ground_truth_sources=set(),
+        auc_pos_hist=torch.zeros(_AUC_BINS, dtype=torch.int64, device=config.device),
+        auc_neg_hist=torch.zeros(_AUC_BINS, dtype=torch.int64, device=config.device),
+    )
+
+
+def _record_auc_histograms(
+    accumulator: _MetricAccumulator,
+    final_probs: torch.Tensor,
+    true_masks: torch.Tensor,
+) -> None:
+    bin_idx = (final_probs * (_AUC_BINS - 1)).long().clamp_(0, _AUC_BINS - 1)
+    flat_bins = bin_idx.view(-1)
+    flat_true = true_masks.view(-1).bool()
+    accumulator.auc_pos_hist.add_(torch.bincount(flat_bins[flat_true], minlength=_AUC_BINS))
+    accumulator.auc_neg_hist.add_(torch.bincount(flat_bins[~flat_true], minlength=_AUC_BINS))
+
+
+def _record_pixel_level_counts(
+    accumulator: _MetricAccumulator,
+    *,
+    patient_ids: list[Any],
+    predictions: np.ndarray[Any, Any],
+    truth_masks: np.ndarray[Any, Any],
+) -> None:
+    for index, patient_id in enumerate(patient_ids):
+        patient_id_str = str(patient_id)
+        accumulator.stats_by_patient[patient_id_str].append(
+            confusion_counts_from_binary_masks(predictions[index], truth_masks[index])
+        )
+        truth_counts = truth_pixel_counts(truth_masks[index])
+        accumulator.truth_counts_by_patient[patient_id_str]["positive"] += truth_counts["positive"]
+        accumulator.truth_counts_by_patient[patient_id_str]["negative"] += truth_counts["negative"]
+        accumulator.positive_patch_counts[patient_id_str] += count_positive_prediction_patches(
+            predictions[index]
+        )
+
+
+def _record_patch_level_counts(
+    accumulator: _MetricAccumulator,
+    *,
+    patient_ids: list[Any],
+    predictions: np.ndarray[Any, Any],
+    truth_masks: np.ndarray[Any, Any],
+    metadata: list[Any],
+    positive_area_fraction_threshold: float,
+) -> None:
+    truth_patch_labels, truth_label_source = _patch_truth_labels_from_batch(metadata, truth_masks)
+    accumulator.patch_ground_truth_sources.add(truth_label_source)
+    pred_patch_labels = patch_labels_from_binary_masks(
+        predictions,
+        positive_area_fraction_threshold=positive_area_fraction_threshold,
+    )
+    for index, patient_id in enumerate(patient_ids):
+        patient_id_str = str(patient_id)
+        accumulator.patch_stats_by_patient[patient_id_str].append(
+            confusion_counts_from_patch_labels(
+                np.asarray([pred_patch_labels[index]]),
+                np.asarray([truth_patch_labels[index]]),
+            )
+        )
+        if truth_patch_labels[index]:
+            accumulator.patch_truth_counts_by_patient[patient_id_str]["positive"] += 1
+        else:
+            accumulator.patch_truth_counts_by_patient[patient_id_str]["negative"] += 1
+
+
+def _record_batch_metrics(
+    accumulator: _MetricAccumulator,
+    *,
+    models_list: list[nn.Module],
+    constituent_models_info: list[dict[str, Any]],
+    batch_data: Any,
+    config: EnsembleAnalysisConfig,
+) -> None:
+    images, masks, patient_ids, *metadata = batch_data
+    images = config.gpu_normalizer(images.to(config.device, non_blocking=True))
+    true_gpu = mask_to_binary_indices(masks.to(config.device, non_blocking=True))
+    final_probs = compute_two_stream_probabilities(
+        models_list,
+        constituent_models_info,
+        images,
+        roi_threshold=config.roi_threshold,
+        roi_scale=config.roi_scale,
+    )
+
+    _record_auc_histograms(accumulator, final_probs, true_gpu)
+    final_probs_np = final_probs.detach().cpu().numpy().astype(np.float32)
+    true_np = true_gpu.cpu().numpy().astype(np.uint8)
+    pred_np = threshold_and_filter_components(
+        final_probs_np,
+        decision_threshold=config.decision_threshold,
+        min_component_area_px=config.postprocessing_config.min_component_area_px,
+    )
+    _record_pixel_level_counts(
+        accumulator,
+        patient_ids=patient_ids,
+        predictions=pred_np,
+        truth_masks=true_np,
+    )
+    _record_patch_level_counts(
+        accumulator,
+        patient_ids=patient_ids,
+        predictions=pred_np,
+        truth_masks=true_np,
+        metadata=metadata,
+        positive_area_fraction_threshold=config.patch_positive_area_fraction_threshold,
+    )
+    accumulator.processed_samples += len(patient_ids)
+
+
+def _patch_level_payload(
+    *,
+    pre_patient_suppression_stats: dict[str, list[dict[str, int]]],
+    post_patient_suppression_stats: dict[str, list[dict[str, int]]],
+    positive_area_fraction_threshold: float,
+    ground_truth_sources: set[str],
+) -> dict[str, Any]:
+    comparator = ">" if positive_area_fraction_threshold <= 0.0 else ">="
+    return {
+        "method": "diagset_patch_recognition_from_segmentation_masks",
+        "primary_comparison": "pre_patient_suppression",
+        "prediction_rule": {
+            "mask_source": (
+                "component_filtered_binary_segmentation_mask_before_patient_suppression"
+            ),
+            "positive_area_fraction_threshold": float(positive_area_fraction_threshold),
+            "positive_comparator": comparator,
+        },
+        "ground_truth_rule": (
+            "; ".join(sorted(ground_truth_sources))
+            if ground_truth_sources
+            else _PATCH_GT_RULE_MASK_FALLBACK
+        ),
+        "pre_patient_suppression": summarize_patch_classification_metrics(
+            pre_patient_suppression_stats
+        ),
+        "post_patient_suppression": summarize_patch_classification_metrics(
+            post_patient_suppression_stats
+        ),
+    }
+
+
 @torch.inference_mode()
 def analyze_ensemble_metrics(
     models_list: list[nn.Module],
@@ -247,91 +446,64 @@ def analyze_ensemble_metrics(
     for model in models_list:
         model.eval()
 
-    stats_by_patient: dict[str, list[dict[str, int]]] = defaultdict(list)
-    truth_counts_by_patient: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"positive": 0, "negative": 0}
-    )
-    positive_patch_counts: dict[str, int] = defaultdict(int)
-    auc_bins = 4096
-    auc_pos_hist = torch.zeros(auc_bins, dtype=torch.int64, device=config.device)
-    auc_neg_hist = torch.zeros(auc_bins, dtype=torch.int64, device=config.device)
-
-    processed_samples = 0
-    skipped_batches = 0
+    accumulator = _build_metric_accumulator(config)
     progress = _progress_iterable(test_loader, desc="Inference TEST", unit="batch")
     try:
         for batch_data in progress:
             if batch_data is None:
-                skipped_batches += 1
-                progress.set_postfix(skipped=skipped_batches, refresh=False)
+                accumulator.skipped_batches += 1
+                progress.set_postfix(skipped=accumulator.skipped_batches, refresh=False)
                 continue
-            images, masks, patient_ids, *_metadata = batch_data
-            images = config.gpu_normalizer(images.to(config.device, non_blocking=True))
-            true_gpu = mask_to_binary_indices(masks.to(config.device, non_blocking=True))
-            final_probs = compute_two_stream_probabilities(
-                models_list,
-                constituent_models_info,
-                images,
-                roi_threshold=config.roi_threshold,
-                roi_scale=config.roi_scale,
+            _record_batch_metrics(
+                accumulator,
+                models_list=models_list,
+                constituent_models_info=constituent_models_info,
+                batch_data=batch_data,
+                config=config,
             )
-
-            bin_idx = (final_probs * (auc_bins - 1)).long().clamp_(0, auc_bins - 1)
-            flat_bins = bin_idx.view(-1)
-            flat_true = true_gpu.view(-1).bool()
-            auc_pos_hist.add_(torch.bincount(flat_bins[flat_true], minlength=auc_bins))
-            auc_neg_hist.add_(torch.bincount(flat_bins[~flat_true], minlength=auc_bins))
-
-            final_probs_np = final_probs.detach().cpu().numpy().astype(np.float32)
-            true_np = true_gpu.cpu().numpy().astype(np.uint8)
-            pred_np = threshold_and_filter_components(
-                final_probs_np,
-                decision_threshold=config.decision_threshold,
-                min_component_area_px=config.postprocessing_config.min_component_area_px,
-            )
-            for index, patient_id in enumerate(patient_ids):
-                patient_id_str = str(patient_id)
-                stats_by_patient[patient_id_str].append(
-                    confusion_counts_from_binary_masks(pred_np[index], true_np[index])
-                )
-                truth_counts = truth_pixel_counts(true_np[index])
-                truth_counts_by_patient[patient_id_str]["positive"] += truth_counts["positive"]
-                truth_counts_by_patient[patient_id_str]["negative"] += truth_counts["negative"]
-                positive_patch_counts[patient_id_str] += count_positive_prediction_patches(
-                    pred_np[index]
-                )
-            processed_samples += len(patient_ids)
             progress.set_postfix(
-                samples=processed_samples,
-                patients=len(stats_by_patient),
-                skipped=skipped_batches,
+                samples=accumulator.processed_samples,
+                patients=len(accumulator.stats_by_patient),
+                skipped=accumulator.skipped_batches,
                 refresh=False,
             )
     finally:
         progress.close()
 
+    suppressed_patients = build_suppressed_patient_set(
+        accumulator.positive_patch_counts,
+        min_patient_positive_patches=(config.postprocessing_config.min_patient_positive_patches),
+    )
     postprocessed_stats = apply_patient_positive_patch_suppression(
-        stats_by_patient,
-        truth_counts_by_patient,
-        positive_patch_counts,
+        accumulator.stats_by_patient,
+        accumulator.truth_counts_by_patient,
+        accumulator.positive_patch_counts,
+        min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
+    )
+    postprocessed_patch_stats = apply_patient_positive_patch_suppression(
+        accumulator.patch_stats_by_patient,
+        accumulator.patch_truth_counts_by_patient,
+        accumulator.positive_patch_counts,
         min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
     )
     summary = summarize_patient_metrics(postprocessed_stats, seed=config.seed)
-    summary["auc"] = compute_auc_from_histograms(auc_pos_hist, auc_neg_hist)
+    summary["diagset_patch_level_metrics"] = _patch_level_payload(
+        pre_patient_suppression_stats=accumulator.patch_stats_by_patient,
+        post_patient_suppression_stats=postprocessed_patch_stats,
+        positive_area_fraction_threshold=config.patch_positive_area_fraction_threshold,
+        ground_truth_sources=accumulator.patch_ground_truth_sources,
+    )
+    summary["auc"] = compute_auc_from_histograms(
+        accumulator.auc_pos_hist,
+        accumulator.auc_neg_hist,
+    )
     summary["auc_source"] = "raw_probabilities_before_hard_postprocessing"
     summary["normalization"] = {
         "mean": [float(x) for x in config.train_mean],
         "std": [float(x) for x in config.train_std],
     }
     summary["postprocessing"] = postprocessing_config_to_payload(config.postprocessing_config)
-    summary["postprocessing"]["suppressed_patient_count"] = len(
-        build_suppressed_patient_set(
-            positive_patch_counts,
-            min_patient_positive_patches=(
-                config.postprocessing_config.min_patient_positive_patches
-            ),
-        )
-    )
+    summary["postprocessing"]["suppressed_patient_count"] = len(suppressed_patients)
     summary["ensemble"] = {
         "method": "two_stream_spatial_gating",
         "roi_threshold": float(config.roi_threshold),
@@ -349,7 +521,7 @@ def _unpack_visualization_batch(batch_data: Any) -> VisualizationBatch | None:
         images, masks, patient_ids = batch_data
         filenames = [None] * images.shape[0]
     else:
-        images, masks, patient_ids, filenames = batch_data
+        images, masks, patient_ids, filenames, *_extra = batch_data
     return VisualizationBatch(
         images=images,
         masks=masks,

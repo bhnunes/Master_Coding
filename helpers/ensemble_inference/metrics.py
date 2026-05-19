@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -9,9 +9,12 @@ from sklearn.metrics import auc as sklearn_auc
 
 MASK_BATCH_NDIM = 4
 MASK_IMAGE_NDIM = 3
+BINARY_MASK_NDIM = 2
+BATCH_BINARY_MASK_NDIM = 3
 BINARY_CLASS_COUNT = 2
 BOOTSTRAP_MIN_PATIENTS = 20
 CONFIDENCE_INTERVAL_PERCENTILES = [2.5, 97.5]
+PATCH_LEVEL_METRIC_KEYS = ("accuracy", "avacc", "sensitivity", "specificity")
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,101 @@ def calculate_metrics(tp: float, fp: float, fn: float, tn: float) -> dict[str, f
         "precision": tp / denom_prec if denom_prec > 0 else np.nan,
         "fpr": fp / denom_tnr if denom_tnr > 0 else np.nan,
         "fnr": fn / denom_tpr if denom_tpr > 0 else np.nan,
+    }
+
+
+def calculate_patch_classification_metrics(
+    tp: float,
+    fp: float,
+    fn: float,
+    tn: float,
+) -> dict[str, float]:
+    metrics = calculate_metrics(tp, fp, fn, tn)
+    sensitivity = metrics["tpr"]
+    specificity = metrics["tnr"]
+    avacc = (
+        (sensitivity + specificity) / 2.0
+        if not (np.isnan(sensitivity) or np.isnan(specificity))
+        else np.nan
+    )
+    return {
+        "accuracy": metrics["accuracy"],
+        "avacc": avacc,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+    }
+
+
+def patch_labels_from_binary_masks(
+    masks: np.ndarray[Any, Any],
+    *,
+    positive_area_fraction_threshold: float,
+) -> np.ndarray[Any, np.dtype[np.bool_]]:
+    if not 0.0 <= positive_area_fraction_threshold <= 1.0:
+        raise ValueError("positive_area_fraction_threshold must be between 0.0 and 1.0.")
+
+    mask_array = np.asarray(masks).astype(bool)
+    if mask_array.ndim == BINARY_MASK_NDIM:
+        mask_array = mask_array[np.newaxis, :, :]
+    if mask_array.ndim != BATCH_BINARY_MASK_NDIM:
+        raise ValueError(f"Expected 2D or 3D binary masks, got shape {mask_array.shape}.")
+
+    positive_pixels = np.count_nonzero(mask_array, axis=(1, 2))
+    if positive_area_fraction_threshold <= 0.0:
+        return cast(np.ndarray[Any, np.dtype[np.bool_]], positive_pixels > 0)
+
+    patch_area = mask_array.shape[1] * mask_array.shape[2]
+    positive_fraction = positive_pixels / float(patch_area)
+    return cast(
+        np.ndarray[Any, np.dtype[np.bool_]],
+        positive_fraction >= positive_area_fraction_threshold,
+    )
+
+
+def confusion_counts_from_patch_labels(
+    prediction_labels: np.ndarray[Any, Any],
+    truth_labels: np.ndarray[Any, Any],
+) -> dict[str, int]:
+    pred_bool = np.asarray(prediction_labels).astype(bool).ravel()
+    truth_bool = np.asarray(truth_labels).astype(bool).ravel()
+    if pred_bool.shape != truth_bool.shape:
+        raise ValueError(
+            "Prediction and truth patch labels must have the same shape: "
+            f"{pred_bool.shape} != {truth_bool.shape}."
+        )
+    return {
+        "tp": int(np.sum(pred_bool & truth_bool)),
+        "fp": int(np.sum(pred_bool & ~truth_bool)),
+        "fn": int(np.sum(~pred_bool & truth_bool)),
+        "tn": int(np.sum(~pred_bool & ~truth_bool)),
+    }
+
+
+def summarize_patch_classification_metrics(
+    stats_by_patient: dict[str, list[dict[str, int]]],
+) -> dict[str, Any]:
+    all_patch_stats = [
+        stat for patient_stats in stats_by_patient.values() for stat in patient_stats
+    ]
+    tp = int(sum(item["tp"] for item in all_patch_stats))
+    fp = int(sum(item["fp"] for item in all_patch_stats))
+    fn = int(sum(item["fn"] for item in all_patch_stats))
+    tn = int(sum(item["tn"] for item in all_patch_stats))
+    positive_patches = tp + fn
+    negative_patches = tn + fp
+    return {
+        "point_estimate": calculate_patch_classification_metrics(tp, fp, fn, tn),
+        "confusion_matrix": {
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "tn": tn,
+        },
+        "support": {
+            "total_patches": tp + fp + fn + tn,
+            "positive_patches": positive_patches,
+            "negative_patches": negative_patches,
+        },
     }
 
 

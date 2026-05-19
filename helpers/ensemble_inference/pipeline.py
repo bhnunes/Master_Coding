@@ -341,6 +341,7 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
             train_std=IMAGENET_STD,
             gpu_normalizer=gpu_normalizer,
             seed=config.seed,
+            patch_positive_area_fraction_threshold=(config.patch_positive_area_fraction_threshold),
         ),
     )
 

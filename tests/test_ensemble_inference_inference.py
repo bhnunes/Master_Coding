@@ -16,6 +16,7 @@ from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_M
 
 ANALYSIS_SEED = 17
 EXPECTED_AUC = 0.75
+EXPECTED_PATCH_CLASSIFICATION_SCORE = 0.5
 SECOND_SAMPLE_ID = 2
 THIRD_SAMPLE_ID = 3
 VISUALIZATION_SAMPLE_COUNT = 2
@@ -294,6 +295,7 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
                 ),
                 ["patient-a", "patient-b"],
                 ["a.png", "b.png"],
+                torch.tensor([1, 0], dtype=torch.int64),
             ),
         ],
     )
@@ -314,6 +316,29 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
     assert summary["auc_source"] == "raw_probabilities_before_hard_postprocessing"
     assert summary["postprocessing"]["min_component_area_px"] == 0
     assert summary["postprocessing"]["min_patient_positive_patches"] == 1
+    patch_metrics = summary["diagset_patch_level_metrics"]
+    assert (
+        patch_metrics["ground_truth_rule"] == "stage2_manifest_label_after_extraction_overlap_rule"
+    )
+    assert patch_metrics["prediction_rule"] == {
+        "mask_source": "component_filtered_binary_segmentation_mask_before_patient_suppression",
+        "positive_area_fraction_threshold": 0.0,
+        "positive_comparator": ">",
+    }
+    assert patch_metrics["pre_patient_suppression"]["confusion_matrix"] == {
+        "tp": 1,
+        "fp": 1,
+        "fn": 0,
+        "tn": 0,
+    }
+    assert (
+        patch_metrics["pre_patient_suppression"]["point_estimate"]["accuracy"]
+        == EXPECTED_PATCH_CLASSIFICATION_SCORE
+    )
+    assert (
+        patch_metrics["pre_patient_suppression"]["point_estimate"]["avacc"]
+        == EXPECTED_PATCH_CLASSIFICATION_SCORE
+    )
     assert summary["normalization"] == {"mean": [0.1, 0.2, 0.3], "std": [0.4, 0.5, 0.6]}
     assert summary["ensemble"] == {
         "method": "two_stream_spatial_gating",

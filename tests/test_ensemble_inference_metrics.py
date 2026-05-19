@@ -9,8 +9,12 @@ import torch
 
 from helpers.ensemble_inference.metrics import (
     calculate_metrics,
+    calculate_patch_classification_metrics,
     compute_auc_from_histograms,
+    confusion_counts_from_patch_labels,
     mask_to_binary_indices,
+    patch_labels_from_binary_masks,
+    summarize_patch_classification_metrics,
     summarize_patient_metrics,
 )
 
@@ -82,6 +86,76 @@ def test_calculate_metrics_returns_nan_when_rate_denominators_are_zero() -> None
     assert math.isnan(metrics["precision"])
     assert math.isnan(metrics["fpr"])
     assert math.isnan(metrics["fnr"])
+
+
+def test_patch_labels_from_binary_masks_uses_area_fraction_threshold() -> None:
+    masks = np.asarray(
+        [
+            [[1, 0], [0, 0]],
+            [[1, 1], [0, 0]],
+            [[0, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+
+    labels = patch_labels_from_binary_masks(
+        masks,
+        positive_area_fraction_threshold=0.5,
+    )
+
+    assert labels.tolist() == [False, True, False]
+
+
+def test_patch_labels_from_binary_masks_treats_zero_threshold_as_any_positive_pixel() -> None:
+    masks = np.asarray(
+        [
+            [[1, 0], [0, 0]],
+            [[0, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+
+    labels = patch_labels_from_binary_masks(
+        masks,
+        positive_area_fraction_threshold=0.0,
+    )
+
+    assert labels.tolist() == [True, False]
+
+
+def test_confusion_counts_from_patch_labels_counts_binary_patch_predictions() -> None:
+    counts = confusion_counts_from_patch_labels(
+        np.asarray([True, True, False, False]),
+        np.asarray([True, False, True, False]),
+    )
+
+    assert counts == {"tp": 1, "fp": 1, "fn": 1, "tn": 1}
+
+
+def test_patch_classification_metrics_reports_avacc() -> None:
+    metrics = calculate_patch_classification_metrics(tp=3, fp=1, fn=1, tn=5)
+
+    assert metrics["accuracy"] == pytest.approx(0.8)
+    assert metrics["sensitivity"] == pytest.approx(3 / 4)
+    assert metrics["specificity"] == pytest.approx(5 / 6)
+    assert metrics["avacc"] == pytest.approx(((3 / 4) + (5 / 6)) / 2)
+
+
+def test_summarize_patch_classification_metrics_reports_support_and_confusion() -> None:
+    summary = summarize_patch_classification_metrics(
+        {
+            "p1": [{"tp": 1, "fp": 0, "fn": 1, "tn": 0}],
+            "p2": [{"tp": 0, "fp": 1, "fn": 0, "tn": 2}],
+        }
+    )
+
+    assert summary["confusion_matrix"] == {"tp": 1, "fp": 1, "fn": 1, "tn": 2}
+    assert summary["support"] == {
+        "total_patches": 5,
+        "positive_patches": 2,
+        "negative_patches": 3,
+    }
+    assert summary["point_estimate"]["avacc"] == pytest.approx(((1 / 2) + (2 / 3)) / 2)
 
 
 def test_compute_auc_from_histograms_returns_nan_without_both_classes() -> None:

@@ -15,6 +15,13 @@ from dotenv import dotenv_values, find_dotenv
 from helpers.runtime_platform import load_headless_matplotlib_pyplot
 
 _METRIC_ORDER = ("dice", "iou", "tpr", "tnr", "precision", "accuracy", "fpr", "fnr")
+_PATCH_LEVEL_METRIC_ORDER = ("accuracy", "avacc", "sensitivity", "specificity")
+_PATCH_LEVEL_METRIC_LABELS = {
+    "accuracy": "Accuracy",
+    "avacc": "AvAcc",
+    "sensitivity": "Sensitivity",
+    "specificity": "Specificity",
+}
 _SENSITIVE_ENV_TERMS = ("PASSWORD", "TOKEN", "SECRET", "PRIVATE", "CREDENTIAL")
 _EXCLUDED_REPORT_ENV_VARS = {"TRAINING_ARCHITECTURE", "TRAINING_ENCODER"}
 _PATHLIKE_SUFFIXES = (
@@ -53,6 +60,16 @@ class ReportMetricsSection:
 
 
 @dataclass(frozen=True)
+class ReportPatchLevelSection:
+    title: str
+    rows: tuple[ReportMetricRow, ...]
+    confusion_rows: tuple[tuple[str, int, int], ...]
+    total_patches: int
+    positive_patches: int
+    negative_patches: int
+
+
+@dataclass(frozen=True)
 class ReportCompositionRow:
     index: int
     architecture: str
@@ -76,6 +93,9 @@ class EnsembleReportContent:
     normalization_std: str
     composition_rows: tuple[ReportCompositionRow, ...]
     metric_sections: tuple[ReportMetricsSection, ...]
+    patch_prediction_rule: str
+    patch_ground_truth_rule: str
+    patch_level_sections: tuple[ReportPatchLevelSection, ...]
     rule6_dice: str
     rule6_dice_ci: str
     rule6_neg_clean_rate: str
@@ -376,6 +396,70 @@ def _build_metrics_rows(
     )
 
 
+def _build_patch_metric_rows(metrics_block: dict[str, Any]) -> tuple[ReportMetricRow, ...]:
+    point_estimate = metrics_block.get("point_estimate", {})
+    return tuple(
+        ReportMetricRow(
+            name=_PATCH_LEVEL_METRIC_LABELS[metric],
+            point_estimate=_fmt_float(point_estimate.get(metric)),
+            confidence_interval="NA",
+        )
+        for metric in _PATCH_LEVEL_METRIC_ORDER
+    )
+
+
+def _build_patch_confusion_rows(
+    metrics_block: dict[str, Any],
+) -> tuple[tuple[str, int, int], ...]:
+    confusion = metrics_block.get("confusion_matrix", {})
+    return (
+        ("True NoCancer", int(confusion.get("tn", 0)), int(confusion.get("fp", 0))),
+        ("True Cancer", int(confusion.get("fn", 0)), int(confusion.get("tp", 0))),
+    )
+
+
+def _build_patch_level_section(
+    title: str, metrics_block: dict[str, Any]
+) -> ReportPatchLevelSection:
+    support = metrics_block.get("support", {})
+    return ReportPatchLevelSection(
+        title=title,
+        rows=_build_patch_metric_rows(metrics_block),
+        confusion_rows=_build_patch_confusion_rows(metrics_block),
+        total_patches=int(support.get("total_patches", 0)),
+        positive_patches=int(support.get("positive_patches", 0)),
+        negative_patches=int(support.get("negative_patches", 0)),
+    )
+
+
+def _format_patch_prediction_rule(rule: dict[str, Any]) -> str:
+    comparator = str(rule.get("positive_comparator", ">"))
+    threshold = _fmt_float(rule.get("positive_area_fraction_threshold"))
+    mask_source = str(rule.get("mask_source", "component_filtered_binary_segmentation_mask"))
+    return (
+        "predicted cancer if predicted positive area fraction "
+        f"{comparator} {threshold}; source={mask_source}"
+    )
+
+
+def _build_patch_level_sections(
+    ensemble_metrics: dict[str, Any],
+) -> tuple[ReportPatchLevelSection, ...]:
+    patch_metrics = ensemble_metrics.get("diagset_patch_level_metrics", {})
+    if not isinstance(patch_metrics, dict) or not patch_metrics:
+        return tuple()
+    return (
+        _build_patch_level_section(
+            "Before Patient-Level Suppression (Primary DIAGSET Comparison)",
+            patch_metrics.get("pre_patient_suppression", {}),
+        ),
+        _build_patch_level_section(
+            "After Frozen Patient-Level Suppression",
+            patch_metrics.get("post_patient_suppression", {}),
+        ),
+    )
+
+
 def _build_report_content(
     *,
     ensemble_recipe: dict[str, Any],
@@ -394,6 +478,8 @@ def _build_report_content(
     comp_models = ensemble_recipe.get("model_registry", [])
     confusion = ensemble_metrics.get("confusion_matrix", {})
     postprocessing = ensemble_recipe.get("postprocessing_config", {})
+    patch_metrics = ensemble_metrics.get("diagset_patch_level_metrics", {})
+    patch_rule = patch_metrics.get("prediction_rule", {}) if isinstance(patch_metrics, dict) else {}
 
     return EnsembleReportContent(
         timestamp=timestamp,
@@ -429,6 +515,15 @@ def _build_report_content(
                 rows=_build_metrics_rows(macro, ran_bootstrap=ran_bootstrap),
             ),
         ),
+        patch_prediction_rule=(
+            _format_patch_prediction_rule(patch_rule) if isinstance(patch_rule, dict) else "NA"
+        ),
+        patch_ground_truth_rule=(
+            str(patch_metrics.get("ground_truth_rule", "NA"))
+            if isinstance(patch_metrics, dict)
+            else "NA"
+        ),
+        patch_level_sections=_build_patch_level_sections(ensemble_metrics),
         rule6_dice=_fmt_float(dice_pos.get("point_estimate")),
         rule6_dice_ci=_fmt_ci(dice_pos.get("ci"), ran_bootstrap),
         rule6_neg_clean_rate=_fmt_float(neg_clean.get("point_estimate")),
@@ -440,6 +535,92 @@ def _build_report_content(
             ("True Cancer", int(confusion.get("fn", 0)), int(confusion.get("tp", 0))),
         ),
     )
+
+
+def _append_patch_level_latex(lines: list[str], report_content: EnsembleReportContent) -> None:
+    if not report_content.patch_level_sections:
+        return
+    lines.extend(
+        [
+            r"\section*{DIAGSET Patch-Level Recognition}",
+            rf"Prediction rule: {_tex_escape(report_content.patch_prediction_rule)}\\",
+            rf"Ground truth rule: {_tex_escape(report_content.patch_ground_truth_rule)}",
+        ]
+    )
+    for section in report_content.patch_level_sections:
+        lines.extend(
+            [
+                rf"\subsection*{{{_tex_escape(section.title)}}}",
+                (
+                    rf"Support: total patches {section.total_patches}; "
+                    rf"positive {section.positive_patches}; "
+                    rf"negative {section.negative_patches}."
+                ),
+                r"\begin{table}[H]",
+                r"\centering",
+                r"\begin{tabular}{l r}",
+                r"\toprule",
+                r"Metric & Point Estimate \\",
+                r"\midrule",
+            ]
+        )
+        for metric_row in section.rows:
+            lines.append(rf"{_tex_escape(metric_row.name)} & {metric_row.point_estimate} \\")
+        lines.extend(
+            [
+                r"\bottomrule",
+                r"\end{tabular}",
+                r"\end{table}",
+                r"\begin{table}[H]",
+                r"\centering",
+                r"\begin{tabular}{l r r}",
+                r"\toprule",
+                r"True Label & Pred NoCancer & Pred Cancer \\",
+                r"\midrule",
+            ]
+        )
+        for true_label, pred_no_cancer, pred_cancer in section.confusion_rows:
+            lines.append(rf"{_tex_escape(true_label)} & {pred_no_cancer} & {pred_cancer} \\")
+        lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
+
+
+def _append_patch_level_markdown(lines: list[str], report_content: EnsembleReportContent) -> None:
+    if not report_content.patch_level_sections:
+        return
+    lines.extend(
+        [
+            "",
+            "## DIAGSET Patch-Level Recognition",
+            f"Prediction rule: {report_content.patch_prediction_rule}",
+            f"Ground truth rule: {report_content.patch_ground_truth_rule}",
+        ]
+    )
+    for section in report_content.patch_level_sections:
+        lines.extend(
+            [
+                "",
+                f"### {section.title}",
+                (
+                    f"Support: total patches {section.total_patches}; "
+                    f"positive {section.positive_patches}; "
+                    f"negative {section.negative_patches}."
+                ),
+                "",
+                "| Metric | Point Estimate |",
+                "| --- | --- |",
+            ]
+        )
+        for metric_row in section.rows:
+            lines.append(f"| {metric_row.name} | {metric_row.point_estimate} |")
+        lines.extend(
+            [
+                "",
+                "| True Label | Pred NoCancer | Pred Cancer |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for true_label, pred_no_cancer, pred_cancer in section.confusion_rows:
+            lines.append(f"| {true_label} | {pred_no_cancer} | {pred_cancer} |")
 
 
 def write_ensemble_report_latex(
@@ -522,6 +703,8 @@ def write_ensemble_report_latex(
                 rf"& {metric_row.confidence_interval} \\"
             )
         lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
+
+    _append_patch_level_latex(lines, report_content)
 
     lines.extend(
         [
@@ -630,6 +813,8 @@ def write_ensemble_report_markdown(
                 f"| {metric_row.name} | {metric_row.point_estimate} | "
                 f"{metric_row.confidence_interval} |"
             )
+
+    _append_patch_level_markdown(lines, report_content)
 
     lines.extend(
         [

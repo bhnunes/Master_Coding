@@ -58,6 +58,46 @@ def _sample_metrics() -> dict[str, object]:
             "n_pos_patients": 10,
             "n_neg_patients": 14,
         },
+        "diagset_patch_level_metrics": {
+            "method": "diagset_patch_recognition_from_segmentation_masks",
+            "primary_comparison": "pre_patient_suppression",
+            "prediction_rule": {
+                "mask_source": (
+                    "component_filtered_binary_segmentation_mask_before_patient_suppression"
+                ),
+                "positive_area_fraction_threshold": 0.0,
+                "positive_comparator": ">",
+            },
+            "ground_truth_rule": "stage2_manifest_label_after_extraction_overlap_rule",
+            "pre_patient_suppression": {
+                "point_estimate": {
+                    "accuracy": 0.9458,
+                    "avacc": 0.9470,
+                    "sensitivity": 0.93,
+                    "specificity": 0.964,
+                },
+                "confusion_matrix": {"tp": 93, "fp": 4, "fn": 7, "tn": 96},
+                "support": {
+                    "total_patches": 200,
+                    "positive_patches": 100,
+                    "negative_patches": 100,
+                },
+            },
+            "post_patient_suppression": {
+                "point_estimate": {
+                    "accuracy": 0.94,
+                    "avacc": 0.94,
+                    "sensitivity": 0.92,
+                    "specificity": 0.96,
+                },
+                "confusion_matrix": {"tp": 92, "fp": 4, "fn": 8, "tn": 96},
+                "support": {
+                    "total_patches": 200,
+                    "positive_patches": 100,
+                    "negative_patches": 100,
+                },
+            },
+        },
     }
 
 
@@ -118,6 +158,8 @@ def test_write_ensemble_report_latex_builds_tex_and_pdf(tmp_path: Path) -> None:
     assert "Ensemble Final Evaluation Report" in tex_path.read_text(encoding="utf-8")
     assert "Decision Threshold" in tex_path.read_text(encoding="utf-8")
     assert "Minimum Component Area" in tex_path.read_text(encoding="utf-8")
+    assert "DIAGSET Patch-Level Recognition" in tex_path.read_text(encoding="utf-8")
+    assert "AvAcc" in tex_path.read_text(encoding="utf-8")
 
 
 def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
@@ -148,6 +190,9 @@ def test_write_ensemble_report_markdown_writes_report_and_sanitized_env(
     assert markdown_path.exists()
     assert "# Ensemble Final Evaluation Report" in contents
     assert "## Final Metrics (Micro / Pixel-Level)" in contents
+    assert "## DIAGSET Patch-Level Recognition" in contents
+    assert "| AvAcc | 0.9470 |" in contents
+    assert "Before Patient-Level Suppression" in contents
     assert "Minimum Component Area" in contents
     assert "## Environment Variables Used For This Project" in contents
     assert "| ARTIFACT_DEVICE | cuda |" in contents
