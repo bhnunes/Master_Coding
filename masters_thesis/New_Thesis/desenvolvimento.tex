@@ -1405,16 +1405,38 @@ $FP_j$ indica o número de falsos positivos no paciente $j$. Essa métrica resum
 em nível de paciente, a frequência com que a receita final não produz qualquer
 predição positiva em casos sem câncer.
 
-Quando o conjunto de teste contém pelo menos 20 pacientes, intervalos de
+Quando o conjunto de teste contém pelo menos 20 pacientes, os intervalos de
 confiança de 95\% são estimados por \textit{bootstrap} não paramétrico com
 10.000 reamostragens em nível de paciente. O \textit{bootstrap} estima a
 variabilidade empírica de uma estatística por reamostragem com reposição das
 unidades observadas, sendo uma técnica clássica para quantificar incerteza sem
 assumir uma forma paramétrica específica para a distribuição da métrica
 \cite{efron1979bootstrap}. Nesta dissertação, a reamostragem é feita no nível do
-paciente para respeitar a unidade de independência experimental. Esses
-intervalos descrevem a variabilidade observada no conjunto avaliado, mas não
-substituem validação externa em bases independentes.
+paciente para respeitar a unidade de independência experimental.
+
+Esse procedimento é aplicado tanto às métricas macro quanto às métricas micro.
+No caso das métricas macro, cada reamostragem agrega novamente os valores
+calculados por paciente. No caso das métricas micro, os pacientes também são
+reamostrados como unidades independentes, mas as contagens de pixels são
+recalculadas de forma agregada dentro de cada amostra reamostrada. Assim, mesmo
+métricas calculadas em nível de pixel preservam a estrutura de dependência do
+experimento, evitando tratar pixels de um mesmo paciente como observações
+independentes.
+
+A AUROC em nível de pixel, por outro lado, é reportada apenas como estimativa
+pontual. A implementação atual armazena as informações necessárias ao cálculo da
+AUROC como histogramas globais de probabilidades e rótulos, sem preservar a
+associação de cada contribuição ao respectivo paciente. Por essa razão, não é
+possível aplicar diretamente o mesmo \textit{bootstrap} em nível de paciente para
+essa métrica. Um \textit{bootstrap} que reamostrasse pixels como unidades independentes violaria a estrutura hierárquica dos dados e tenderia a subestimar a incerteza. Uma estimativa cientificamente consistente de
+incerteza para AUROC exigiria preservar histogramas por paciente, ou as
+distribuições brutas de escores e rótulos por paciente, antes da reamostragem, o que por razões limitantes computacionais não é implementado.
+
+Portanto, os intervalos de confiança reportados descrevem a variabilidade
+observada no conjunto avaliado para métricas micro e macro compatíveis com
+reamostragem por paciente. Eles não substituem validação externa em bases
+independentes, nem devem ser extrapolados para métricas cujos insumos não
+preservam a unidade experimental necessária ao \textit{bootstrap}.
 
 Ao final da execução, a Fase 10 exporta métricas em JSON e CSV, relatórios em
 Markdown e LaTeX, matriz de confusão normalizada por linha e visualizações de
