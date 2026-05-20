@@ -104,16 +104,9 @@ lâminas podem apresentar dimensões de gigapixel, formatos distintos,
 anotações heterogêneas e artefatos visuais capazes de afetar diretamente a
 qualidade dos \textit{patches} extraídos.
 
-As fontes de dados consideradas no projeto abrangem diferentes domínios
-histopatológicos, incluindo CAMELYON16, CATCH, DiagSet e HiESD
-\cite{bejnordi2017diagnostic,wilm2022catch,koziarski2024diagset,wang2025hiesd}.
-Essas bases são utilizadas como fontes públicas de proveniência e como exemplos
-de heterogeneidade em patologia digital. Sua presença em uma execução específica,
-entretanto, não é inferida apenas pela citação ou pela existência de suporte no
-código: ela deve ser determinada pelos manifestos, configurações e artefatos
-produzidos naquela análise. Assim, o fluxo define uma formulação comum de câncer
-versus não câncer, mas a composição efetiva dos conjuntos experimentais permanece
-vinculada aos registros de execução.
+A fonte de dados utilizada nesta dissertação é o DIAGSET, uma base pública de imagens histopatológicas voltada à detecção de câncer de próstata \cite{koziarski2024diagset}. A escolha dessa base permitiu avaliar o fluxo proposto em um domínio histopatológico específico, com formulação binária de câncer versus não câncer e com dados compatíveis com as etapas de ingestão, curadoria, particionamento por paciente, treinamento e inferência final.
+
+Embora o método tenha sido concebido de forma modular, sua validação experimental nesta dissertação permanece restrita ao DIAGSET. Assim, todos os resultados, métricas e interpretações quantitativas apresentados ao longo do trabalho devem ser entendidos dentro desse escopo. A existência de suporte computacional para outras bases ou domínios (por exemplo, na etapa de extração de patches) não implica validação empírica fora do conjunto efetivamente processado. Desse modo, a composição dos conjuntos de treino, validação e teste, bem como as conclusões experimentais, estão vinculadas exclusivamente aos manifestos, configurações e artefatos produzidos para o DIAGSET.
 
 A Fase 1 realiza o controle inicial de qualidade por detecção de artefatos. Para
 evitar a extração permanente de todo o acervo para disco, cada lâmina suportada é
@@ -146,24 +139,48 @@ fluxos de processamento de WSIs baseados em tecido, extração de \textit{patche
 e controle de escala gigapixel
 \cite{munozaguirre2020pyhist,khened2021generalized,bandi2019resolution}.
 
-A ingestão também padroniza anotações heterogêneas em um contrato binário comum.
-O fluxo aceita combinações de lâminas e anotações em formatos como
-\texttt{.svs/.xml}, \texttt{.ndpi/.ndpa}, \texttt{.tif/.json} e
-\texttt{.svs/.json}. Em bases específicas, como HiESD ou conjuntos identificados
-por políticas próprias de anotação, regras internas definem como cores, classes
-e estruturas XML são interpretadas. Essa conversão é metodologicamente crítica:
-categorias originais de cada base são mapeadas para rótulos \texttt{cancer} e
-\texttt{not\_cancer}. As citações das bases sustentam a proveniência dos dados,
-mas a regra exata de mapeamento é uma decisão do fluxo desta dissertação.
+A ingestão foi projetada para converter diferentes combinações de lâminas e
+anotações em uma representação binária comum. O fluxo oferece suporte a pares de
+arquivos como \texttt{.svs/.xml}, \texttt{.ndpi/.ndpa}, \texttt{.tif/.json} e
+\texttt{.svs/.json}, o que permite adaptar o método a bases com formatos,
+estruturas de anotação e convenções de classe distintas. Para cada combinação,
+regras internas definem como cores, rótulos, polígonos e estruturas XML devem
+ser interpretados antes da geração dos \textit{patches}. Essa etapa é
+metodologicamente crítica, pois as categorias originais de cada base precisam
+ser convertidas de forma explícita para os rótulos \texttt{cancer} e
+\texttt{not\_cancer}.
 
-Um \textit{patch} é aceito apenas quando satisfaz três condições. Primeiro, a
-janela deve possuir associação semântica não ambígua com uma classe. Segundo,
-deve conter conteúdo tecidual suficiente, estimado por limiarização em HSV,
-método de Otsu e operações morfológicas, conforme discutido na
-\Secao{sec:preprocessamento_patologia}. Terceiro, sua identidade deve obedecer a
-um contrato determinístico de nome, rótulo, coordenada e proveniência. A
-\Figura{fig:patch-mask} ilustra o produto elementar dessa etapa: um
-\textit{patch} histológico e sua máscara binária correspondente.
+No caso dos pares \texttt{.ndpi/.ndpa} utilizados pelo DIAGSET, a regra de
+classe é definida pelo título da anotação, e não por sua cor. Anotações com
+título exatamente igual a \texttt{R1}, \texttt{R2}, \texttt{R3}, \texttt{R4} ou
+\texttt{R5} são interpretadas como câncer, pois correspondem aos graus 1 a 5 de
+Gleason nas regiões demarcadas pelos patologistas. Anotações com título
+exatamente igual a \texttt{BG}, \texttt{T}, \texttt{N} ou \texttt{A} são
+interpretadas como não câncer, representando, respectivamente, fundo da lâmina,
+fundo tecidual, tecido normal ou saudável e artefato de aquisição \cite{koziarski2024diagset}. Títulos ausentes, diferentes desses valores ou polígonos malformados são ignorados.
+
+Após a interpretação das anotações, a atribuição do rótulo ao \textit{patch}
+depende de sua sobreposição com as regiões anotadas. A janela é mantida como
+\texttt{CANCER} quando a área sobreposta a regiões positivas atinge o limiar
+mínimo definido e não há sobreposição com regiões não cancerosas. A
+classe \texttt{NOT\_CANCER} é atribuída na condição inversa. Janelas com
+sobreposição insuficiente ou conflitante são descartadas. Esse
+critério é complementado por uma regra de integridade aplicada aos polígonos:
+regiões não cancerosas sobrepostas a áreas positivas são removidas, impedindo
+que a mesma área contribua para os dois rótulos.
+
+Além da consistência semântica, um \textit{patch} é aceito apenas quando contém
+tecido suficiente, estimado por método de Otsu e operações
+morfológicas, conforme discutido na \Secao{sec:preprocessamento_patologia}.
+Também deve obedecer a um contrato determinístico de nome, rótulo, coordenada e
+proveniência. A \Figura{fig:patch-mask} ilustra o produto elementar dessa etapa:
+um \textit{patch} histológico e sua máscara binária correspondente.
+
+Embora a execução experimental desta dissertação utilize o par
+\texttt{.ndpi/.ndpa}, a arquitetura de ingestão permanece extensível. Novos
+formatos e políticas de anotação podem ser incorporados por meio de regras
+específicas de interpretação, sem alterar a formulação binária adotada nas etapas
+posteriores.
 
 \begin{figure}[!htb]
     \centering
