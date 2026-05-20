@@ -22,6 +22,7 @@ DEFAULT_DECISION_THRESHOLD_MIN = 0.50
 DEFAULT_DECISION_THRESHOLD_MAX = 0.95
 DEFAULT_DECISION_THRESHOLD_STEP = 0.01
 DEFAULT_POS_DICE_DROP_TOLERANCE = 0.02
+DEFAULT_POS_TPR_DROP_TOLERANCE = 0.02
 DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES = (0, 16, 32, 64, 128, 256)
 DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES = (1, 2, 3, 5, 10)
 
@@ -116,6 +117,17 @@ def _validate_disjoint_architecture_groups(
         )
 
 
+def _validate_rule6_drop_tolerances(
+    *,
+    pos_dice_drop_tolerance: float,
+    pos_tpr_drop_tolerance: float,
+) -> None:
+    if pos_dice_drop_tolerance < 0.0:
+        raise ValueError("pos_dice_drop_tolerance must be greater than or equal to 0.")
+    if pos_tpr_drop_tolerance < 0.0:
+        raise ValueError("pos_tpr_drop_tolerance must be greater than or equal to 0.")
+
+
 @dataclass(frozen=True)
 class EnsembleOptimizerConfig:
     master_manifest_path: Path
@@ -151,6 +163,7 @@ class EnsembleOptimizerConfig:
     decision_threshold_max: float = DEFAULT_DECISION_THRESHOLD_MAX
     decision_threshold_step: float = DEFAULT_DECISION_THRESHOLD_STEP
     pos_dice_drop_tolerance: float = DEFAULT_POS_DICE_DROP_TOLERANCE
+    pos_tpr_drop_tolerance: float = DEFAULT_POS_TPR_DROP_TOLERANCE
     min_component_area_px_candidates: tuple[int, ...] = DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES
     min_patient_positive_patches_candidates: tuple[int, ...] = (
         DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES
@@ -173,8 +186,10 @@ class EnsembleOptimizerConfig:
             raise ValueError("decision_threshold_min cannot exceed decision_threshold_max.")
         if self.decision_threshold_step <= 0.0:
             raise ValueError("decision_threshold_step must be greater than 0.")
-        if self.pos_dice_drop_tolerance < 0.0:
-            raise ValueError("pos_dice_drop_tolerance must be greater than or equal to 0.")
+        _validate_rule6_drop_tolerances(
+            pos_dice_drop_tolerance=self.pos_dice_drop_tolerance,
+            pos_tpr_drop_tolerance=self.pos_tpr_drop_tolerance,
+        )
         if any(candidate < 0 for candidate in self.min_component_area_px_candidates):
             raise ValueError("min_component_area_px_candidates cannot contain negative values.")
         if any(candidate < 1 for candidate in self.min_patient_positive_patches_candidates):
@@ -292,6 +307,10 @@ def load_ensemble_optimizer_config(
         pos_dice_drop_tolerance=_parse_float(
             values.get("ENSEMBLE_OPT_POS_DICE_DROP_TOLERANCE"),
             default=DEFAULT_POS_DICE_DROP_TOLERANCE,
+        ),
+        pos_tpr_drop_tolerance=_parse_float(
+            values.get("ENSEMBLE_OPT_POS_TPR_DROP_TOLERANCE"),
+            default=DEFAULT_POS_TPR_DROP_TOLERANCE,
         ),
         min_component_area_px_candidates=_parse_int_tuple(
             values.get("ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES"),

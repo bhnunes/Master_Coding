@@ -68,6 +68,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_DECISION_THRESHOLD_MAX": "0.85",
             "ENSEMBLE_OPT_DECISION_THRESHOLD_STEP": "0.05",
             "ENSEMBLE_OPT_POS_DICE_DROP_TOLERANCE": "0.03",
+            "ENSEMBLE_OPT_POS_TPR_DROP_TOLERANCE": "0.04",
             "ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES": "0,16,16,64",
             "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES": "1,3,5",
             "ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES": str(EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES),
@@ -96,6 +97,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.decision_threshold_max == pytest.approx(0.85)
     assert config.decision_threshold_step == pytest.approx(0.05)
     assert config.pos_dice_drop_tolerance == pytest.approx(0.03)
+    assert config.pos_tpr_drop_tolerance == pytest.approx(0.04)
     assert config.min_component_area_px_candidates == (0, 16, 64)
     assert config.min_patient_positive_patches_candidates == (1, 3, 5)
     assert config.optimization_cache_max_bytes == EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES
@@ -127,6 +129,7 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.decision_threshold_max == pytest.approx(0.95)
     assert config.decision_threshold_step == pytest.approx(0.01)
     assert config.pos_dice_drop_tolerance == pytest.approx(0.02)
+    assert config.pos_tpr_drop_tolerance == pytest.approx(0.02)
     assert config.min_component_area_px_candidates == (0, 16, 32, 64, 128, 256)
     assert config.min_patient_positive_patches_candidates == (1, 2, 3, 5, 10)
     assert config.optimization_cache_max_bytes == DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
@@ -221,6 +224,21 @@ def test_load_ensemble_optimizer_config_requires_unfiltered_rule6_baseline(
                 ),
                 "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
                 "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES": "2,3",
+            }
+        )
+
+
+def test_load_ensemble_optimizer_config_rejects_negative_tpr_drop_tolerance(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="pos_tpr_drop_tolerance"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_POS_TPR_DROP_TOLERANCE": "-0.01",
             }
         )
 

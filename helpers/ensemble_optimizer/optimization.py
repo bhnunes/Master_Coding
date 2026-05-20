@@ -212,6 +212,7 @@ class _Rule6CandidateScore:
     key: _Rule6CandidateKey
     macro_rule6: float
     positive_dice: float
+    positive_tpr: float
     negative_clean_rate: float
     positive_patient_count: int
     negative_patient_count: int
@@ -677,6 +678,13 @@ def _dice_from_counts(counts: dict[str, int]) -> float:
     return float((2.0 * tp) / denominator) if denominator > 0.0 else 0.0
 
 
+def _tpr_from_counts(counts: dict[str, int]) -> float:
+    tp = float(counts["tp"])
+    fn = float(counts["fn"])
+    denominator = tp + fn
+    return float(tp / denominator) if denominator > 0.0 else 0.0
+
+
 def _rule6_threshold_values(config: EnsembleOptimizerConfig) -> tuple[float, ...]:
     values: list[float] = []
     current = config.decision_threshold_min
@@ -722,7 +730,12 @@ def _zero_rule6_calibration_result(config: EnsembleOptimizerConfig) -> _Rule6Cal
             "Calibration_threshold": float(config.decision_threshold_min),
             "Calibration_macro_rule6": 0.0,
             "Calibration_positive_dice": 0.0,
+            "Calibration_positive_tpr": 0.0,
             "Calibration_negative_clean_rate": 0.0,
+            "Calibration_baseline_positive_dice": 0.0,
+            "Calibration_baseline_positive_tpr": 0.0,
+            "Calibration_positive_dice_drop_tolerance": float(config.pos_dice_drop_tolerance),
+            "Calibration_positive_tpr_drop_tolerance": float(config.pos_tpr_drop_tolerance),
             "Calibration_min_component_area_px": 0,
             "Calibration_min_patient_positive_patches": 1,
             "Calibration_n_patients": 0,
@@ -758,6 +771,7 @@ def _score_rule6_candidate(
     *,
     key: _Rule6CandidateKey,
     positive_dice_total: float,
+    positive_tpr_total: float,
     negative_clean_total: float,
     positive_patient_count: int,
     negative_patient_count: int,
@@ -765,6 +779,9 @@ def _score_rule6_candidate(
     total_patients = positive_patient_count + negative_patient_count
     positive_dice = (
         float(positive_dice_total / positive_patient_count) if positive_patient_count > 0 else 0.0
+    )
+    positive_tpr = (
+        float(positive_tpr_total / positive_patient_count) if positive_patient_count > 0 else 0.0
     )
     negative_clean_rate = (
         float(negative_clean_total / negative_patient_count) if negative_patient_count > 0 else 0.0
@@ -778,6 +795,7 @@ def _score_rule6_candidate(
         key=key,
         macro_rule6=macro_rule6,
         positive_dice=positive_dice,
+        positive_tpr=positive_tpr,
         negative_clean_rate=negative_clean_rate,
         positive_patient_count=positive_patient_count,
         negative_patient_count=negative_patient_count,
@@ -786,10 +804,11 @@ def _score_rule6_candidate(
 
 def _candidate_sort_key(
     candidate: _Rule6CandidateScore,
-) -> tuple[float, float, float, float, int, float]:
+) -> tuple[float, float, float, float, float, int, float]:
     return (
         candidate.macro_rule6,
         candidate.negative_clean_rate,
+        candidate.positive_tpr,
         candidate.positive_dice,
         -float(candidate.key.min_component_area_px),
         -int(candidate.key.min_patient_positive_patches),
@@ -804,6 +823,7 @@ def _candidate_to_summary(candidate: _Rule6CandidateScore) -> dict[str, float | 
         "min_patient_positive_patches": int(candidate.key.min_patient_positive_patches),
         "macro_rule6": float(candidate.macro_rule6),
         "positive_dice": float(candidate.positive_dice),
+        "positive_tpr": float(candidate.positive_tpr),
         "negative_clean_rate": float(candidate.negative_clean_rate),
         "positive_patient_count": int(candidate.positive_patient_count),
         "negative_patient_count": int(candidate.negative_patient_count),
@@ -819,6 +839,7 @@ def _calibrate_rule6_from_patient_predictions(
 ) -> _Rule6CalibrationResult:
     candidate_keys = _rule6_candidate_keys(optimizer_config)
     positive_dice_totals = np.zeros(len(candidate_keys), dtype=np.float64)
+    positive_tpr_totals = np.zeros(len(candidate_keys), dtype=np.float64)
     negative_clean_totals = np.zeros(len(candidate_keys), dtype=np.float64)
     positive_patient_count = 0
     negative_patient_count = 0
@@ -874,6 +895,7 @@ def _calibrate_rule6_from_patient_predictions(
                     )
                     if is_positive_patient:
                         positive_dice_totals[index] += _dice_from_counts(counts)
+                        positive_tpr_totals[index] += _tpr_from_counts(counts)
                     else:
                         negative_clean_totals[index] += 1.0 if counts["fp"] == 0 else 0.0
 
@@ -889,23 +911,30 @@ def _calibrate_rule6_from_patient_predictions(
         _score_rule6_candidate(
             key=key,
             positive_dice_total=float(positive_dice_totals[index]),
+            positive_tpr_total=float(positive_tpr_totals[index]),
             negative_clean_total=float(negative_clean_totals[index]),
             positive_patient_count=positive_patient_count,
             negative_patient_count=negative_patient_count,
         )
         for index, key in enumerate(candidate_keys)
     ]
-    baseline_candidates = [
-        score
-        for score in scores
-        if score.key.min_component_area_px == 0 and score.key.min_patient_positive_patches == 1
-    ]
-    baseline = max(baseline_candidates, key=_candidate_sort_key)
+    # Anchor sensitivity guardrails to the least-filtered baseline, not to the
+    # best unfiltered candidate selected by the same threshold sweep.
+    baseline_key = _Rule6CandidateKey(
+        threshold=threshold_values[0],
+        min_component_area_px=0,
+        min_patient_positive_patches=1,
+    )
+    baseline = scores[candidate_index[baseline_key]]
     minimum_allowed_positive_dice = (
         baseline.positive_dice - optimizer_config.pos_dice_drop_tolerance
     )
+    minimum_allowed_positive_tpr = baseline.positive_tpr - optimizer_config.pos_tpr_drop_tolerance
     accepted_candidates = [
-        score for score in scores if score.positive_dice >= minimum_allowed_positive_dice
+        score
+        for score in scores
+        if score.positive_dice >= minimum_allowed_positive_dice
+        and score.positive_tpr >= minimum_allowed_positive_tpr
     ]
     selected = max(accepted_candidates, key=_candidate_sort_key)
     postprocessing_config = PostprocessingConfig(
@@ -915,7 +944,9 @@ def _calibrate_rule6_from_patient_predictions(
     summary = {
         "objective": "balanced_rule6",
         "positive_dice_drop_tolerance": float(optimizer_config.pos_dice_drop_tolerance),
+        "positive_tpr_drop_tolerance": float(optimizer_config.pos_tpr_drop_tolerance),
         "minimum_allowed_positive_dice": float(minimum_allowed_positive_dice),
+        "minimum_allowed_positive_tpr": float(minimum_allowed_positive_tpr),
         "candidate_grid": _rule6_candidate_grid_summary(optimizer_config),
         "baseline_unfiltered": _candidate_to_summary(baseline),
         "selected": _candidate_to_summary(selected),
@@ -932,10 +963,15 @@ def _calibrate_rule6_from_patient_predictions(
             "Calibration_threshold": float(selected.key.threshold),
             "Calibration_macro_rule6": float(selected.macro_rule6),
             "Calibration_positive_dice": float(selected.positive_dice),
+            "Calibration_positive_tpr": float(selected.positive_tpr),
             "Calibration_negative_clean_rate": float(selected.negative_clean_rate),
             "Calibration_baseline_positive_dice": float(baseline.positive_dice),
+            "Calibration_baseline_positive_tpr": float(baseline.positive_tpr),
             "Calibration_positive_dice_drop_tolerance": float(
                 optimizer_config.pos_dice_drop_tolerance
+            ),
+            "Calibration_positive_tpr_drop_tolerance": float(
+                optimizer_config.pos_tpr_drop_tolerance
             ),
             "Calibration_min_component_area_px": int(selected.key.min_component_area_px),
             "Calibration_min_patient_positive_patches": int(

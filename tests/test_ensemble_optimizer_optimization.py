@@ -542,9 +542,11 @@ def test_calibrate_decision_threshold_selects_higher_rule6_candidate(
     assert result.postprocessing_config.min_patient_positive_patches == 1
     assert result.metrics["Calibration_metric"] == "Macro_Rule6_Dice"
     assert result.metrics["Calibration_macro_rule6"] == pytest.approx(1.0)
+    assert result.metrics["Calibration_positive_tpr"] == pytest.approx(1.0)
     assert result.metrics["Calibration_n_positive_patients"] == 1
     assert result.metrics["Calibration_n_negative_patients"] == 1
     assert result.summary["selected"]["min_component_area_px"] == RULE6_COMPONENT_AREA_CANDIDATE
+    assert result.summary["selected"]["positive_tpr"] == pytest.approx(1.0)
 
 
 def test_calibrate_decision_threshold_rejects_positive_dice_drop(
@@ -622,6 +624,74 @@ def test_calibrate_decision_threshold_rejects_positive_dice_drop(
     assert result.postprocessing_config.min_component_area_px == 0
     assert result.metrics["Calibration_positive_dice"] == pytest.approx(1.0)
     assert result.summary["rejected_candidate_count"] == 1
+
+
+def test_calibrate_rule6_rejects_positive_tpr_drop(
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    positive_truth = np.array(
+        [
+            [
+                [1, 1, 0],
+                [1, 1, 0],
+                [0, 0, 0],
+            ]
+        ],
+        dtype=np.uint8,
+    )
+    positive_prediction = np.array(
+        [
+            [
+                [0.9, 0.9, 0.6],
+                [0.9, 0.6, 0.6],
+                [0.6, 0.0, 0.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    negative_truth = np.zeros((1, 3, 3), dtype=np.uint8)
+    negative_prediction = np.array(
+        [
+            [
+                [0.6, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    roi_mask = np.ones_like(positive_truth, dtype=np.uint8)
+    patient_predictions = [
+        ("positive", positive_prediction, positive_truth, roi_mask),
+        ("negative", negative_prediction, negative_truth, roi_mask),
+    ]
+    config = replace(
+        optimizer_config,
+        decision_threshold_min=0.5,
+        decision_threshold_max=0.8,
+        decision_threshold_step=0.3,
+        pos_dice_drop_tolerance=1.0,
+        pos_tpr_drop_tolerance=0.05,
+        min_component_area_px_candidates=(0,),
+        min_patient_positive_patches_candidates=(1,),
+    )
+
+    strict_result = optimization._calibrate_rule6_from_patient_predictions(
+        optimizer_config=config,
+        patient_predictions=patient_predictions,
+    )
+    relaxed_result = optimization._calibrate_rule6_from_patient_predictions(
+        optimizer_config=replace(config, pos_tpr_drop_tolerance=0.50),
+        patient_predictions=patient_predictions,
+    )
+
+    assert strict_result.decision_threshold == pytest.approx(0.5)
+    assert strict_result.metrics["Calibration_baseline_positive_tpr"] == pytest.approx(1.0)
+    assert strict_result.metrics["Calibration_positive_tpr"] == pytest.approx(1.0)
+    assert strict_result.summary["minimum_allowed_positive_tpr"] == pytest.approx(0.95)
+    assert strict_result.summary["rejected_candidate_count"] == 1
+    assert relaxed_result.decision_threshold == pytest.approx(0.8)
+    assert relaxed_result.metrics["Calibration_positive_tpr"] == pytest.approx(0.75)
 
 
 def test_spatial_objective_precompute_matches_full_image_objective(
