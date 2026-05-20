@@ -150,7 +150,7 @@ def save_confusion_matrix_png(tp: int, fp: int, fn: int, tn: int, out_path_png: 
     )
     plt.xlabel("Predicted")
     plt.ylabel("True")
-    plt.title("Ensemble Confusion Matrix (Row-Normalized %)")
+    plt.title("Matriz de Confusão do Ensemble (Normalizada em %)")
     plt.tight_layout()
     plt.savefig(out_path_png, dpi=300, bbox_inches="tight")
     plt.close()
