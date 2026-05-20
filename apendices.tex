@@ -1,55 +1,243 @@
-\chapter{Artefatos pendentes para a versão final}\label{ap:artefatos_pendentes}
-
-Este apêndice lista os artefatos que devem ser preenchidos antes da entrega final da dissertação. A lista evita que a versão inicial transforme placeholders em conclusões.
-
-\begin{itemize}
-    \item Estatísticas finais por base: lâminas, pacientes ou identificadores operacionais, \textit{patches}, máscaras positivas, linhas aceitas e linhas rejeitadas.
-    \item Configurações finais de execução: variáveis de ambiente relevantes, normalização selecionada, backend VAHADANE, uso de amostragem inteligente, uso de HDF5 compacto, OHEM e perda sensível a artefatos.
-    \item Artefatos de treinamento: registros da Fase 7, checkpoints da Fase 8, metadados de compatibilidade e logs de validação.
-    \item Receita final de ensemble: modelos selecionados, pesos, limiares, configuração de TTA, hashes de checkpoint e assinatura de proveniência.
-    \item Resultados de teste: métricas finais, intervalos de confiança, matriz de confusão, figuras qualitativas e relatório gerado pela Fase 10.
-    \item Itens administrativos: data final de defesa, banca definitiva, ficha catalográfica, dedicatória e agradecimentos pessoais.
-\end{itemize}
-
-\chapter{Mapa entre texto e implementação}\label{ap:mapa_codigo_texto}
-
-A \Tabela{tab:mapa_codigo_texto} resume as principais fontes de código que sustentam cada parte metodológica da dissertação. O mapa foi derivado do arquivo \texttt{reports/method\_sources.md} e deve ser atualizado se a implementação mudar substancialmente.
-
-\begin{table}[!ht]
-\centering
-\caption{Mapa resumido entre capítulos metodológicos e fontes de implementação.}
-\label{tab:mapa_codigo_texto}
-\scriptsize
-\begin{tabular}{>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{10.1cm}}
-\toprule
-Tema & Fontes principais \\
-\midrule
-Visão geral & Scripts \texttt{1\_artifact\_detection.py} a \texttt{10\_inference\_ensemble.py}; \texttt{helpers/runtime\_platform.py}; \texttt{helpers/runtime\_normalization.py}. \\
-Artefatos & Módulos em \texttt{helpers/artifact/*}. \\
-Extração & Módulos em \texttt{helpers/extraction/*}, incluindo leitura, anotações, HDF5 e manifesto. \\
-Limpeza & Módulos em \texttt{helpers/optimization\_sampling/*} e \texttt{helpers/graph/*}. \\
-Particionamento & Módulos em \texttt{helpers/crossfold/*} e \texttt{helpers/runtime\_normalization.py}. \\
-Sanidade & Módulos em \texttt{helpers/sanity/*}. \\
-Amostragem & Módulos em \texttt{helpers/smart\_sampling/*} e \texttt{helpers/training/compact\_train\_selected.py}. \\
-Treinamento & \texttt{helpers/lr\_finder/*}, \texttt{helpers/training/*} e registros \texttt{training\_model\_registry\_*}. \\
-Ensemble e inferência & Módulos em \texttt{helpers/ensemble\_optimizer/*} e \texttt{helpers/ensemble\_inference/*}. \\
-\bottomrule
-\end{tabular}
-\normalsize
-\end{table}
-
 \chapter{Configurações a reportar}\label{ap:configs_reportar}
 
-As configurações abaixo devem ser registradas junto aos resultados finais porque afetam a interpretação do experimento:
+Este apêndice registra os valores configurados no arquivo \texttt{.env\_example}
+para as variáveis que afetam a metodologia, a reprodutibilidade ou o custo
+computacional do experimento. Foram omitidas variáveis que representam apenas
+caminhos locais, nomes de arquivos, nomes de diretórios, credenciais, tokens,
+senhas, e-mails, repositórios de rastreamento ou identificadores administrativos.
+Se a execução final usar valores diferentes dos listados aqui, a tabela deve ser
+atualizada para refletir o ambiente efetivamente executado.
 
-\begin{itemize}
-    \item \texttt{RUNTIME\_NORMALIZATION\_METHOD} e, se aplicável, \texttt{RUNTIME\_VAHADANE\_BACKEND};
-    \item configurações de compressão HDF5 e uso de armazenamento local temporário nas fases de extração e particionamento;
-    \item flags de smart sampling e compactação de \texttt{TRAIN\_SELECTED};
-    \item arquitetura, encoder, taxa de aprendizado, decaimento de peso, pesos da função de perda e precisão numérica de cada modelo treinado;
-    \item parâmetros de ensemble, TTA, limiar final e número de amostras bootstrap;
-    \item versão do código, ambiente Python, dependências principais, hardware e local de execução.
-\end{itemize}
+{\scriptsize
+\begin{longtable}{>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{11.2cm}}
+\caption{Valores de variáveis de ambiente metodologicamente relevantes reportados a partir de \texttt{.env\_example}.}
+\label{tab:configs_reportar}\\
+\toprule
+Escopo & Variáveis e valores reportados \\
+\midrule
+\endfirsthead
+\toprule
+Escopo & Variáveis e valores reportados \\
+\midrule
+\endhead
+\midrule
+\multicolumn{2}{r}{Continua na próxima página.}\\
+\endfoot
+\bottomrule
+\endlastfoot
+
+Configuração compartilhada &
+\texttt{RUNTIME\_NORMALIZATION\_METHOD=NOT\_NORMALIZED};
+\texttt{RUNTIME\_VAHADANE\_BACKEND=fixed\_source}. \\
+
+Fase 1: detecção de artefatos &
+\texttt{ARTIFACT\_DEVICE=cuda};
+\texttt{ARTIFACT\_MPP\_MODEL=1.5};
+\texttt{ARTIFACT\_OVERLAY\_FACTOR=10}. \\
+
+Fase 2: extração e manifesto &
+\texttt{TAG=CHILE};
+\texttt{STAGE2\_COPY\_WSI\_TO\_LOCAL\_CACHE=True};
+\texttt{WINDOW\_SIZE=224};
+\texttt{STRIDE=112};
+\texttt{TARGET\_LEVEL=0};
+\texttt{HIESD\_XML\_COORD\_LEVEL=6};
+\texttt{TISSUE\_PERCENTAGE=0.3};
+\texttt{MATCH\_PERCENTAGE=1.0};
+\texttt{LOADCASES=False};
+\texttt{NUM\_WORKERS=3};
+\texttt{OPENSLIDE\_CACHE\_BYTES=0};
+\texttt{STAGE2\_PRELOAD\_SCAN\_AREA\_MAX\_BYTES=0};
+\texttt{STAGE2\_SUPPRESS\_NATIVE\_TIFF\_WARNINGS=True};
+\texttt{STAGE2\_HDF5\_COMPRESSION=none};
+\texttt{USE\_ADVANCED\_ARTIFACT\_FILTERING=True};
+\texttt{ACTIVATE\_SANITY\_CHECK\_GEOJSON=True}. \\
+
+Fase 3.1: amostragem para revisão &
+\texttt{OPTIMIZATION\_SAMPLING\_CONFIDENCE\_LEVEL=0.95};
+\texttt{OPTIMIZATION\_SAMPLING\_MARGIN\_OF\_ERROR=0.05};
+\texttt{OPTIMIZATION\_SAMPLING\_PROPORTION=0.5};
+\texttt{OPTIMIZATION\_SAMPLING\_PILOT\_SAMPLE\_SIZE=100};
+\texttt{OPTIMIZATION\_SAMPLING\_MASTER\_POOL\_FRACTION=0.10};
+\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_COLOR\_B=0};
+\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_COLOR\_G=0};
+\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_COLOR\_R=255};
+\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_THICKNESS=2};
+\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_ALPHA=1.0};
+\texttt{OPTIMIZATION\_SAMPLING\_SEED=42};
+\texttt{OPTIMIZATION\_SAMPLING\_NUM\_PROCESSES=} vazio. \\
+
+Fase 3.2: ajuste da limpeza por grafos &
+\texttt{GRAPH\_TUNING\_TEST\_SET\_SIZE=0.2};
+\texttt{GRAPH\_TUNING\_N\_SPLITS\_INNER\_CV=3};
+\texttt{GRAPH\_TUNING\_N\_BAYESIAN\_CALLS=50};
+\texttt{GRAPH\_TUNING\_N\_INITIAL\_POINTS=10};
+\texttt{GRAPH\_TUNING\_RANDOM\_STATE=42};
+\texttt{GRAPH\_TUNING\_BG\_INTENSITY\_MIN=100};
+\texttt{GRAPH\_TUNING\_BG\_INTENSITY\_MAX=250};
+\texttt{GRAPH\_TUNING\_K\_MIN=100};
+\texttt{GRAPH\_TUNING\_K\_MAX=500};
+\texttt{GRAPH\_TUNING\_MIN\_SIZE\_MIN=10};
+\texttt{GRAPH\_TUNING\_MIN\_SIZE\_MAX=200};
+\texttt{GRAPH\_TUNING\_EROSION\_MIN=0};
+\texttt{GRAPH\_TUNING\_EROSION\_MAX=10}. \\
+
+Fase 3.3: limpeza por grafos &
+\texttt{GRAPH\_CLEANING\_NUM\_WORKERS=} vazio. \\
+
+Fase 4: particionamento e artefatos de normalização &
+\texttt{CROSSFOLD\_RANDOM\_STATE=42};
+\texttt{CROSSFOLD\_OVERWRITE\_OUTPUT\_DIR=True};
+\texttt{CROSSFOLD\_TEST\_PATIENT\_COUNT=20};
+\texttt{CROSSFOLD\_VALIDATION\_PATIENT\_COUNT=20};
+\texttt{CROSSFOLD\_SPLIT\_OPTUNA\_TRIALS=1000};
+\texttt{CROSSFOLD\_ENTROPY\_NUM\_WORKERS=} vazio;
+\texttt{CROSSFOLD\_ENTROPY\_CHUNKSIZE=128};
+\texttt{CROSSFOLD\_ENTROPY\_THUMBNAIL=128};
+\texttt{CROSSFOLD\_HDF5\_COMPRESSION=none};
+\texttt{CROSSFOLD\_COPY\_BATCH\_SIZE=1024};
+\texttt{CROSSFOLD\_SAVE\_ENTROPY\_CACHE\_CSV=True};
+\texttt{CROSSFOLD\_CALC\_CHECKSUMS=False}. \\
+
+Fase 5: verificações de sanidade &
+\texttt{SANITY\_SAMPLE\_PAIRS=1000};
+\texttt{SANITY\_FULL\_MASK\_SCAN=False};
+\texttt{SANITY\_FULL\_SHAPE\_SCAN=False};
+\texttt{SANITY\_CHECKSUM\_MODE=SAMPLE};
+\texttt{SANITY\_ENFORCE\_FILENAME\_UNIQUENESS=True};
+\texttt{SANITY\_ENFORCE\_REGEX\_PATIENT\_ID\_MATCH=True};
+\texttt{SANITY\_ENFORCE\_SPLIT\_STATS\_PARITY=True};
+\texttt{SANITY\_FAIL\_ON\_EMPTY\_CANCER\_MASK=True};
+\texttt{SANITY\_FAIL\_ON\_POSITIVE\_NOT\_CANCER\_MASK=True}. \\
+
+Fase 6: amostragem inteligente &
+\texttt{SMART\_SAMPLER\_LOCAL\_SHARD\_CACHE\_BYTES=0};
+\texttt{SMART\_SAMPLER\_STAGE\_INPUT\_LOCALLY=False};
+\texttt{SMART\_SAMPLER\_STAGE\_OUTPUTS\_LOCALLY=False};
+\texttt{SMART\_SAMPLER\_CLEAN\_LOCAL\_WORK\_DIR=True};
+\texttt{SMART\_SAMPLER\_WRITE\_SIDECARS=True};
+\texttt{SMART\_SAMPLER\_OVERWRITE\_OUTPUT=False};
+\texttt{SMART\_SAMPLER\_BUILD\_COMPACT\_TRAIN\_SELECTED=True};
+\texttt{SMART\_SAMPLER\_COMPACT\_HDF5\_COMPRESSION=none};
+\texttt{SMART\_SAMPLER\_MODEL\_NAME=owkin/phikon-v2};
+\texttt{SMART\_SAMPLER\_BATCH\_SIZE=128};
+\texttt{SMART\_SAMPLER\_DEVICE=cuda};
+\texttt{SMART\_SAMPLER\_NUM\_WORKERS=2};
+\texttt{SMART\_SAMPLER\_SEED=42};
+\texttt{SMART\_SAMPLER\_N\_START=512};
+\texttt{SMART\_SAMPLER\_N\_MAX=15000};
+\texttt{SMART\_SAMPLER\_GROWTH\_FACTOR=2.0};
+\texttt{SMART\_SAMPLER\_STABILITY\_THRESHOLD=0.85};
+\texttt{SMART\_SAMPLER\_STABILITY\_REPEATS=3};
+\texttt{SMART\_SAMPLER\_MAX\_STEPS=7};
+\texttt{SMART\_SAMPLER\_INTERSECTION\_RATIO\_THRESHOLD=0.2};
+\texttt{SMART\_SAMPLER\_K\_MIN=20};
+\texttt{SMART\_SAMPLER\_K\_MAX=80};
+\texttt{SMART\_SAMPLER\_ADAPTIVE\_KEEP\_ENABLED=True};
+\texttt{SMART\_SAMPLER\_KEEP\_MIN=64};
+\texttt{SMART\_SAMPLER\_KEEP\_STEP=64};
+\texttt{SMART\_SAMPLER\_KEEP\_IMPROVEMENT\_THRESHOLD=0.02};
+\texttt{SMART\_SAMPLER\_KEEP\_PATIENCE=2};
+\texttt{SMART\_SAMPLER\_M\_MAX=2000};
+\texttt{SMART\_SAMPLER\_PROTECT\_POSITIVE\_LABELS=True};
+\texttt{SMART\_SAMPLER\_PROTECT\_MASK\_POSITIVE=True};
+\texttt{SMART\_SAMPLER\_POSITIVE\_MASK\_FRACTION\_THRESHOLD=0.0};
+\texttt{SMART\_SAMPLER\_USE\_GIST=False};
+\texttt{SMART\_SAMPLER\_GIST\_CANDIDATE\_POOL\_LIMIT=4096}. \\
+
+Fase 7: triagem de taxa de aprendizado &
+\texttt{LR\_FINDER\_STAGE\_INPUT\_LOCALLY=False};
+\texttt{LR\_FINDER\_USE\_COMPACT\_TRAIN\_SELECTED=True};
+\texttt{LR\_FINDER\_OVERWRITE\_OUTPUT=True};
+\texttt{LR\_FINDER\_SMART\_SAMPLING=True};
+\texttt{LR\_FINDER\_EXECUTION\_MODE=PAPER};
+\texttt{LR\_FINDER\_AMP\_PRECISION=fp32};
+\texttt{LR\_FINDER\_SEED=24};
+\texttt{LR\_FINDER\_BATCH\_SIZE=32};
+\texttt{LR\_FINDER\_WORKERS=8};
+\texttt{LR\_FINDER\_ARCHITECTURES=} vazio;
+\texttt{LR\_FINDER\_USE\_SUBSET=False};
+\texttt{LR\_FINDER\_SUBSET\_RATIO=1.0};
+\texttt{LR\_FINDER\_NUM\_LHS\_SAMPLES=12};
+\texttt{LR\_FINDER\_NUM\_REPEATS=3};
+\texttt{LR\_FINDER\_END\_LR=0.1};
+\texttt{LR\_FINDER\_NUM\_ITER=100};
+\texttt{LR\_FINDER\_OPTIMIZER\_START\_LR=1e-8};
+\texttt{LR\_FINDER\_OPTIMIZER\_WEIGHT\_DECAY=1e-4};
+\texttt{LR\_FINDER\_ALPHA\_MIN=0.1};
+\texttt{LR\_FINDER\_ALPHA\_MAX=1.0};
+\texttt{LR\_FINDER\_BETA\_MIN=0.1};
+\texttt{LR\_FINDER\_BETA\_MAX=0.5};
+\texttt{LR\_FINDER\_GAMMA\_MIN=0.1};
+\texttt{LR\_FINDER\_GAMMA\_MAX=0.5};
+\texttt{LR\_FINDER\_GAMMA\_LOG=False}. \\
+
+Fase 8: treinamento supervisionado &
+\texttt{TRAINING\_ARCHITECTURE=FPN};
+\texttt{TRAINING\_ENCODER=senet154};
+\texttt{TRAINING\_USE\_COMPACT\_TRAIN\_SELECTED=True};
+\texttt{TRAINING\_EXECUTION\_MODE=PAPER};
+\texttt{TRAINING\_SEED=24};
+\texttt{TRAINING\_SMART\_SAMPLING=True};
+\texttt{TRAINING\_UNLEASHED=False};
+\texttt{TRAINING\_USE\_ARTIFACT\_AWARE\_LOSS=False};
+\texttt{TRAINING\_RUN\_OHEM=False};
+\texttt{TRAINING\_NUM\_EPOCHS=100};
+\texttt{TRAINING\_PATIENCE=5};
+\texttt{TRAINING\_BATCH\_SIZE=32};
+\texttt{TRAINING\_VAL\_BATCH\_MULTIPLIER=3};
+\texttt{TRAINING\_ACCUMULATION\_STEPS=4};
+\texttt{TRAINING\_WORKERS=8};
+\texttt{PROFILE\_TIMING=False};
+\texttt{TRAINING\_OPTIMIZER\_NAME=AdamWScheduleFree};
+\texttt{TRAINING\_AMP\_PRECISION=fp16};
+\texttt{TRAINING\_OHEM\_START\_EPOCH=2};
+\texttt{TRAINING\_OHEM\_RATIO=0.25};
+\texttt{TRAINING\_OHEM\_MIN\_KEPT=1024};
+\texttt{TRAINING\_SENSITIVITY\_TARGET=0.95}. \\
+
+Fase 9: otimização do \textit{ensemble} &
+\texttt{ENSEMBLE\_OPT\_LOCAL\_SHARD\_CACHE\_MAX\_BYTES=0};
+\texttt{ENSEMBLE\_OPT\_OPTIMIZATION\_CACHE\_MAX\_BYTES=8589934592};
+\texttt{ENSEMBLE\_OPT\_STAGE\_INPUT\_LOCALLY=True};
+\texttt{ENSEMBLE\_OPT\_OVERWRITE\_OUTPUT=True};
+\texttt{ENSEMBLE\_OPT\_SEED=24};
+\texttt{ENSEMBLE\_OPT\_BATCH\_SIZE=32};
+\texttt{ENSEMBLE\_OPT\_WORKERS=2};
+\texttt{ENSEMBLE\_OPT\_SORT\_METRIC=best\_val\_auprc\_pixel\_score};
+\texttt{ENSEMBLE\_OPT\_VAL\_CALIBRATION\_FRAC=0.25};
+\texttt{ENSEMBLE\_OPT\_VAL\_HOLDOUT\_FRAC=0.20};
+\texttt{ENSEMBLE\_OPT\_SEMANTIC\_ARCHITECTURES=SWIN,DPT,SEGFORMER,UPERNET};
+\texttt{ENSEMBLE\_OPT\_SPATIAL\_ARCHITECTURES=DEEPLABV3PLUS,UNET++,FPN,MANET};
+\texttt{ENSEMBLE\_OPT\_ROI\_CONTEXT\_SCALE=4};
+\texttt{ENSEMBLE\_OPT\_ROI\_MAX\_MEDIAN=0.60};
+\texttt{ENSEMBLE\_OPT\_ROI\_EMPTY\_MAX=0.50};
+\texttt{ENSEMBLE\_OPT\_ROI\_MIN\_POS\_RECALL=0.80};
+\texttt{ENSEMBLE\_OPT\_SPILL\_PENALTY\_LAMBDA=0.10};
+\texttt{ENSEMBLE\_OPT\_SPATIAL\_PATIENT\_POLICY=all};
+\texttt{ENSEMBLE\_OPT\_DECISION\_THRESHOLD\_MIN=0.50};
+\texttt{ENSEMBLE\_OPT\_DECISION\_THRESHOLD\_MAX=0.95};
+\texttt{ENSEMBLE\_OPT\_DECISION\_THRESHOLD\_STEP=0.01};
+\texttt{ENSEMBLE\_OPT\_POS\_DICE\_DROP\_TOLERANCE=0.02};
+\texttt{ENSEMBLE\_OPT\_MIN\_COMPONENT\_AREA\_PX\_CANDIDATES=0,16,32,64,128,256};
+\texttt{ENSEMBLE\_OPT\_MIN\_PATIENT\_POSITIVE\_PATCHES\_CANDIDATES=1,2,3,5,10};
+\texttt{ENSEMBLE\_OPT\_NUM\_TRIALS\_SEMANTIC=50};
+\texttt{ENSEMBLE\_OPT\_NUM\_TRIALS\_SPATIAL=50}. \\
+
+Fase 10: inferência final &
+\texttt{ENSEMBLE\_INFER\_STAGE\_INPUT\_LOCALLY=True};
+\texttt{ENSEMBLE\_INFER\_OVERWRITE\_OUTPUT=True};
+\texttt{ENSEMBLE\_INFER\_SEED=24};
+\texttt{ENSEMBLE\_INFER\_BATCH\_SIZE=32};
+\texttt{ENSEMBLE\_INFER\_WORKERS=8};
+\texttt{ENSEMBLE\_INFER\_VIS\_NUM\_SAMPLES=10};
+\texttt{ENSEMBLE\_INFER\_EXPORT\_CSV=True};
+\texttt{ENSEMBLE\_INFER\_EXPORT\_LATEX=True};
+\texttt{ENSEMBLE\_INFER\_EXPORT\_VISUALIZATIONS=True};
+\texttt{ENSEMBLE\_INFER\_PATCH\_POSITIVE\_AREA\_FRACTION\_THRESHOLD=0.0}. \\
+
+\end{longtable}
+}
 
 \chapter{Matriz de extração da revisão sistemática}\label{ap:matriz_revisao_sistematica}
 
