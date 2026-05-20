@@ -5,8 +5,8 @@ flowchart LR
     overlays[Output<br/>Pilot sample + master candidate pool overlays]
     review[Human review<br/>APPROVED / REJECTED]
     p32[Phase 3.2<br/>3_2_tune_graph_method.py<br/>Tune graph cleaning rule]
-    params[Output<br/>graph_cleaning_params.json]
-    p33[Phase 3.3<br/>3_3_cleaner_script.py<br/>Apply cleaning to cancer rows only]
+    params[Output<br/>graph_cleaning_params.json<br/>including selected rule/tau]
+    p33[Phase 3.3<br/>3_3_cleaner_script.py<br/>Graph-clean cancer rows<br/>pass negatives through]
     sidecars[Output<br/>accepted_manifest.csv + rejected_manifest.csv]
 
     manifest -. read cancer candidate rows .-> p31
@@ -18,4 +18,4 @@ flowchart LR
     manifest -. read canonical cancer rows .-> p33
     shards -. read-only pixel loading .-> p33
     p33 --> sidecars
-    p33 -. updates patch_stage_state cleaning fields .-> manifest
+    p33 -. updates patch_stage_state<br/>with source-signature parity checks .-> manifest

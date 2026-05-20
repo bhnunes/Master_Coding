@@ -1,6 +1,6 @@
 graph TD
     raw_data[Raw inputs<br/>WSIs + annotations + .env]
-    manifest[(master_manifest.sqlite<br/>canonical row registry + row state)]
+    manifest[(master_manifest.sqlite<br/>portable canonical row registry<br/>+ stage state)]
 
     subgraph P1[Phase 1: Artifact Detection - optional]
         p1[1_artifact_detection.py<br/>Detect slide artifacts]
@@ -9,22 +9,22 @@ graph TD
     end
 
     subgraph P2[Phase 2: Patch Extraction]
-        p2[2_database_manager.py<br/>Extract patches from WSIs<br/>validate manifest integrity]
-        p2_out[Canonical patient HDF5 shards<br/>+ portable master_manifest.sqlite]
+        p2[2_database_manager.py<br/>Extract patches from WSIs<br/>validate manifest integrity before / after]
+        p2_out[Canonical patient HDF5 shards<br/>+ portable master_manifest.sqlite<br/>+ shard manifest/source signatures]
     end
 
     subgraph P3[Phase 3: Annotation Cleaning - optional]
         p31[3_1_optimization_sampling.py<br/>Sample cancer rows from<br/>master_manifest.sqlite]
         review[Human review<br/>APPROVED / REJECTED]
         p32[3_2_tune_graph_method.py<br/>Tune graph cleaning from reviewed<br/>manifest-resolved cancer rows]
-        p33[3_3_cleaner_script.py<br/>Apply cleaning to cancer rows only<br/>from master_manifest.sqlite]
+        p33[3_3_cleaner_script.py<br/>Graph-clean cancer rows<br/>and pass negatives through]
         p3_out[Updated patch_stage_state in<br/>master_manifest.sqlite + decision sidecars<br/>Stage 2 HDF5 shards remain read-only]
         p31 --> review --> p32 --> p33 --> p3_out
     end
 
     subgraph P4[Phase 4: Crossfold Dataset Preparation]
-        p4[4_crossfold.py<br/>Assign one TRAIN / VALIDATION / TEST split<br/>and build shared runtime artifacts]
-        p4_out[manifest.csv + split_stats.csv + run_config.json<br/>+ template-selection sidecars + runtime artifacts<br/>+ split bundle state in SQLite]
+        p4[4_crossfold.py<br/>Assign one TRAIN / VALIDATION / TEST split<br/>normalization-agnostic split state]
+        p4_out[manifest.csv + split_stats.csv + run_config.json<br/>+ template-selection sidecars<br/>+ runtime_normalization_artifacts<br/>+ split bundle/artifact links in SQLite]
         p4 --> p4_out
     end
 
@@ -35,32 +35,32 @@ graph TD
     end
 
     subgraph P6[Phase 6: Smart Sampling - optional]
-        p6[6_smart_sampler.py<br/>Select informative TRAIN rows<br/>and optionally compact them]
-        p6_out[Selection sidecars + sampling state in SQLite<br/>+ optional compact TRAIN_SELECTED HDF5]
+        p6[6_smart_sampler.py<br/>Select informative TRAIN rows<br/>GIST-style or legacy selector]
+        p6_out[Selection sidecars + sampling state in SQLite<br/>+ optional portable compact TRAIN_SELECTED HDF5/index]
         p6 --> p6_out
     end
 
     subgraph P7[Phase 7: LR Finder]
-        p7[7_lr_finder.py<br/>Screen approved registry pairs<br/>with runtime normalization]
-        p7_out[LR reports + CSV / JSON sidecars<br/>+ effective batch records]
+        p7[7_lr_finder.py<br/>Screen approved registry pairs<br/>runtime normalization at load time]
+        p7_out[LR reports + CSV / JSON sidecars<br/>+ LaTeX/PDF report + effective batch records]
         p7 --> p7_out
     end
 
     subgraph P8[Phase 8: Training]
-        p8[8_training_ensemble.py<br/>Train one approved model per run<br/>optional OHEM]
-        p8_out[Checkpoints + metrics + reports]
+        p8[8_training_ensemble.py<br/>Train one approved model per run<br/>compact TRAIN optional, VALIDATION canonical]
+        p8_out[Checkpoints + metrics + reports<br/>+ split/runtime provenance metadata]
         p8 --> p8_out
     end
 
     subgraph P9[Phase 9: Ensemble Optimization]
-        p9[9_optimizer_ensemble.py<br/>Optimize ensemble recipe on VALIDATION]
-        p9_out[Declarative ensemble recipe JSON]
+        p9[9_optimizer_ensemble.py<br/>Optimize two-stream ensemble recipe<br/>on manifest-backed VALIDATION]
+        p9_out[Signed ensemble recipe JSON<br/>+ optimizer run_config]
         p9 --> p9_out
     end
 
     subgraph P10[Phase 10: Inference]
-        p10[10_inference_ensemble.py<br/>Run TEST inference and reporting]
-        p10_out[Predictions + metrics + JSON / CSV / LaTeX outputs]
+        p10[10_inference_ensemble.py<br/>Validate recipe/checkpoints<br/>run TEST inference and reporting]
+        p10_out[Metrics + confusion matrix + reports<br/>+ optional visualizations + run_config]
         p10 --> p10_out
     end
 
@@ -71,17 +71,22 @@ graph TD
 
     p2_out --> p31
     p2_out --> p4
+    p2_out --> p7
+    p2_out --> p8
+    p2_out --> p9
+    p2_out --> p10
     p3_out --> p4
     p4_out --> p5
     p4_out --> p6
     p4_out --> p7
+    p4_out --> p8
+    p4_out --> p9
+    p4_out --> p10
     p6_out --> p7
     p6_out --> p8
-    p4_out --> p8
     p7_out --> p8
     p8_out --> p9
     p9_out --> p10
-    p2_out --> p10
 
     manifest -. sample cancer rows .-> p31
     p33 -. updates cleaning state .-> manifest
@@ -90,7 +95,7 @@ graph TD
     manifest -. validate provenance/state .-> p5
     manifest -. read TRAIN candidate rows .-> p6
     p6 -. updates sampling state .-> manifest
-    manifest -. read selected rows + split bundle refs .-> p7
-    manifest -. read selected rows + split bundle refs .-> p8
-    manifest -. read VALIDATION rows + split bundle refs .-> p9
-    manifest -. read TEST rows + split bundle refs .-> p10
+    manifest -. read TRAIN or TRAIN_SELECTED<br/>+ VALIDATION refs .-> p7
+    manifest -. read TRAIN or TRAIN_SELECTED<br/>+ VALIDATION refs .-> p8
+    manifest -. read VALIDATION refs<br/>+ runtime lineage .-> p9
+    manifest -. read TEST refs<br/>+ runtime lineage .-> p10

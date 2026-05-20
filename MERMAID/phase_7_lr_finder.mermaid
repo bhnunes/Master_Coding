@@ -1,16 +1,16 @@
 flowchart LR
-    manifest[(master_manifest.sqlite<br/>Split + split bundle references)]
-    shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
-    phase4_outputs[Input<br/>Stage 4 run config + runtime artifacts]
-    phase6_outputs[Optional input<br/>Sampling state + compact TRAIN_SELECTED]
+    manifest[(master_manifest.sqlite<br/>TRAIN / TRAIN_SELECTED + VALIDATION refs<br/>split bundle/runtime artifact links)]
+    shards[Input<br/>Phase 2 HDF5 shards<br/>VALIDATION + TRAIN fallback]
+    phase4_outputs[Input<br/>Stage 4 split bundle<br/>+ runtime_normalization_artifacts]
+    compact[Optional input<br/>Portable compact TRAIN_SELECTED HDF5/index]
     env[Input<br/>LR finder / auth / registry / normalization config]
-    p7[Phase 7<br/>7_lr_finder.py<br/>Screen architectures / encoders<br/>retry OOM with smaller effective batch]
-    reports[Output<br/>LR reports + CSV / JSON sidecars<br/>including effective batch size]
+    p7[Phase 7<br/>7_lr_finder.py<br/>Direct LR range tests<br/>runtime normalization at load time<br/>OOM retry + divergence stop]
+    reports[Output<br/>LR reports + CSV / JSON sidecars<br/>LaTeX/PDF + effective batch size]
 
-    manifest -. read selected rows + split bundle refs .-> p7
-    shards -. load training / validation pixels .-> p7
+    manifest -. read TRAIN or TRAIN_SELECTED<br/>+ VALIDATION rows .-> p7
+    shards -. load validation pixels<br/>and canonical TRAIN fallback .-> p7
     phase4_outputs --> p7
-    phase6_outputs -. optional .-> p7
+    compact -. optional TRAIN_SELECTED .-> p7
     env --> p7
     p7 --> reports
     p7 -. read only .-> manifest

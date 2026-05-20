@@ -1,14 +1,16 @@
 flowchart LR
-    manifest[(master_manifest.sqlite<br/>VALIDATION row selection + split bundle refs)]
+    manifest[(master_manifest.sqlite<br/>VALIDATION refs + split/runtime lineage)]
     shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
-    phase4_outputs[Input<br/>Stage 4 run config + runtime artifacts]
-    checkpoints[Input<br/>Phase 8 checkpoints + metrics]
-    p9[Phase 9<br/>9_optimizer_ensemble.py<br/>Optimize ensemble recipe]
-    recipe[Output<br/>Declarative ensemble recipe JSON]
+    phase4_outputs[Input<br/>Stage 4 split bundle<br/>+ runtime_normalization_artifacts]
+    checkpoints[Input<br/>Phase 8 checkpoints + model metadata]
+    env[Input<br/>Optimizer config + runtime normalization config]
+    p9[Phase 9<br/>9_optimizer_ensemble.py<br/>Optimize two-stream ensemble recipe<br/>calibration/holdout within VALIDATION]
+    recipe[Output<br/>Signed declarative recipe JSON<br/>+ ensemble_optimizer_run_config.json]
 
-    manifest -. read VALIDATION rows .-> p9
+    manifest -. read VALIDATION rows<br/>+ lineage refs .-> p9
     shards -. load validation pixels .-> p9
     phase4_outputs --> p9
     checkpoints --> p9
+    env --> p9
     p9 --> recipe
     p9 -. read only .-> manifest

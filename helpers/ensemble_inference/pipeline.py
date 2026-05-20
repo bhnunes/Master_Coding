@@ -384,6 +384,13 @@ def _execute_pipeline(config: EnsembleInferenceConfig) -> EnsembleInferenceOutpu
                 num_samples=config.visualization_samples,
             ),
         )
+    elif not config.export_visualizations:
+        print(
+            "Visualization image-sample export skipped "
+            "(ENSEMBLE_INFER_EXPORT_VISUALIZATIONS=False)."
+        )
+    else:
+        print("Visualization image-sample export skipped (ENSEMBLE_INFER_VIS_NUM_SAMPLES=0).")
 
     results = PipelineResults(
         metrics_json_path=metrics_json_path,

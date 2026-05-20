@@ -59,12 +59,11 @@ the thesis tables and the `ENSEMBLE_METRICS_*.json` files listed above.
 
 ## Paper Figures
 
-Paper-selected assets are copied into `reports/figures/` from
-`masters_thesis/New_Thesis/figuras/`:
+Paper-selected assets are copied or rendered into `reports/figures/`:
 
-- `pipeline_overview.png` from `mestrado_v3.png`
-- `results_diagset_micro_metrics.png`
-- `results_diagset_macro_metrics.png`
+- `pipeline_overview.png` from `MERMAID/pipeline_overview.mermaid`
+- `results_diagset_micro_metrics.png` from `masters_thesis/New_Thesis/figuras/`
+- `results_diagset_macro_metrics.png` from `masters_thesis/New_Thesis/figuras/`
 
 The paper intentionally omits LR-finder plots, per-architecture checkpoint
 tables, and the full thesis confusion-matrix set to keep the Elsevier manuscript

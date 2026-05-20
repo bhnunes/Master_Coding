@@ -4,13 +4,17 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from helpers.ensemble_inference.config import EnsembleInferenceConfig
 from helpers.ensemble_inference.pipeline import (
     EnsembleInferenceOutputs,
+    PipelinePreparation,
     _execute_pipeline,
     run_ensemble_inference_pipeline,
 )
+from helpers.ensemble_inference.recipe import EnsembleRecipe
+from helpers.ensemble_postprocessing import PostprocessingConfig
 
 PIPELINE_BATCH_SIZE = 8
 PIPELINE_VISUALIZATION_SAMPLES = 3
@@ -19,6 +23,123 @@ PIPELINE_VISUALIZATION_SAMPLES = 3
 @pytest.fixture(autouse=True)
 def _stub_cuda_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("helpers.ensemble_inference.pipeline.require_cuda_device", lambda: "cuda")
+
+
+def _pipeline_config(
+    tmp_path: Path,
+    *,
+    visualization_samples: int,
+    export_visualizations: bool,
+) -> EnsembleInferenceConfig:
+    return EnsembleInferenceConfig(
+        recipe_path=tmp_path / "recipe.json",
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
+        output_dir=tmp_path / "reports",
+        local_data_dir=tmp_path / "cache",
+        stage_input_locally=False,
+        overwrite_output=True,
+        batch_size=PIPELINE_BATCH_SIZE,
+        workers=1,
+        seed=24,
+        visualization_samples=visualization_samples,
+        export_csv=False,
+        export_latex=False,
+        export_visualizations=export_visualizations,
+    )
+
+
+def _stub_successful_execute_pipeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe_copy_path = tmp_path / "reports" / "recipe.json"
+    test_layout = type(
+        "_Layout",
+        (),
+        {
+            "master_manifest_path": tmp_path / "master_manifest.sqlite",
+        },
+    )()
+    recipe = EnsembleRecipe(
+        strategy="two_stream_spatial_gating",
+        roi_threshold=0.33,
+        decision_threshold=0.57,
+        postprocessing_config=PostprocessingConfig(
+            min_component_area_px=0,
+            min_patient_positive_patches=1,
+        ),
+        roi_scale=4,
+        model_registry=[],
+        raw_payload={},
+    )
+
+    def fake_prepare_pipeline(
+        config: EnsembleInferenceConfig,
+        *,
+        output_dir: Path,
+        normalizer_device: torch.device,
+    ) -> PipelinePreparation:
+        del config, normalizer_device
+        output_dir.mkdir(parents=True, exist_ok=True)
+        recipe_copy_path.write_text("{}", encoding="utf-8")
+        return PipelinePreparation(
+            recipe=recipe,
+            recipe_payload={},
+            recipe_copy_path=recipe_copy_path,
+            test_layout=test_layout,
+            test_dataset_provenance={"attrs": {}},
+            observed_checkpoint_hashes={},
+        )
+
+    def fake_save_confusion_matrix_png(
+        tp: int,
+        fp: int,
+        fn: int,
+        tn: int,
+        output_path: Path,
+    ) -> Path:
+        del tp, fp, fn, tn
+        output_path.write_text("png", encoding="utf-8")
+        return output_path
+
+    def fake_run_reports(**kwargs: object) -> tuple[Path, Path | None, Path | None, Path | None]:
+        output_dir = kwargs["output_dir"]
+        assert isinstance(output_dir, Path)
+        report_path = output_dir / "report.md"
+        report_path.write_text("report", encoding="utf-8")
+        return report_path, None, None, None
+
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.require_cuda_device",
+        lambda: torch.device("cpu"),
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.resolve_dataloader_stain_normalizer_device",
+        lambda device, workers: torch.device("cpu"),
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline._prepare_pipeline", fake_prepare_pipeline
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.create_test_dataloader", lambda *a, **k: []
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.load_recipe_models", lambda *a, **k: ([], [])
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.analyze_ensemble_metrics",
+        lambda *a, **k: {"confusion_matrix": {"tp": 1, "fp": 0, "fn": 0, "tn": 1}},
+    )
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.save_confusion_matrix_png",
+        fake_save_confusion_matrix_png,
+    )
+    monkeypatch.setattr("helpers.ensemble_inference.pipeline._run_reports", fake_run_reports)
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.collect_runtime_environment",
+        lambda: {"git_commit": "test"},
+    )
+    monkeypatch.setattr("helpers.ensemble_inference.pipeline.hash_file_sha256", lambda path: "sha")
 
 
 def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> None:
@@ -67,6 +188,65 @@ def test_run_ensemble_inference_pipeline_writes_run_config(tmp_path: Path) -> No
     assert "git_commit" in payload["runtime_environment"]
     assert outputs.recipe_copy_path.name == "recipe.json"
     assert outputs.markdown_report_path.name == "report.md"
+
+
+def test_execute_pipeline_skips_visualization_export_when_feature_flag_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _stub_successful_execute_pipeline(tmp_path, monkeypatch)
+    config = _pipeline_config(
+        tmp_path,
+        visualization_samples=PIPELINE_VISUALIZATION_SAMPLES,
+        export_visualizations=False,
+    )
+
+    def fail_export_visualizations(*args: object, **kwargs: object) -> list[Path]:
+        del args, kwargs
+        raise AssertionError("visualization export should have been skipped")
+
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.export_visualizations",
+        fail_export_visualizations,
+    )
+
+    outputs = _execute_pipeline(config)
+
+    payload = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
+    assert payload["export_visualizations"] is False
+    assert not (outputs.output_dir / "visualizations").exists()
+    assert "Visualization image-sample export skipped" in capsys.readouterr().out
+
+
+def test_execute_pipeline_exports_visualizations_when_feature_flag_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_successful_execute_pipeline(tmp_path, monkeypatch)
+    config = _pipeline_config(
+        tmp_path,
+        visualization_samples=PIPELINE_VISUALIZATION_SAMPLES,
+        export_visualizations=True,
+    )
+    captured: dict[str, int] = {}
+
+    def fake_export_visualizations(*args: object, **kwargs: object) -> list[Path]:
+        del args, kwargs
+        captured["calls"] = captured.get("calls", 0) + 1
+        return []
+
+    monkeypatch.setattr(
+        "helpers.ensemble_inference.pipeline.export_visualizations",
+        fake_export_visualizations,
+    )
+
+    outputs = _execute_pipeline(config)
+    payload = json.loads(outputs.run_config_path.read_text(encoding="utf-8"))
+
+    assert payload["export_visualizations"] is True
+    assert payload["visualization_samples"] == PIPELINE_VISUALIZATION_SAMPLES
+    assert captured == {"calls": 1}
 
 
 def test_execute_pipeline_rejects_checkpoint_hash_mismatch(

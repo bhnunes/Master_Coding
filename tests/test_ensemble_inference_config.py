@@ -23,6 +23,7 @@ def test_load_ensemble_inference_config_uses_defaults(tmp_path: Path) -> None:
     assert config.stage_input_locally is True
     assert config.batch_size == DEFAULT_BATCH_SIZE
     assert config.visualization_samples == DEFAULT_VISUALIZATION_SAMPLES
+    assert config.export_visualizations is False
     assert config.export_latex is True
     assert config.patch_positive_area_fraction_threshold == 0.0
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
@@ -56,6 +57,20 @@ def test_load_ensemble_inference_config_reads_runtime_vahadane_backend(
     config = load_ensemble_inference_config(env)
 
     assert config.runtime_vahadane_backend == "torch_staintools_exact"
+
+
+def test_load_ensemble_inference_config_reads_visualization_export_flag(
+    tmp_path: Path,
+) -> None:
+    env = {
+        "ENSEMBLE_INFER_RECIPE_PATH": str(tmp_path / "recipe.json"),
+        "ENSEMBLE_INFER_MASTER_MANIFEST_PATH": str(tmp_path / "master_manifest.sqlite"),
+        "ENSEMBLE_INFER_EXPORT_VISUALIZATIONS": "True",
+    }
+
+    config = load_ensemble_inference_config(env)
+
+    assert config.export_visualizations is True
 
 
 def test_load_ensemble_inference_config_reads_patch_area_fraction_threshold(

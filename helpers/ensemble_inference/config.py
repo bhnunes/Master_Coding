@@ -135,7 +135,7 @@ def load_ensemble_inference_config(
         export_latex=_parse_bool(values.get("ENSEMBLE_INFER_EXPORT_LATEX"), default=True),
         export_visualizations=_parse_bool(
             values.get("ENSEMBLE_INFER_EXPORT_VISUALIZATIONS"),
-            default=True,
+            default=False,
         ),
         patch_positive_area_fraction_threshold=patch_positive_area_fraction_threshold,
         runtime_normalization_method=parse_runtime_normalization_method(

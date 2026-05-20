@@ -1,10 +1,10 @@
 flowchart LR
-    manifest[(master_manifest.sqlite<br/>Canonical rows + stage state)]
+    manifest[(master_manifest.sqlite<br/>Canonical rows + stage state<br/>portable provenance refs)]
     phase4_outputs[Input<br/>Phase 4 manifests + run_config + split outputs]
-    p5[Phase 5<br/>5_sanity_checks.py<br/>Validate provenance + scientific integrity]
+    p5[Phase 5<br/>5_sanity_checks.py<br/>Validate provenance + scientific integrity<br/>patient isolation + class presence]
     report[Output<br/>PASS / WARN / FAIL report]
 
-    manifest -. read provenance + row state .-> p5
+    manifest -. read provenance + split row state .-> p5
     phase4_outputs --> p5
     p5 --> report
     p5 -. no write .-> manifest

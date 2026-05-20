@@ -1,16 +1,16 @@
 flowchart LR
-    manifest[(master_manifest.sqlite<br/>Split + split bundle + sampling state)]
-    shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
-    phase4_outputs[Input<br/>Stage 4 run config + runtime artifacts]
-    phase6_outputs[Optional input<br/>Sampling state + compact TRAIN_SELECTED]
+    manifest[(master_manifest.sqlite<br/>TRAIN / TRAIN_SELECTED + VALIDATION refs<br/>split bundle/runtime artifact links)]
+    shards[Input<br/>Phase 2 HDF5 shards<br/>VALIDATION + TRAIN fallback]
+    phase4_outputs[Input<br/>Stage 4 split bundle<br/>+ runtime_normalization_artifacts]
+    compact[Optional input<br/>Portable compact TRAIN_SELECTED HDF5/index]
     phase7_outputs[Input<br/>Approved LR / architecture reports]
-    p8[Phase 8<br/>8_training_ensemble.py<br/>Train one approved run<br/>optional OHEM]
-    outputs[Output<br/>Checkpoints + metrics + metadata<br/>with runtime-normalization provenance]
+    p8[Phase 8<br/>8_training_ensemble.py<br/>Train one approved run<br/>WeightedRandomSampler + optional OHEM<br/>runtime normalization at load time]
+    outputs[Output<br/>Checkpoints + metrics + reports<br/>metadata with split/runtime provenance]
 
-    manifest -. read training / validation rows .-> p8
-    shards -. load validation pixels<br/>and canonical train fallback .-> p8
+    manifest -. read TRAIN or TRAIN_SELECTED<br/>+ VALIDATION rows .-> p8
+    shards -. load validation pixels<br/>and canonical TRAIN fallback .-> p8
     phase4_outputs --> p8
-    phase6_outputs -. optional .-> p8
+    compact -. optional TRAIN_SELECTED .-> p8
     phase7_outputs --> p8
     p8 --> outputs
     p8 -. read only .-> manifest
