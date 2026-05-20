@@ -1,183 +1,96 @@
 # Method Sources
 
-This file maps major manuscript sections in `reports/main.tex` to repository sources inspected during drafting.
-The repo now uses current script names (`3_1`, `4_crossfold`, `8_training_ensemble`, etc.),
-so stage labels here follow the current codebase naming used in orchestration entrypoints.
+This file maps the current Elsevier manuscript in `reports/main.tex` to the
+thesis chapters, final result artifacts, and repository modules that support its
+main claims. It is intentionally concise: the paper should remain cleaner than
+the thesis while retaining enough traceability to audit every quantitative and
+methodological statement.
 
-## Pipeline overview
+## Manuscript Narrative
 
-- `README.md`
-- `AGENTS.md`
-- `1_artifact_detection.py`
-- `2_database_manager.py`
-- `3_1_optimization_sampling.py`
-- `3_2_tune_graph_method.py`
-- `3_3_cleaner_script.py`
-- `4_crossfold.py`
-- `5_sanity_checks.py`
-- `6_smart_sampler.py`
-- `7_lr_finder.py`
-- `8_training_ensemble.py`
-- `9_optimizer_ensemble.py`
-- `10_inference_ensemble.py`
-- `helpers/runtime_platform.py`
-- `helpers/runtime_normalization.py`
-- `helpers/logging_utils.py`
+- `masters_thesis/New_Thesis/resumo.tex`
+- `masters_thesis/New_Thesis/desenvolvimento.tex`
+- `masters_thesis/New_Thesis/resultados.tex`
+- `masters_thesis/New_Thesis/conclusoes.tex`
+- `references/citations.md`
 
-## Stage 1 artifact detection
+The paper-level claim is methodological: an auditable end-to-end workflow for
+digital pathology experiments, evaluated on DIAGSET. It should not claim clinical
+deployment readiness or superiority over external baselines.
 
-- `1_artifact_detection.py`
-- `helpers/artifact/config.py`
-- `helpers/artifact/pipeline.py`
-- `helpers/artifact/processor.py`
-- `helpers/artifact/model_loader.py`
-- `helpers/artifact/repository.py`
-- `helpers/artifact/zip.py`
-- `.env_example`
+## Dataset, Curation, and Split Evidence
 
-## Stage 2 database-backed patch extraction
+- `masters_thesis/New_Thesis/resultados.tex`
+  - ingestion: 429 images, 429 annotations, 419 valid GeoJSON-paired cases
+  - graph-review samples: pilot 94/6, master 367/18 approved/rejected
+  - graph-cleaning parameters: background threshold 167, `k=140`, minimum size 97,
+    erosion 3 px, contamination threshold 0.19
+  - retained dataset: 1,186,778 accepted patches after 74,047 cancer-patch rejections
+  - patient split: TRAIN/VALIDATION/TEST = 236/78/79 patients
+  - test set: 38 positive and 41 negative patients, 387,325 patches
+  - smart sampling: 180,381 retained of 660,867 training patches
+- `helpers/extraction/*`
+- `helpers/graph/*`
+- `helpers/crossfold/*`
+- `helpers/smart_sampling/*`
 
-- `2_database_manager.py`
-- `helpers/extraction/config.py`
-- `helpers/extraction/repository.py`
-- `helpers/extraction/image_reader_service.py`
-- `helpers/extraction/data_handlers.py`
-- `helpers/extraction/master_manifest.py`
-- `helpers/extraction/patch_engine.py`
-- `helpers/runtime_platform.py`
-- `.env_example`
+## Training, Ensemble, and Metrics Evidence
 
-## Stages 3.1--3.3 cleaning workflow
+- `masters_thesis/New_Thesis/resultados.tex`
+  - five normalization settings: no normalization, Reinhard, Ruifrok, Macenko,
+    Vahadane
+  - 40 final trainings, eight architectures per normalization, seed 24
+  - ensemble composition and thresholds for each normalization
+  - final micro, macro, AUROC, positive-patient Dice, and negative-clean-rate
+    findings
+- Final metric JSON files under
+  `D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/*/INFERENCE/`
+  - `ENSEMBLE_METRICS_11_05_2026_14_51_19.json` for `NOT_NORMALIZED`
+  - `ENSEMBLE_METRICS_11_05_2026_15_16_10.json` for `REINHARD`
+  - `ENSEMBLE_METRICS_12_05_2026_13_11_34.json` for `RUIFROK`
+  - `ENSEMBLE_METRICS_12_05_2026_13_13_22.json` for `MACENKO`
+  - `ENSEMBLE_METRICS_12_05_2026_13_17_25.json` for `VAHADANE`
+- `helpers/training/*`
+- `helpers/ensemble_optimizer/*`
+- `helpers/ensemble_inference/*`
 
-- `3_1_optimization_sampling.py`
-- `helpers/optimization_sampling/config.py`
-- `helpers/optimization_sampling/sampling.py`
-- `helpers/optimization_sampling/overlay.py`
-- `helpers/optimization_sampling/pipeline.py`
-- `3_2_tune_graph_method.py`
-- `helpers/graph/tuning_config.py`
-- `helpers/graph/tuning_pipeline.py`
-- `helpers/graph/contamination.py`
-- `helpers/graph/parameter_store.py`
-- `3_3_cleaner_script.py`
-- `helpers/graph/cleaning_config.py`
-- `helpers/graph/cleaning_pipeline.py`
-- `.env_example`
+The compact final-results table in `reports/main.tex` was cross-checked against
+the thesis tables and the `ENSEMBLE_METRICS_*.json` files listed above.
 
-## Stage 3 canonical source packaging helpers
+## Paper Figures
 
-- `helpers/packaging/config.py`
-- `helpers/packaging/pipeline.py`
-- `helpers/packaging/writer.py`
-- `.env_example`
+Paper-selected assets are copied into `reports/figures/` from
+`masters_thesis/New_Thesis/figuras/`:
 
-## Stage 4 crossfold and normalization
+- `pipeline_overview.png` from `mestrado_v3.png`
+- `results_diagset_micro_metrics.png`
+- `results_diagset_macro_metrics.png`
 
-- `4_crossfold.py`
-- `helpers/crossfold/config.py`
-- `helpers/crossfold/discovery.py`
-- `helpers/crossfold/entropy.py`
-- `helpers/crossfold/io.py`
-- `helpers/crossfold/normalization.py`
-- `helpers/crossfold/pipeline.py`
-- `helpers/crossfold/provenance.py`
-- `helpers/crossfold/splitting.py`
-- `helpers/runtime_normalization.py`
-- `.env_example`
+The paper intentionally omits LR-finder plots, per-architecture checkpoint
+tables, and the full thesis confusion-matrix set to keep the Elsevier manuscript
+focused.
 
-## Stage 5 sanity checks
+## Citation Sources
 
-- `5_sanity_checks.py`
-- `helpers/sanity/config.py`
-- `helpers/sanity/contracts.py`
-- `helpers/sanity/disk_checks.py`
-- `helpers/sanity/manifest_checks.py`
-- `helpers/sanity/pipeline.py`
-- `helpers/sanity/provenance.py`
-- `helpers/sanity/reporting.py`
-- `helpers/sanity/semantic_checks.py`
+- `reports/references.bib`
+- `masters_thesis/New_Thesis/bibliografia.bib`
+- `references/citations.md`
 
-## Stage 6 smart sampling
+The report-local bibliography uses vetted peer-reviewed or proceedings entries
+needed by the paper narrative. ArXiv-only entries are excluded by default.
 
-- `6_smart_sampler.py`
-- `helpers/smart_sampling/config.py`
-- `helpers/smart_sampling/index.py`
-- `helpers/smart_sampling/embeddings.py`
-- `helpers/smart_sampling/gist.py`
-- `helpers/smart_sampling/selection.py`
-- `helpers/smart_sampling/storage.py`
-- `helpers/smart_sampling/writer.py`
-- `helpers/smart_sampling/pipeline.py`
-- `helpers/training/compact_train_selected.py`
+## Build Contract
 
-## Stage 7 learning-rate screening
+Build from `reports/` with the Elsevier template visible:
 
-- `7_lr_finder.py`
-- `helpers/lr_finder/config.py`
-- `helpers/lr_finder/data.py`
-- `helpers/lr_finder/search_space.py`
-- `helpers/lr_finder/analysis.py`
-- `helpers/lr_finder/runner.py`
-- `helpers/lr_finder/reporting.py`
-- `helpers/lr_finder/pipeline.py`
-- `helpers/runtime_normalization.py`
-- `helpers/training/stain_normalization.py`
-- `helpers/training/compact_train_selected.py`
-- `training_model_registry_NOT_NORMALIZED.json`
-- `training_model_registry_MACENKO.json`
-- `training_model_registry_REINHARD.json`
-- `training_model_registry_RUIFROK.json`
-- `training_model_registry_VAHADANE.json`
+```powershell
+$env:TEXINPUTS = '../latex_template//;'
+$env:BSTINPUTS = '../latex_template//;'
+xelatex main.tex
+bibtex main
+xelatex main.tex
+xelatex main.tex
+```
 
-## Stage 8 training
-
-- `8_training_ensemble.py`
-- `helpers/training/config.py`
-- `helpers/training/data.py`
-- `helpers/training/compact_train_selected.py`
-- `helpers/training/models.py`
-- `helpers/training/losses.py`
-- `helpers/training/loop.py`
-- `helpers/training/metrics.py`
-- `helpers/training/checkpointing.py`
-- `helpers/training/pipeline.py`
-- `helpers/training/runtime.py`
-- `helpers/training/gpu.py`
-- `helpers/runtime_normalization.py`
-- `helpers/training/stain_normalization.py`
-- `training_model_registry_NOT_NORMALIZED.json`
-- `training_model_registry_MACENKO.json`
-- `training_model_registry_REINHARD.json`
-- `training_model_registry_RUIFROK.json`
-- `training_model_registry_VAHADANE.json`
-
-## Stages 9--10 ensemble optimization and inference
-
-- `9_optimizer_ensemble.py`
-- `helpers/ensemble_optimizer/config.py`
-- `helpers/ensemble_optimizer/data.py`
-- `helpers/ensemble_optimizer/metadata.py`
-- `helpers/ensemble_optimizer/models.py`
-- `helpers/ensemble_optimizer/optimization.py`
-- `helpers/ensemble_optimizer/pipeline.py`
-- `helpers/ensemble_optimizer/reporting.py`
-- `helpers/ensemble_optimizer/splitting.py`
-- `helpers/runtime_normalization.py`
-- `10_inference_ensemble.py`
-- `helpers/ensemble_inference/config.py`
-- `helpers/ensemble_inference/data.py`
-- `helpers/ensemble_inference/inference.py`
-- `helpers/ensemble_inference/metrics.py`
-- `helpers/ensemble_inference/models.py`
-- `helpers/ensemble_inference/pipeline.py`
-- `helpers/ensemble_inference/recipe.py`
-- `helpers/ensemble_inference/reporting.py`
-- `helpers/runtime_normalization.py`
-
-## Environment and template constraints
-
-- `pyproject.toml`
-- `.env_example`
-- `latex_template/README`
-- `latex_template/cas-dc-template.tex`
-- `latex_template/cas-dc-sample.tex`
+After building, inspect `main.log` for undefined citations, undefined
+references, missing figures, LaTeX errors, and serious overfull boxes.

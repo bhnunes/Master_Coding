@@ -5,35 +5,73 @@
 \csgdef{mark@corau1}{1}
 \emailauthor{bruno.nunes.1987@gmail.com}{Bruno Henrique Nunes}
 \HyPL@Entry{0<</P(\376\377\0000)>>}
+\citation{roberts2017crossvalidation,dawood2026confounding}
+\citation{wilkinson2016fair,piccolo2016tools}
+\citation{koziarski2024diagset}
+\citation{reinhard2001color,ruifrok2001quantification,macenko2009method,vahadane2016structure}
+\citation{saito2015precision,fawcett2006roc,seghier2024dice}
+\citation{weng2024grandqc,munozaguirre2020pyhist,khened2021generalized}
+\citation{folk2011hdf5,wilkinson2016fair}
+\citation{tellez2019augmentation}
 \HyPL@Entry{1<</S/D>>}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{1}{section.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {3}Materials and Methods}{1}{section.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Pipeline overview}{1}{subsection.3.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Stage 1: artifact detection on archived whole-slide images}{2}{subsection.3.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Stage 2: database-backed patch extraction}{2}{subsection.3.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Stages 3.1--3.3: review-oriented cleaning and graph-based rejection}{3}{subsection.3.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Stage 3: packaging canonical source HDF5 datasets}{4}{subsection.3.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Stage 4: patient-level split generation and shared runtime-normalization artifacts}{4}{subsection.3.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.7}Stage 5: scientific sanity checks}{4}{subsection.3.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.8}Stage 6: embedding-based smart sampling of the training split}{4}{subsection.3.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.9}Stage 7: repeated learning-rate and loss-weight screening}{5}{subsection.3.9}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.10}Stage 8: single-model segmentation training}{5}{subsection.3.10}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.11}Stage 9: validation-only optimization of a two-stream ensemble recipe}{7}{subsection.3.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.12}Stage 10: frozen test-time ensemble inference}{8}{subsection.3.12}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup and Reproducibility}{8}{section.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Software environment}{8}{subsection.4.1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Approved architecture--encoder search space and default optimization settings extracted from the model registry and Stage~9 role assignments.}}{9}{table.1}\protected@file@percent }
-\newlabel{tab:model-registry}{{1}{9}{Approved architecture--encoder search space and default optimization settings extracted from the model registry and Stage~9 role assignments}{table.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Selected default settings for the late-stage data selection, optimization, and inference workflow. Values are taken from the repository configuration defaults and should be overridden in the manuscript only when authoritative run artifacts show different settings for the reported experiment.}}{9}{table.2}\protected@file@percent }
-\newlabel{tab:core-settings}{{2}{9}{Selected default settings for the late-stage data selection, optimization, and inference workflow. Values are taken from the repository configuration defaults and should be overridden in the manuscript only when authoritative run artifacts show different settings for the reported experiment}{table.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Approved model search space}{9}{subsection.4.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Core optimization settings}{9}{subsection.4.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Determinism and provenance tracking}{9}{subsection.4.4}\protected@file@percent }
-\csxdef{lastpage}{10}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Known limits of code-grounded reporting}{10}{subsection.4.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{10}{section.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{10}{section.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{10}{section.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {A}Code-grounded placeholders requiring experiment artifacts}{10}{section.A}\protected@file@percent }
-\gdef \@abspage@last{11}
+\citation{dietterich2000ensemble,caruana2004ensemble,moshkov2020test}
+\citation{koziarski2024diagset}
+\citation{felzenszwalb2004efficient}
+\citation{campanella2025clinical,oquab2024dinov2,he2009imbalanced}
+\citation{khened2021generalized,he2009imbalanced}
+\citation{saito2015precision,matthews1975comparison}
+\citation{akiba2019optuna,bergstra2011algorithms}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Materials and Methods}{2}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Workflow Overview}{2}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Dataset and Curation}{2}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Patient-Level Splitting and Runtime Normalization}{2}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Training and Checkpoint Selection}{2}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Two-Stream Ensemble Inference}{2}{subsection.3.5}\protected@file@percent }
+\citation{efron1979bootstrap}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Overview of the implemented workflow. Whole-slide images and annotations are transformed into curated HDF5-backed patch datasets, split at the patient level, optionally reduced only in the training split, trained through a fixed model registry, combined by validation-only ensemble optimization, and evaluated with a frozen test-time recipe.}}{3}{figure.1}\protected@file@percent }
+\newlabel{fig:pipeline-overview}{{1}{3}{Overview of the implemented workflow. Whole-slide images and annotations are transformed into curated HDF5-backed patch datasets, split at the patient level, optionally reduced only in the training split, trained through a fixed model registry, combined by validation-only ensemble optimization, and evaluated with a frozen test-time recipe}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Metrics and Uncertainty}{3}{subsection.3.6}\protected@file@percent }
+\citation{tellez2019augmentation}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction.}}{4}{table.1}\protected@file@percent }
+\newlabel{tab:final-results}{{1}{4}{Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction}{table.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Results}{4}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Curation, Split, and Sampling Outcomes}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Final Test Performance}{4}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Discussion}{4}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{4}{section.6}\protected@file@percent }
+\bibstyle{cas-model2-names}
+\bibdata{references}
+\bibcite{akiba2019optuna}{{1}{2019}{{Akiba et~al.}}{{Akiba, Sano, Yanase, Ohta and Koyama}}}
+\bibcite{bergstra2011algorithms}{{2}{2011}{{Bergstra et~al.}}{{Bergstra, Bardenet, Bengio and K{\'e}gl}}}
+\bibcite{campanella2025clinical}{{3}{2025}{{Campanella et~al.}}{{Campanella, Chen, Singh et~al.}}}
+\bibcite{caruana2004ensemble}{{4}{2004}{{Caruana et~al.}}{{Caruana, Niculescu-Mizil, Crew and Ksikes}}}
+\bibcite{dawood2026confounding}{{5}{2026}{{Dawood et~al.}}{{Dawood, Branson, Tejpar, Rajpoot and Minhas}}}
+\bibcite{dietterich2000ensemble}{{6}{2000}{{Dietterich}}{{}}}
+\bibcite{efron1979bootstrap}{{7}{1979}{{Efron}}{{}}}
+\bibcite{fawcett2006roc}{{8}{2006}{{Fawcett}}{{}}}
+\bibcite{felzenszwalb2004efficient}{{9}{2004}{{Felzenszwalb and Huttenlocher}}{{}}}
+\bibcite{folk2011hdf5}{{10}{2011}{{Folk et~al.}}{{Folk, Heber, Koziol, Pourmal and Robinson}}}
+\bibcite{he2009imbalanced}{{11}{2009}{{He and Garcia}}{{}}}
+\bibcite{khened2021generalized}{{12}{2021}{{Khened et~al.}}{{Khened, Kori, Rajkumar, Krishnamurthi and Srinivasan}}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Micro- and macro-averaged DIAGSET test metrics across normalization strategies. Micro metrics pool pixel counts before metric computation, whereas macro metrics compute patient-level values before averaging. Error bars denote 95\% patient-bootstrap confidence intervals where available.}}{5}{figure.2}\protected@file@percent }
+\newlabel{fig:metric-panels}{{2}{5}{Micro- and macro-averaged DIAGSET test metrics across normalization strategies. Micro metrics pool pixel counts before metric computation, whereas macro metrics compute patient-level values before averaging. Error bars denote 95\% patient-bootstrap confidence intervals where available}{figure.2}{}}
+\bibcite{koziarski2024diagset}{{13}{2024}{{Koziarski et~al.}}{{Koziarski, Cyganek et~al.}}}
+\bibcite{macenko2009method}{{14}{2009}{{Macenko et~al.}}{{Macenko, Niethammer, Marron, Borland, Woosley, Guan, Schmitt and Thomas}}}
+\bibcite{matthews1975comparison}{{15}{1975}{{Matthews}}{{}}}
+\bibcite{moshkov2020test}{{16}{2020}{{Moshkov et~al.}}{{Moshkov, Mathe, Kertesz-Farkas, Hollandi and Horvath}}}
+\bibcite{munozaguirre2020pyhist}{{17}{2020}{{Mu{\~n}oz-Aguirre et~al.}}{{Mu{\~n}oz-Aguirre, Ntasis, Rojas and Guig{\'o}}}}
+\bibcite{oquab2024dinov2}{{18}{2024}{{Oquab et~al.}}{{Oquab, Darcet, Moutakanni, Vo, Szafraniec, Khalidov, Fernandez et~al.}}}
+\bibcite{piccolo2016tools}{{19}{2016}{{Piccolo and Frampton}}{{}}}
+\bibcite{reinhard2001color}{{20}{2001}{{Reinhard et~al.}}{{Reinhard, Ashikhmin, Gooch and Shirley}}}
+\bibcite{roberts2017crossvalidation}{{21}{2017}{{Roberts et~al.}}{{Roberts, Bahn, Ciuti, Boyce, Elith et~al.}}}
+\bibcite{ruifrok2001quantification}{{22}{2001}{{Ruifrok and Johnston}}{{}}}
+\bibcite{saito2015precision}{{23}{2015}{{Saito and Rehmsmeier}}{{}}}
+\bibcite{seghier2024dice}{{24}{2024}{{Seghier}}{{}}}
+\bibcite{tellez2019augmentation}{{25}{2019}{{Tellez et~al.}}{{Tellez, Litjens, B{\'a}ndi, Bulten, Bokhorst, Ciompi and van~der Laak}}}
+\bibcite{vahadane2016structure}{{26}{2016}{{Vahadane et~al.}}{{Vahadane, Peng, Sethi, Albarqouni, Wang, Baust, Steiger, Schlitter, Esposito and Navab}}}
+\bibcite{weng2024grandqc}{{27}{2024}{{Weng et~al.}}{{Weng, Seper, Pryalukhin, Mairinger, Wickenhauser, Bauer, Glamann et~al.}}}
+\bibcite{wilkinson2016fair}{{28}{2016}{{Wilkinson et~al.}}{{Wilkinson, Dumontier, Aalbersberg, Appleton, Axton et~al.}}}
+\csxdef{lastpage}{6}
+\gdef \@abspage@last{7}
