@@ -104,120 +104,33 @@ bases distintas, mas exige documentar explicitamente quais classes originais
 foram fundidas, ignoradas ou rejeitadas ao longo do fluxo de preparação dos
 dados.
 
-\section{Conjuntos públicos de imagens utilizados}\label{sec:bases_publicas}
+\section{Conjunto público de imagens utilizado}\label{sec:bases_publicas}
 
-Os conjuntos públicos utilizados nesta dissertação foram selecionados por
-representarem diferentes cenários de patologia digital, tanto do ponto de vista
-clínico quanto metodológico. Eles variam em órgão, espécie, tipo de lesão,
-protocolo de aquisição, formato de anotação, granularidade diagnóstica e nível
-de supervisão disponível. Essa heterogeneidade é relevante para o objetivo do
-trabalho, pois permite avaliar se o fluxo proposto é capaz de organizar dados
-histopatológicos distintos sob contratos comuns de ingestão, rastreabilidade,
-curadoria, particionamento, treinamento e inferência.
+Esta dissertação utiliza exclusivamente o DIAGSET, uma base pública de imagens histopatológicas de próstata voltada à detecção computacional de câncer \cite{koziarski2024diagset}. O conjunto foi proposto por Koziarski et al. e reúne três subconjuntos complementares: DIAGSET-A, com mais de 2{,}6 milhões de \textit{patches} extraídos de 430 exames totalmente anotados; DIAGSET-B, com 4\,675 exames associados a diagnóstico binário; e DIAGSET-C, com 46 exames avaliados independentemente por nove patologistas. Essa organização torna a base relevante tanto para tarefas locais, baseadas em \textit{patches}, quanto para análises em nível de exame. 
 
-A \Tabela{tab:datasets_ativos} resume os principais conjuntos considerados no
-escopo experimental e metodológico da dissertação. A finalidade da tabela não é
-estabelecer comparação direta de desempenho entre bases, mas explicitar o papel
-de cada conjunto na validação do fluxo de trabalho proposto.
+No escopo deste trabalho, utiliza-se a porção anotada do DIAGSET, pois ela permite estruturar uma tarefa supervisionada de câncer versus não câncer. Essa escolha está alinhada ao objetivo metodológico da dissertação: avaliar um fluxo reprodutível que conecta ingestão, curadoria, particionamento por paciente, treinamento, combinação de modelos e inferência final. Diferentemente do estudo original, que enfatiza classificação de \textit{patches}, mapas probabilísticos e diagnóstico em nível de lâmina, esta dissertação reorganiza a base para avaliar segmentação binária por meio de métricas de sobreposição, métricas em nível de paciente e análise separada de casos com e sem lesão anotada.
 
 \begin{table}[!htb]
 \centering
-\caption{Conjuntos públicos de imagens considerados no escopo da dissertação.}
-\label{tab:datasets_ativos}
-\begin{tabular}{p{2.7cm}p{3.4cm}p{4.7cm}p{4.2cm}}
+\caption{Conjunto público de imagens utilizado na dissertação.}
+\label{tab:dataset_diagset}
+\begin{tabular}{p{2.7cm}p{3.4cm}p{5.2cm}p{4.0cm}}
 \toprule
 Conjunto & Domínio & Características principais & Papel na dissertação \\
 \midrule
-CAMELYON16 &
-Metástases de câncer de mama em linfonodos sentinela &
-WSIs hematoxilina-eosina de linfonodos, com casos positivos e negativos para
-metástase; inclui anotações de lesões metastáticas no conjunto de treino e
-avaliação independente em conjunto de teste \cite{bejnordi2017diagnostic}. &
-Referência clássica de desafio público em patologia digital, usada para
-representar detecção de regiões tumorais em WSIs com protocolo de avaliação
-bem definido. \\
-
-CATCH &
-Tumores cutâneos caninos &
-Conjunto pan-tumoral com WSIs de tumores cutâneos caninos, anotações
-poligonais extensas e múltiplas classes histológicas, incluindo subtipos
-tumorais e tecidos não tumorais \cite{wilm2022catch}. &
-Exemplo de patologia comparativa com anotações poligonais ricas, útil para
-avaliar ingestão, conversão de polígonos em máscaras e curadoria de classes. \\
-
-DiagSet &
+DIAGSET &
 Histopatologia de câncer de próstata &
-Conjunto público para detecção de câncer de próstata, composto por imagens
-anotadas em diferentes níveis, incluindo \textit{patches} extraídos de exames
-totalmente anotados e exames com diagnóstico binário \cite{koziarski2024diagset}. &
-Fonte de dados de um domínio humano específico, empregada para representar
-formulação binária de câncer versus não câncer e avaliação em múltiplas
-escalas. \\
-
-HiESD &
-Câncer gástrico precoce e lesões pré-cancerosas &
-WSIs de espécimes gástricos obtidos por dissecção submucosa endoscópica, com
-amostras de tecido, anotações categóricas e máscaras adequadas à segmentação
-supervisionada \cite{wang2025hiesd}. &
-Exemplo de base com supervisão detalhada em nível de tecido, relevante para
-testar segmentação, rastreabilidade entre lâmina e amostra, e conversão de
-classes para a tarefa binária. \\
+Base pública composta por \textit{patches} extraídos de exames anotados, exames com diagnóstico binário e um subconjunto avaliado independentemente por patologistas. A porção anotada permite formular uma tarefa supervisionada de câncer versus não câncer. &
+Base única de validação experimental do fluxo proposto, utilizada para avaliar ingestão, curadoria, particionamento por paciente, normalização de cor, treinamento supervisionado, \textit{ensemble} e inferência final. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-O conjunto CAMELYON16 é utilizado como referência de desafio público em
-patologia digital. Ele foi proposto para avaliar algoritmos de detecção de
-metástases de câncer de mama em WSIs de linfonodos sentinela. Seu interesse para
-esta dissertação está no fato de combinar lâminas positivas e negativas,
-anotações de regiões metastáticas no conjunto de treino, separação explícita
-entre treino e teste, e tarefas de avaliação em nível de lesão e em nível de
-lâmina \cite{bejnordi2017diagnostic}. Assim, CAMELYON16 representa um caso
-paradigmático de fluxo supervisionado em WSI, no qual a validade experimental
-depende da relação correta entre lâmina, anotação, \textit{patch}, paciente e
-conjunto de avaliação.
+O DIAGSET é adequado para esta dissertação por combinar um domínio clínico específico, anotações histopatológicas utilizáveis para supervisão e uma formulação compatível com a distinção binária entre tecido canceroso e não canceroso. No artigo original, essa formulação binária apresentou o melhor desempenho entre os cenários avaliados, alcançando aproximadamente 94{,}6\% de acurácia no reconhecimento em nível de \textit{patch}; os autores também descrevem o uso de \textit{ensembles} em múltiplas escalas para produzir mapas de probabilidade e apoiar o diagnóstico em nível de exame.
 
-O conjunto CATCH amplia o escopo para a patologia comparativa. Diferentemente de
-bases restritas a uma única classe tumoral, CATCH reúne tumores cutâneos caninos
-com diferentes subtipos histológicos e anotações poligonais detalhadas
-\cite{wilm2022catch}. Essa característica torna o conjunto particularmente
-relevante para testar etapas de ingestão, rasterização de polígonos, preservação
-da hierarquia entre classes e geração de máscaras supervisionadas. Além disso,
-por incluir classes tumorais e não tumorais, CATCH exige decisões explícitas de
-mapeamento quando o problema é convertido para uma formulação binária de câncer
-versus não câncer.
+Esses resultados fornecem um ponto de referência, mas não são diretamente comparáveis aos desta dissertação. A acurácia de classificação reportada por Koziarski et al. avalia a atribuição de rótulos a \textit{patches} ou exames, enquanto este trabalho avalia a qualidade espacial das predições por Dice, IoU, AUC, métricas agregadas por paciente e comportamento em casos negativos. Ainda assim, o desempenho binário observado no estudo original indica que a separação entre câncer e não câncer é uma tarefa empiricamente plausível no DIAGSET, justificando sua escolha como base para avaliar o fluxo proposto.
 
-O DiagSet introduz um domínio humano específico: a histopatologia do câncer de
-próstata. A base combina imagens com anotação detalhada, \textit{patches}
-extraídos de exames anotados e exames com diagnóstico binário, permitindo
-trabalhar tanto com informação localizada quanto com diagnóstico em nível mais
-global \cite{koziarski2024diagset}. No contexto desta dissertação, o DiagSet é
-relevante por aproximar o fluxo experimental de uma tarefa clínica frequente,
-na qual a distinção entre tecido tumoral e não tumoral precisa ser preservada
-sem perder a rastreabilidade entre amostras, exames e rótulos diagnósticos.
-
-O HiESD, por sua vez, representa um cenário de câncer gástrico precoce e lesões
-pré-cancerosas em espécimes obtidos por dissecção submucosa endoscópica. A base
-inclui WSIs, amostras de tecido, máscaras de qualidade, anotações e arquivos
-auxiliares que permitem localizar componentes de tecido dentro da lâmina
-original \cite{wang2025hiesd}. Sua inclusão é importante porque aproxima o
-fluxo de um problema de segmentação supervisionada com múltiplos tipos
-histológicos, exigindo conversão cuidadosa das categorias originais para uma
-tarefa binária, além de preservação da correspondência entre lâmina, fragmento
-tecidual, anotação e máscara.
-
-Em conjunto, essas bases permitem exercitar o fluxo proposto em condições
-heterogêneas. CAMELYON16 enfatiza o desafio público e a avaliação independente;
-CATCH enfatiza anotações poligonais extensas e diversidade de classes;
-DiagSet enfatiza um domínio humano específico com formulação diagnóstica de
-câncer de próstata; e HiESD enfatiza segmentação supervisionada em espécimes
-gástricos com múltiplas categorias histológicas. Essa diversidade torna
-necessário documentar, para cada amostra, sua origem, classe original,
-transformação aplicada, identificador de paciente ou caso, conjunto
-experimental, máscara resultante e regras de inclusão ou rejeição. Desse modo,
-os conjuntos públicos não são tratados apenas como fontes de imagens, mas como
-casos metodológicos para avaliar a rastreabilidade e a robustez do fluxo
-experimental.
+A adoção exclusiva do DIAGSET também delimita o alcance das conclusões. Os resultados apresentados nesta dissertação devem ser interpretados como uma validação metodológica em histopatologia de próstata, e não como evidência de generalização para outros órgãos, protocolos de aquisição ou bases de dados. A generalização do método para outros tipos de câncer (o que já encontra-se pensado desde sua concepção) permanece como etapa futura, a ser investigada mediante aplicação do mesmo fluxo a bases independentes.
 
 \section{Pré-processamento, tecido e artefatos}\label{sec:preprocessamento_patologia}
 
