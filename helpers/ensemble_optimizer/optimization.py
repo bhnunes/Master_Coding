@@ -205,6 +205,8 @@ class _Rule6CandidateKey:
     threshold: float
     min_component_area_px: int
     min_patient_positive_patches: int
+    min_patient_positive_area_fraction: float
+    min_component_area_fraction_patch: float
 
 
 @dataclass(frozen=True)
@@ -214,8 +216,56 @@ class _Rule6CandidateScore:
     positive_dice: float
     positive_tpr: float
     negative_clean_rate: float
+    micro_dice: float
+    macro_precision: float
     positive_patient_count: int
     negative_patient_count: int
+
+
+@dataclass(frozen=True)
+class _Rule6Grid:
+    candidate_keys: tuple[_Rule6CandidateKey, ...]
+    candidate_index: dict[_Rule6CandidateKey, int]
+    threshold_values: tuple[float, ...]
+    area_candidates: tuple[int, ...]
+    area_fraction_candidates: tuple[float, ...]
+    patch_candidates: tuple[int, ...]
+    patient_area_fraction_candidates: tuple[float, ...]
+
+
+@dataclass
+class _Rule6CandidateAccumulator:
+    positive_dice_totals: npt.NDArray[np.float64]
+    positive_tpr_totals: npt.NDArray[np.float64]
+    negative_clean_totals: npt.NDArray[np.float64]
+    macro_precision_totals: npt.NDArray[np.float64]
+    macro_precision_counts: npt.NDArray[np.int64]
+    micro_tp_totals: npt.NDArray[np.int64]
+    micro_fp_totals: npt.NDArray[np.int64]
+    micro_fn_totals: npt.NDArray[np.int64]
+    micro_tn_totals: npt.NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class _Rule6CandidateTotals:
+    positive_dice_total: float
+    positive_tpr_total: float
+    negative_clean_total: float
+    macro_precision_total: float
+    macro_precision_count: int
+    micro_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class _Rule6PatientCandidateEvidence:
+    threshold: float
+    min_component_area_px: int
+    min_component_area_fraction_patch: float
+    positive_patch_count: int
+    positive_area_fraction: float
+    unsuppressed_counts: dict[str, int]
+    suppressed_counts: dict[str, int]
+    is_positive_patient: bool
 
 
 @dataclass(frozen=True)
@@ -678,6 +728,13 @@ def _dice_from_counts(counts: dict[str, int]) -> float:
     return float((2.0 * tp) / denominator) if denominator > 0.0 else 0.0
 
 
+def _precision_from_counts(counts: dict[str, int]) -> float:
+    tp = float(counts["tp"])
+    fp = float(counts["fp"])
+    denominator = tp + fp
+    return float(tp / denominator) if denominator > 0.0 else float("nan")
+
+
 def _tpr_from_counts(counts: dict[str, int]) -> float:
     tp = float(counts["tp"])
     fn = float(counts["fn"])
@@ -700,10 +757,16 @@ def _rule6_candidate_keys(config: EnsembleOptimizerConfig) -> tuple[_Rule6Candid
             threshold=threshold,
             min_component_area_px=min_component_area_px,
             min_patient_positive_patches=min_patient_positive_patches,
+            min_patient_positive_area_fraction=min_patient_positive_area_fraction,
+            min_component_area_fraction_patch=min_component_area_fraction_patch,
         )
         for threshold in _rule6_threshold_values(config)
         for min_component_area_px in config.min_component_area_px_candidates
+        for min_component_area_fraction_patch in config.min_component_area_fraction_patch_candidates
         for min_patient_positive_patches in config.min_patient_positive_patches_candidates
+        for min_patient_positive_area_fraction in (
+            config.min_patient_positive_area_fraction_candidates
+        )
     )
 
 
@@ -711,6 +774,8 @@ def _zero_rule6_calibration_result(config: EnsembleOptimizerConfig) -> _Rule6Cal
     postprocessing_config = PostprocessingConfig(
         min_component_area_px=0,
         min_patient_positive_patches=1,
+        min_patient_positive_area_fraction=0.0,
+        min_component_area_fraction_patch=0.0,
     )
     summary: dict[str, Any] = {
         "objective": "balanced_rule6",
@@ -732,12 +797,21 @@ def _zero_rule6_calibration_result(config: EnsembleOptimizerConfig) -> _Rule6Cal
             "Calibration_positive_dice": 0.0,
             "Calibration_positive_tpr": 0.0,
             "Calibration_negative_clean_rate": 0.0,
+            "Calibration_micro_dice": 0.0,
+            "Calibration_macro_precision": 0.0,
             "Calibration_baseline_positive_dice": 0.0,
             "Calibration_baseline_positive_tpr": 0.0,
+            "Calibration_min_micro_dice": float(config.min_micro_dice),
+            "Calibration_negative_clean_target": float(config.negative_clean_target),
+            "Calibration_min_macro_precision": float(config.min_macro_precision),
+            "Calibration_min_macro_tpr": float(config.min_macro_tpr),
             "Calibration_positive_dice_drop_tolerance": float(config.pos_dice_drop_tolerance),
             "Calibration_positive_tpr_drop_tolerance": float(config.pos_tpr_drop_tolerance),
             "Calibration_min_component_area_px": 0,
             "Calibration_min_patient_positive_patches": 1,
+            "Calibration_min_patient_positive_area_fraction": 0.0,
+            "Calibration_min_component_area_fraction_patch": 0.0,
+            "Calibration_target_status": "no_calibration_patients",
             "Calibration_n_patients": 0,
             "Calibration_n_positive_patients": 0,
             "Calibration_n_negative_patients": 0,
@@ -756,13 +830,21 @@ def _rule6_candidate_grid_summary(config: EnsembleOptimizerConfig) -> dict[str, 
         "min_component_area_px_candidates": [
             int(value) for value in config.min_component_area_px_candidates
         ],
+        "min_component_area_fraction_patch_candidates": [
+            float(value) for value in config.min_component_area_fraction_patch_candidates
+        ],
         "min_patient_positive_patches_candidates": [
             int(value) for value in config.min_patient_positive_patches_candidates
+        ],
+        "min_patient_positive_area_fraction_candidates": [
+            float(value) for value in config.min_patient_positive_area_fraction_candidates
         ],
         "candidate_count": int(
             len(thresholds)
             * len(config.min_component_area_px_candidates)
+            * len(config.min_component_area_fraction_patch_candidates)
             * len(config.min_patient_positive_patches_candidates)
+            * len(config.min_patient_positive_area_fraction_candidates)
         ),
     }
 
@@ -770,25 +852,34 @@ def _rule6_candidate_grid_summary(config: EnsembleOptimizerConfig) -> dict[str, 
 def _score_rule6_candidate(
     *,
     key: _Rule6CandidateKey,
-    positive_dice_total: float,
-    positive_tpr_total: float,
-    negative_clean_total: float,
+    totals: _Rule6CandidateTotals,
     positive_patient_count: int,
     negative_patient_count: int,
 ) -> _Rule6CandidateScore:
     total_patients = positive_patient_count + negative_patient_count
     positive_dice = (
-        float(positive_dice_total / positive_patient_count) if positive_patient_count > 0 else 0.0
+        float(totals.positive_dice_total / positive_patient_count)
+        if positive_patient_count > 0
+        else 0.0
     )
     positive_tpr = (
-        float(positive_tpr_total / positive_patient_count) if positive_patient_count > 0 else 0.0
+        float(totals.positive_tpr_total / positive_patient_count)
+        if positive_patient_count > 0
+        else 0.0
     )
     negative_clean_rate = (
-        float(negative_clean_total / negative_patient_count) if negative_patient_count > 0 else 0.0
+        float(totals.negative_clean_total / negative_patient_count)
+        if negative_patient_count > 0
+        else 0.0
     )
     macro_rule6 = (
-        float((positive_dice_total + negative_clean_total) / total_patients)
+        float((totals.positive_dice_total + totals.negative_clean_total) / total_patients)
         if total_patients > 0
+        else 0.0
+    )
+    macro_precision = (
+        float(totals.macro_precision_total / totals.macro_precision_count)
+        if totals.macro_precision_count > 0
         else 0.0
     )
     return _Rule6CandidateScore(
@@ -797,6 +888,8 @@ def _score_rule6_candidate(
         positive_dice=positive_dice,
         positive_tpr=positive_tpr,
         negative_clean_rate=negative_clean_rate,
+        micro_dice=_dice_from_counts(totals.micro_counts),
+        macro_precision=macro_precision,
         positive_patient_count=positive_patient_count,
         negative_patient_count=negative_patient_count,
     )
@@ -804,14 +897,18 @@ def _score_rule6_candidate(
 
 def _candidate_sort_key(
     candidate: _Rule6CandidateScore,
-) -> tuple[float, float, float, float, float, int, float]:
+) -> tuple[float, ...]:
     return (
         candidate.macro_rule6,
         candidate.negative_clean_rate,
         candidate.positive_tpr,
         candidate.positive_dice,
+        candidate.micro_dice,
+        candidate.macro_precision,
         -float(candidate.key.min_component_area_px),
-        -int(candidate.key.min_patient_positive_patches),
+        -float(candidate.key.min_patient_positive_patches),
+        -float(candidate.key.min_patient_positive_area_fraction),
+        -float(candidate.key.min_component_area_fraction_patch),
         -float(candidate.key.threshold),
     )
 
@@ -821,12 +918,269 @@ def _candidate_to_summary(candidate: _Rule6CandidateScore) -> dict[str, float | 
         "decision_threshold": float(candidate.key.threshold),
         "min_component_area_px": int(candidate.key.min_component_area_px),
         "min_patient_positive_patches": int(candidate.key.min_patient_positive_patches),
+        "min_patient_positive_area_fraction": float(
+            candidate.key.min_patient_positive_area_fraction
+        ),
+        "min_component_area_fraction_patch": float(candidate.key.min_component_area_fraction_patch),
         "macro_rule6": float(candidate.macro_rule6),
         "positive_dice": float(candidate.positive_dice),
         "positive_tpr": float(candidate.positive_tpr),
         "negative_clean_rate": float(candidate.negative_clean_rate),
+        "micro_dice": float(candidate.micro_dice),
+        "macro_precision": float(candidate.macro_precision),
         "positive_patient_count": int(candidate.positive_patient_count),
         "negative_patient_count": int(candidate.negative_patient_count),
+    }
+
+
+def _build_rule6_grid(config: EnsembleOptimizerConfig) -> _Rule6Grid:
+    candidate_keys = _rule6_candidate_keys(config)
+    return _Rule6Grid(
+        candidate_keys=candidate_keys,
+        candidate_index={key: index for index, key in enumerate(candidate_keys)},
+        threshold_values=_rule6_threshold_values(config),
+        area_candidates=config.min_component_area_px_candidates,
+        area_fraction_candidates=config.min_component_area_fraction_patch_candidates,
+        patch_candidates=config.min_patient_positive_patches_candidates,
+        patient_area_fraction_candidates=config.min_patient_positive_area_fraction_candidates,
+    )
+
+
+def _build_rule6_accumulator(candidate_count: int) -> _Rule6CandidateAccumulator:
+    return _Rule6CandidateAccumulator(
+        positive_dice_totals=np.zeros(candidate_count, dtype=np.float64),
+        positive_tpr_totals=np.zeros(candidate_count, dtype=np.float64),
+        negative_clean_totals=np.zeros(candidate_count, dtype=np.float64),
+        macro_precision_totals=np.zeros(candidate_count, dtype=np.float64),
+        macro_precision_counts=np.zeros(candidate_count, dtype=np.int64),
+        micro_tp_totals=np.zeros(candidate_count, dtype=np.int64),
+        micro_fp_totals=np.zeros(candidate_count, dtype=np.int64),
+        micro_fn_totals=np.zeros(candidate_count, dtype=np.int64),
+        micro_tn_totals=np.zeros(candidate_count, dtype=np.int64),
+    )
+
+
+def _record_rule6_counts(
+    accumulator: _Rule6CandidateAccumulator,
+    *,
+    index: int,
+    counts: dict[str, int],
+    is_positive_patient: bool,
+) -> None:
+    accumulator.micro_tp_totals[index] += counts["tp"]
+    accumulator.micro_fp_totals[index] += counts["fp"]
+    accumulator.micro_fn_totals[index] += counts["fn"]
+    accumulator.micro_tn_totals[index] += counts["tn"]
+    precision = _precision_from_counts(counts)
+    if not np.isnan(precision):
+        accumulator.macro_precision_totals[index] += precision
+        accumulator.macro_precision_counts[index] += 1
+    if is_positive_patient:
+        accumulator.positive_dice_totals[index] += _dice_from_counts(counts)
+        accumulator.positive_tpr_totals[index] += _tpr_from_counts(counts)
+    else:
+        accumulator.negative_clean_totals[index] += 1.0 if counts["fp"] == 0 else 0.0
+
+
+def _record_patient_rule6_candidates(
+    accumulator: _Rule6CandidateAccumulator,
+    *,
+    grid: _Rule6Grid,
+    evidence: _Rule6PatientCandidateEvidence,
+) -> None:
+    for min_patient_positive_patches in grid.patch_candidates:
+        for min_patient_positive_area_fraction in grid.patient_area_fraction_candidates:
+            key = _Rule6CandidateKey(
+                threshold=evidence.threshold,
+                min_component_area_px=evidence.min_component_area_px,
+                min_patient_positive_patches=min_patient_positive_patches,
+                min_patient_positive_area_fraction=min_patient_positive_area_fraction,
+                min_component_area_fraction_patch=evidence.min_component_area_fraction_patch,
+            )
+            counts = (
+                evidence.suppressed_counts
+                if evidence.positive_patch_count < min_patient_positive_patches
+                or evidence.positive_area_fraction < min_patient_positive_area_fraction
+                else evidence.unsuppressed_counts
+            )
+            _record_rule6_counts(
+                accumulator,
+                index=grid.candidate_index[key],
+                counts=counts,
+                is_positive_patient=evidence.is_positive_patient,
+            )
+
+
+def _accumulate_patient_rule6_scores(
+    accumulator: _Rule6CandidateAccumulator,
+    *,
+    grid: _Rule6Grid,
+    spatial_prediction: npt.NDArray[np.float32],
+    patient_truth: npt.NDArray[np.uint8],
+    roi_mask: npt.NDArray[np.uint8],
+) -> bool:
+    gated_prediction = cast(
+        npt.NDArray[np.float32],
+        spatial_prediction.astype(np.float32) * roi_mask.astype(np.float32),
+    )
+    truth_counts = truth_pixel_counts(patient_truth)
+    is_positive_patient = truth_counts["positive"] > 0
+    suppressed_counts = {
+        "tp": 0,
+        "fp": 0,
+        "fn": int(truth_counts["positive"]),
+        "tn": int(truth_counts["negative"]),
+    }
+    for threshold in grid.threshold_values:
+        for min_component_area_px in grid.area_candidates:
+            for min_component_area_fraction_patch in grid.area_fraction_candidates:
+                predictions = threshold_and_filter_components(
+                    gated_prediction,
+                    decision_threshold=threshold,
+                    min_component_area_px=min_component_area_px,
+                    min_component_area_fraction_patch=min_component_area_fraction_patch,
+                )
+                positive_area_fraction = (
+                    float(np.count_nonzero(predictions) / predictions.size)
+                    if predictions.size > 0
+                    else 0.0
+                )
+                _record_patient_rule6_candidates(
+                    accumulator,
+                    grid=grid,
+                    evidence=_Rule6PatientCandidateEvidence(
+                        threshold=threshold,
+                        min_component_area_px=min_component_area_px,
+                        min_component_area_fraction_patch=min_component_area_fraction_patch,
+                        positive_patch_count=count_positive_prediction_patches(predictions),
+                        positive_area_fraction=positive_area_fraction,
+                        unsuppressed_counts=confusion_counts_from_binary_masks(
+                            predictions,
+                            patient_truth,
+                        ),
+                        suppressed_counts=suppressed_counts,
+                        is_positive_patient=is_positive_patient,
+                    ),
+                )
+    return is_positive_patient
+
+
+def _rule6_candidate_totals(
+    accumulator: _Rule6CandidateAccumulator,
+    index: int,
+) -> _Rule6CandidateTotals:
+    return _Rule6CandidateTotals(
+        positive_dice_total=float(accumulator.positive_dice_totals[index]),
+        positive_tpr_total=float(accumulator.positive_tpr_totals[index]),
+        negative_clean_total=float(accumulator.negative_clean_totals[index]),
+        macro_precision_total=float(accumulator.macro_precision_totals[index]),
+        macro_precision_count=int(accumulator.macro_precision_counts[index]),
+        micro_counts={
+            "tp": int(accumulator.micro_tp_totals[index]),
+            "fp": int(accumulator.micro_fp_totals[index]),
+            "fn": int(accumulator.micro_fn_totals[index]),
+            "tn": int(accumulator.micro_tn_totals[index]),
+        },
+    )
+
+
+def _score_rule6_candidates(
+    *,
+    grid: _Rule6Grid,
+    accumulator: _Rule6CandidateAccumulator,
+    positive_patient_count: int,
+    negative_patient_count: int,
+) -> list[_Rule6CandidateScore]:
+    return [
+        _score_rule6_candidate(
+            key=key,
+            totals=_rule6_candidate_totals(accumulator, index),
+            positive_patient_count=positive_patient_count,
+            negative_patient_count=negative_patient_count,
+        )
+        for index, key in enumerate(grid.candidate_keys)
+    ]
+
+
+def _select_rule6_candidate(
+    *,
+    scores: list[_Rule6CandidateScore],
+    optimizer_config: EnsembleOptimizerConfig,
+    minimum_allowed_positive_dice: float,
+    minimum_allowed_positive_tpr: float,
+) -> tuple[_Rule6CandidateScore, str, list[_Rule6CandidateScore], dict[str, int]]:
+    positive_guardrail_candidates = [
+        score
+        for score in scores
+        if score.positive_dice >= minimum_allowed_positive_dice
+        and score.positive_tpr >= minimum_allowed_positive_tpr
+    ]
+    micro_guardrail_candidates = [
+        score
+        for score in positive_guardrail_candidates
+        if score.micro_dice >= optimizer_config.min_micro_dice
+    ]
+    target_candidates = [
+        score
+        for score in micro_guardrail_candidates
+        if score.negative_clean_rate >= optimizer_config.negative_clean_target
+        and score.macro_precision >= optimizer_config.min_macro_precision
+        and score.positive_tpr >= optimizer_config.min_macro_tpr
+    ]
+    if target_candidates:
+        return (
+            max(target_candidates, key=_candidate_sort_key),
+            "target_met",
+            target_candidates,
+            _rule6_candidate_pool_counts(
+                positive_guardrail_candidates,
+                micro_guardrail_candidates,
+                target_candidates,
+            ),
+        )
+    if micro_guardrail_candidates:
+        return (
+            max(micro_guardrail_candidates, key=_candidate_sort_key),
+            "target_infeasible",
+            micro_guardrail_candidates,
+            _rule6_candidate_pool_counts(
+                positive_guardrail_candidates,
+                micro_guardrail_candidates,
+                target_candidates,
+            ),
+        )
+    if positive_guardrail_candidates:
+        return (
+            max(positive_guardrail_candidates, key=_candidate_sort_key),
+            "micro_guardrail_infeasible",
+            positive_guardrail_candidates,
+            _rule6_candidate_pool_counts(
+                positive_guardrail_candidates,
+                micro_guardrail_candidates,
+                target_candidates,
+            ),
+        )
+    return (
+        max(scores, key=_candidate_sort_key),
+        "positive_guardrail_infeasible",
+        scores,
+        _rule6_candidate_pool_counts(
+            positive_guardrail_candidates,
+            micro_guardrail_candidates,
+            target_candidates,
+        ),
+    )
+
+
+def _rule6_candidate_pool_counts(
+    positive_guardrail_candidates: list[_Rule6CandidateScore],
+    micro_guardrail_candidates: list[_Rule6CandidateScore],
+    target_candidates: list[_Rule6CandidateScore],
+) -> dict[str, int]:
+    return {
+        "positive_guardrail_candidate_count": len(positive_guardrail_candidates),
+        "micro_guardrail_candidate_count": len(micro_guardrail_candidates),
+        "target_candidate_count": len(target_candidates),
     }
 
 
@@ -837,67 +1191,25 @@ def _calibrate_rule6_from_patient_predictions(
         tuple[str, npt.NDArray[np.float32], npt.NDArray[np.uint8], npt.NDArray[np.uint8]]
     ],
 ) -> _Rule6CalibrationResult:
-    candidate_keys = _rule6_candidate_keys(optimizer_config)
-    positive_dice_totals = np.zeros(len(candidate_keys), dtype=np.float64)
-    positive_tpr_totals = np.zeros(len(candidate_keys), dtype=np.float64)
-    negative_clean_totals = np.zeros(len(candidate_keys), dtype=np.float64)
+    grid = _build_rule6_grid(optimizer_config)
+    accumulator = _build_rule6_accumulator(len(grid.candidate_keys))
     positive_patient_count = 0
     negative_patient_count = 0
     processed_patients = 0
 
-    threshold_values = _rule6_threshold_values(optimizer_config)
-    area_candidates = optimizer_config.min_component_area_px_candidates
-    patch_candidates = optimizer_config.min_patient_positive_patches_candidates
-    candidate_index = {key: index for index, key in enumerate(candidate_keys)}
-
     for _patient_id, spatial_prediction, patient_truth, roi_mask in patient_predictions:
         processed_patients += 1
-        gated_prediction = cast(
-            npt.NDArray[np.float32],
-            spatial_prediction.astype(np.float32) * roi_mask.astype(np.float32),
+        is_positive_patient = _accumulate_patient_rule6_scores(
+            accumulator,
+            grid=grid,
+            spatial_prediction=spatial_prediction,
+            patient_truth=patient_truth,
+            roi_mask=roi_mask,
         )
-        truth_counts = truth_pixel_counts(patient_truth)
-        is_positive_patient = truth_counts["positive"] > 0
         if is_positive_patient:
             positive_patient_count += 1
         else:
             negative_patient_count += 1
-
-        suppressed_counts = {
-            "tp": 0,
-            "fp": 0,
-            "fn": int(truth_counts["positive"]),
-            "tn": int(truth_counts["negative"]),
-        }
-        for threshold in threshold_values:
-            for min_component_area_px in area_candidates:
-                predictions = threshold_and_filter_components(
-                    gated_prediction,
-                    decision_threshold=threshold,
-                    min_component_area_px=min_component_area_px,
-                )
-                positive_patch_count = count_positive_prediction_patches(predictions)
-                unsuppressed_counts = confusion_counts_from_binary_masks(
-                    predictions,
-                    patient_truth,
-                )
-                for min_patient_positive_patches in patch_candidates:
-                    key = _Rule6CandidateKey(
-                        threshold=threshold,
-                        min_component_area_px=min_component_area_px,
-                        min_patient_positive_patches=min_patient_positive_patches,
-                    )
-                    index = candidate_index[key]
-                    counts = (
-                        suppressed_counts
-                        if positive_patch_count < min_patient_positive_patches
-                        else unsuppressed_counts
-                    )
-                    if is_positive_patient:
-                        positive_dice_totals[index] += _dice_from_counts(counts)
-                        positive_tpr_totals[index] += _tpr_from_counts(counts)
-                    else:
-                        negative_clean_totals[index] += 1.0 if counts["fp"] == 0 else 0.0
 
     if processed_patients == 0:
         return _zero_rule6_calibration_result(optimizer_config)
@@ -907,42 +1219,45 @@ def _calibrate_rule6_from_patient_predictions(
             "calibration patient."
         )
 
-    scores = [
-        _score_rule6_candidate(
-            key=key,
-            positive_dice_total=float(positive_dice_totals[index]),
-            positive_tpr_total=float(positive_tpr_totals[index]),
-            negative_clean_total=float(negative_clean_totals[index]),
-            positive_patient_count=positive_patient_count,
-            negative_patient_count=negative_patient_count,
-        )
-        for index, key in enumerate(candidate_keys)
-    ]
+    scores = _score_rule6_candidates(
+        grid=grid,
+        accumulator=accumulator,
+        positive_patient_count=positive_patient_count,
+        negative_patient_count=negative_patient_count,
+    )
     # Anchor sensitivity guardrails to the least-filtered baseline, not to the
     # best unfiltered candidate selected by the same threshold sweep.
     baseline_key = _Rule6CandidateKey(
-        threshold=threshold_values[0],
+        threshold=grid.threshold_values[0],
         min_component_area_px=0,
         min_patient_positive_patches=1,
+        min_patient_positive_area_fraction=0.0,
+        min_component_area_fraction_patch=0.0,
     )
-    baseline = scores[candidate_index[baseline_key]]
+    baseline = scores[grid.candidate_index[baseline_key]]
     minimum_allowed_positive_dice = (
         baseline.positive_dice - optimizer_config.pos_dice_drop_tolerance
     )
     minimum_allowed_positive_tpr = baseline.positive_tpr - optimizer_config.pos_tpr_drop_tolerance
-    accepted_candidates = [
-        score
-        for score in scores
-        if score.positive_dice >= minimum_allowed_positive_dice
-        and score.positive_tpr >= minimum_allowed_positive_tpr
-    ]
-    selected = max(accepted_candidates, key=_candidate_sort_key)
+    selected, target_status, selection_pool, candidate_pool_counts = _select_rule6_candidate(
+        scores=scores,
+        optimizer_config=optimizer_config,
+        minimum_allowed_positive_dice=minimum_allowed_positive_dice,
+        minimum_allowed_positive_tpr=minimum_allowed_positive_tpr,
+    )
     postprocessing_config = PostprocessingConfig(
         min_component_area_px=selected.key.min_component_area_px,
         min_patient_positive_patches=selected.key.min_patient_positive_patches,
+        min_patient_positive_area_fraction=selected.key.min_patient_positive_area_fraction,
+        min_component_area_fraction_patch=selected.key.min_component_area_fraction_patch,
     )
     summary = {
         "objective": "balanced_rule6",
+        "target_status": target_status,
+        "min_micro_dice": float(optimizer_config.min_micro_dice),
+        "negative_clean_target": float(optimizer_config.negative_clean_target),
+        "min_macro_precision": float(optimizer_config.min_macro_precision),
+        "min_macro_tpr": float(optimizer_config.min_macro_tpr),
         "positive_dice_drop_tolerance": float(optimizer_config.pos_dice_drop_tolerance),
         "positive_tpr_drop_tolerance": float(optimizer_config.pos_tpr_drop_tolerance),
         "minimum_allowed_positive_dice": float(minimum_allowed_positive_dice),
@@ -951,8 +1266,10 @@ def _calibrate_rule6_from_patient_predictions(
         "baseline_unfiltered": _candidate_to_summary(baseline),
         "selected": _candidate_to_summary(selected),
         "postprocessing_config": postprocessing_config_to_payload(postprocessing_config),
-        "accepted_candidate_count": int(len(accepted_candidates)),
-        "rejected_candidate_count": int(len(scores) - len(accepted_candidates)),
+        **candidate_pool_counts,
+        "selection_pool_candidate_count": int(len(selection_pool)),
+        "accepted_candidate_count": int(len(selection_pool)),
+        "rejected_candidate_count": int(len(scores) - len(selection_pool)),
     }
     return _Rule6CalibrationResult(
         decision_threshold=float(selected.key.threshold),
@@ -965,8 +1282,14 @@ def _calibrate_rule6_from_patient_predictions(
             "Calibration_positive_dice": float(selected.positive_dice),
             "Calibration_positive_tpr": float(selected.positive_tpr),
             "Calibration_negative_clean_rate": float(selected.negative_clean_rate),
+            "Calibration_micro_dice": float(selected.micro_dice),
+            "Calibration_macro_precision": float(selected.macro_precision),
             "Calibration_baseline_positive_dice": float(baseline.positive_dice),
             "Calibration_baseline_positive_tpr": float(baseline.positive_tpr),
+            "Calibration_min_micro_dice": float(optimizer_config.min_micro_dice),
+            "Calibration_negative_clean_target": float(optimizer_config.negative_clean_target),
+            "Calibration_min_macro_precision": float(optimizer_config.min_macro_precision),
+            "Calibration_min_macro_tpr": float(optimizer_config.min_macro_tpr),
             "Calibration_positive_dice_drop_tolerance": float(
                 optimizer_config.pos_dice_drop_tolerance
             ),
@@ -977,11 +1300,27 @@ def _calibrate_rule6_from_patient_predictions(
             "Calibration_min_patient_positive_patches": int(
                 selected.key.min_patient_positive_patches
             ),
+            "Calibration_min_patient_positive_area_fraction": float(
+                selected.key.min_patient_positive_area_fraction
+            ),
+            "Calibration_min_component_area_fraction_patch": float(
+                selected.key.min_component_area_fraction_patch
+            ),
+            "Calibration_target_status": target_status,
             "Calibration_n_patients": int(positive_patient_count + negative_patient_count),
             "Calibration_n_positive_patients": int(positive_patient_count),
             "Calibration_n_negative_patients": int(negative_patient_count),
-            "Calibration_accepted_candidate_count": int(len(accepted_candidates)),
-            "Calibration_rejected_candidate_count": int(len(scores) - len(accepted_candidates)),
+            "Calibration_positive_guardrail_candidate_count": int(
+                candidate_pool_counts["positive_guardrail_candidate_count"]
+            ),
+            "Calibration_micro_guardrail_candidate_count": int(
+                candidate_pool_counts["micro_guardrail_candidate_count"]
+            ),
+            "Calibration_target_candidate_count": int(
+                candidate_pool_counts["target_candidate_count"]
+            ),
+            "Calibration_accepted_candidate_count": int(len(selection_pool)),
+            "Calibration_rejected_candidate_count": int(len(scores) - len(selection_pool)),
         },
         summary=summary,
     )

@@ -87,6 +87,8 @@ class EnsembleReportContent:
     postprocessing_method: str
     min_component_area_px: str
     min_patient_positive_patches: str
+    min_patient_positive_area_fraction: str
+    min_component_area_fraction_patch: str
     auc: str
     auc_source: str
     normalization_mean: str
@@ -206,6 +208,8 @@ def export_results_to_csv(
             "Post-processing Method",
             "Min Component Area (px)",
             "Min Patient Positive Patches",
+            "Min Patient Positive Area Fraction",
+            "Min Component Area Fraction Patch",
             "AUC Source",
         ],
         "Value": [
@@ -223,6 +227,12 @@ def export_results_to_csv(
             ensemble_recipe.get("postprocessing_config", {}).get("min_component_area_px", "FAILED"),
             ensemble_recipe.get("postprocessing_config", {}).get(
                 "min_patient_positive_patches", "FAILED"
+            ),
+            ensemble_recipe.get("postprocessing_config", {}).get(
+                "min_patient_positive_area_fraction", "FAILED"
+            ),
+            ensemble_recipe.get("postprocessing_config", {}).get(
+                "min_component_area_fraction_patch", "FAILED"
             ),
             metrics_results.get("auc_source", "raw_probabilities_before_hard_postprocessing"),
         ],
@@ -281,6 +291,10 @@ def export_results_to_csv(
         composition_df.to_csv(handle, index=False)
         handle.write("\n--- Final Performance Metrics ---\n")
         metrics_df.to_csv(handle, index=False)
+        patient_diagnostics = metrics_results.get("patient_diagnostics", [])
+        if isinstance(patient_diagnostics, list) and patient_diagnostics:
+            handle.write("\n--- Patient Diagnostics ---\n")
+            pd.DataFrame(patient_diagnostics).to_csv(handle, index=False)
     return filepath
 
 
@@ -489,6 +503,12 @@ def _build_report_content(
         postprocessing_method=str(postprocessing.get("method", "NA")),
         min_component_area_px=str(postprocessing.get("min_component_area_px", "NA")),
         min_patient_positive_patches=str(postprocessing.get("min_patient_positive_patches", "NA")),
+        min_patient_positive_area_fraction=_fmt_float(
+            postprocessing.get("min_patient_positive_area_fraction")
+        ),
+        min_component_area_fraction_patch=_fmt_float(
+            postprocessing.get("min_component_area_fraction_patch")
+        ),
         auc=_fmt_float(ensemble_metrics.get("auc")),
         auc_source=str(
             ensemble_metrics.get("auc_source", "raw_probabilities_before_hard_postprocessing")
@@ -664,6 +684,14 @@ def write_ensemble_report_latex(
             rf"\item Minimum Patient Positive Patches: "
             rf"{_tex_escape(report_content.min_patient_positive_patches)}"
         ),
+        (
+            rf"\item Minimum Patient Positive Area Fraction: "
+            rf"{_tex_escape(report_content.min_patient_positive_area_fraction)}"
+        ),
+        (
+            rf"\item Minimum Component Area Fraction/Patch: "
+            rf"{_tex_escape(report_content.min_component_area_fraction_patch)}"
+        ),
         rf"\item AUC: {report_content.auc} ({_tex_escape(report_content.auc_source)})",
         r"\end{itemize}",
         r"\section*{Normalization Statistics}",
@@ -782,6 +810,14 @@ def write_ensemble_report_markdown(
         f"- Post-processing: {report_content.postprocessing_method}",
         f"- Minimum Component Area: {report_content.min_component_area_px} px",
         f"- Minimum Patient Positive Patches: {report_content.min_patient_positive_patches}",
+        (
+            "- Minimum Patient Positive Area Fraction: "
+            f"{report_content.min_patient_positive_area_fraction}"
+        ),
+        (
+            "- Minimum Component Area Fraction/Patch: "
+            f"{report_content.min_component_area_fraction_patch}"
+        ),
         f"- AUC: {report_content.auc} ({report_content.auc_source})",
         "",
         "## Normalization Statistics",

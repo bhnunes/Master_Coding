@@ -28,6 +28,8 @@ def _sample_recipe() -> dict[str, object]:
             "method": "threshold_components_patient_suppression",
             "min_component_area_px": 16,
             "min_patient_positive_patches": 3,
+            "min_patient_positive_area_fraction": 1e-4,
+            "min_component_area_fraction_patch": 0.001,
         },
         "validation_calibration_summary": {"objective": "balanced_rule6"},
         "model_registry": [
@@ -98,6 +100,24 @@ def _sample_metrics() -> dict[str, object]:
                 },
             },
         },
+        "patient_diagnostics": [
+            {
+                "patient_id": "p1",
+                "gt_positive_area": 9,
+                "pred_positive_area": 8,
+                "pre_suppression_pred_positive_area": 8,
+                "tp_area": 8,
+                "fp_area": 0,
+                "fn_area": 1,
+                "tn_area": 9,
+                "dice": 0.9412,
+                "precision": 1.0,
+                "recall": 0.8889,
+                "positive_patch_count": 2,
+                "largest_component_area": 8,
+                "suppressed": False,
+            }
+        ],
     }
 
 
@@ -119,6 +139,8 @@ def test_export_results_to_csv_writes_report(tmp_path: Path) -> None:
     assert "Ensemble Composition" in csv_path.read_text(encoding="utf-8")
     assert "Decision Threshold" in csv_path.read_text(encoding="utf-8")
     assert "Min Component Area" in csv_path.read_text(encoding="utf-8")
+    assert "Patient Diagnostics" in csv_path.read_text(encoding="utf-8")
+    assert "largest_component_area" in csv_path.read_text(encoding="utf-8")
 
 
 def test_save_confusion_matrix_png_replaces_colab_inline_backend(

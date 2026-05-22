@@ -10,6 +10,8 @@ ROI_SCALE = 4
 SPATIAL_MODEL_WEIGHT = 0.8
 MIN_COMPONENT_AREA_PX = 16
 MIN_PATIENT_POSITIVE_PATCHES = 3
+MIN_PATIENT_POSITIVE_AREA_FRACTION = 1e-4
+MIN_COMPONENT_AREA_FRACTION_PATCH = 0.001
 
 
 def test_parse_ensemble_recipe_preserves_contract_fields() -> None:
@@ -23,6 +25,8 @@ def test_parse_ensemble_recipe_preserves_contract_fields() -> None:
             "method": "threshold_components_patient_suppression",
             "min_component_area_px": MIN_COMPONENT_AREA_PX,
             "min_patient_positive_patches": MIN_PATIENT_POSITIVE_PATCHES,
+            "min_patient_positive_area_fraction": MIN_PATIENT_POSITIVE_AREA_FRACTION,
+            "min_component_area_fraction_patch": MIN_COMPONENT_AREA_FRACTION_PATCH,
         },
         "validation_calibration_summary": {"objective": "balanced_rule6"},
         "model_registry": [
@@ -50,6 +54,14 @@ def test_parse_ensemble_recipe_preserves_contract_fields() -> None:
     assert parsed.decision_threshold == DECISION_THRESHOLD
     assert parsed.postprocessing_config.min_component_area_px == MIN_COMPONENT_AREA_PX
     assert parsed.postprocessing_config.min_patient_positive_patches == MIN_PATIENT_POSITIVE_PATCHES
+    assert (
+        parsed.postprocessing_config.min_patient_positive_area_fraction
+        == MIN_PATIENT_POSITIVE_AREA_FRACTION
+    )
+    assert (
+        parsed.postprocessing_config.min_component_area_fraction_patch
+        == MIN_COMPONENT_AREA_FRACTION_PATCH
+    )
     assert parsed.roi_scale == ROI_SCALE
     assert parsed.model_registry[0].stream_role == "semantic"
     assert parsed.model_registry[1].weight == SPATIAL_MODEL_WEIGHT
@@ -66,6 +78,8 @@ def test_parse_ensemble_recipe_rejects_invalid_strategy() -> None:
             "method": "threshold_components_patient_suppression",
             "min_component_area_px": MIN_COMPONENT_AREA_PX,
             "min_patient_positive_patches": MIN_PATIENT_POSITIVE_PATCHES,
+            "min_patient_positive_area_fraction": MIN_PATIENT_POSITIVE_AREA_FRACTION,
+            "min_component_area_fraction_patch": MIN_COMPONENT_AREA_FRACTION_PATCH,
         },
         "validation_calibration_summary": {"objective": "balanced_rule6"},
         "model_registry": [],
@@ -85,6 +99,8 @@ def test_parse_ensemble_recipe_rejects_missing_decision_config() -> None:
             "method": "threshold_components_patient_suppression",
             "min_component_area_px": MIN_COMPONENT_AREA_PX,
             "min_patient_positive_patches": MIN_PATIENT_POSITIVE_PATCHES,
+            "min_patient_positive_area_fraction": MIN_PATIENT_POSITIVE_AREA_FRACTION,
+            "min_component_area_fraction_patch": MIN_COMPONENT_AREA_FRACTION_PATCH,
         },
         "validation_calibration_summary": {"objective": "balanced_rule6"},
         "model_registry": [

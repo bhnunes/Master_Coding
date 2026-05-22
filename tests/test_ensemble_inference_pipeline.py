@@ -67,6 +67,8 @@ def _stub_successful_execute_pipeline(
         postprocessing_config=PostprocessingConfig(
             min_component_area_px=0,
             min_patient_positive_patches=1,
+            min_patient_positive_area_fraction=0.0,
+            min_component_area_fraction_patch=0.0,
         ),
         roi_scale=4,
         model_registry=[],
@@ -267,6 +269,8 @@ def test_execute_pipeline_rejects_checkpoint_hash_mismatch(
                     "method": "threshold_components_patient_suppression",
                     "min_component_area_px": 16,
                     "min_patient_positive_patches": 3,
+                    "min_patient_positive_area_fraction": 0.0,
+                    "min_component_area_fraction_patch": 0.0,
                 },
                 "validation_calibration_summary": {"objective": "balanced_rule6"},
                 "model_registry": [
@@ -348,6 +352,8 @@ def test_execute_pipeline_rejects_test_hdf5_lineage_mismatch(
                     "method": "threshold_components_patient_suppression",
                     "min_component_area_px": 16,
                     "min_patient_positive_patches": 3,
+                    "min_patient_positive_area_fraction": 0.0,
+                    "min_component_area_fraction_patch": 0.0,
                 },
                 "validation_calibration_summary": {"objective": "balanced_rule6"},
                 "model_registry": [
@@ -455,6 +461,8 @@ def test_execute_pipeline_rejects_missing_validation_lineage_key(
                     "method": "threshold_components_patient_suppression",
                     "min_component_area_px": 16,
                     "min_patient_positive_patches": 3,
+                    "min_patient_positive_area_fraction": 0.0,
+                    "min_component_area_fraction_patch": 0.0,
                 },
                 "validation_calibration_summary": {"objective": "balanced_rule6"},
                 "model_registry": [

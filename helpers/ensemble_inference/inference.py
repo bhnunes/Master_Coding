@@ -31,6 +31,8 @@ from helpers.ensemble_postprocessing import (
     build_suppressed_patient_set,
     confusion_counts_from_binary_masks,
     count_positive_prediction_patches,
+    largest_component_area,
+    patient_positive_area_fractions_from_stats,
     postprocessing_config_to_payload,
     threshold_and_filter_components,
     truth_pixel_counts,
@@ -137,6 +139,7 @@ class _MetricAccumulator:
     patch_stats_by_patient: dict[str, list[dict[str, int]]]
     patch_truth_counts_by_patient: dict[str, dict[str, int]]
     positive_patch_counts: dict[str, int]
+    largest_component_areas: dict[str, int]
     patch_ground_truth_sources: set[str]
     auc_pos_hist: torch.Tensor
     auc_neg_hist: torch.Tensor
@@ -293,6 +296,7 @@ def _build_metric_accumulator(config: EnsembleAnalysisConfig) -> _MetricAccumula
         patch_stats_by_patient=defaultdict(list),
         patch_truth_counts_by_patient=defaultdict(lambda: {"positive": 0, "negative": 0}),
         positive_patch_counts=defaultdict(int),
+        largest_component_areas=defaultdict(int),
         patch_ground_truth_sources=set(),
         auc_pos_hist=torch.zeros(_AUC_BINS, dtype=torch.int64, device=config.device),
         auc_neg_hist=torch.zeros(_AUC_BINS, dtype=torch.int64, device=config.device),
@@ -328,6 +332,10 @@ def _record_pixel_level_counts(
         accumulator.truth_counts_by_patient[patient_id_str]["negative"] += truth_counts["negative"]
         accumulator.positive_patch_counts[patient_id_str] += count_positive_prediction_patches(
             predictions[index]
+        )
+        accumulator.largest_component_areas[patient_id_str] = max(
+            accumulator.largest_component_areas[patient_id_str],
+            largest_component_area(predictions[index]),
         )
 
 
@@ -386,6 +394,9 @@ def _record_batch_metrics(
         final_probs_np,
         decision_threshold=config.decision_threshold,
         min_component_area_px=config.postprocessing_config.min_component_area_px,
+        min_component_area_fraction_patch=(
+            config.postprocessing_config.min_component_area_fraction_patch
+        ),
     )
     _record_pixel_level_counts(
         accumulator,
@@ -436,6 +447,54 @@ def _patch_level_payload(
     }
 
 
+def _aggregate_patient_counts(patient_stats: list[dict[str, int]]) -> dict[str, int]:
+    return {
+        "tp": int(sum(item["tp"] for item in patient_stats)),
+        "fp": int(sum(item["fp"] for item in patient_stats)),
+        "fn": int(sum(item["fn"] for item in patient_stats)),
+        "tn": int(sum(item["tn"] for item in patient_stats)),
+    }
+
+
+def _patient_diagnostic_rows(
+    *,
+    pre_patient_suppression_stats: dict[str, list[dict[str, int]]],
+    post_patient_suppression_stats: dict[str, list[dict[str, int]]],
+    positive_patch_counts: dict[str, int],
+    largest_component_areas: dict[str, int],
+    suppressed_patients: set[str],
+) -> list[dict[str, int | float | str | bool]]:
+    rows: list[dict[str, int | float | str | bool]] = []
+    for patient_id in sorted(post_patient_suppression_stats):
+        counts = _aggregate_patient_counts(post_patient_suppression_stats[patient_id])
+        pre_counts = _aggregate_patient_counts(pre_patient_suppression_stats[patient_id])
+        metrics = calculate_metrics(
+            float(counts["tp"]),
+            float(counts["fp"]),
+            float(counts["fn"]),
+            float(counts["tn"]),
+        )
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "gt_positive_area": counts["tp"] + counts["fn"],
+                "pred_positive_area": counts["tp"] + counts["fp"],
+                "pre_suppression_pred_positive_area": pre_counts["tp"] + pre_counts["fp"],
+                "tp_area": counts["tp"],
+                "fp_area": counts["fp"],
+                "fn_area": counts["fn"],
+                "tn_area": counts["tn"],
+                "dice": float(metrics["dice"]),
+                "precision": float(metrics["precision"]),
+                "recall": float(metrics["tpr"]),
+                "positive_patch_count": int(positive_patch_counts.get(patient_id, 0)),
+                "largest_component_area": int(largest_component_areas.get(patient_id, 0)),
+                "suppressed": patient_id in suppressed_patients,
+            }
+        )
+    return rows
+
+
 @torch.inference_mode()
 def analyze_ensemble_metrics(
     models_list: list[nn.Module],
@@ -470,23 +529,45 @@ def analyze_ensemble_metrics(
     finally:
         progress.close()
 
+    positive_area_fractions = patient_positive_area_fractions_from_stats(
+        accumulator.stats_by_patient
+    )
     suppressed_patients = build_suppressed_patient_set(
         accumulator.positive_patch_counts,
         min_patient_positive_patches=(config.postprocessing_config.min_patient_positive_patches),
+        positive_area_fractions=positive_area_fractions,
+        min_patient_positive_area_fraction=(
+            config.postprocessing_config.min_patient_positive_area_fraction
+        ),
     )
     postprocessed_stats = apply_patient_positive_patch_suppression(
         accumulator.stats_by_patient,
         accumulator.truth_counts_by_patient,
         accumulator.positive_patch_counts,
         min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
+        positive_area_fractions=positive_area_fractions,
+        min_patient_positive_area_fraction=(
+            config.postprocessing_config.min_patient_positive_area_fraction
+        ),
     )
     postprocessed_patch_stats = apply_patient_positive_patch_suppression(
         accumulator.patch_stats_by_patient,
         accumulator.patch_truth_counts_by_patient,
         accumulator.positive_patch_counts,
         min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
+        positive_area_fractions=positive_area_fractions,
+        min_patient_positive_area_fraction=(
+            config.postprocessing_config.min_patient_positive_area_fraction
+        ),
     )
     summary = summarize_patient_metrics(postprocessed_stats, seed=config.seed)
+    summary["patient_diagnostics"] = _patient_diagnostic_rows(
+        pre_patient_suppression_stats=accumulator.stats_by_patient,
+        post_patient_suppression_stats=postprocessed_stats,
+        positive_patch_counts=accumulator.positive_patch_counts,
+        largest_component_areas=accumulator.largest_component_areas,
+        suppressed_patients=suppressed_patients,
+    )
     summary["diagset_patch_level_metrics"] = _patch_level_payload(
         pre_patient_suppression_stats=accumulator.patch_stats_by_patient,
         post_patient_suppression_stats=postprocessed_patch_stats,
@@ -559,6 +640,9 @@ def _collect_visualization_candidates(
         probs_np,
         decision_threshold=config.decision_threshold,
         min_component_area_px=config.postprocessing_config.min_component_area_px,
+        min_component_area_fraction_patch=(
+            config.postprocessing_config.min_component_area_fraction_patch
+        ),
     )
 
     samples: list[VisualizationSample] = []
@@ -587,12 +671,14 @@ def _collect_visualization_candidates(
     return samples, sample_index
 
 
-def _collect_visualization_positive_patch_counts(
+def _collect_visualization_patient_evidence(
     models_list: list[nn.Module],
     dataloader: DataLoader[Any],
     config: VisualizationExportConfig,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], dict[str, float]]:
     positive_patch_counts: dict[str, int] = defaultdict(int)
+    predicted_positive_pixels: dict[str, int] = defaultdict(int)
+    total_pixels: dict[str, int] = defaultdict(int)
     processed_samples = 0
     progress = _progress_iterable(dataloader, desc="Visualization counts", unit="batch")
     try:
@@ -612,11 +698,19 @@ def _collect_visualization_positive_patch_counts(
                 final_probs.cpu().numpy().astype(np.float32),
                 decision_threshold=config.decision_threshold,
                 min_component_area_px=config.postprocessing_config.min_component_area_px,
+                min_component_area_fraction_patch=(
+                    config.postprocessing_config.min_component_area_fraction_patch
+                ),
             )
             for index, patient_id in enumerate(batch.patient_ids):
-                positive_patch_counts[str(patient_id)] += count_positive_prediction_patches(
+                patient_id_str = str(patient_id)
+                positive_patch_counts[patient_id_str] += count_positive_prediction_patches(
                     predictions[index]
                 )
+                predicted_positive_pixels[patient_id_str] += int(
+                    np.count_nonzero(predictions[index])
+                )
+                total_pixels[patient_id_str] += int(predictions[index].size)
             processed_samples += batch.images.shape[0]
             progress.set_postfix(
                 samples=processed_samples,
@@ -625,7 +719,15 @@ def _collect_visualization_positive_patch_counts(
             )
     finally:
         progress.close()
-    return positive_patch_counts
+    positive_area_fractions = {
+        patient_id: (
+            float(predicted_positive_pixels[patient_id] / total_pixels[patient_id])
+            if total_pixels[patient_id] > 0
+            else 0.0
+        )
+        for patient_id in positive_patch_counts
+    }
+    return positive_patch_counts, positive_area_fractions
 
 
 def _update_ranked_samples(
@@ -700,7 +802,7 @@ def export_visualizations(
         return []
     ranked_samples: list[VisualizationSample] = []
     sample_index = 0
-    positive_patch_counts = _collect_visualization_positive_patch_counts(
+    positive_patch_counts, positive_area_fractions = _collect_visualization_patient_evidence(
         models_list,
         dataloader,
         config,
@@ -708,6 +810,10 @@ def export_visualizations(
     suppressed_patients = build_suppressed_patient_set(
         positive_patch_counts,
         min_patient_positive_patches=config.postprocessing_config.min_patient_positive_patches,
+        positive_area_fractions=positive_area_fractions,
+        min_patient_positive_area_fraction=(
+            config.postprocessing_config.min_patient_positive_area_fraction
+        ),
     )
 
     ranking_progress = _progress_iterable(dataloader, desc="Visualization ranking", unit="batch")

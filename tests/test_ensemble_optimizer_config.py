@@ -69,8 +69,14 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_DECISION_THRESHOLD_STEP": "0.05",
             "ENSEMBLE_OPT_POS_DICE_DROP_TOLERANCE": "0.03",
             "ENSEMBLE_OPT_POS_TPR_DROP_TOLERANCE": "0.04",
+            "ENSEMBLE_OPT_MIN_MICRO_DICE": "0.81",
+            "ENSEMBLE_OPT_NEGATIVE_CLEAN_TARGET": "0.52",
+            "ENSEMBLE_OPT_MIN_MACRO_PRECISION": "0.53",
+            "ENSEMBLE_OPT_MIN_MACRO_TPR": "0.82",
             "ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES": "0,16,16,64",
+            "ENSEMBLE_OPT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES": "0,0.001,0.001",
             "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES": "1,3,5",
+            "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES": "0,1e-6,1e-6",
             "ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES": str(EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES),
             "ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES": str(LOCAL_SHARD_CACHE_MAX_BYTES),
         }
@@ -98,8 +104,14 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.decision_threshold_step == pytest.approx(0.05)
     assert config.pos_dice_drop_tolerance == pytest.approx(0.03)
     assert config.pos_tpr_drop_tolerance == pytest.approx(0.04)
+    assert config.min_micro_dice == pytest.approx(0.81)
+    assert config.negative_clean_target == pytest.approx(0.52)
+    assert config.min_macro_precision == pytest.approx(0.53)
+    assert config.min_macro_tpr == pytest.approx(0.82)
     assert config.min_component_area_px_candidates == (0, 16, 64)
+    assert config.min_component_area_fraction_patch_candidates == (0.0, 0.001)
     assert config.min_patient_positive_patches_candidates == (1, 3, 5)
+    assert config.min_patient_positive_area_fraction_candidates == (0.0, 1e-6)
     assert config.optimization_cache_max_bytes == EXPLICIT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.local_shard_cache_max_bytes == LOCAL_SHARD_CACHE_MAX_BYTES
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
@@ -126,12 +138,27 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.val_calibration_frac == VALIDATION_CALIBRATION_FRACTION
     assert config.spatial_patient_policy == "all"
     assert config.decision_threshold_min == pytest.approx(0.50)
-    assert config.decision_threshold_max == pytest.approx(0.95)
+    assert config.decision_threshold_max == pytest.approx(0.99)
     assert config.decision_threshold_step == pytest.approx(0.01)
     assert config.pos_dice_drop_tolerance == pytest.approx(0.02)
     assert config.pos_tpr_drop_tolerance == pytest.approx(0.02)
-    assert config.min_component_area_px_candidates == (0, 16, 32, 64, 128, 256)
-    assert config.min_patient_positive_patches_candidates == (1, 2, 3, 5, 10)
+    assert config.min_micro_dice == pytest.approx(0.80)
+    assert config.negative_clean_target == pytest.approx(0.50)
+    assert config.min_macro_precision == pytest.approx(0.50)
+    assert config.min_macro_tpr == pytest.approx(0.80)
+    assert config.min_component_area_px_candidates == (0, 64, 128, 256, 512, 1024, 2048, 4096)
+    assert config.min_component_area_fraction_patch_candidates == (0.0,)
+    assert config.min_patient_positive_patches_candidates == (1, 2, 3, 5, 8, 13, 21)
+    assert config.min_patient_positive_area_fraction_candidates == (
+        0.0,
+        1e-6,
+        5e-6,
+        1e-5,
+        5e-5,
+        1e-4,
+        5e-4,
+        1e-3,
+    )
     assert config.optimization_cache_max_bytes == DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.local_shard_cache_max_bytes == 0
     assert config.runtime_normalization_method == "NOT_NORMALIZED"
@@ -224,6 +251,28 @@ def test_load_ensemble_optimizer_config_requires_unfiltered_rule6_baseline(
                 ),
                 "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
                 "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES": "2,3",
+            }
+        )
+
+    with pytest.raises(ValueError, match="must include 0.0"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES": "1e-6",
+            }
+        )
+
+    with pytest.raises(ValueError, match="must include 0.0"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES": "0.001",
             }
         )
 

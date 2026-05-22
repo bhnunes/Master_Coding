@@ -19,12 +19,27 @@ VALID_SORT_METRICS = {"best_validation_DICE", "best_val_auprc_pixel_score"}
 VALID_SPATIAL_PATIENT_POLICIES = {"positive_only", "all"}
 DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES = 8 * 1024 * 1024 * 1024
 DEFAULT_DECISION_THRESHOLD_MIN = 0.50
-DEFAULT_DECISION_THRESHOLD_MAX = 0.95
+DEFAULT_DECISION_THRESHOLD_MAX = 0.99
 DEFAULT_DECISION_THRESHOLD_STEP = 0.01
 DEFAULT_POS_DICE_DROP_TOLERANCE = 0.02
 DEFAULT_POS_TPR_DROP_TOLERANCE = 0.02
-DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES = (0, 16, 32, 64, 128, 256)
-DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES = (1, 2, 3, 5, 10)
+DEFAULT_MIN_MICRO_DICE = 0.80
+DEFAULT_NEGATIVE_CLEAN_TARGET = 0.50
+DEFAULT_MIN_MACRO_PRECISION = 0.50
+DEFAULT_MIN_MACRO_TPR = 0.80
+DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES = (0, 64, 128, 256, 512, 1024, 2048, 4096)
+DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES = (1, 2, 3, 5, 8, 13, 21)
+DEFAULT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES = (
+    0.0,
+    1e-6,
+    5e-6,
+    1e-5,
+    5e-5,
+    1e-4,
+    5e-4,
+    1e-3,
+)
+DEFAULT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES = (0.0,)
 
 
 def _parse_bool(value: str | None, *, default: bool) -> bool:
@@ -57,6 +72,18 @@ def _parse_int_tuple(
         parsed = tuple(int(part.strip()) for part in value.split(",") if part.strip())
     if not parsed:
         raise ValueError(f"{variable_name} must contain at least one integer candidate.")
+    return tuple(dict.fromkeys(parsed))
+
+
+def _parse_float_tuple(
+    value: str | None, *, default: tuple[float, ...], variable_name: str
+) -> tuple[float, ...]:
+    if value is None or value.strip() == "":
+        parsed = default
+    else:
+        parsed = tuple(float(part.strip()) for part in value.split(",") if part.strip())
+    if not parsed:
+        raise ValueError(f"{variable_name} must contain at least one float candidate.")
     return tuple(dict.fromkeys(parsed))
 
 
@@ -128,6 +155,61 @@ def _validate_rule6_drop_tolerances(
         raise ValueError("pos_tpr_drop_tolerance must be greater than or equal to 0.")
 
 
+def _validate_unit_interval(value: float, name: str) -> None:
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be within [0, 1].")
+
+
+def _validate_rule6_targets(
+    *,
+    min_micro_dice: float,
+    negative_clean_target: float,
+    min_macro_precision: float,
+    min_macro_tpr: float,
+) -> None:
+    for value, name in (
+        (min_micro_dice, "min_micro_dice"),
+        (negative_clean_target, "negative_clean_target"),
+        (min_macro_precision, "min_macro_precision"),
+        (min_macro_tpr, "min_macro_tpr"),
+    ):
+        _validate_unit_interval(value, name)
+
+
+def _validate_rule6_integer_candidates(
+    *,
+    min_component_area_px_candidates: tuple[int, ...],
+    min_patient_positive_patches_candidates: tuple[int, ...],
+) -> None:
+    if any(candidate < 0 for candidate in min_component_area_px_candidates):
+        raise ValueError("min_component_area_px_candidates cannot contain negative values.")
+    if any(candidate < 1 for candidate in min_patient_positive_patches_candidates):
+        raise ValueError("min_patient_positive_patches_candidates must contain positive integers.")
+    if 0 not in min_component_area_px_candidates:
+        raise ValueError("min_component_area_px_candidates must include 0 for the baseline.")
+    if 1 not in min_patient_positive_patches_candidates:
+        raise ValueError("min_patient_positive_patches_candidates must include 1 for the baseline.")
+
+
+def _validate_rule6_fraction_candidates(
+    *,
+    min_patient_positive_area_fraction_candidates: tuple[float, ...],
+    min_component_area_fraction_patch_candidates: tuple[float, ...],
+) -> None:
+    for candidate in min_patient_positive_area_fraction_candidates:
+        _validate_unit_interval(candidate, "min_patient_positive_area_fraction_candidates")
+    for candidate in min_component_area_fraction_patch_candidates:
+        _validate_unit_interval(candidate, "min_component_area_fraction_patch_candidates")
+    if 0.0 not in min_patient_positive_area_fraction_candidates:
+        raise ValueError(
+            "min_patient_positive_area_fraction_candidates must include 0.0 for the baseline."
+        )
+    if 0.0 not in min_component_area_fraction_patch_candidates:
+        raise ValueError(
+            "min_component_area_fraction_patch_candidates must include 0.0 for the baseline."
+        )
+
+
 @dataclass(frozen=True)
 class EnsembleOptimizerConfig:
     master_manifest_path: Path
@@ -164,9 +246,19 @@ class EnsembleOptimizerConfig:
     decision_threshold_step: float = DEFAULT_DECISION_THRESHOLD_STEP
     pos_dice_drop_tolerance: float = DEFAULT_POS_DICE_DROP_TOLERANCE
     pos_tpr_drop_tolerance: float = DEFAULT_POS_TPR_DROP_TOLERANCE
+    min_micro_dice: float = DEFAULT_MIN_MICRO_DICE
+    negative_clean_target: float = DEFAULT_NEGATIVE_CLEAN_TARGET
+    min_macro_precision: float = DEFAULT_MIN_MACRO_PRECISION
+    min_macro_tpr: float = DEFAULT_MIN_MACRO_TPR
     min_component_area_px_candidates: tuple[int, ...] = DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES
     min_patient_positive_patches_candidates: tuple[int, ...] = (
         DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES
+    )
+    min_patient_positive_area_fraction_candidates: tuple[float, ...] = (
+        DEFAULT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES
+    )
+    min_component_area_fraction_patch_candidates: tuple[float, ...] = (
+        DEFAULT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES
     )
 
     @property
@@ -190,18 +282,24 @@ class EnsembleOptimizerConfig:
             pos_dice_drop_tolerance=self.pos_dice_drop_tolerance,
             pos_tpr_drop_tolerance=self.pos_tpr_drop_tolerance,
         )
-        if any(candidate < 0 for candidate in self.min_component_area_px_candidates):
-            raise ValueError("min_component_area_px_candidates cannot contain negative values.")
-        if any(candidate < 1 for candidate in self.min_patient_positive_patches_candidates):
-            raise ValueError(
-                "min_patient_positive_patches_candidates must contain positive integers."
-            )
-        if 0 not in self.min_component_area_px_candidates:
-            raise ValueError("min_component_area_px_candidates must include 0 for the baseline.")
-        if 1 not in self.min_patient_positive_patches_candidates:
-            raise ValueError(
-                "min_patient_positive_patches_candidates must include 1 for the baseline."
-            )
+        _validate_rule6_targets(
+            min_micro_dice=self.min_micro_dice,
+            negative_clean_target=self.negative_clean_target,
+            min_macro_precision=self.min_macro_precision,
+            min_macro_tpr=self.min_macro_tpr,
+        )
+        _validate_rule6_integer_candidates(
+            min_component_area_px_candidates=self.min_component_area_px_candidates,
+            min_patient_positive_patches_candidates=self.min_patient_positive_patches_candidates,
+        )
+        _validate_rule6_fraction_candidates(
+            min_patient_positive_area_fraction_candidates=(
+                self.min_patient_positive_area_fraction_candidates
+            ),
+            min_component_area_fraction_patch_candidates=(
+                self.min_component_area_fraction_patch_candidates
+            ),
+        )
 
 
 def load_ensemble_optimizer_config(
@@ -312,6 +410,22 @@ def load_ensemble_optimizer_config(
             values.get("ENSEMBLE_OPT_POS_TPR_DROP_TOLERANCE"),
             default=DEFAULT_POS_TPR_DROP_TOLERANCE,
         ),
+        min_micro_dice=_parse_float(
+            values.get("ENSEMBLE_OPT_MIN_MICRO_DICE"),
+            default=DEFAULT_MIN_MICRO_DICE,
+        ),
+        negative_clean_target=_parse_float(
+            values.get("ENSEMBLE_OPT_NEGATIVE_CLEAN_TARGET"),
+            default=DEFAULT_NEGATIVE_CLEAN_TARGET,
+        ),
+        min_macro_precision=_parse_float(
+            values.get("ENSEMBLE_OPT_MIN_MACRO_PRECISION"),
+            default=DEFAULT_MIN_MACRO_PRECISION,
+        ),
+        min_macro_tpr=_parse_float(
+            values.get("ENSEMBLE_OPT_MIN_MACRO_TPR"),
+            default=DEFAULT_MIN_MACRO_TPR,
+        ),
         min_component_area_px_candidates=_parse_int_tuple(
             values.get("ENSEMBLE_OPT_MIN_COMPONENT_AREA_PX_CANDIDATES"),
             default=DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES,
@@ -321,6 +435,16 @@ def load_ensemble_optimizer_config(
             values.get("ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES"),
             default=DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES,
             variable_name="ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES",
+        ),
+        min_patient_positive_area_fraction_candidates=_parse_float_tuple(
+            values.get("ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES"),
+            default=DEFAULT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES,
+            variable_name="ENSEMBLE_OPT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES",
+        ),
+        min_component_area_fraction_patch_candidates=_parse_float_tuple(
+            values.get("ENSEMBLE_OPT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES"),
+            default=DEFAULT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES,
+            variable_name="ENSEMBLE_OPT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES",
         ),
         optimization_cache_max_bytes=_parse_non_negative_int(
             values.get("ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES"),

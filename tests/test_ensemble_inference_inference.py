@@ -17,6 +17,7 @@ from helpers.runtime_platform import COLAB_INLINE_MATPLOTLIB_BACKEND, HEADLESS_M
 ANALYSIS_SEED = 17
 EXPECTED_AUC = 0.75
 EXPECTED_PATCH_CLASSIFICATION_SCORE = 0.5
+EXPECTED_PATIENT_A_AREA = 2
 SECOND_SAMPLE_ID = 2
 THIRD_SAMPLE_ID = 3
 VISUALIZATION_SAMPLE_COUNT = 2
@@ -48,6 +49,8 @@ def _analysis_config() -> inference.EnsembleAnalysisConfig:
         postprocessing_config=PostprocessingConfig(
             min_component_area_px=0,
             min_patient_positive_patches=1,
+            min_patient_positive_area_fraction=0.0,
+            min_component_area_fraction_patch=0.0,
         ),
         roi_scale=2,
         train_mean=[0.1, 0.2, 0.3],
@@ -67,6 +70,8 @@ def _visualization_config(
         postprocessing_config=PostprocessingConfig(
             min_component_area_px=0,
             min_patient_positive_patches=1,
+            min_patient_positive_area_fraction=0.0,
+            min_component_area_fraction_patch=0.0,
         ),
         roi_scale=2,
         train_mean=[0.1, 0.2, 0.3],
@@ -316,6 +321,13 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
     assert summary["auc_source"] == "raw_probabilities_before_hard_postprocessing"
     assert summary["postprocessing"]["min_component_area_px"] == 0
     assert summary["postprocessing"]["min_patient_positive_patches"] == 1
+    assert summary["postprocessing"]["min_patient_positive_area_fraction"] == 0.0
+    assert summary["postprocessing"]["min_component_area_fraction_patch"] == 0.0
+    assert summary["patient_diagnostics"][0]["patient_id"] == "patient-a"
+    assert summary["patient_diagnostics"][0]["gt_positive_area"] == EXPECTED_PATIENT_A_AREA
+    assert summary["patient_diagnostics"][0]["pred_positive_area"] == EXPECTED_PATIENT_A_AREA
+    assert summary["patient_diagnostics"][0]["largest_component_area"] == 1
+    assert summary["patient_diagnostics"][0]["suppressed"] is False
     patch_metrics = summary["diagset_patch_level_metrics"]
     assert (
         patch_metrics["ground_truth_rule"] == "stage2_manifest_label_after_extraction_overlap_rule"
@@ -348,6 +360,8 @@ def test_analyze_ensemble_metrics_skips_none_batches_and_builds_summary(
             "method": "threshold_components_patient_suppression",
             "min_component_area_px": 0,
             "min_patient_positive_patches": 1,
+            "min_patient_positive_area_fraction": 0.0,
+            "min_component_area_fraction_patch": 0.0,
         },
         "weights": None,
     }
@@ -456,6 +470,8 @@ def test_analyze_ensemble_metrics_uses_declared_threshold_for_hard_predictions(
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=0,
                 min_patient_positive_patches=1,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
@@ -524,6 +540,8 @@ def test_analyze_ensemble_metrics_applies_frozen_patient_suppression(
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=0,
                 min_patient_positive_patches=2,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
@@ -605,6 +623,8 @@ def test_export_visualizations_writes_requested_number_of_pngs(
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=0,
                 min_patient_positive_patches=1,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
@@ -683,6 +703,8 @@ def test_export_visualizations_ranks_worst_dice_across_batches(
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=0,
                 min_patient_positive_patches=1,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],
@@ -760,6 +782,8 @@ def test_export_visualizations_reports_scan_rank_and_render_progress(
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=0,
                 min_patient_positive_patches=1,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             roi_scale=2,
             train_mean=[0.1, 0.2, 0.3],

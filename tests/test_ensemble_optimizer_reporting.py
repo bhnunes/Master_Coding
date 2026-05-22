@@ -48,6 +48,8 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=MIN_COMPONENT_AREA_PX,
                 min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             spill_penalty_lambda=0.1,
             spatial_patient_policy="positive_only",
@@ -99,6 +101,8 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
             postprocessing_config=PostprocessingConfig(
                 min_component_area_px=MIN_COMPONENT_AREA_PX,
                 min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                min_patient_positive_area_fraction=0.0,
+                min_component_area_fraction_patch=0.0,
             ),
             spill_penalty_lambda=0.1,
             spatial_patient_policy="positive_only",

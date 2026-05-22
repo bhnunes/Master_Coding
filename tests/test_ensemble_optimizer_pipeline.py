@@ -169,6 +169,8 @@ def test_execute_pipeline_records_strict_metadata_selection_in_run_config(
                 "postprocessing_config": PostprocessingConfig(
                     min_component_area_px=MIN_COMPONENT_AREA_PX,
                     min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                    min_patient_positive_area_fraction=0.0,
+                    min_component_area_fraction_patch=0.0,
                 ),
                 "calibration_metrics": {"Calibration_best_mcc": 0.55},
                 "validation_calibration_summary": {"objective": "balanced_rule6"},
@@ -353,6 +355,8 @@ def test_execute_pipeline_logs_phase_summaries(
                 "postprocessing_config": PostprocessingConfig(
                     min_component_area_px=MIN_COMPONENT_AREA_PX,
                     min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                    min_patient_positive_area_fraction=0.0,
+                    min_component_area_fraction_patch=0.0,
                 ),
                 "calibration_metrics": {"Calibration_best_mcc": 0.55},
                 "validation_calibration_summary": {"objective": "balanced_rule6"},
@@ -499,6 +503,8 @@ def test_execute_pipeline_records_compatibility_signature_and_split_fingerprint(
                 "postprocessing_config": PostprocessingConfig(
                     min_component_area_px=MIN_COMPONENT_AREA_PX,
                     min_patient_positive_patches=MIN_PATIENT_POSITIVE_PATCHES,
+                    min_patient_positive_area_fraction=0.0,
+                    min_component_area_fraction_patch=0.0,
                 ),
                 "calibration_metrics": {"Calibration_best_mcc": 0.55},
                 "validation_calibration_summary": {"objective": "balanced_rule6"},
