@@ -15,6 +15,7 @@ import numpy as np
 import numpy.typing as npt
 import optuna
 import torch
+from skimage.measure import label as connected_component_label
 from sklearn.metrics import average_precision_score
 from torch import nn
 from torch.nn import functional
@@ -29,10 +30,7 @@ from helpers.ensemble_optimizer.splitting import (
 )
 from helpers.ensemble_postprocessing import (
     PostprocessingConfig,
-    confusion_counts_from_binary_masks,
-    count_positive_prediction_patches,
     postprocessing_config_to_payload,
-    threshold_and_filter_components,
     truth_pixel_counts,
 )
 from helpers.training.gpu import GPUNormalizer
@@ -266,6 +264,13 @@ class _Rule6PatientCandidateEvidence:
     unsuppressed_counts: dict[str, int]
     suppressed_counts: dict[str, int]
     is_positive_patient: bool
+
+
+@dataclass
+class _Rule6AreaCounts:
+    predicted_positive_pixels: int = 0
+    true_positive_pixels: int = 0
+    positive_patch_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -1011,6 +1016,93 @@ def _record_patient_rule6_candidates(
             )
 
 
+def _rule6_effective_area_by_candidate(
+    *,
+    area_candidates: tuple[int, ...],
+    area_fraction: float,
+    patch_area: int,
+) -> dict[int, int]:
+    fraction_area_px = int(np.ceil(patch_area * area_fraction)) if area_fraction > 0.0 else 0
+    return {
+        int(area_candidate): max(int(area_candidate), fraction_area_px)
+        for area_candidate in area_candidates
+    }
+
+
+def _rule6_component_metrics_for_patch(
+    binary_patch: npt.NDArray[np.bool_],
+    truth_patch: npt.NDArray[np.uint8],
+    *,
+    effective_area_values: tuple[int, ...],
+) -> dict[int, tuple[int, int, bool]]:
+    if not np.any(binary_patch):
+        return {}
+    labels = cast(
+        npt.NDArray[np.int32],
+        connected_component_label(binary_patch, connectivity=1),  # type: ignore[no-untyped-call]
+    )
+    max_label = int(labels.max())
+    if max_label <= 0:
+        return {}
+    component_sizes = np.bincount(labels.ravel(), minlength=max_label + 1)[1:]
+    true_positive_pixels_by_label = np.bincount(
+        labels.ravel(),
+        weights=truth_patch.ravel(),
+        minlength=max_label + 1,
+    )[1:]
+    metrics: dict[int, tuple[int, int, bool]] = {}
+    for effective_area in effective_area_values:
+        kept_components = component_sizes >= effective_area
+        predicted_positive_pixels = int(component_sizes[kept_components].sum())
+        true_positive_pixels = int(true_positive_pixels_by_label[kept_components].sum())
+        metrics[effective_area] = (
+            predicted_positive_pixels,
+            true_positive_pixels,
+            predicted_positive_pixels > 0,
+        )
+    return metrics
+
+
+def _rule6_area_counts_for_threshold(
+    binary_predictions: npt.NDArray[np.bool_],
+    patient_truth: npt.NDArray[np.uint8],
+    *,
+    effective_area_values: tuple[int, ...],
+) -> dict[int, _Rule6AreaCounts]:
+    counts_by_area = {
+        effective_area: _Rule6AreaCounts() for effective_area in effective_area_values
+    }
+    for patch_index in range(binary_predictions.shape[0]):
+        patch_metrics = _rule6_component_metrics_for_patch(
+            binary_predictions[patch_index],
+            patient_truth[patch_index],
+            effective_area_values=effective_area_values,
+        )
+        for effective_area, patch_counts in patch_metrics.items():
+            predicted_positive_pixels, true_positive_pixels, has_positive_prediction = (
+                patch_counts
+            )
+            counts = counts_by_area[effective_area]
+            counts.predicted_positive_pixels += predicted_positive_pixels
+            counts.true_positive_pixels += true_positive_pixels
+            counts.positive_patch_count += int(has_positive_prediction)
+    return counts_by_area
+
+
+def _rule6_confusion_counts_from_area_counts(
+    area_counts: _Rule6AreaCounts,
+    *,
+    truth_counts: dict[str, int],
+) -> dict[str, int]:
+    false_positive_pixels = area_counts.predicted_positive_pixels - area_counts.true_positive_pixels
+    return {
+        "tp": int(area_counts.true_positive_pixels),
+        "fp": int(false_positive_pixels),
+        "fn": int(truth_counts["positive"] - area_counts.true_positive_pixels),
+        "tn": int(truth_counts["negative"] - false_positive_pixels),
+    }
+
+
 def _accumulate_patient_rule6_scores(
     accumulator: _Rule6CandidateAccumulator,
     *,
@@ -1021,7 +1113,7 @@ def _accumulate_patient_rule6_scores(
 ) -> bool:
     gated_prediction = cast(
         npt.NDArray[np.float32],
-        spatial_prediction.astype(np.float32) * roi_mask.astype(np.float32),
+        spatial_prediction.astype(np.float32, copy=False) * roi_mask,
     )
     truth_counts = truth_pixel_counts(patient_truth)
     is_positive_patient = truth_counts["positive"] > 0
@@ -1031,18 +1123,28 @@ def _accumulate_patient_rule6_scores(
         "fn": int(truth_counts["positive"]),
         "tn": int(truth_counts["negative"]),
     }
+    patch_area = int(gated_prediction.shape[1] * gated_prediction.shape[2])
+    patient_pixel_count = int(gated_prediction.size)
     for threshold in grid.threshold_values:
-        for min_component_area_px in grid.area_candidates:
-            for min_component_area_fraction_patch in grid.area_fraction_candidates:
-                predictions = threshold_and_filter_components(
-                    gated_prediction,
-                    decision_threshold=threshold,
-                    min_component_area_px=min_component_area_px,
-                    min_component_area_fraction_patch=min_component_area_fraction_patch,
-                )
+        binary_predictions = gated_prediction > threshold
+        for min_component_area_fraction_patch in grid.area_fraction_candidates:
+            effective_area_by_candidate = _rule6_effective_area_by_candidate(
+                area_candidates=grid.area_candidates,
+                area_fraction=min_component_area_fraction_patch,
+                patch_area=patch_area,
+            )
+            counts_by_effective_area = _rule6_area_counts_for_threshold(
+                binary_predictions,
+                patient_truth,
+                effective_area_values=tuple(sorted(set(effective_area_by_candidate.values()))),
+            )
+            for min_component_area_px in grid.area_candidates:
+                area_counts = counts_by_effective_area[
+                    effective_area_by_candidate[min_component_area_px]
+                ]
                 positive_area_fraction = (
-                    float(np.count_nonzero(predictions) / predictions.size)
-                    if predictions.size > 0
+                    float(area_counts.predicted_positive_pixels / patient_pixel_count)
+                    if patient_pixel_count > 0
                     else 0.0
                 )
                 _record_patient_rule6_candidates(
@@ -1052,11 +1154,11 @@ def _accumulate_patient_rule6_scores(
                         threshold=threshold,
                         min_component_area_px=min_component_area_px,
                         min_component_area_fraction_patch=min_component_area_fraction_patch,
-                        positive_patch_count=count_positive_prediction_patches(predictions),
+                        positive_patch_count=area_counts.positive_patch_count,
                         positive_area_fraction=positive_area_fraction,
-                        unsuppressed_counts=confusion_counts_from_binary_masks(
-                            predictions,
-                            patient_truth,
+                        unsuppressed_counts=_rule6_confusion_counts_from_area_counts(
+                            area_counts,
+                            truth_counts=truth_counts,
                         ),
                         suppressed_counts=suppressed_counts,
                         is_positive_patient=is_positive_patient,
