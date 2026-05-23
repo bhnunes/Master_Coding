@@ -27,7 +27,21 @@ DEFAULT_MIN_MICRO_DICE = 0.80
 DEFAULT_NEGATIVE_CLEAN_TARGET = 0.50
 DEFAULT_MIN_MACRO_PRECISION = 0.50
 DEFAULT_MIN_MACRO_TPR = 0.80
-DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES = (0, 64, 128, 256, 512, 1024, 2048, 4096)
+DEFAULT_NEGATIVE_FP_PENALTY_LAMBDA = 0.50
+DEFAULT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA = 0.25
+DEFAULT_MIN_COMPONENT_AREA_PX_CANDIDATES = (
+    0,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+)
 DEFAULT_MIN_PATIENT_POSITIVE_PATCHES_CANDIDATES = (1, 2, 3, 5, 8, 13, 21)
 DEFAULT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES = (
     0.0,
@@ -39,7 +53,7 @@ DEFAULT_MIN_PATIENT_POSITIVE_AREA_FRACTION_CANDIDATES = (
     5e-4,
     1e-3,
 )
-DEFAULT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES = (0.0,)
+DEFAULT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES = (0.0, 0.001, 0.0025, 0.005, 0.01)
 
 
 def _parse_bool(value: str | None, *, default: bool) -> bool:
@@ -176,6 +190,11 @@ def _validate_rule6_targets(
         _validate_unit_interval(value, name)
 
 
+def _validate_non_negative_float(value: float, name: str) -> None:
+    if value < 0.0:
+        raise ValueError(f"{name} must be greater than or equal to 0.")
+
+
 def _validate_rule6_integer_candidates(
     *,
     min_component_area_px_candidates: tuple[int, ...],
@@ -260,6 +279,8 @@ class EnsembleOptimizerConfig:
     min_component_area_fraction_patch_candidates: tuple[float, ...] = (
         DEFAULT_MIN_COMPONENT_AREA_FRACTION_PATCH_CANDIDATES
     )
+    negative_fp_penalty_lambda: float = DEFAULT_NEGATIVE_FP_PENALTY_LAMBDA
+    roi_negative_area_penalty_lambda: float = DEFAULT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA
 
     @property
     def log_path(self) -> Path:
@@ -278,6 +299,15 @@ class EnsembleOptimizerConfig:
             raise ValueError("decision_threshold_min cannot exceed decision_threshold_max.")
         if self.decision_threshold_step <= 0.0:
             raise ValueError("decision_threshold_step must be greater than 0.")
+        _validate_non_negative_float(self.spill_penalty_lambda, "spill_penalty_lambda")
+        _validate_non_negative_float(
+            self.negative_fp_penalty_lambda,
+            "negative_fp_penalty_lambda",
+        )
+        _validate_non_negative_float(
+            self.roi_negative_area_penalty_lambda,
+            "roi_negative_area_penalty_lambda",
+        )
         _validate_rule6_drop_tolerances(
             pos_dice_drop_tolerance=self.pos_dice_drop_tolerance,
             pos_tpr_drop_tolerance=self.pos_tpr_drop_tolerance,
@@ -382,6 +412,14 @@ def load_ensemble_optimizer_config(
         spill_penalty_lambda=_parse_float(
             values.get("ENSEMBLE_OPT_SPILL_PENALTY_LAMBDA"),
             default=0.10,
+        ),
+        negative_fp_penalty_lambda=_parse_float(
+            values.get("ENSEMBLE_OPT_NEGATIVE_FP_PENALTY_LAMBDA"),
+            default=DEFAULT_NEGATIVE_FP_PENALTY_LAMBDA,
+        ),
+        roi_negative_area_penalty_lambda=_parse_float(
+            values.get("ENSEMBLE_OPT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA"),
+            default=DEFAULT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA,
         ),
         spatial_patient_policy=_parse_choice(
             values.get("ENSEMBLE_OPT_SPATIAL_PATIENT_POLICY"),

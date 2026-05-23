@@ -24,6 +24,7 @@ class RecipeMetadataConfig:
     decision_threshold: float
     postprocessing_config: PostprocessingConfig
     spill_penalty_lambda: float
+    negative_fp_penalty_lambda: float
     spatial_patient_policy: str
     calibration_metrics: dict[str, float | int | str]
     validation_calibration_summary: dict[str, Any]
@@ -118,6 +119,7 @@ def build_recipe_metadata(config: RecipeMetadataConfig) -> dict[str, Any]:
         "postprocessing_config": postprocessing_config_to_payload(config.postprocessing_config),
         "spatial_config": {
             "spill_lambda": config.spill_penalty_lambda,
+            "negative_fp_lambda": config.negative_fp_penalty_lambda,
             "patient_policy": config.spatial_patient_policy,
         },
         "model_registry": model_registry,

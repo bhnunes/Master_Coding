@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from helpers.ensemble_optimizer.metadata import SelectedModelMetadata
 from helpers.ensemble_optimizer.reporting import (
     RecipeMetadataConfig,
@@ -52,6 +54,7 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
                 min_component_area_fraction_patch=0.0,
             ),
             spill_penalty_lambda=0.1,
+            negative_fp_penalty_lambda=0.5,
             spatial_patient_policy="positive_only",
             calibration_metrics={"Calibration_macro_rule6": 0.61},
             validation_calibration_summary={"objective": "balanced_rule6"},
@@ -77,6 +80,8 @@ def test_write_recipe_metadata_preserves_inference_contract(tmp_path: Path) -> N
         payload["postprocessing_config"]["min_patient_positive_patches"]
         == MIN_PATIENT_POSITIVE_PATCHES
     )
+    assert payload["spatial_config"]["spill_lambda"] == pytest.approx(0.1)
+    assert payload["spatial_config"]["negative_fp_lambda"] == pytest.approx(0.5)
     assert payload["model_registry"][0]["stream_role"] == "semantic"
     assert payload["model_registry"][1]["stream_role"] == "spatial"
     assert payload["calibration_metrics"] == {"Calibration_macro_rule6": 0.61}
@@ -105,6 +110,7 @@ def test_build_recipe_metadata_records_validation_lineage_summary() -> None:
                 min_component_area_fraction_patch=0.0,
             ),
             spill_penalty_lambda=0.1,
+            negative_fp_penalty_lambda=0.5,
             spatial_patient_policy="positive_only",
             calibration_metrics={},
             validation_calibration_summary={"objective": "balanced_rule6"},

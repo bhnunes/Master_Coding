@@ -274,6 +274,13 @@ class _Rule6AreaCounts:
 
 
 @dataclass(frozen=True)
+class _Rule6PatientRoiDiagnostics:
+    is_positive_patient: bool
+    roi_area_fraction: float
+    positive_roi_recall: float
+
+
+@dataclass(frozen=True)
 class _Rule6CalibrationResult:
     decision_threshold: float
     postprocessing_config: PostprocessingConfig
@@ -817,6 +824,10 @@ def _zero_rule6_calibration_result(config: EnsembleOptimizerConfig) -> _Rule6Cal
             "Calibration_min_patient_positive_area_fraction": 0.0,
             "Calibration_min_component_area_fraction_patch": 0.0,
             "Calibration_target_status": "no_calibration_patients",
+            "Calibration_positive_roi_recall": 0.0,
+            "Calibration_negative_roi_area_fraction": 0.0,
+            "Calibration_negative_roi_activation_rate": 0.0,
+            "Calibration_mean_roi_area_fraction": 0.0,
             "Calibration_n_patients": 0,
             "Calibration_n_positive_patients": 0,
             "Calibration_n_negative_patients": 0,
@@ -1029,6 +1040,21 @@ def _rule6_effective_area_by_candidate(
     }
 
 
+def _rule6_effective_areas_by_fraction(
+    grid: _Rule6Grid,
+    *,
+    patch_area: int,
+) -> dict[float, dict[int, int]]:
+    return {
+        area_fraction: _rule6_effective_area_by_candidate(
+            area_candidates=grid.area_candidates,
+            area_fraction=area_fraction,
+            patch_area=patch_area,
+        )
+        for area_fraction in grid.area_fraction_candidates
+    }
+
+
 def _rule6_component_metrics_for_patch(
     binary_patch: npt.NDArray[np.bool_],
     truth_patch: npt.NDArray[np.uint8],
@@ -1110,7 +1136,7 @@ def _accumulate_patient_rule6_scores(
     spatial_prediction: npt.NDArray[np.float32],
     patient_truth: npt.NDArray[np.uint8],
     roi_mask: npt.NDArray[np.uint8],
-) -> bool:
+) -> _Rule6PatientRoiDiagnostics:
     gated_prediction = cast(
         npt.NDArray[np.float32],
         spatial_prediction.astype(np.float32, copy=False) * roi_mask,
@@ -1125,19 +1151,30 @@ def _accumulate_patient_rule6_scores(
     }
     patch_area = int(gated_prediction.shape[1] * gated_prediction.shape[2])
     patient_pixel_count = int(gated_prediction.size)
+    effective_area_by_fraction = _rule6_effective_areas_by_fraction(
+        grid,
+        patch_area=patch_area,
+    )
+    unique_effective_area_values = tuple(
+        sorted(
+            {
+                effective_area
+                for area_map in effective_area_by_fraction.values()
+                for effective_area in area_map.values()
+            }
+        )
+    )
     for threshold in grid.threshold_values:
         binary_predictions = gated_prediction > threshold
+        counts_by_effective_area = _rule6_area_counts_for_threshold(
+            binary_predictions,
+            patient_truth,
+            effective_area_values=unique_effective_area_values,
+        )
         for min_component_area_fraction_patch in grid.area_fraction_candidates:
-            effective_area_by_candidate = _rule6_effective_area_by_candidate(
-                area_candidates=grid.area_candidates,
-                area_fraction=min_component_area_fraction_patch,
-                patch_area=patch_area,
-            )
-            counts_by_effective_area = _rule6_area_counts_for_threshold(
-                binary_predictions,
-                patient_truth,
-                effective_area_values=tuple(sorted(set(effective_area_by_candidate.values()))),
-            )
+            effective_area_by_candidate = effective_area_by_fraction[
+                min_component_area_fraction_patch
+            ]
             for min_component_area_px in grid.area_candidates:
                 area_counts = counts_by_effective_area[
                     effective_area_by_candidate[min_component_area_px]
@@ -1164,7 +1201,17 @@ def _accumulate_patient_rule6_scores(
                         is_positive_patient=is_positive_patient,
                     ),
                 )
-    return is_positive_patient
+    roi_area_fraction = float(np.mean(roi_mask)) if roi_mask.size > 0 else 0.0
+    positive_roi_recall = 0.0
+    if is_positive_patient:
+        positive_roi_recall = float(
+            np.sum((roi_mask == 1) & (patient_truth == 1)) / max(1, truth_counts["positive"])
+        )
+    return _Rule6PatientRoiDiagnostics(
+        is_positive_patient=is_positive_patient,
+        roi_area_fraction=roi_area_fraction,
+        positive_roi_recall=positive_roi_recall,
+    )
 
 
 def _rule6_candidate_totals(
@@ -1298,20 +1345,28 @@ def _calibrate_rule6_from_patient_predictions(
     positive_patient_count = 0
     negative_patient_count = 0
     processed_patients = 0
+    positive_roi_recall_total = 0.0
+    negative_roi_area_total = 0.0
+    negative_roi_activation_count = 0
+    roi_area_total = 0.0
 
     for _patient_id, spatial_prediction, patient_truth, roi_mask in patient_predictions:
         processed_patients += 1
-        is_positive_patient = _accumulate_patient_rule6_scores(
+        diagnostics = _accumulate_patient_rule6_scores(
             accumulator,
             grid=grid,
             spatial_prediction=spatial_prediction,
             patient_truth=patient_truth,
             roi_mask=roi_mask,
         )
-        if is_positive_patient:
+        roi_area_total += diagnostics.roi_area_fraction
+        if diagnostics.is_positive_patient:
             positive_patient_count += 1
+            positive_roi_recall_total += diagnostics.positive_roi_recall
         else:
             negative_patient_count += 1
+            negative_roi_area_total += diagnostics.roi_area_fraction
+            negative_roi_activation_count += int(diagnostics.roi_area_fraction > 0.0)
 
     if processed_patients == 0:
         return _zero_rule6_calibration_result(optimizer_config)
@@ -1353,6 +1408,10 @@ def _calibrate_rule6_from_patient_predictions(
         min_patient_positive_area_fraction=selected.key.min_patient_positive_area_fraction,
         min_component_area_fraction_patch=selected.key.min_component_area_fraction_patch,
     )
+    positive_roi_recall = float(positive_roi_recall_total / positive_patient_count)
+    negative_roi_area_fraction = float(negative_roi_area_total / negative_patient_count)
+    negative_roi_activation_rate = float(negative_roi_activation_count / negative_patient_count)
+    mean_roi_area_fraction = float(roi_area_total / processed_patients)
     summary = {
         "objective": "balanced_rule6",
         "target_status": target_status,
@@ -1364,6 +1423,10 @@ def _calibrate_rule6_from_patient_predictions(
         "positive_tpr_drop_tolerance": float(optimizer_config.pos_tpr_drop_tolerance),
         "minimum_allowed_positive_dice": float(minimum_allowed_positive_dice),
         "minimum_allowed_positive_tpr": float(minimum_allowed_positive_tpr),
+        "positive_roi_recall": positive_roi_recall,
+        "negative_roi_area_fraction": negative_roi_area_fraction,
+        "negative_roi_activation_rate": negative_roi_activation_rate,
+        "mean_roi_area_fraction": mean_roi_area_fraction,
         "candidate_grid": _rule6_candidate_grid_summary(optimizer_config),
         "baseline_unfiltered": _candidate_to_summary(baseline),
         "selected": _candidate_to_summary(selected),
@@ -1409,6 +1472,10 @@ def _calibrate_rule6_from_patient_predictions(
                 selected.key.min_component_area_fraction_patch
             ),
             "Calibration_target_status": target_status,
+            "Calibration_positive_roi_recall": positive_roi_recall,
+            "Calibration_negative_roi_area_fraction": negative_roi_area_fraction,
+            "Calibration_negative_roi_activation_rate": negative_roi_activation_rate,
+            "Calibration_mean_roi_area_fraction": mean_roi_area_fraction,
             "Calibration_n_patients": int(positive_patient_count + negative_patient_count),
             "Calibration_n_positive_patients": int(positive_patient_count),
             "Calibration_n_negative_patients": int(negative_patient_count),
@@ -2014,6 +2081,7 @@ def _semantic_objective(
     )
     roi_threshold = trial.suggest_float("roi_thresh", 0.15, 0.60)
     roi_area_fractions: list[float] = []
+    negative_roi_area_fractions: list[float] = []
     roi_positive_recalls: list[float] = []
     positive_recall_sum = 0.0
     processed_positive_patients = 0
@@ -2046,6 +2114,8 @@ def _semantic_objective(
             roi_positive_recalls.append(recall)
             positive_recall_sum += recall
             processed_positive_patients += 1
+        else:
+            negative_roi_area_fractions.append(float(np.mean(roi_mask)))
         if empty_rois / max(1, total_patients) > config.roi_empty_max:
             raise optuna.exceptions.TrialPruned(
                 f"Trivial Empty: {empty_rois / max(1, total_patients):.2f}"
@@ -2062,6 +2132,9 @@ def _semantic_objective(
     median_area = float(np.median(roi_area_fractions)) if roi_area_fractions else 0.0
     empty_rate = float(empty_rois / max(1, len(prepared.optimization_patients)))
     mean_positive_recall = float(np.mean(roi_positive_recalls)) if roi_positive_recalls else 0.0
+    mean_negative_roi_area = (
+        float(np.mean(negative_roi_area_fractions)) if negative_roi_area_fractions else 0.0
+    )
     if empty_rate > config.roi_empty_max:
         raise optuna.exceptions.TrialPruned(f"Trivial Empty: {empty_rate:.2f}")
     if mean_positive_recall < config.roi_min_pos_recall:
@@ -2083,7 +2156,10 @@ def _semantic_objective(
         raise optuna.exceptions.TrialPruned(
             f"Trivial Permissive: {median_area:.2f} > {dynamic_max_median:.2f}"
         )
-    return mean_positive_recall
+    return float(
+        mean_positive_recall
+        - (config.roi_negative_area_penalty_lambda * mean_negative_roi_area)
+    )
 
 
 def _run_semantic_optimization(
@@ -2241,7 +2317,7 @@ def _spatial_objective(
     return float(
         macro_positive_auprc
         - (config.spill_penalty_lambda * macro_spill)
-        - (config.spill_penalty_lambda * macro_negative_fp)
+        - (config.negative_fp_penalty_lambda * macro_negative_fp)
     )
 
 
@@ -2411,7 +2487,7 @@ def _evaluate_holdout(
     holdout_objective = float(
         macro_positive_auprc
         - (config.spill_penalty_lambda * macro_spill)
-        - (config.spill_penalty_lambda * macro_negative_fp)
+        - (config.negative_fp_penalty_lambda * macro_negative_fp)
     )
     metrics: dict[str, float | int | str] = {
         "Macro_AUPRC_in_ROI": macro_positive_auprc,
@@ -2429,6 +2505,7 @@ def _evaluate_holdout(
         "Decision_threshold": decision_threshold,
         "Spatial_patient_policy": config.spatial_patient_policy,
         "Spill_lambda": float(config.spill_penalty_lambda),
+        "Negative_FP_lambda": float(config.negative_fp_penalty_lambda),
     }
     LOGGER.info(
         "Holdout evaluation complete: objective=%.4f macro_auprc=%.4f spill=%.4f.",
@@ -2536,7 +2613,7 @@ def _evaluate_holdout_streaming(
     holdout_objective = float(
         macro_positive_auprc
         - (context.config.spill_penalty_lambda * macro_spill)
-        - (context.config.spill_penalty_lambda * macro_negative_fp)
+        - (context.config.negative_fp_penalty_lambda * macro_negative_fp)
     )
     metrics: dict[str, float | int | str] = {
         "Macro_AUPRC_in_ROI": macro_positive_auprc,
@@ -2554,6 +2631,7 @@ def _evaluate_holdout_streaming(
         "Decision_threshold": decision_threshold,
         "Spatial_patient_policy": context.config.spatial_patient_policy,
         "Spill_lambda": float(context.config.spill_penalty_lambda),
+        "Negative_FP_lambda": float(context.config.negative_fp_penalty_lambda),
     }
     LOGGER.info(
         "Holdout evaluation complete: objective=%.4f macro_auprc=%.4f spill=%.4f.",

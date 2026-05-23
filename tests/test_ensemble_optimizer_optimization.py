@@ -123,6 +123,8 @@ def optimizer_config(tmp_path: Path) -> EnsembleOptimizerConfig:
         negative_clean_target=0.0,
         min_macro_precision=0.0,
         min_macro_tpr=0.0,
+        min_component_area_px_candidates=(0,),
+        min_patient_positive_patches_candidates=(1,),
         min_patient_positive_area_fraction_candidates=(0.0,),
         min_component_area_fraction_patch_candidates=(0.0,),
         num_trials_semantic=1,
@@ -774,6 +776,10 @@ def test_calibrate_rule6_uses_component_fraction_filtering_for_small_false_posit
     assert result.metrics["Calibration_target_status"] == "target_met"
     assert result.metrics["Calibration_negative_clean_rate"] == pytest.approx(1.0)
     assert result.metrics["Calibration_micro_dice"] == pytest.approx(1.0)
+    assert result.metrics["Calibration_positive_roi_recall"] == pytest.approx(1.0)
+    assert result.metrics["Calibration_negative_roi_area_fraction"] == pytest.approx(1.0)
+    assert result.metrics["Calibration_negative_roi_activation_rate"] == pytest.approx(1.0)
+    assert result.summary["mean_roi_area_fraction"] == pytest.approx(1.0)
 
 
 def test_calibrate_rule6_reports_target_infeasible_when_guardrails_cannot_be_met(
@@ -937,7 +943,7 @@ def test_spatial_objective_precompute_matches_full_image_objective(
     expected_score = (
         macro_positive_auprc
         - (config.spill_penalty_lambda * macro_spill)
-        - (config.spill_penalty_lambda * macro_negative_fp)
+        - (config.negative_fp_penalty_lambda * macro_negative_fp)
     )
 
     assert precomputed_score == pytest.approx(expected_score)
@@ -1021,6 +1027,47 @@ def test_semantic_objective_early_checks_preserve_completed_trial_score(
     score = optimization._semantic_objective(trial, config=optimizer_config, prepared=prepared)
 
     assert score == pytest.approx(1.0)
+
+
+def test_semantic_objective_penalizes_negative_patient_roi_activation(
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    prepared = optimization.OptimizationPreparation(
+        patient_map={"positive": [0], "negative": [1]},
+        prediction_memmaps=[],
+        truth_memmap=cast(Any, np.zeros((2, 2, 2), dtype=np.uint8)),
+        holdout_idx=np.array([], dtype=np.int64),
+        holdout_local_map={},
+        holdout_patients=[],
+        calibration_idx=np.array([], dtype=np.int64),
+        calibration_local_map={},
+        calibration_patients=[],
+        optimization_idx=np.array([0, 1], dtype=np.int64),
+        optimization_local_map={"positive": slice(0, 1), "negative": slice(1, 2)},
+        optimization_patients=["positive", "negative"],
+        semantic_indices=[0],
+        spatial_indices=[0],
+        optimization_truth=None,
+        optimization_semantic_cache={
+            "positive": np.asarray([np.full((1, 2, 2), UINT16_MAX, dtype=np.uint16)]),
+            "negative": np.asarray([np.full((1, 2, 2), UINT16_MAX, dtype=np.uint16)]),
+        },
+        optimization_spatial_cache=None,
+        optimization_truth_cache={
+            "positive": np.ones((1, 2, 2), dtype=np.uint8),
+            "negative": np.zeros((1, 2, 2), dtype=np.uint8),
+        },
+        optimization_gt_density_by_patient={"positive": 1.0, "negative": 0.0},
+        optimization_positive_patients={"positive"},
+        height=2,
+        width=2,
+    )
+    config = replace(optimizer_config, roi_negative_area_penalty_lambda=0.25)
+    trial = cast(optuna.Trial, _FixedTrial({"w_sem_0": 1.0, "roi_thresh": 0.5}))
+
+    score = optimization._semantic_objective(trial, config=config, prepared=prepared)
+
+    assert score == pytest.approx(0.75)
 
 
 def test_compute_positive_patients_flags_any_patient_with_positive_pixel(tmp_path: Path) -> None:
@@ -1579,4 +1626,5 @@ def test_run_two_stream_optimization_all_policy_penalizes_negative_false_positiv
     assert result.holdout_metrics["Macro_AUPRC_in_ROI_Positive"] == pytest.approx(0.8)
     assert result.holdout_metrics["Macro_Negative_FP"] == pytest.approx(1.0)
     assert result.holdout_metrics["Macro_Spill_All"] == pytest.approx(0.0)
-    assert result.holdout_metrics["Objective_Composite"] == pytest.approx(0.7)
+    assert result.holdout_metrics["Negative_FP_lambda"] == pytest.approx(0.5)
+    assert result.holdout_metrics["Objective_Composite"] == pytest.approx(0.3)

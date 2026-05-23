@@ -15,6 +15,8 @@ VALIDATION_CALIBRATION_FRACTION = 0.25
 VALIDATION_HOLDOUT_FRACTION = 0.3
 SEMANTIC_TRIALS = 11
 SPATIAL_TRIALS = 13
+NEGATIVE_FP_PENALTY = 0.42
+ROI_NEGATIVE_AREA_PENALTY = 0.33
 
 
 @pytest.fixture(autouse=True)
@@ -64,6 +66,10 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_SPATIAL_ARCHITECTURES": "fpn, manet",
             "ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC": "11",
             "ENSEMBLE_OPT_NUM_TRIALS_SPATIAL": "13",
+            "ENSEMBLE_OPT_NEGATIVE_FP_PENALTY_LAMBDA": str(NEGATIVE_FP_PENALTY),
+            "ENSEMBLE_OPT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA": str(
+                ROI_NEGATIVE_AREA_PENALTY
+            ),
             "ENSEMBLE_OPT_DECISION_THRESHOLD_MIN": "0.55",
             "ENSEMBLE_OPT_DECISION_THRESHOLD_MAX": "0.85",
             "ENSEMBLE_OPT_DECISION_THRESHOLD_STEP": "0.05",
@@ -99,6 +105,10 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.spatial_architectures == ("FPN", "MANET")
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
+    assert config.negative_fp_penalty_lambda == pytest.approx(NEGATIVE_FP_PENALTY)
+    assert config.roi_negative_area_penalty_lambda == pytest.approx(
+        ROI_NEGATIVE_AREA_PENALTY
+    )
     assert config.decision_threshold_min == pytest.approx(0.55)
     assert config.decision_threshold_max == pytest.approx(0.85)
     assert config.decision_threshold_step == pytest.approx(0.05)
@@ -146,8 +156,28 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
     assert config.negative_clean_target == pytest.approx(0.50)
     assert config.min_macro_precision == pytest.approx(0.50)
     assert config.min_macro_tpr == pytest.approx(0.80)
-    assert config.min_component_area_px_candidates == (0, 64, 128, 256, 512, 1024, 2048, 4096)
-    assert config.min_component_area_fraction_patch_candidates == (0.0,)
+    assert config.negative_fp_penalty_lambda == pytest.approx(0.50)
+    assert config.roi_negative_area_penalty_lambda == pytest.approx(0.25)
+    assert config.min_component_area_px_candidates == (
+        0,
+        64,
+        128,
+        256,
+        512,
+        1024,
+        2048,
+        4096,
+        8192,
+        16384,
+        32768,
+    )
+    assert config.min_component_area_fraction_patch_candidates == (
+        0.0,
+        0.001,
+        0.0025,
+        0.005,
+        0.01,
+    )
     assert config.min_patient_positive_patches_candidates == (1, 2, 3, 5, 8, 13, 21)
     assert config.min_patient_positive_area_fraction_candidates == (
         0.0,
@@ -288,6 +318,32 @@ def test_load_ensemble_optimizer_config_rejects_negative_tpr_drop_tolerance(
                 ),
                 "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
                 "ENSEMBLE_OPT_POS_TPR_DROP_TOLERANCE": "-0.01",
+            }
+        )
+
+
+def test_load_ensemble_optimizer_config_rejects_negative_penalty_lambdas(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="negative_fp_penalty_lambda"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_NEGATIVE_FP_PENALTY_LAMBDA": "-0.01",
+            }
+        )
+
+    with pytest.raises(ValueError, match="roi_negative_area_penalty_lambda"):
+        load_ensemble_optimizer_config(
+            {
+                "ENSEMBLE_OPT_MASTER_MANIFEST_PATH": str(
+                    tmp_path / "dataset" / "master_manifest.sqlite"
+                ),
+                "ENSEMBLE_OPT_METADATA_DIR": str(tmp_path / "metadata"),
+                "ENSEMBLE_OPT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA": "-0.01",
             }
         )
 

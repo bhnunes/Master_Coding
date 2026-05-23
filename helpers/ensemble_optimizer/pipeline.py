@@ -192,6 +192,7 @@ def _execute_pipeline(config: EnsembleOptimizerConfig) -> EnsembleOptimizerOutpu
             decision_threshold=optimization_result.decision_threshold,
             postprocessing_config=optimization_result.postprocessing_config,
             spill_penalty_lambda=config.spill_penalty_lambda,
+            negative_fp_penalty_lambda=config.negative_fp_penalty_lambda,
             spatial_patient_policy=config.spatial_patient_policy,
             calibration_metrics=optimization_result.calibration_metrics,
             validation_calibration_summary=optimization_result.validation_calibration_summary,
