@@ -782,6 +782,44 @@ def test_calibrate_rule6_uses_component_fraction_filtering_for_small_false_posit
     assert result.summary["mean_roi_area_fraction"] == pytest.approx(1.0)
 
 
+def test_calibrate_rule6_tracks_negative_false_positive_burden(
+    optimizer_config: EnsembleOptimizerConfig,
+) -> None:
+    positive_truth = np.ones((1, 10, 10), dtype=np.uint8)
+    positive_prediction = positive_truth.astype(np.float32) * 0.9
+    negative_truth = np.zeros((1, 10, 10), dtype=np.uint8)
+    negative_prediction = np.zeros((1, 10, 10), dtype=np.float32)
+    negative_prediction[:, :4, :4] = 0.9
+    negative_prediction[:, 9, 9] = 0.9
+    roi_mask = np.ones_like(positive_truth, dtype=np.uint8)
+
+    result = optimization._calibrate_rule6_from_patient_predictions(
+        optimizer_config=replace(
+            optimizer_config,
+            decision_threshold_min=0.5,
+            decision_threshold_max=0.5,
+            decision_threshold_step=0.1,
+            min_micro_dice=0.0,
+            negative_clean_target=1.0,
+            min_macro_precision=0.0,
+            min_macro_tpr=0.0,
+            min_component_area_px_candidates=(0, RULE6_COMPONENT_AREA_CANDIDATE),
+            min_patient_positive_patches_candidates=(1,),
+            min_patient_positive_area_fraction_candidates=(0.0,),
+        ),
+        patient_predictions=[
+            ("positive", positive_prediction, positive_truth, roi_mask),
+            ("negative", negative_prediction, negative_truth, roi_mask),
+        ],
+    )
+
+    assert result.postprocessing_config.min_component_area_px == RULE6_COMPONENT_AREA_CANDIDATE
+    assert result.metrics["Calibration_target_status"] == "target_infeasible"
+    assert result.metrics["Calibration_negative_clean_rate"] == pytest.approx(0.0)
+    assert result.metrics["Calibration_negative_fp_area_fraction"] == pytest.approx(0.16)
+    assert result.summary["selected"]["negative_fp_area_fraction"] == pytest.approx(0.16)
+
+
 def test_calibrate_rule6_reports_target_infeasible_when_guardrails_cannot_be_met(
     optimizer_config: EnsembleOptimizerConfig,
 ) -> None:

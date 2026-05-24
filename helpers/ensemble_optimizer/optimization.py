@@ -214,6 +214,7 @@ class _Rule6CandidateScore:
     positive_dice: float
     positive_tpr: float
     negative_clean_rate: float
+    negative_fp_area_fraction: float
     micro_dice: float
     macro_precision: float
     positive_patient_count: int
@@ -236,6 +237,7 @@ class _Rule6CandidateAccumulator:
     positive_dice_totals: npt.NDArray[np.float64]
     positive_tpr_totals: npt.NDArray[np.float64]
     negative_clean_totals: npt.NDArray[np.float64]
+    negative_fp_area_fraction_totals: npt.NDArray[np.float64]
     macro_precision_totals: npt.NDArray[np.float64]
     macro_precision_counts: npt.NDArray[np.int64]
     micro_tp_totals: npt.NDArray[np.int64]
@@ -249,6 +251,7 @@ class _Rule6CandidateTotals:
     positive_dice_total: float
     positive_tpr_total: float
     negative_clean_total: float
+    negative_fp_area_fraction_total: float
     macro_precision_total: float
     macro_precision_count: int
     micro_counts: dict[str, int]
@@ -809,6 +812,7 @@ def _zero_rule6_calibration_result(config: EnsembleOptimizerConfig) -> _Rule6Cal
             "Calibration_positive_dice": 0.0,
             "Calibration_positive_tpr": 0.0,
             "Calibration_negative_clean_rate": 0.0,
+            "Calibration_negative_fp_area_fraction": 0.0,
             "Calibration_micro_dice": 0.0,
             "Calibration_macro_precision": 0.0,
             "Calibration_baseline_positive_dice": 0.0,
@@ -888,6 +892,11 @@ def _score_rule6_candidate(
         if negative_patient_count > 0
         else 0.0
     )
+    negative_fp_area_fraction = (
+        float(totals.negative_fp_area_fraction_total / negative_patient_count)
+        if negative_patient_count > 0
+        else 0.0
+    )
     macro_rule6 = (
         float((totals.positive_dice_total + totals.negative_clean_total) / total_patients)
         if total_patients > 0
@@ -904,6 +913,7 @@ def _score_rule6_candidate(
         positive_dice=positive_dice,
         positive_tpr=positive_tpr,
         negative_clean_rate=negative_clean_rate,
+        negative_fp_area_fraction=negative_fp_area_fraction,
         micro_dice=_dice_from_counts(totals.micro_counts),
         macro_precision=macro_precision,
         positive_patient_count=positive_patient_count,
@@ -917,6 +927,7 @@ def _candidate_sort_key(
     return (
         candidate.macro_rule6,
         candidate.negative_clean_rate,
+        -candidate.negative_fp_area_fraction,
         candidate.positive_tpr,
         candidate.positive_dice,
         candidate.micro_dice,
@@ -942,6 +953,7 @@ def _candidate_to_summary(candidate: _Rule6CandidateScore) -> dict[str, float | 
         "positive_dice": float(candidate.positive_dice),
         "positive_tpr": float(candidate.positive_tpr),
         "negative_clean_rate": float(candidate.negative_clean_rate),
+        "negative_fp_area_fraction": float(candidate.negative_fp_area_fraction),
         "micro_dice": float(candidate.micro_dice),
         "macro_precision": float(candidate.macro_precision),
         "positive_patient_count": int(candidate.positive_patient_count),
@@ -967,6 +979,7 @@ def _build_rule6_accumulator(candidate_count: int) -> _Rule6CandidateAccumulator
         positive_dice_totals=np.zeros(candidate_count, dtype=np.float64),
         positive_tpr_totals=np.zeros(candidate_count, dtype=np.float64),
         negative_clean_totals=np.zeros(candidate_count, dtype=np.float64),
+        negative_fp_area_fraction_totals=np.zeros(candidate_count, dtype=np.float64),
         macro_precision_totals=np.zeros(candidate_count, dtype=np.float64),
         macro_precision_counts=np.zeros(candidate_count, dtype=np.int64),
         micro_tp_totals=np.zeros(candidate_count, dtype=np.int64),
@@ -996,6 +1009,11 @@ def _record_rule6_counts(
         accumulator.positive_tpr_totals[index] += _tpr_from_counts(counts)
     else:
         accumulator.negative_clean_totals[index] += 1.0 if counts["fp"] == 0 else 0.0
+        negative_pixels = counts["fp"] + counts["tn"]
+        if negative_pixels > 0:
+            accumulator.negative_fp_area_fraction_totals[index] += (
+                float(counts["fp"]) / negative_pixels
+            )
 
 
 def _record_patient_rule6_candidates(
@@ -1105,9 +1123,7 @@ def _rule6_area_counts_for_threshold(
             effective_area_values=effective_area_values,
         )
         for effective_area, patch_counts in patch_metrics.items():
-            predicted_positive_pixels, true_positive_pixels, has_positive_prediction = (
-                patch_counts
-            )
+            predicted_positive_pixels, true_positive_pixels, has_positive_prediction = patch_counts
             counts = counts_by_area[effective_area]
             counts.predicted_positive_pixels += predicted_positive_pixels
             counts.true_positive_pixels += true_positive_pixels
@@ -1222,6 +1238,7 @@ def _rule6_candidate_totals(
         positive_dice_total=float(accumulator.positive_dice_totals[index]),
         positive_tpr_total=float(accumulator.positive_tpr_totals[index]),
         negative_clean_total=float(accumulator.negative_clean_totals[index]),
+        negative_fp_area_fraction_total=float(accumulator.negative_fp_area_fraction_totals[index]),
         macro_precision_total=float(accumulator.macro_precision_totals[index]),
         macro_precision_count=int(accumulator.macro_precision_counts[index]),
         micro_counts={
@@ -1447,6 +1464,7 @@ def _calibrate_rule6_from_patient_predictions(
             "Calibration_positive_dice": float(selected.positive_dice),
             "Calibration_positive_tpr": float(selected.positive_tpr),
             "Calibration_negative_clean_rate": float(selected.negative_clean_rate),
+            "Calibration_negative_fp_area_fraction": float(selected.negative_fp_area_fraction),
             "Calibration_micro_dice": float(selected.micro_dice),
             "Calibration_macro_precision": float(selected.macro_precision),
             "Calibration_baseline_positive_dice": float(baseline.positive_dice),
@@ -2157,8 +2175,7 @@ def _semantic_objective(
             f"Trivial Permissive: {median_area:.2f} > {dynamic_max_median:.2f}"
         )
     return float(
-        mean_positive_recall
-        - (config.roi_negative_area_penalty_lambda * mean_negative_roi_area)
+        mean_positive_recall - (config.roi_negative_area_penalty_lambda * mean_negative_roi_area)
     )
 
 

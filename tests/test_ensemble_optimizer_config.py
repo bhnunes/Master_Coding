@@ -67,9 +67,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
             "ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC": "11",
             "ENSEMBLE_OPT_NUM_TRIALS_SPATIAL": "13",
             "ENSEMBLE_OPT_NEGATIVE_FP_PENALTY_LAMBDA": str(NEGATIVE_FP_PENALTY),
-            "ENSEMBLE_OPT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA": str(
-                ROI_NEGATIVE_AREA_PENALTY
-            ),
+            "ENSEMBLE_OPT_ROI_NEGATIVE_AREA_PENALTY_LAMBDA": str(ROI_NEGATIVE_AREA_PENALTY),
             "ENSEMBLE_OPT_DECISION_THRESHOLD_MIN": "0.55",
             "ENSEMBLE_OPT_DECISION_THRESHOLD_MAX": "0.85",
             "ENSEMBLE_OPT_DECISION_THRESHOLD_STEP": "0.05",
@@ -106,9 +104,7 @@ def test_load_ensemble_optimizer_config_reads_expected_environment(tmp_path: Pat
     assert config.num_trials_semantic == SEMANTIC_TRIALS
     assert config.num_trials_spatial == SPATIAL_TRIALS
     assert config.negative_fp_penalty_lambda == pytest.approx(NEGATIVE_FP_PENALTY)
-    assert config.roi_negative_area_penalty_lambda == pytest.approx(
-        ROI_NEGATIVE_AREA_PENALTY
-    )
+    assert config.roi_negative_area_penalty_lambda == pytest.approx(ROI_NEGATIVE_AREA_PENALTY)
     assert config.decision_threshold_min == pytest.approx(0.55)
     assert config.decision_threshold_max == pytest.approx(0.85)
     assert config.decision_threshold_step == pytest.approx(0.05)
@@ -188,6 +184,15 @@ def test_load_ensemble_optimizer_config_uses_portable_defaults(tmp_path: Path) -
         1e-4,
         5e-4,
         1e-3,
+        0.0025,
+        0.005,
+        0.0075,
+        0.01,
+        0.015,
+        0.02,
+        0.03,
+        0.04,
+        0.05,
     )
     assert config.optimization_cache_max_bytes == DEFAULT_OPTIMIZATION_CACHE_MAX_BYTES
     assert config.local_shard_cache_max_bytes == 0
