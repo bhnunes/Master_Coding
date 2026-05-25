@@ -92,6 +92,19 @@ amostragem ou receita de inferência tende, portanto, a ser detectada como
 incompatibilidade experimental, em vez de se propagar como resultado
 aparentemente válido.
 
+
+\section{Ambiente computacional}\label{sec:met_ambiente_computacional}
+
+A execução experimental foi distribuída entre um ambiente local, voltado às etapas intensivas em leitura e escrita de arquivos, e um ambiente em nuvem, reservado às etapas dependentes de GPU. Essa divisão foi adotada para adequar o fluxo às restrições de armazenamento, memória e processamento disponíveis, evitando que tarefas com perfis computacionais distintos competissem pelos mesmos recursos.
+
+O ambiente local consistiu em um notebook com processador Intel Core i5, 16 GB de RAM, SSD interno de 500 GB e HD interno de 500 GB, complementado por um HD externo de 1 TB e um SSD externo de 1 TB. As WSIs completas foram mantidas no HD externo, priorizando capacidade de armazenamento. Em contrapartida, a geração e persistência dos \textit{patches} foram direcionadas ao SSD externo, cuja maior taxa de leitura e escrita reduziu gargalos de entrada e saída durante o processamento. Os códigos Python e os arquivos temporários de execução foram mantidos no SSD interno, enquanto o HD interno foi reservado principalmente para tarefas auxiliares de download e upload de arquivos para o ambiente em nuvem.
+
+Nesse ambiente local foram realizadas as etapas de geração de \textit{patches}, limpeza da base de câncer, criação dos conjuntos de treino, validação e teste, além das verificações de sanidade. Essas tarefas demandaram manipulação intensiva de arquivos e controle de consistência, mas não exigiram aceleração por GPU. Por essa razão, puderam ser executadas localmente, desde que a organização dos discos evitasse concentrar leitura das WSIs, escrita dos \textit{patches} e execução dos scripts no mesmo dispositivo físico.
+
+As etapas dependentes de aceleração por GPU foram executadas no Google Colab Pro. Esse conjunto incluiu análise de artefatos, amostragem inteligente do conjunto de treino, investigação de taxa de aprendizado, treinamento supervisionado, otimização do \textit{ensemble} e inferência final. Nas execuções reportadas, foi utilizada uma GPU NVIDIA L4, com 22{,}5 GB de memória de vídeo disponível no ambiente, aproximadamente 53 GB de RAM do sistema e 235{,}7 GB de armazenamento temporário. A GPU NVIDIA L4 é uma aceleradora voltada a cargas de trabalho de IA, vídeo e computação visual, com 24 GB de memória GDDR6 em sua especificação nominal; a diferença entre o valor nominal e o valor visível decorre da forma como o ambiente virtualizado disponibiliza a memória ao usuário \cite{nvidia_l4}. 
+
+Sempre que possível, o processamento em nuvem foi distribuído em até três instâncias paralelas do Google Colab Pro, respeitando a disponibilidade do serviço e o custo computacional associado. Essa estratégia permitiu executar simultaneamente experimentos independentes, como treinamentos de arquiteturas distintas ou avaliações sob diferentes normalizações de cor.
+
 \section{Aquisição, ingestão e controle de qualidade}\label{sec:met_ingestao_qc}
 
 A primeira etapa metodológica trata a WSI como um objeto de dados volumoso,
@@ -1135,7 +1148,7 @@ desempenho observado em validação \cite{caruana2004ensemble}. No entanto, a
 estratégia adotada nesta dissertação é específica ao problema de segmentação
 histopatológica: em vez de calcular uma média global simples entre todos os
 modelos, a Fase 9 organiza a inferência em dois fluxos complementares,
-otimizando pesos, limiares e restrições espaciais por meio de Optuna/TPE
+otimizando pesos, limiares e restrições espaciais por meio de otimização Bayesiana realizada pela ferramenta Optuna/TPE
 \cite{akiba2019optuna,bergstra2011algorithms}.
 
 Antes de qualquer otimização, a fase carrega os metadados produzidos durante o
@@ -1151,12 +1164,12 @@ misturados silenciosamente.
 Quando há múltiplos candidatos válidos para uma mesma arquitetura, a Fase 9
 seleciona exatamente um modelo por arquitetura solicitada, ordenado por uma
 métrica configurável. Por padrão, essa seleção utiliza
-\texttt{best\_val\_auprc\_pixel\_score}, coerente com o uso de AUPRC como métrica
+o melhor valor de AUPRC obtido no nível de pixel durante a validação do treinamento, coerente com o uso do AUPRC como métrica
 principal de validação em cenários desbalanceados. Essa escolha transforma o
 registro de modelos treinados em uma biblioteca controlada de candidatos, sobre
 a qual a receita de \textit{ensemble} é construída.
 
-A validação é lida a partir do \texttt{master\_manifest.sqlite}, preservando a
+A validação é lida a partir do banco de dados Mestre, preservando a
 linhagem dos pacientes, dos shards HDF5 canônicos e da normalização em tempo de
 execução. Internamente, os pacientes de validação são separados em subconjuntos
 disjuntos de otimização, calibração e, quando possível, \textit{holdout}
@@ -1165,24 +1178,30 @@ positivos e negativos em cada subconjunto. Assim, os pesos do \textit{ensemble},
 o limiar final e os relatórios internos de desenvolvimento não são obtidos
 exatamente sobre os mesmos pacientes.
 
-A receita adotada é denominada
-\texttt{two\_stream\_spatial\_gating}. Nessa estratégia, modelos do fluxo
-semântico produzem uma estimativa grosseira da região de interesse, enquanto
-modelos do fluxo espacial refinam a probabilidade de câncer dentro dessa região.
-Por padrão, o fluxo semântico considera \texttt{SWIN}, \texttt{DPT},
+A composição do \textit{ensemble} adota dois fluxos com componentes semântico e
+espacial, estratégia denominada no código como
+\texttt{two\_stream\_spatial\_gating}. O fluxo semântico, formado por modelos
+baseados em \textit{Transformers}, produz uma estimativa inicial da região de
+interesse, explorando relações globais entre diferentes áreas da imagem. Em
+seguida, o fluxo espacial, composto por modelos convolucionais, refina a
+probabilidade de câncer dentro dessa região, priorizando padrões locais de
+textura, borda e morfologia.
+
+Essa organização permite combinar papéis complementares. Os modelos baseados em
+atenção contribuem para restringir a busca a regiões mais prováveis de conter
+tumor, enquanto as redes convolucionais reavaliam essas áreas com maior ênfase
+em detalhes espaciais. Assim, a predição final resulta da colaboração entre contexto global e evidência local, evitando competição entre famílias de arquiteturas. Por padrão, o fluxo semântico considera \texttt{SWIN}, \texttt{DPT},
 \texttt{SEGFORMER} e \texttt{UPERNET}; o fluxo espacial considera
-\texttt{DEEPLABV3PLUS}, \texttt{UNET++}, \texttt{FPN} e \texttt{MANET}. Essa
-organização explora a complementaridade entre arquiteturas com maior capacidade
-de representação contextual e arquiteturas com maior viés para reconstrução
-local da máscara.
+\texttt{DEEPLABV3PLUS}, \texttt{UNET++}, \texttt{FPN} e \texttt{MANET}.
 
 Sejam $\mathcal{M}_{\mathrm{sem}}$ e $\mathcal{M}_{\mathrm{spa}}$ os conjuntos de
 modelos dos fluxos semântico e espacial, respectivamente. Seja $P_m(x)$ a
 probabilidade de primeiro plano produzida pelo modelo $m$ no pixel $x$. Durante
 a inferência de validação, essa probabilidade é obtida por média de três vistas:
-imagem original, espelhamento horizontal e espelhamento vertical. Essa forma de
-\textit{test-time augmentation} busca reduzir a sensibilidade da predição a
-transformações simples da entrada \cite{moshkov2020test}. As probabilidades
+imagem original, espelhamento horizontal e espelhamento vertical. Essa técnica, conhecida como \Sigla{\textit{Test-time augmentation}}{TTA}, busca reduzir a sensibilidade da predição a
+transformações simples da entrada \cite{moshkov2020test}. 
+
+As probabilidades
 agregadas dos dois fluxos são definidas por:
 
 \begin{equation}
@@ -1196,16 +1215,10 @@ P_{\mathrm{spa}}(x) &=&
 \end{equation}
 
 Os pesos $w_m^{\mathrm{sem}}$ e $w_m^{\mathrm{spa}}$ são normalizados,
-não negativos e definidos separadamente em cada fluxo. Essa separação permite
-que o fluxo semântico priorize modelos mais adequados à localização contextual
-da região de interesse, enquanto o fluxo espacial prioriza modelos mais
-adequados ao refinamento da segmentação.
-
-Para tornar a otimização viável em validações volumosas, a Fase 9 pode
-materializar probabilidades em \textit{memmaps}. Esse cache armazena predições
+não negativos e definidos separadamente em cada fluxo. Para tornar a otimização viável em validações volumosas, a Fase 9 materializa probabilidades em caches no disco rígido. Esse cache armazena predições
 com TTA, máscaras de referência e identificadores de paciente para a mesma
 divisão usada na otimização. As probabilidades são quantizadas em 16 bits e as
-máscaras em 8 bits, reduzindo consumo de RAM e disco. Na rota escalonável, a
+máscaras em 8 bits, reduzindo consumo de RAM e disco. Durante o processo, a
 fase constrói primeiro o cache semântico, utiliza-o para definir a região de
 interesse, descarta predições semânticas brutas quando deixam de ser necessárias
 e, em seguida, constrói o cache espacial. Esse mecanismo é operacional: ele
@@ -1227,12 +1240,14 @@ resolução, limiarização e retorno à grade original:
     \label{eq:roi_gate}
 \end{equation}
 
-Nessa expressão, $s$ é a escala de contexto, $\tau_{\mathrm{roi}}$ é o limiar da
-região de interesse, $\mathrm{Down}(\cdot;s)$ representa a redução de resolução e
-$\mathrm{Up}(\cdot)$ representa o retorno à resolução original. A redução de
-resolução permite que o fluxo semântico opere em uma escala mais contextual,
-enquanto o retorno à grade original permite aplicar a restrição espacial sobre a
-predição refinada.
+Nessa expressão, $s$ representa a escala de contexto, $\tau_{\mathrm{roi}}$
+corresponde ao limiar da região de interesse, $\mathrm{Down}(\cdot;s)$ indica a
+redução de resolução e $\mathrm{Up}(\cdot)$ representa o retorno à resolução
+original. A redução de resolução permite que o fluxo semântico opere em uma
+escala mais contextual, enquanto o retorno à grade original possibilita aplicar
+essa região de interesse sobre a predição espacial refinada. A motivação é aproximar computacionalmente uma estratégia comum na leitura
+histopatológica: alternar entre menor ampliação, para observar a organização
+global do tecido, e maior ampliação, para examinar detalhes morfológicos locais.
 
 A probabilidade final é obtida pela aplicação da região de interesse sobre a
 saída do fluxo espacial:
@@ -1262,14 +1277,18 @@ permissivas. Para um paciente positivo $i$, a recuperação da região de intere
 \end{equation}
 
 Nessa expressão, $Y_i$ é a máscara de referência do paciente, $R_i$ é a região
-de interesse proposta e $\varepsilon$ evita instabilidade numérica. Esse critério
-privilegia ROIs que cubram a região positiva, mas a etapa também aplica regras
-de rejeição para evitar soluções triviais.
+de interesse proposta e $\varepsilon$ evita instabilidade numérica. O critério
+privilegia ROIs que cubram a região positiva, mas é acompanhado por regras de
+rejeição para evitar soluções triviais, como selecionar a imagem inteira ou uma
+área excessivamente ampla do tecido. Embora essa escolha aumentasse a recuperação
+da lesão, ela não forneceria localização espacial útil e incluiria grande volume
+de tecido irrelevante. Portanto, a ROI deve preservar alta cobertura da região
+positiva sem perder sua função de restringir a análise espacial.
 
-O fluxo espacial é otimizado por uma função composta que avalia desempenho
+O fluxo espacial é otimizado por uma função composta que avalia o desempenho
 dentro da ROI e penaliza predições fora dela. A função objetivo combina AUPRC
-média em pacientes positivos, vazamento de probabilidade fora da ROI e massa
-falso-positiva em pacientes negativos:
+média em pacientes positivos, vazamento de probabilidade fora da ROI e predições
+indevidas em pacientes negativos:
 
 \begin{equation}
     J_{\mathrm{spa}} =
@@ -1293,30 +1312,82 @@ quais regiões positivas podem ocupar pequena fração dos pixels
 da região tumoral, refinamento local e controle de falsos positivos.
 
 Após a seleção dos pesos dos fluxos e de $\tau_{\mathrm{roi}}$, a Fase 9 calibra
-o limiar final em pacientes de calibração disjuntos daqueles usados na
-otimização. O limiar escolhido maximiza a média do MCC por paciente em uma grade
-pré-definida:
+a decisão final em pacientes de calibração disjuntos daqueles utilizados na
+otimização dos pesos. Essa calibração não se limita a uma varredura simples de
+limiar: em vez disso, realiza-se uma busca balanceada voltada a dois objetivos
+complementares: Preservar a qualidade da segmentação em pacientes positivos e
+reduzir predições indevidas em pacientes negativos.
+
+Cada configuração candidata define simultaneamente cinco parâmetros: o limiar de
+decisão $\tau_{\mathrm{dec}}$, a área mínima de componentes conectados em pixels,
+a área mínima de componentes como fração da área do \textit{patch}, o número
+mínimo de \textit{patches} positivos por paciente e a fração mínima da área do
+paciente prevista como positiva. Dessa forma, a calibração atua não apenas sobre
+a probabilidade final, mas também sobre o pós-processamento espacial e sobre a
+decisão agregada em nível de paciente.
+
+Antes do cálculo das métricas de cada candidato, a predição espacial é
+restringida pela ROI semântica e binarizada pelo limiar de decisão. Em seguida,
+os componentes conectados previstos em cada \textit{patch} são identificados, e
+componentes menores que o limiar efetivo são removidos. Esse limiar efetivo é
+definido como o maior valor entre a área absoluta configurada e a fração mínima
+da área do \textit{patch}. Depois dessa filtragem, as contagens de verdadeiros
+positivos, falsos positivos, falsos negativos e verdadeiros negativos são
+acumuladas por paciente.
+
+Além da filtragem por componentes, a calibração aplica critérios mínimos de
+evidência em nível de paciente. Se o número de \textit{patches} positivos
+previstos for inferior ao mínimo exigido, ou se a área positiva prevista for
+menor que a fração mínima configurada, o paciente é considerado negativo naquela
+configuração candidata. Essa regra reduz ativações espúrias do modelo, isto é,
+pequenas regiões isoladas que poderiam ser interpretadas erroneamente como
+câncer. Do ponto de vista histopatológico, essa restrição é plausível: uma região
+tumoral dificilmente se manifesta como um único pixel ou como poucos fragmentos
+desconectados sem extensão espacial mínima.
+
+Sejam $\mathcal{P}_+^{cal}$ e $\mathcal{P}_-^{cal}$ os conjuntos de pacientes
+positivos e negativos no subconjunto de calibração. Para cada configuração
+candidata, a métrica principal é definida por:
 
 \begin{equation}
-    \tau_{\mathrm{dec}}^\star =
-    \mathop{\mathrm{arg\,max}}_{t \in \{0.05,0.10,\ldots,0.95\}}
-    \overline{\mathrm{MCC}}_{\mathrm{cal}}(t).
-    \label{eq:threshold_calibration}
+    \mathrm{Score}_{\mathrm{cal}} =
+    \frac{
+    \sum_{i\in\mathcal{P}_+^{cal}}\mathrm{Dice}_i
+    +
+    \sum_{j\in\mathcal{P}_-^{cal}}\mathbf{1}_{[FP_j=0]}
+    }{
+    |\mathcal{P}_+^{cal}| + |\mathcal{P}_-^{cal}|
+    }.
+    \label{eq:balanced_calibration_score}
 \end{equation}
 
-O uso do MCC nessa calibração é adequado porque a métrica combina, em uma única
-medida, erros positivos e negativos \cite{matthews1975comparison}. O subconjunto
-\textit{holdout} interno de validação, quando disponível, é usado apenas para
-relato de desenvolvimento e não deve ser interpretado como avaliação final.
+Nessa expressão, $\mathrm{Dice}_i$ representa o Dice do paciente positivo $i$,
+calculado após a aplicação da configuração candidata, e $FP_j$ representa o
+número de falsos positivos acumulados no paciente negativo $j$. Assim, pacientes
+positivos contribuem por meio da qualidade da segmentação, enquanto pacientes
+negativos contribuem apenas quando permanecem sem falsos positivos. A métrica
+favorece, portanto, configurações que mantêm boa sobreposição nas regiões
+tumorais sem permitir que esse desempenho oculte falhas no controle de
+predições positivas em pacientes sem lesão anotada.
+
+A escolha da configuração final também é condicionada por salvaguardas
+metodológicas. Essas salvaguardas não substituem a métrica principal, mas
+restringem o conjunto de candidatos aceitáveis. A calibração compara cada
+candidato com uma configuração-base menos filtrada e rejeita soluções nas quais o
+Dice ou a TPR dos pacientes positivos caiam além das tolerâncias definidas. Além
+disso, podem ser exigidos valores mínimos para Dice micro, precisão macro, TPR
+macro e proporção de pacientes negativos sem predição positiva. Quando nenhuma
+configuração satisfaz simultaneamente todos os critérios, a receita registra
+explicitamente o estado da calibração, distinguindo entre alvo atingido, alvo
+inviável e violações das salvaguardas.
 
 A saída da Fase 9 é uma receita JSON assinada. Esse artefato registra a estratégia
 de \textit{ensemble}, os modelos selecionados, seus fluxos, pesos normalizados,
-limiares, assinaturas de proveniência, hashes de \textit{checkpoints}, métricas
-de calibração e informações de \textit{holdout}. A receita representa a fronteira
-entre desenvolvimento e avaliação final: uma vez congelada, ela deve ser aplicada
-ao conjunto de teste sem novos ajustes de pesos, limiares ou seleção de modelos.
-Dessa forma, a Fase 9 transforma a inferência final em um artefato explícito,
-auditável e reprodutível, em vez de uma decisão posterior aos resultados.
+limiares, parâmetros de pós-processamento, assinaturas de proveniência, hashes de
+\textit{checkpoints}, métricas de calibração e informações de \textit{holdout}.
+A receita representa a fronteira entre desenvolvimento e avaliação final: uma vez
+definida, ela deve ser aplicada ao conjunto de teste sem novos ajustes de pesos,
+limiares, pós-processamento ou seleção de modelos.
 
 \section{Inferência final}\label{sec:met_inferencia_final}
 
@@ -1463,3 +1534,37 @@ configurações de normalização e das variáveis de ambiente não sensíveis u
 na avaliação final. Dessa forma, a inferência final não é apenas a aplicação de
 um modelo ao teste, mas a execução auditável de uma receita previamente
 definida, congelada e vinculada aos artefatos que a originaram.
+
+\section{Uso de ferramentas de inteligência artificial generativa}
+\label{sec:met_uso_ia}
+
+Ferramentas de inteligência artificial generativa foram utilizadas como apoio ao
+desenvolvimento desta dissertação, especialmente em tarefas de revisão textual,
+organização estrutural, esclarecimento de conceitos, análise de código e
+geração de materiais visuais auxiliares. Seu uso teve caráter instrumental e
+não substituiu a análise crítica do autor. Todas as decisões metodológicas,
+interpretações dos resultados, escolhas experimentais e conclusões apresentadas
+neste trabalho são de responsabilidade exclusiva do autor.
+
+Na análise e revisão de código, foi utilizado o modelo GPT-5.5 Extra High da
+OpenAI. Para apoio à escrita acadêmica em \LaTeX{}, revisão gramatical,
+reorganização de parágrafos e melhoria de fluidez textual, foi utilizado o
+ChatGPT, também da OpenAI. Para a geração de imagens conceituais incluídas na
+dissertação, foi utilizado o modelo Gemini, do Google. Na etapa de revisão de
+literatura, especificamente para auxiliar a geração inicial de resumos dos
+artigos recuperados, foi utilizado o modelo Gemma 4 31B, do Google.
+
+Os conteúdos produzidos ou sugeridos por essas ferramentas foram revisados antes
+de sua incorporação ao texto, ao código ou aos materiais gráficos. No caso da
+revisão de literatura, os resumos gerados automaticamente foram utilizados
+apenas como apoio preliminar de leitura, sem substituir a consulta aos artigos
+originais. De modo semelhante, sugestões de código, explicações conceituais e
+reescritas textuais foram aceitas somente após verificação de coerência com o
+método proposto, com os artefatos experimentais e com a literatura pertinente.
+
+Assim, o uso de inteligência artificial generativa neste trabalho deve ser
+entendido como recurso de apoio à produtividade científica, e não como fonte
+autônoma de evidência. Os resultados quantitativos, a definição do protocolo
+experimental, a interpretação das métricas, a discussão das limitações e as
+conclusões foram estabelecidos a partir dos dados processados, dos artefatos
+gerados pelo fluxo computacional e da avaliação crítica do autor.

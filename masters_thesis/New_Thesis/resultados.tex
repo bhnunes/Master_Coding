@@ -33,7 +33,7 @@ Conteúdo mínimo de tecido & 0{,}3 \\
 Tempo médio por imagem concluída & 1{,}22 min \\
 \bottomrule
 \end{tabular}
-\caption*{\footnotesize A contagem de GeoJSON corresponde aos casos que passaram pela checagem de pareamento na etapa de ingestão.}
+\caption*{\footnotesize A contagem de GeoJSON corresponde aos casos que passaram pela checagem de pareamento na etapa de ingestão, ou seja, arquivos GeoJSON que apresentavam uma imagem associada.}
 \end{table}
 
 Após a ingestão, realizou-se uma etapa de curadoria quantitativa antes do particionamento por paciente. Inicialmente, uma amostra piloto foi usada para inspecionar o comportamento da limpeza baseada em grafos. Em seguida, um conjunto mestre rotulado orientou a escolha dos parâmetros empregados na rejeição de \textit{patches} com contaminação por fundo. Como mostra a \Tabela{tab:results_diagset-stage3-sampling}, a revisão piloto incluiu 100 amostras, das quais 94 foram aprovadas; o conjunto mestre reuniu 385 amostras, com 367 aprovações.
@@ -338,15 +338,7 @@ UPERNET & 0.06 \\
 
 \begin{figure}[!htb]
 \centering
-
-\fbox{%
-\begin{minipage}[c][8.0cm][c]{0.95\textwidth}
-\centering
-\small Placeholder do relatório do LR finder\\[0.4em]
-\footnotesize DIAGSET com normalização Reinhard
-\end{minipage}%
-}
-
+\includegraphics[width=\textwidth]{figuras/DIAGSET_REINHARD_LR.png}
 \caption[Curvas de busca de taxa de aprendizado para DIAGSET com Reinhard]{
 Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
 DIAGSET com normalização de cor pelo método de Reinhard. Cada subgráfico deverá
@@ -381,15 +373,7 @@ UPERNET & 0.01 \\
 
 \begin{figure}[!htb]
 \centering
-
-\fbox{%
-\begin{minipage}[c][8.0cm][c]{0.95\textwidth}
-\centering
-\small Placeholder do relatório do LR finder\\[0.4em]
-\footnotesize DIAGSET com normalização Ruifrok
-\end{minipage}%
-}
-
+\includegraphics[width=\textwidth]{figuras/DIAGSET_RUIFROK_LR.png}
 \caption[Curvas de busca de taxa de aprendizado para DIAGSET com Ruifrok]{
 Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
 DIAGSET com normalização de cor pelo método de Ruifrok. Cada subgráfico deverá
@@ -463,13 +447,7 @@ UPERNET & 0.03 \\
 \begin{figure}[!htb]
 \centering
 
-\fbox{%
-\begin{minipage}[c][8.0cm][c]{0.95\textwidth}
-\centering
-\small Placeholder do relatório do LR finder\\[0.4em]
-\footnotesize DIAGSET com normalização Vahadane
-\end{minipage}%
-}
+\includegraphics[width=\textwidth]{figuras/DIAGSET_VAHADANE_LR.png}
 
 \caption[Curvas de busca de taxa de aprendizado para DIAGSET com Vahadane]{
 Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
