@@ -22,25 +22,26 @@
 \citation{campanella2025clinical,oquab2024dinov2,he2009imbalanced}
 \citation{khened2021generalized,he2009imbalanced}
 \citation{saito2015precision,matthews1975comparison}
-\citation{akiba2019optuna,bergstra2011algorithms}
+\citation{akiba2019optuna,bergstra2011algorithms,saito2015precision}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Materials and Methods}{2}{section.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Workflow Overview}{2}{subsection.3.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Dataset and Curation}{2}{subsection.3.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Patient-Level Splitting and Runtime Normalization}{2}{subsection.3.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Training and Checkpoint Selection}{2}{subsection.3.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Two-Stream Ensemble Inference}{2}{subsection.3.5}\protected@file@percent }
-\citation{efron1979bootstrap}
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Overview of the implemented workflow. Whole-slide images and annotations are transformed into curated HDF5-backed patch datasets, split at the patient level, optionally reduced only in the training split, trained through a fixed model registry, combined by validation-only ensemble optimization, and evaluated with a frozen test-time recipe.}}{3}{figure.1}\protected@file@percent }
 \newlabel{fig:pipeline-overview}{{1}{3}{Overview of the implemented workflow. Whole-slide images and annotations are transformed into curated HDF5-backed patch datasets, split at the patient level, optionally reduced only in the training split, trained through a fixed model registry, combined by validation-only ensemble optimization, and evaluated with a frozen test-time recipe}{figure.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Metrics and Uncertainty}{3}{subsection.3.6}\protected@file@percent }
-\citation{tellez2019augmentation}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction.}}{4}{table.1}\protected@file@percent }
-\newlabel{tab:final-results}{{1}{4}{Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction}{table.1}{}}
+\citation{efron1979bootstrap}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Metrics and Uncertainty}{4}{subsection.3.6}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4}Results}{4}{section.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Curation, Split, and Sampling Outcomes}{4}{subsection.4.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Final Test Performance}{4}{subsection.4.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Discussion}{4}{section.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{4}{section.6}\protected@file@percent }
+\citation{tellez2019augmentation}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction.}}{5}{table.1}\protected@file@percent }
+\newlabel{tab:final-results}{{1}{5}{Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction}{table.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Micro- and macro-averaged DIAGSET test metrics across normalization strategies. Micro metrics pool pixel counts before metric computation, whereas macro metrics compute patient-level values before averaging. Error bars denote 95\% patient-bootstrap confidence intervals where available.}}{5}{figure.2}\protected@file@percent }
+\newlabel{fig:metric-panels}{{2}{5}{Micro- and macro-averaged DIAGSET test metrics across normalization strategies. Micro metrics pool pixel counts before metric computation, whereas macro metrics compute patient-level values before averaging. Error bars denote 95\% patient-bootstrap confidence intervals where available}{figure.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Discussion}{5}{section.5}\protected@file@percent }
 \bibstyle{cas-model2-names}
 \bibdata{references}
 \bibcite{akiba2019optuna}{{1}{2019}{{Akiba et~al.}}{{Akiba, Sano, Yanase, Ohta and Koyama}}}
@@ -55,8 +56,6 @@
 \bibcite{folk2011hdf5}{{10}{2011}{{Folk et~al.}}{{Folk, Heber, Koziol, Pourmal and Robinson}}}
 \bibcite{he2009imbalanced}{{11}{2009}{{He and Garcia}}{{}}}
 \bibcite{khened2021generalized}{{12}{2021}{{Khened et~al.}}{{Khened, Kori, Rajkumar, Krishnamurthi and Srinivasan}}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Micro- and macro-averaged DIAGSET test metrics across normalization strategies. Micro metrics pool pixel counts before metric computation, whereas macro metrics compute patient-level values before averaging. Error bars denote 95\% patient-bootstrap confidence intervals where available.}}{5}{figure.2}\protected@file@percent }
-\newlabel{fig:metric-panels}{{2}{5}{Micro- and macro-averaged DIAGSET test metrics across normalization strategies. Micro metrics pool pixel counts before metric computation, whereas macro metrics compute patient-level values before averaging. Error bars denote 95\% patient-bootstrap confidence intervals where available}{figure.2}{}}
 \bibcite{koziarski2024diagset}{{13}{2024}{{Koziarski et~al.}}{{Koziarski, Cyganek et~al.}}}
 \bibcite{macenko2009method}{{14}{2009}{{Macenko et~al.}}{{Macenko, Niethammer, Marron, Borland, Woosley, Guan, Schmitt and Thomas}}}
 \bibcite{matthews1975comparison}{{15}{1975}{{Matthews}}{{}}}
@@ -68,10 +67,11 @@
 \bibcite{roberts2017crossvalidation}{{21}{2017}{{Roberts et~al.}}{{Roberts, Bahn, Ciuti, Boyce, Elith et~al.}}}
 \bibcite{ruifrok2001quantification}{{22}{2001}{{Ruifrok and Johnston}}{{}}}
 \bibcite{saito2015precision}{{23}{2015}{{Saito and Rehmsmeier}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{6}{section.6}\protected@file@percent }
 \bibcite{seghier2024dice}{{24}{2024}{{Seghier}}{{}}}
 \bibcite{tellez2019augmentation}{{25}{2019}{{Tellez et~al.}}{{Tellez, Litjens, B{\'a}ndi, Bulten, Bokhorst, Ciompi and van~der Laak}}}
 \bibcite{vahadane2016structure}{{26}{2016}{{Vahadane et~al.}}{{Vahadane, Peng, Sethi, Albarqouni, Wang, Baust, Steiger, Schlitter, Esposito and Navab}}}
 \bibcite{weng2024grandqc}{{27}{2024}{{Weng et~al.}}{{Weng, Seper, Pryalukhin, Mairinger, Wickenhauser, Bauer, Glamann et~al.}}}
 \bibcite{wilkinson2016fair}{{28}{2016}{{Wilkinson et~al.}}{{Wilkinson, Dumontier, Aalbersberg, Appleton, Axton et~al.}}}
-\csxdef{lastpage}{6}
-\gdef \@abspage@last{7}
+\csxdef{lastpage}{7}
+\gdef \@abspage@last{8}
