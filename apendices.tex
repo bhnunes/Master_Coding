@@ -1,16 +1,12 @@
-\chapter{Configurações a reportar}\label{ap:configs_reportar}
+\chapter{Configurações metodológicas do experimento}\label{ap:configs_reportar}
 
-Este apêndice registra os valores configurados no arquivo \texttt{.env\_example}
-para as variáveis que afetam a metodologia, a reprodutibilidade ou o custo
-computacional do experimento. Foram omitidas variáveis que representam apenas
-caminhos locais, nomes de arquivos, nomes de diretórios, credenciais, tokens,
-senhas, e-mails, repositórios de rastreamento ou identificadores administrativos.
-Se a execução final usar valores diferentes dos listados aqui, a tabela deve ser
-atualizada para refletir o ambiente efetivamente executado.
+Este apêndice registra as variáveis de configuração com impacto metodológico, reprodutivo ou computacional no experimento realizado com DIAGSET. Foram mantidos apenas os parâmetros que afetam a ingestão dos dados, a curadoria das amostras, o particionamento por paciente, a normalização, as verificações de sanidade, a amostragem inteligente, o treinamento supervisionado, a otimização do \textit{ensemble} e a inferência final.
+
+Variáveis associadas exclusivamente a caminhos locais, nomes de arquivos, diretórios temporários, credenciais, tokens, e-mails, identificadores administrativos ou repositórios de rastreamento foram omitidas, pois não alteram a interpretação científica dos resultados. A documentação dessas configurações complementa a rastreabilidade do fluxo experimental, permitindo relacionar as métricas finais aos parâmetros que condicionaram cada etapa da execução.
 
 {\scriptsize
 \begin{longtable}{>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{11.2cm}}
-\caption{Valores de variáveis de ambiente metodologicamente relevantes reportados a partir de \texttt{.env\_example}.}
+\caption{Configurações metodologicamente relevantes utilizadas no fluxo experimental.}
 \label{tab:configs_reportar}\\
 \toprule
 Escopo & Variáveis e valores reportados \\
@@ -27,28 +23,19 @@ Escopo & Variáveis e valores reportados \\
 \endlastfoot
 
 Configuração compartilhada &
-\texttt{RUNTIME\_NORMALIZATION\_METHOD=NOT\_NORMALIZED};
+
 \texttt{RUNTIME\_VAHADANE\_BACKEND=fixed\_source}. \\
 
 Fase 1: detecção de artefatos &
-\texttt{ARTIFACT\_DEVICE=cuda};
 \texttt{ARTIFACT\_MPP\_MODEL=1.5};
 \texttt{ARTIFACT\_OVERLAY\_FACTOR=10}. \\
 
 Fase 2: extração e manifesto &
-\texttt{TAG=CHILE};
-\texttt{STAGE2\_COPY\_WSI\_TO\_LOCAL\_CACHE=True};
 \texttt{WINDOW\_SIZE=224};
 \texttt{STRIDE=112};
 \texttt{TARGET\_LEVEL=0};
-\texttt{HIESD\_XML\_COORD\_LEVEL=6};
 \texttt{TISSUE\_PERCENTAGE=0.3};
 \texttt{MATCH\_PERCENTAGE=1.0};
-\texttt{LOADCASES=False};
-\texttt{NUM\_WORKERS=3};
-\texttt{OPENSLIDE\_CACHE\_BYTES=0};
-\texttt{STAGE2\_PRELOAD\_SCAN\_AREA\_MAX\_BYTES=0};
-\texttt{STAGE2\_SUPPRESS\_NATIVE\_TIFF\_WARNINGS=True};
 \texttt{STAGE2\_HDF5\_COMPRESSION=none};
 \texttt{USE\_ADVANCED\_ARTIFACT\_FILTERING=True};
 \texttt{ACTIVATE\_SANITY\_CHECK\_GEOJSON=True}. \\
@@ -59,13 +46,7 @@ Fase 3.1: amostragem para revisão &
 \texttt{OPTIMIZATION\_SAMPLING\_PROPORTION=0.5};
 \texttt{OPTIMIZATION\_SAMPLING\_PILOT\_SAMPLE\_SIZE=100};
 \texttt{OPTIMIZATION\_SAMPLING\_MASTER\_POOL\_FRACTION=0.10};
-\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_COLOR\_B=0};
-\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_COLOR\_G=0};
-\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_COLOR\_R=255};
-\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_THICKNESS=2};
-\texttt{OPTIMIZATION\_SAMPLING\_OVERLAY\_ALPHA=1.0};
-\texttt{OPTIMIZATION\_SAMPLING\_SEED=42};
-\texttt{OPTIMIZATION\_SAMPLING\_NUM\_PROCESSES=} vazio. \\
+\texttt{OPTIMIZATION\_SAMPLING\_SEED=42}. \\
 
 Fase 3.2: ajuste da limpeza por grafos &
 \texttt{GRAPH\_TUNING\_TEST\_SET\_SIZE=0.2};
@@ -82,22 +63,17 @@ Fase 3.2: ajuste da limpeza por grafos &
 \texttt{GRAPH\_TUNING\_EROSION\_MIN=0};
 \texttt{GRAPH\_TUNING\_EROSION\_MAX=10}. \\
 
-Fase 3.3: limpeza por grafos &
-\texttt{GRAPH\_CLEANING\_NUM\_WORKERS=} vazio. \\
+Fase 3.3: limpeza por grafos & \\
 
 Fase 4: particionamento e artefatos de normalização &
 \texttt{CROSSFOLD\_RANDOM\_STATE=42};
-\texttt{CROSSFOLD\_OVERWRITE\_OUTPUT\_DIR=True};
 \texttt{CROSSFOLD\_TEST\_PATIENT\_COUNT=20};
 \texttt{CROSSFOLD\_VALIDATION\_PATIENT\_COUNT=20};
 \texttt{CROSSFOLD\_SPLIT\_OPTUNA\_TRIALS=1000};
-\texttt{CROSSFOLD\_ENTROPY\_NUM\_WORKERS=} vazio;
 \texttt{CROSSFOLD\_ENTROPY\_CHUNKSIZE=128};
 \texttt{CROSSFOLD\_ENTROPY\_THUMBNAIL=128};
 \texttt{CROSSFOLD\_HDF5\_COMPRESSION=none};
-\texttt{CROSSFOLD\_COPY\_BATCH\_SIZE=1024};
-\texttt{CROSSFOLD\_SAVE\_ENTROPY\_CACHE\_CSV=True};
-\texttt{CROSSFOLD\_CALC\_CHECKSUMS=False}. \\
+\texttt{CROSSFOLD\_COPY\_BATCH\_SIZE=1024}. \\
 
 Fase 5: verificações de sanidade &
 \texttt{SANITY\_SAMPLE\_PAIRS=1000};
@@ -111,13 +87,6 @@ Fase 5: verificações de sanidade &
 \texttt{SANITY\_FAIL\_ON\_POSITIVE\_NOT\_CANCER\_MASK=True}. \\
 
 Fase 6: amostragem inteligente &
-\texttt{SMART\_SAMPLER\_LOCAL\_SHARD\_CACHE\_BYTES=0};
-\texttt{SMART\_SAMPLER\_STAGE\_INPUT\_LOCALLY=False};
-\texttt{SMART\_SAMPLER\_STAGE\_OUTPUTS\_LOCALLY=False};
-\texttt{SMART\_SAMPLER\_CLEAN\_LOCAL\_WORK\_DIR=True};
-\texttt{SMART\_SAMPLER\_WRITE\_SIDECARS=True};
-\texttt{SMART\_SAMPLER\_OVERWRITE\_OUTPUT=False};
-\texttt{SMART\_SAMPLER\_BUILD\_COMPACT\_TRAIN\_SELECTED=True};
 \texttt{SMART\_SAMPLER\_COMPACT\_HDF5\_COMPRESSION=none};
 \texttt{SMART\_SAMPLER\_MODEL\_NAME=owkin/phikon-v2};
 \texttt{SMART\_SAMPLER\_BATCH\_SIZE=128};
@@ -146,17 +115,11 @@ Fase 6: amostragem inteligente &
 \texttt{SMART\_SAMPLER\_GIST\_CANDIDATE\_POOL\_LIMIT=4096}. \\
 
 Fase 7: triagem de taxa de aprendizado &
-\texttt{LR\_FINDER\_STAGE\_INPUT\_LOCALLY=False};
-\texttt{LR\_FINDER\_USE\_COMPACT\_TRAIN\_SELECTED=True};
-\texttt{LR\_FINDER\_OVERWRITE\_OUTPUT=True};
-\texttt{LR\_FINDER\_SMART\_SAMPLING=True};
-\texttt{LR\_FINDER\_EXECUTION\_MODE=PAPER};
 \texttt{LR\_FINDER\_AMP\_PRECISION=fp32};
 \texttt{LR\_FINDER\_SEED=24};
 \texttt{LR\_FINDER\_BATCH\_SIZE=32};
-\texttt{LR\_FINDER\_WORKERS=8};
+\texttt{LR\_FINDER\_WORKERS=2};
 \texttt{LR\_FINDER\_ARCHITECTURES=} vazio;
-\texttt{LR\_FINDER\_USE\_SUBSET=False};
 \texttt{LR\_FINDER\_SUBSET\_RATIO=1.0};
 \texttt{LR\_FINDER\_NUM\_LHS\_SAMPLES=12};
 \texttt{LR\_FINDER\_NUM\_REPEATS=3};
@@ -169,19 +132,17 @@ Fase 7: triagem de taxa de aprendizado &
 \texttt{LR\_FINDER\_BETA\_MIN=0.1};
 \texttt{LR\_FINDER\_BETA\_MAX=0.5};
 \texttt{LR\_FINDER\_GAMMA\_MIN=0.1};
-\texttt{LR\_FINDER\_GAMMA\_MAX=0.5};
-\texttt{LR\_FINDER\_GAMMA\_LOG=False}. \\
+\texttt{LR\_FINDER\_GAMMA\_MAX=0.5}.\\
 
 Fase 8: treinamento supervisionado &
 \texttt{TRAINING\_ARCHITECTURE=FPN};
 \texttt{TRAINING\_ENCODER=senet154};
 \texttt{TRAINING\_USE\_COMPACT\_TRAIN\_SELECTED=True};
-\texttt{TRAINING\_EXECUTION\_MODE=PAPER};
 \texttt{TRAINING\_SEED=24};
 \texttt{TRAINING\_SMART\_SAMPLING=True};
 \texttt{TRAINING\_UNLEASHED=False};
 \texttt{TRAINING\_USE\_ARTIFACT\_AWARE\_LOSS=False};
-\texttt{TRAINING\_RUN\_OHEM=False};
+\texttt{TRAINING\_RUN\_OHEM=True};
 \texttt{TRAINING\_NUM\_EPOCHS=100};
 \texttt{TRAINING\_PATIENCE=5};
 \texttt{TRAINING\_BATCH\_SIZE=32};
@@ -197,10 +158,6 @@ Fase 8: treinamento supervisionado &
 \texttt{TRAINING\_SENSITIVITY\_TARGET=0.95}. \\
 
 Fase 9: otimização do \textit{ensemble} &
-\texttt{ENSEMBLE\_OPT\_LOCAL\_SHARD\_CACHE\_MAX\_BYTES=0};
-\texttt{ENSEMBLE\_OPT\_OPTIMIZATION\_CACHE\_MAX\_BYTES=8589934592};
-\texttt{ENSEMBLE\_OPT\_STAGE\_INPUT\_LOCALLY=True};
-\texttt{ENSEMBLE\_OPT\_OVERWRITE\_OUTPUT=True};
 \texttt{ENSEMBLE\_OPT\_SEED=24};
 \texttt{ENSEMBLE\_OPT\_BATCH\_SIZE=32};
 \texttt{ENSEMBLE\_OPT\_WORKERS=2};
@@ -225,19 +182,22 @@ Fase 9: otimização do \textit{ensemble} &
 \texttt{ENSEMBLE\_OPT\_NUM\_TRIALS\_SPATIAL=50}. \\
 
 Fase 10: inferência final &
-\texttt{ENSEMBLE\_INFER\_STAGE\_INPUT\_LOCALLY=True};
-\texttt{ENSEMBLE\_INFER\_OVERWRITE\_OUTPUT=True};
 \texttt{ENSEMBLE\_INFER\_SEED=24};
 \texttt{ENSEMBLE\_INFER\_BATCH\_SIZE=32};
 \texttt{ENSEMBLE\_INFER\_WORKERS=8};
 \texttt{ENSEMBLE\_INFER\_VIS\_NUM\_SAMPLES=10};
-\texttt{ENSEMBLE\_INFER\_EXPORT\_CSV=True};
-\texttt{ENSEMBLE\_INFER\_EXPORT\_LATEX=True};
-\texttt{ENSEMBLE\_INFER\_EXPORT\_VISUALIZATIONS=True};
 \texttt{ENSEMBLE\_INFER\_PATCH\_POSITIVE\_AREA\_FRACTION\_THRESHOLD=0.0}. \\
 
 \end{longtable}
 }
+
+As configurações apresentadas neste apêndice devem ser interpretadas como parte
+do contrato experimental da dissertação. Elas não substituem os artefatos
+gerados durante a execução, mas documentam os principais parâmetros que
+condicionam a reprodução do fluxo. Em conjunto com os manifestos, checkpoints,
+métricas exportadas e registros de inferência, esses valores permitem auditar a
+relação entre decisões metodológicas e resultados reportados.
+
 
 \chapter{Matriz de extração da revisão sistemática}\label{ap:matriz_revisao_sistematica}
 
