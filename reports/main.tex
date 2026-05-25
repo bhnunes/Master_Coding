@@ -142,11 +142,21 @@ Candidate selection also enforced baseline-relative positive-patient Dice and tr
 
 \subsection{Metrics and Uncertainty}
 
-Final evaluation was performed only on the frozen test split. Micro metrics were computed by pooling pixel counts across test patients before evaluating the metric, whereas macro metrics were computed per patient and then averaged. The reported summary includes Dice, AUROC, and a separate positive/negative-patient decomposition. Positive-patient Dice was computed only among patients with annotated lesion pixels. Negative-clean rate was defined as the proportion of negative patients with no positive prediction,
+Final evaluation was performed only on the frozen test split. Pixel-level counts were accumulated after the validation-selected thresholding, connected-component filtering, and frozen patient-level suppression rules. Micro metrics were computed by pooling pixel counts across test patients before evaluating the metric, whereas macro metrics were computed per patient and then averaged. The reported summary includes Dice, IoU, accuracy, sensitivity, specificity, precision, false-positive and false-negative rates, AUROC, and a separate positive/negative-patient decomposition. Positive-patient Dice was computed only among patients with annotated lesion pixels. Negative-clean rate was defined as the proportion of negative patients with no positive prediction,
 \[
 \mathrm{NCR}=\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-}\indicator{FP_j=0},
 \]
 where $\mathcal{P}_-$ is the set of negative patients and $FP_j$ is the number of false-positive pixels for patient $j$.
+
+Stage 10 also emits a DIAGSET-style patch-recognition summary without changing the segmentation decision path. For patch $i$, the prediction is converted to a binary patch label from the component-filtered segmentation mask,
+\[
+\hat{z}_i=\indicator{a(\hat{Y}_i)>\tau_{\mathrm{patch}}},
+\]
+where $a(\hat{Y}_i)$ is the predicted positive area fraction and the default $\tau_{\mathrm{patch}}=0$ marks a patch as cancer when any positive mask area remains after component filtering. Ground-truth patch labels are taken from the manifest label produced by the extraction-overlap rule, with a binary-mask fallback when labels are absent from the batch. The patch report gives point estimates for Accuracy, Sensitivity, Specificity, and balanced average accuracy,
+\[
+\mathrm{AvAcc}=\frac{\mathrm{Sensitivity}+\mathrm{Specificity}}{2},
+\]
+plus support and confusion counts. The primary DIAGSET-style comparison is recorded before patient-level suppression, and a second section reports the same patch metrics after the frozen patient-level suppression rule.
 
 When confidence intervals were available, they were computed by nonparametric bootstrap with 10,000 resamples at the patient level \cite{efron1979bootstrap}. This patient-wise procedure was used for micro metrics, macro metrics, and the positive/negative-patient decomposition. AUROC is reported as a point estimate only because the final artifacts preserved the information needed for histogram-based AUROC but did not preserve patient-indexed probability distributions required for a patient-level AUROC bootstrap.
 
@@ -160,7 +170,7 @@ These numbers are methodologically important because they define the evaluation 
 
 \subsection{Final Test Performance}
 
-Table~\ref{tab:final-results} summarizes the final held-out test results for the five normalization strategies. The table is intentionally compact: it reports the metrics needed to interpret the main findings without reproducing the full thesis inventory of per-model checkpoints and per-metric tables.
+Table~\ref{tab:final-results} summarizes the final held-out test results for the five normalization strategies. The table is intentionally compact: it reports the metrics needed to interpret the main findings without reproducing the full thesis inventory of per-model checkpoints and per-metric tables. The inference artifacts also export the DIAGSET-style patch-recognition metrics described above for comparisons that require patch-level Accuracy or AvAcc rather than segmentation overlap.
 
 \begin{table*}[t]
 \caption{Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction.}
