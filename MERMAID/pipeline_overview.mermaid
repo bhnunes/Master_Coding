@@ -1,101 +1,19 @@
-graph TD
-    raw_data[Raw inputs<br/>WSIs + annotations + .env]
-    manifest[(master_manifest.sqlite<br/>portable canonical row registry<br/>+ stage state)]
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 28, "rankSpacing": 44}, "themeVariables": {"fontFamily": "Arial", "fontSize": "24px", "primaryTextColor": "#111827", "lineColor": "#4b5563"}}}%%
+flowchart TB
+    inputs["<b>Raw&nbsp;slide&nbsp;pairs</b><br/>WSIs&nbsp;+&nbsp;annotations"]
+    registry["<b>Curated&nbsp;patch&nbsp;registry</b><br/>clean&nbsp;HDF5&nbsp;shards&nbsp;+&nbsp;portable&nbsp;manifest"]
+    split["<b>Experiment&nbsp;state</b><br/>patient&nbsp;split&nbsp;+&nbsp;training&nbsp;stain&nbsp;state"]
+    development["<b>Model&nbsp;development</b><br/>TRAIN&nbsp;models&nbsp;+&nbsp;VAL&nbsp;recipe&nbsp;selection"]
+    test["<b>Frozen&nbsp;TEST&nbsp;inference</b><br/>TEST&nbsp;metrics&nbsp;+&nbsp;reports"]
 
-    subgraph P1[Phase 1: Artifact Detection - optional]
-        p1[1_artifact_detection.py<br/>Detect slide artifacts]
-        p1_out[Artifact GeoJSON + SQLite tracking]
-        p1 --> p1_out
-    end
+    inputs --> registry --> split --> development --> test
 
-    subgraph P2[Phase 2: Patch Extraction]
-        p2[2_database_manager.py<br/>Extract patches from WSIs<br/>validate manifest integrity before / after]
-        p2_out[Canonical patient HDF5 shards<br/>+ portable master_manifest.sqlite<br/>+ shard manifest/source signatures]
-    end
+    classDef source fill:#f8fafc,stroke:#475569,stroke-width:1.3px,color:#111827;
+    classDef state fill:#ecfeff,stroke:#0e7490,stroke-width:1.5px,color:#111827;
+    classDef train fill:#f0fdf4,stroke:#15803d,stroke-width:1.5px,color:#111827;
+    classDef eval fill:#fff7ed,stroke:#c2410c,stroke-width:1.5px,color:#111827;
 
-    subgraph P3[Phase 3: Annotation Cleaning - optional]
-        p31[3_1_optimization_sampling.py<br/>Sample cancer rows from<br/>master_manifest.sqlite]
-        review[Human review<br/>APPROVED / REJECTED]
-        p32[3_2_tune_graph_method.py<br/>Tune graph cleaning from reviewed<br/>manifest-resolved cancer rows]
-        p33[3_3_cleaner_script.py<br/>Graph-clean cancer rows<br/>and pass negatives through]
-        p3_out[Updated patch_stage_state in<br/>master_manifest.sqlite + decision sidecars<br/>Stage 2 HDF5 shards remain read-only]
-        p31 --> review --> p32 --> p33 --> p3_out
-    end
-
-    subgraph P4[Phase 4: Crossfold Dataset Preparation]
-        p4[4_crossfold.py<br/>Assign one TRAIN / VALIDATION / TEST split<br/>normalization-agnostic split state]
-        p4_out[manifest.csv + split_stats.csv + run_config.json<br/>+ template-selection sidecars<br/>+ runtime_normalization_artifacts<br/>+ split bundle/artifact links in SQLite]
-        p4 --> p4_out
-    end
-
-    subgraph P5[Phase 5: Sanity Checks]
-        p5[5_sanity_checks.py<br/>Validate provenance and scientific integrity]
-        p5_out[PASS / WARN / FAIL report]
-        p5 --> p5_out
-    end
-
-    subgraph P6[Phase 6: Smart Sampling - optional]
-        p6[6_smart_sampler.py<br/>Select informative TRAIN rows<br/>GIST-style or legacy selector]
-        p6_out[Selection sidecars + sampling state in SQLite<br/>+ optional portable compact TRAIN_SELECTED HDF5/index]
-        p6 --> p6_out
-    end
-
-    subgraph P7[Phase 7: LR Finder]
-        p7[7_lr_finder.py<br/>Screen approved registry pairs<br/>runtime normalization at load time]
-        p7_out[LR reports + CSV / JSON sidecars<br/>+ LaTeX/PDF report + effective batch records]
-        p7 --> p7_out
-    end
-
-    subgraph P8[Phase 8: Training]
-        p8[8_training_ensemble.py<br/>Train one approved model per run<br/>compact TRAIN optional, VALIDATION canonical]
-        p8_out[Checkpoints + metrics + reports<br/>+ split/runtime provenance metadata]
-        p8 --> p8_out
-    end
-
-    subgraph P9[Phase 9: Ensemble Optimization]
-        p9[9_optimizer_ensemble.py<br/>Optimize two-stream ensemble recipe<br/>on manifest-backed VALIDATION]
-        p9_out[Signed ensemble recipe JSON<br/>+ optimizer run_config]
-        p9 --> p9_out
-    end
-
-    subgraph P10[Phase 10: Inference]
-        p10[10_inference_ensemble.py<br/>Validate recipe/checkpoints<br/>run TEST inference and reporting]
-        p10_out[Metrics + confusion matrix + reports<br/>+ optional visualizations + run_config]
-        p10 --> p10_out
-    end
-
-    raw_data --> p2
-    raw_data -. optional artifact pass .-> p1
-    p1_out -. artifact metadata .-> p2
-    p2 -. writes canonical rows .-> manifest
-
-    p2_out --> p31
-    p2_out --> p4
-    p2_out --> p7
-    p2_out --> p8
-    p2_out --> p9
-    p2_out --> p10
-    p3_out --> p4
-    p4_out --> p5
-    p4_out --> p6
-    p4_out --> p7
-    p4_out --> p8
-    p4_out --> p9
-    p4_out --> p10
-    p6_out --> p7
-    p6_out --> p8
-    p7_out --> p8
-    p8_out --> p9
-    p9_out --> p10
-
-    manifest -. sample cancer rows .-> p31
-    p33 -. updates cleaning state .-> manifest
-    manifest -. read cleaning + split state .-> p4
-    p4 -. updates split bundle + split state .-> manifest
-    manifest -. validate provenance/state .-> p5
-    manifest -. read TRAIN candidate rows .-> p6
-    p6 -. updates sampling state .-> manifest
-    manifest -. read TRAIN or TRAIN_SELECTED<br/>+ VALIDATION refs .-> p7
-    manifest -. read TRAIN or TRAIN_SELECTED<br/>+ VALIDATION refs .-> p8
-    manifest -. read VALIDATION refs<br/>+ runtime lineage .-> p9
-    manifest -. read TEST refs<br/>+ runtime lineage .-> p10
+    class inputs,registry source;
+    class split state;
+    class development train;
+    class test eval;

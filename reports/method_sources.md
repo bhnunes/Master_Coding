@@ -44,26 +44,29 @@ deployment readiness or superiority over external baselines.
   - final micro, macro, AUROC, positive-patient Dice, and negative-clean-rate
     findings
 - Final metric JSON files under
-  `D:/Usuario/Desktop/Results_DIAGSET/DIAGSET_RESULTS/DIAGSET_RESULTS/*/INFERENCE/`
-  - `ENSEMBLE_METRICS_11_05_2026_14_51_19.json` for `NOT_NORMALIZED`
-  - `ENSEMBLE_METRICS_11_05_2026_15_16_10.json` for `REINHARD`
-  - `ENSEMBLE_METRICS_12_05_2026_13_11_34.json` for `RUIFROK`
-  - `ENSEMBLE_METRICS_12_05_2026_13_13_22.json` for `MACENKO`
-  - `ENSEMBLE_METRICS_12_05_2026_13_17_25.json` for `VAHADANE`
+  `D:/Usuario/Desktop/DIAGSET_RESULTS_UPDATED/DIAGSET_RESULTS/*/INFERENCE/`
+  - `ENSEMBLE_METRICS_25_05_2026_13_22_56.json` for `NOT_NORMALIZED`
+  - `ENSEMBLE_METRICS_26_05_2026_12_59_29.json` for `REINHARD`
+  - `ENSEMBLE_METRICS_26_05_2026_14_56_02.json` for `RUIFROK`
+  - `ENSEMBLE_METRICS_26_05_2026_16_18_56.json` for `MACENKO`
+  - `ENSEMBLE_METRICS_26_05_2026_14_48_03.json` for `VAHADANE`
 - `helpers/training/*`
 - `helpers/ensemble_optimizer/*`
 - `helpers/ensemble_inference/*`
 
-The compact final-results table in `reports/main.tex` was cross-checked against
-the thesis tables and the `ENSEMBLE_METRICS_*.json` files listed above.
+The compact final-results and patch-recognition tables in `reports/main.tex`
+were cross-checked against the thesis tables and the `ENSEMBLE_METRICS_*.json`
+files listed above.
 
 ## Paper Figures
 
 Paper-selected assets are copied or rendered into `reports/figures/`:
 
 - `pipeline_overview.png` from `MERMAID/pipeline_overview.mermaid`
-- `results_diagset_micro_metrics.png` from `masters_thesis/New_Thesis/figuras/`
-- `results_diagset_macro_metrics.png` from `masters_thesis/New_Thesis/figuras/`
+- `results_diagset_micro_metrics.png` from
+  `masters_thesis/New_Thesis/figuras/results_diagset_micro_metrics_updated.png`
+- `results_diagset_macro_metrics.png` from
+  `masters_thesis/New_Thesis/figuras/results_diagset_macro_metrics_updated.png`
 
 The paper intentionally omits LR-finder plots, per-architecture checkpoint
 tables, and the full thesis confusion-matrix set to keep the Elsevier manuscript

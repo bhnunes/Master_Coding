@@ -29,8 +29,8 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Patient-Level Splitting and Runtime Normalization}{2}{subsection.3.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Training and Checkpoint Selection}{2}{subsection.3.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Two-Stream Ensemble Inference}{2}{subsection.3.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Overview of the implemented workflow. Whole-slide images and annotations are transformed into curated HDF5-backed patch datasets, split at the patient level, optionally reduced only in the training split, trained through a fixed model registry, combined by validation-only ensemble optimization, and evaluated with a frozen test-time recipe.}}{3}{figure.1}\protected@file@percent }
-\newlabel{fig:pipeline-overview}{{1}{3}{Overview of the implemented workflow. Whole-slide images and annotations are transformed into curated HDF5-backed patch datasets, split at the patient level, optionally reduced only in the training split, trained through a fixed model registry, combined by validation-only ensemble optimization, and evaluated with a frozen test-time recipe}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Condensed overview of the implemented workflow. The figure emphasizes the main reproducibility constraints: curated manifest-backed patches, patient-level split isolation, train-derived stain state, train-only sampling, validation-only recipe selection, and frozen held-out test inference.}}{3}{figure.1}\protected@file@percent }
+\newlabel{fig:pipeline-overview}{{1}{3}{Condensed overview of the implemented workflow. The figure emphasizes the main reproducibility constraints: curated manifest-backed patches, patient-level split isolation, train-derived stain state, train-only sampling, validation-only recipe selection, and frozen held-out test inference}{figure.1}{}}
 \citation{efron1979bootstrap}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Metrics and Uncertainty}{4}{subsection.3.6}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4}Results}{4}{section.4}\protected@file@percent }
@@ -59,6 +59,9 @@
 \bibcite{koziarski2024diagset}{{13}{2024}{{Koziarski et~al.}}{{Koziarski, Cyganek et~al.}}}
 \bibcite{macenko2009method}{{14}{2009}{{Macenko et~al.}}{{Macenko, Niethammer, Marron, Borland, Woosley, Guan, Schmitt and Thomas}}}
 \bibcite{matthews1975comparison}{{15}{1975}{{Matthews}}{{}}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces DIAGSET-style patch recognition on the held-out test set. The primary comparison is before patient-level suppression; the last column reports AvAcc after applying the frozen patient-level suppression rule.}}{6}{table.2}\protected@file@percent }
+\newlabel{tab:patch-results}{{2}{6}{DIAGSET-style patch recognition on the held-out test set. The primary comparison is before patient-level suppression; the last column reports AvAcc after applying the frozen patient-level suppression rule}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{6}{section.6}\protected@file@percent }
 \bibcite{moshkov2020test}{{16}{2020}{{Moshkov et~al.}}{{Moshkov, Mathe, Kertesz-Farkas, Hollandi and Horvath}}}
 \bibcite{munozaguirre2020pyhist}{{17}{2020}{{Mu{\~n}oz-Aguirre et~al.}}{{Mu{\~n}oz-Aguirre, Ntasis, Rojas and Guig{\'o}}}}
 \bibcite{oquab2024dinov2}{{18}{2024}{{Oquab et~al.}}{{Oquab, Darcet, Moutakanni, Vo, Szafraniec, Khalidov, Fernandez et~al.}}}
@@ -67,7 +70,6 @@
 \bibcite{roberts2017crossvalidation}{{21}{2017}{{Roberts et~al.}}{{Roberts, Bahn, Ciuti, Boyce, Elith et~al.}}}
 \bibcite{ruifrok2001quantification}{{22}{2001}{{Ruifrok and Johnston}}{{}}}
 \bibcite{saito2015precision}{{23}{2015}{{Saito and Rehmsmeier}}{{}}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{6}{section.6}\protected@file@percent }
 \bibcite{seghier2024dice}{{24}{2024}{{Seghier}}{{}}}
 \bibcite{tellez2019augmentation}{{25}{2019}{{Tellez et~al.}}{{Tellez, Litjens, B{\'a}ndi, Bulten, Bokhorst, Ciompi and van~der Laak}}}
 \bibcite{vahadane2016structure}{{26}{2016}{{Vahadane et~al.}}{{Vahadane, Peng, Sethi, Albarqouni, Wang, Baust, Steiger, Schlitter, Esposito and Navab}}}
