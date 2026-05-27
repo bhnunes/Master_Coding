@@ -10,14 +10,17 @@ No caso da patologia digital, essa exigência torna-se ainda mais crítica. WSIs
 
 Esta dissertação parte dessa lacuna metodológica. O objetivo não é propor uma nova arquitetura neural como contribuição isolada, mas desenvolver e documentar um fluxo de trabalho computacional reprodutível para detecção e segmentação de câncer em WSIs. O projeto integra etapas de ingestão de lâminas e anotações, extração de \textit{patches}, controle de qualidade, curadoria de amostras, normalização de cor, particionamento por paciente, amostragem do conjunto de treino, triagem de hiperparâmetros, treinamento supervisionado, otimização de \textit{ensemble} e inferência final. A ênfase recai sobre a consistência do processo completo: cada artefato intermediário precisa ser associado à sua origem, às configurações utilizadas e às etapas posteriores que o consomem.
 
-Desse modo, o fluxo completo de análise é tratado como objeto científico. Essa escolha permite explicitar decisões frequentemente omitidas ou descritas de forma incompleta em estudos de aprendizagem profunda para segmentação médica, como estratégia de validação, critérios de exclusão de amostras, uso de aumento de dados, normalização, seleção de modelos, otimização e infraestrutura computacional. Ao organizar essas decisões em fases auditáveis e reprodutíveis, a dissertação busca oferecer uma base experimental mais confiável para avaliar modelos de segmentação em patologia digital, reduzindo o risco de vazamento de dados, escolhas pós-hoc e estimativas artificialmente otimistas de desempenho.
+Desse modo, o fluxo completo de análise é tratado como objeto científico. Essa escolha permite explicitar decisões frequentemente omitidas ou descritas de forma incompleta em estudos de aprendizagem profunda para segmentação médica, como estratégia de validação, critérios de exclusão de amostras, uso de aumento de dados, normalização, seleção de modelos, otimização e infraestrutura computacional. Ao organizar essas decisões em fases auditáveis e reprodutíveis, a dissertação busca oferecer uma base experimental mais confiável para
+avaliar modelos de segmentação em patologia digital, reduzindo o risco de
+vazamento de dados, ajustes enviesados e
+estimativas artificialmente otimistas de desempenho.
 
 \section{Objetivos}\label{sec:objetivos}
 
 O objetivo geral desta dissertação é desenvolver, documentar e avaliar um fluxo
 de trabalho computacional reprodutível para detecção e segmentação de câncer em WSI, assegurando separação explícita entre
 dados, configurações experimentais, artefatos intermediários, treinamento de
-modelos, otimização em validação e inferência final em teste.
+modelos, otimização em grupo de validação e inferência final em grupo de teste.
 
 Para alcançar esse objetivo, foram definidos os seguintes objetivos específicos:
 
@@ -57,29 +60,26 @@ Para alcançar esse objetivo, foram definidos os seguintes objetivos específico
 A justificativa clínica e científica desta dissertação está na necessidade de
 processos confiáveis para análise computacional de câncer em patologia digital.
 Modelos de aprendizagem profunda podem auxiliar na triagem, delimitação e
-quantificação de regiões suspeitas; contudo, sua utilidade depende não apenas
-da arquitetura neural empregada, mas também da qualidade do fluxo experimental
-que produz os dados de treinamento e sustenta a avaliação dos resultados. Em
-bases histopatológicas, pequenos descuidos metodológicos podem gerar estimativas
+quantificação de regiões suspeitas; contudo, sua utilidade depende não apenas da
+arquitetura neural empregada, mas também da qualidade do fluxo experimental que
+produz os dados de treinamento e sustenta a avaliação dos resultados. Em bases
+histopatológicas, pequenos descuidos metodológicos podem gerar estimativas
 artificialmente otimistas de desempenho, como ocorre quando \textit{patches} de
 um mesmo paciente são distribuídos entre conjuntos distintos, quando anotações
 ambíguas ou contraditórias são tratadas como verdade absoluta, ou quando
 limiares e decisões de inferência são ajustados, ainda que indiretamente, a
 partir do conjunto de teste.
 
-Essa preocupação é reforçada por estudos sobre reprodutibilidade em segmentação
-médica com aprendizagem profunda. Uma revisão da área mostrou que apenas 9\%
-dos artigos avaliados descreviam suficientemente os hiperparâmetros e o conjunto
-de dados para permitir reprodução, além de apontar lacunas na descrição de
-componentes essenciais do fluxo experimental, como aumento de dados, conjunto de
-validação, taxa de aprendizado, tamanho de lote e procedimento de otimização
-\cite{renard2020variability}. De forma complementar, revisões sobre aprendizado
-de máquina em imagem médica destacam que a reprodutibilidade é condição central
-para que resultados computacionais possam ser verificados, comparados e
-reutilizados pela comunidade científica \cite{colliot2023reproducibility}.
-Assim, a confiabilidade de um experimento não depende apenas da métrica final
-reportada, mas da possibilidade de reconstruir o caminho que levou da imagem
-original à predição avaliada.
+Essa preocupação, introduzida anteriormente a partir da literatura sobre
+reprodutibilidade em segmentação médica, orienta a justificativa metodológica
+deste trabalho. O problema central não está apenas em obter uma métrica elevada,
+mas em garantir que essa métrica possa ser interpretada como consequência de um
+processo experimental controlado. Para isso, é necessário preservar a relação
+entre lâmina, anotação, \textit{patch}, paciente, partição, modelo treinado,
+configuração de inferência e resultado final. Sem essa cadeia de rastreabilidade,
+torna-se difícil distinguir ganho real de desempenho de efeitos produzidos por
+vazamento de dados, curadoria inadequada ou decisões orientadas pelos resultados
+já observados.
 
 Do ponto de vista computacional, o trabalho também se justifica pela necessidade
 de transformar uma sequência complexa de operações em um processo auditável.
@@ -88,37 +88,42 @@ especializada, manipulação eficiente de grandes imagens, armazenamento
 estruturado, controle de progresso, manifestos, checagens de integridade e
 execução em ambientes com restrições de disco e GPU. Ao documentar esses
 contratos, a dissertação busca tornar o fluxo experimental mais transparente,
-reprodutível, criticável e extensível.
+reprodutível, criticável e extensível. Essa perspectiva é coerente com a
+literatura de aprendizagem de máquina em imagem médica, que trata a
+reprodutibilidade como condição para que resultados computacionais possam ser
+verificados, comparados e reutilizados pela comunidade científica
+\cite{colliot2023reproducibility}.
 
 Por fim, a contribuição metodológica está em tratar o fluxo completo como
 objeto de pesquisa. Em vez de relatar apenas a métrica final de um modelo, o
 trabalho explicita as decisões que conectam a lâmina original à máscara
-prevista: aquisição, curadoria, extração de \textit{patches}, normalização,
+predita: aquisição, curadoria, extração de \textit{patches}, normalização,
 particionamento por paciente, treinamento, seleção de modelos, otimização de
-\textit{ensemble} e inferência final. Essa posição é compatível com
-recomendações de reprodutibilidade computacional e com os princípios FAIR,
-segundo os quais dados, metadados, algoritmos, ferramentas e fluxos de trabalho
-devem favorecer localização, acessibilidade, interoperabilidade e reutilização
-\cite{renard2020variability,wilkinson2016fair,piccolo2016tools}.
+\textit{ensemble} e inferência final. Essa posição também se alinha aos princípios
+\Sigla{\textit{Findable, Accessible, Interoperable and Reusable}}{FAIR},
+que orientam a organização de dados e metadados científicos de modo que sejam
+localizáveis, acessíveis, interoperáveis e reutilizáveis. Nesta dissertação,
+essa lógica é estendida ao fluxo computacional, no qual a documentação de
+componentes, parâmetros, artefatos intermediários e proveniência favorece
+auditoria, reprodução e reutilização científica do método
+\cite{wilkinson2016fair,piccolo2016tools}.
 
 \section{Estrutura do documento}\label{sec:estrutura_documento}
 
-O restante desta dissertação está organizado da seguinte forma. O
-\Capitulo{chp:levantamento} apresenta os fundamentos necessários à compreensão
-do trabalho, incluindo patologia digital, imagens de lâminas inteiras,
-pré-processamento, normalização de cor, segmentação semântica, métricas de
-avaliação, particionamento experimental, reprodutibilidade e
-\textit{ensembles}. O \Capitulo{chp:desenvolvimento} descreve a metodologia
-proposta e implementada, relacionando as fases executáveis do repositório aos
-contratos científicos que orientam ingestão de dados, controle de qualidade,
-extração de amostras, particionamento, treinamento, otimização e inferência.
+Esta dissertação está organizada em cinco capítulos. O \Capitulo{chp:levantamento}
+apresenta os fundamentos necessários à compreensão do trabalho, incluindo os
+principais conceitos de patologia digital, aprendizagem profunda, segmentação
+semântica, métricas de avaliação e reprodutibilidade computacional. Em seguida,
+o \Capitulo{chp:desenvolvimento} descreve a metodologia proposta, relacionando
+as etapas implementadas no fluxo experimental aos contratos científicos que
+orientam a ingestão dos dados, a curadoria, o particionamento por paciente, o
+treinamento, a otimização do \textit{ensemble} e a inferência.
 
-O \Capitulo{chp:resultados} apresenta os resultados experimentais obtidos,
-incluindo estatísticas dos conjuntos de dados analisados, efeitos das etapas de
-extração e curadoria, desempenho dos modelos treinados, otimização do
-\textit{ensemble}, inferência final e análises complementares. O
-\Capitulo{chp:conclusoes} sintetiza as contribuições da dissertação, discute as
-limitações identificadas e aponta possibilidades de continuidade. Por fim, os
-apêndices complementam o texto principal com materiais de apoio, registros
-metodológicos, mapeamentos entre texto e implementação e informações adicionais
-necessárias à reprodutibilidade do fluxo experimental.
+O \Capitulo{chp:resultados} apresenta os resultados obtidos no DIAGSET, com
+ênfase na caracterização dos dados, nas decisões de curadoria, no treinamento
+dos modelos, na composição final do \textit{ensemble} e nas métricas de
+inferência. O \Capitulo{chp:conclusoes} sintetiza as contribuições da
+dissertação, discute suas limitações e aponta caminhos para trabalhos futuros.
+Por fim, os apêndices reúnem materiais complementares, registros metodológicos,
+mapeamentos entre texto e implementação e informações adicionais necessárias à
+reprodutibilidade do fluxo experimental.

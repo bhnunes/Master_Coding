@@ -509,6 +509,15 @@ A avaliação final foi conduzida exclusivamente no conjunto de teste. Para inte
 
 A leitura geral dos resultados indica que o desempenho do método depende do critério de avaliação adotado. Ruifrok apresentou o maior Dice em nível de pixel, sugerindo melhor desempenho quando a segmentação é avaliada de forma agregada no conjunto completo de pixels. Macenko obteve a maior estimativa pontual de AUROC, indicando melhor capacidade de ranqueamento probabilístico no teste. Em contrapartida, a ausência de normalização apresentou o melhor Dice em nível de paciente e o melhor Dice quando a análise foi restrita aos pacientes positivos. Essa divergência mostra que a comparação entre estratégias de normalização não deve ser reduzida a um único indicador: cada métrica enfatiza um aspecto distinto do comportamento do método.
 
+A implementação atual da Fase 10 também registra uma camada complementar de
+reconhecimento em nível de \textit{patch}. Nessa saída, cada \textit{patch} recebe
+um rótulo binário de câncer ou não câncer a partir da máscara de segmentação
+filtrada, e o relatório final exporta acurácia, \textit{AvAcc}, sensibilidade,
+especificidade, suporte e matriz de confusão antes e depois da supressão em
+nível de paciente. Essa camada foi incorporada para facilitar comparações no
+formato usual de DIAGSET, sem substituir as métricas de segmentação e de
+paciente usadas nas tabelas numéricas abaixo.
+
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_micro_metrics.png}
