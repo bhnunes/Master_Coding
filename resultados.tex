@@ -511,14 +511,7 @@ A avaliação final foi conduzida exclusivamente no conjunto de teste. Para inte
 
 A leitura geral dos resultados indica que o desempenho do método depende do critério de avaliação adotado. A ausência de normalização apresentou os maiores valores de Dice micro e macro, sugerindo melhor equilíbrio entre a segmentação agregada por pixel e a agregação por paciente. Ruifrok obteve a maior estimativa pontual de AUROC e o maior Dice quando a análise foi restrita aos pacientes positivos. Em contrapartida, Macenko apresentou o melhor \textit{AvAcc} na comparação binária em nível de \textit{patch}. Essa divergência mostra que a comparação entre estratégias de normalização não deve ser reduzida a um único indicador: cada métrica enfatiza um aspecto distinto do comportamento do método.
 
-A implementação atual da Fase 10 também registra uma camada complementar de
-reconhecimento em nível de \textit{patch}. Nessa saída, cada \textit{patch} recebe
-um rótulo binário de câncer ou não câncer a partir da máscara de segmentação
-filtrada, e o relatório final exporta acurácia, \textit{AvAcc}, sensibilidade,
-especificidade, suporte e matriz de confusão antes e depois da supressão em
-nível de paciente. Essa camada foi incorporada para facilitar comparações no
-formato usual de DIAGSET, sem substituir as métricas de segmentação e de
-paciente usadas nas tabelas numéricas abaixo.
+A Fase 10 também produz uma saída complementar de reconhecimento binário em nível de \textit{patch}, alinhada ao formato de avaliação reportado no DIAGSET. Nessa análise, cada \textit{patch} é classificado como câncer ou não câncer a partir da máscara de segmentação após filtragem, permitindo calcular acurácia, \textit{AvAcc}, sensibilidade e especificidade antes e depois da supressão em nível de paciente. Essa camada tem finalidade apenas comparativa e descritiva: ela aproxima a saída do fluxo ao protocolo de reconhecimento em \textit{patches} usado pelo DIAGSET, mas não substitui as métricas principais de segmentação e de avaliação por paciente já citadas.
 
 \begin{figure}[!htb]
 \centering
@@ -811,7 +804,16 @@ Vahadane & 0.9389 \\
 \end{tabular}
 \end{table}
 
-Também foi realizada uma avaliação separada entre pacientes com lesão anotada e pacientes sem lesão visível. Essa separação evita que o Dice seja interpretado de forma ambígua em casos negativos, nos quais não há região positiva de referência. Nos pacientes positivos, Ruifrok apresentou o maior Dice, com estimativa de 0{,}7985, seguido por Macenko e pela ausência de normalização. Nos pacientes negativos, a ausência de normalização e Reinhard apresentaram a maior proporção de casos sem qualquer predição positiva, ambas com 0{,}7317. Esse resultado indica que a configuração sem normalização reuniu bom desempenho agregado com melhor supressão de predições positivas em casos negativos, enquanto Ruifrok preservou maior desempenho entre os pacientes positivos.
+A avaliação também distinguiu pacientes positivos, com lesão anotada, e pacientes
+negativos, sem lesão visível. Essa separação torna a interpretação mais clara,
+pois o Dice mede sobreposição com a região positiva de referência e pode ser
+pouco informativo quando essa região não existe. Entre os pacientes positivos,
+Ruifrok obteve o maior Dice (0{,}7985), seguido por Macenko e pela ausência de
+normalização. Entre os pacientes negativos, a ausência de normalização e Reinhard
+apresentaram a maior proporção de casos sem predição positiva (0{,}7317). Assim,
+a ausência de normalização combinou bom desempenho agregado com maior controle
+de falsos positivos em pacientes negativos, enquanto Ruifrok se destacou na
+segmentação dos pacientes positivos.
 
 \begin{table}[!htb]
 \centering
@@ -833,7 +835,14 @@ Vahadane & 0{,}7579 [0{,}6716, 0{,}8362] & 0{,}1463 [0{,}0476, 0{,}2632] & 38 & 
 }
 \end{table}
 
-A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta a camada complementar de reconhecimento binário em nível de \textit{patch}. A comparação principal segue a saída antes da supressão em nível de paciente, conforme definido no artefato final da Fase 10. Após a supressão congelada, os valores são apresentados apenas como leitura operacional adicional. Em todas as normalizações, o suporte foi de 387\,325 \textit{patches}, incluindo 72\,428 positivos e 314\,897 negativos. Na tabela, TP, FP, FN e TN são reportados como percentuais desse suporte total.
+A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta uma análise
+complementar em nível de \textit{patch}, aproximando os resultados deste trabalho
+do formato de avaliação usado no DIAGSET. A comparação principal considera os
+valores antes da supressão em nível de paciente. Os valores após essa supressão
+são mostrados apenas como informação adicional, pois refletem uma etapa posterior
+de filtragem das predições. Em todas as estratégias de normalização, a avaliação
+foi realizada sobre 387\,325 \textit{patches}, dos quais 72\,428 eram positivos e
+314\,897 eram negativos.
 
 \begin{table}[!htb]
 \centering
@@ -841,20 +850,20 @@ A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta a camada compleme
 \label{tab:results_diagset-patch-recognition}
 \small
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{llrrrrrrrr}
+\begin{tabular}{llrrrr}
 \toprule
-Normalização & Comparação & Acurácia & \textit{AvAcc} & Sens. & Espec. & TP (\%) & FP (\%) & FN (\%) & TN (\%) \\
+Normalização & Comparação & Acurácia & \textit{AvAcc} & Sensibilidade & Especificidade \\
 \midrule
-Sem normalização & Pré-supressão & 0.9323 & 0.8923 & 0.8283 & 0.9562 & 15{,}49\% & 3{,}56\% & 3{,}21\% & 77{,}74\% \\
-Sem normalização & Pós-supressão & 0.9419 & 0.8970 & 0.8255 & 0.9686 & 15{,}44\% & 2{,}55\% & 3{,}26\% & 78{,}75\% \\
-Reinhard & Pré-supressão & 0.9296 & 0.8811 & 0.8036 & 0.9586 & 15{,}03\% & 3{,}37\% & 3{,}67\% & 77{,}93\% \\
-Reinhard & Pós-supressão & 0.9385 & 0.8854 & 0.8005 & 0.9702 & 14{,}97\% & 2{,}42\% & 3{,}73\% & 78{,}88\% \\
-Ruifrok & Pré-supressão & 0.9325 & 0.8997 & 0.8474 & 0.9520 & 15{,}85\% & 3{,}90\% & 2{,}85\% & 77{,}40\% \\
-Ruifrok & Pós-supressão & 0.9337 & 0.9005 & 0.8474 & 0.9536 & 15{,}85\% & 3{,}78\% & 2{,}85\% & 77{,}52\% \\
-Macenko & Pré-supressão & 0.9166 & 0.9009 & 0.8758 & 0.9260 & 16{,}38\% & 6{,}02\% & 2{,}32\% & 75{,}28\% \\
-Macenko & Pós-supressão & 0.9176 & 0.9015 & 0.8758 & 0.9272 & 16{,}38\% & 5{,}92\% & 2{,}32\% & 75{,}38\% \\
-Vahadane & Pré-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 14{,}90\% & 4{,}37\% & 3{,}80\% & 76{,}93\% \\
-Vahadane & Pós-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 14{,}90\% & 4{,}37\% & 3{,}80\% & 76{,}93\% \\
+Sem normalização & Pré-supressão & 0.9323 & 0.8923 & 0.8283 & 0.9562 \\
+Sem normalização & Pós-supressão & 0.9419 & 0.8970 & 0.8255 & 0.9686 \\
+Reinhard & Pré-supressão & 0.9296 & 0.8811 & 0.8036 & 0.9586 \\
+Reinhard & Pós-supressão & 0.9385 & 0.8854 & 0.8005 & 0.9702 \\
+Ruifrok & Pré-supressão & 0.9325 & 0.8997 & 0.8474 & 0.9520 \\
+Ruifrok & Pós-supressão & 0.9337 & 0.9005 & 0.8474 & 0.9536 \\
+Macenko & Pré-supressão & 0.9166 & 0.9009 & 0.8758 & 0.9260 \\
+Macenko & Pós-supressão & 0.9176 & 0.9015 & 0.8758 & 0.9272 \\
+Vahadane & Pré-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 \\
+Vahadane & Pós-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 \\
 \bottomrule
 \end{tabular}
 }
@@ -867,9 +876,7 @@ com o cenário binário S1 reportado por Koziarski et al.~\cite{koziarski2024dia
 Essa comparação deve ser interpretada como referência externa, e não como
 reprodução estrita do experimento original, pois o artigo do DIAGSET utiliza seu
 próprio protocolo de extração, escalas de magnificação e \textit{ensemble} de
-classificadores, enquanto esta dissertação avalia um fluxo de segmentação com
-particionamento, curadoria e pós-processamento próprios. A coluna ``Dif.'' indica
-a diferença em pontos percentuais em relação ao valor original.
+classificadores. A coluna ``Dif.'' indica a diferença em pontos percentuais (p.p) em relação ao valor original.
 
 \begin{table}[!htb]
 \centering
@@ -918,13 +925,9 @@ mesmo a melhor configuração desta dissertação, Macenko, permaneceu 4{,}61 po
 percentuais abaixo do S1 original. Esse comportamento sugere que a acurácia
 agregada em \textit{patches} aproxima o desempenho do artigo de referência, mas
 o equilíbrio entre sensibilidade e especificidade ainda é inferior ao obtido pelo
-\textit{ensemble} dedicado do DIAGSET. Ao mesmo tempo, a comparação deve ser lida
-à luz das diferenças metodológicas: o objetivo desta dissertação não foi repetir
-o classificador multiescala original, mas avaliar um fluxo reprodutível de
-segmentação e inferência congelada sobre o conjunto de teste produzido no
-próprio pipeline.
+\textit{ensemble} dedicado do DIAGSET.
 
-As matrizes de confusão complementam essa interpretação ao explicitar o balanço entre verdadeiros negativos, falsos positivos, falsos negativos e verdadeiros positivos em nível de pixel, após a inferência final e a pós-filtragem congelada. A \Figura{fig:results_diagset-confusion-matrices} reúne os resultados das cinco estratégias de normalização, permitindo observar de forma visual a distribuição dos erros sem confundir esse artefato com a matriz binária em nível de \textit{patch} apresentada na Tabela~\ref{tab:results_diagset-patch-recognition}.
+As matrizes de confusão complementam essa interpretação ao explicitar o balanço entre verdadeiros negativos, falsos positivos, falsos negativos e verdadeiros positivos em nível de pixel, após a inferência final e a pós-filtragem congelada. A \Figura{fig:results_diagset-confusion-matrices} reúne os resultados das cinco estratégias de normalização, permitindo observar de forma visual a distribuição dos erros.
 
 \begin{figure}[!htb]
 \centering
