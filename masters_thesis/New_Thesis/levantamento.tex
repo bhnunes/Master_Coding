@@ -612,7 +612,7 @@ entre uma rede convolucional e um \textit{Transformer} visual.
 
 Em tarefas de segmentação, arquiteturas neurais frequentemente utilizam
 \textit{encoders} inicializados com pesos pré-treinados em grandes bases de imagens, como
-a ImageNet, antes do ajuste ao domínio específico de aplicação. Essa estratégia corresponde a uma forma de
+a \textit{ImageNet}, antes do ajuste ao domínio específico de aplicação. Essa estratégia corresponde a uma forma de
 transferência de aprendizado: Ao invés de iniciar todos os parâmetros de maneira
 aleatória, o modelo parte de representações visuais previamente aprendidas em
 uma base ampla de imagens naturais. Embora imagens naturais e imagens
@@ -622,7 +622,7 @@ texturas, contrastes locais e composições estruturais. Com isso, reduz-se a
 dependência de grandes volumes de dados anotados no domínio-alvo e favorece-se
 uma inicialização mais estável do treinamento.
 
-O ImageNet é uma base de imagens em larga escala amplamente utilizada em visão
+O \textit{ImageNet} é uma base de imagens em larga escala amplamente utilizada em visão
 computacional, sobretudo em tarefas de reconhecimento visual
 \cite{deng2009imagenet,russakovsky2015imagenet}. Por sua abrangência e impacto,
 tornou-se uma referência importante para o pré-treinamento de modelos de
@@ -631,10 +631,10 @@ aprendizagem profunda.
 \begin{figure}[!htb]
     \centering
     \includegraphics[width=\linewidth]{figuras/imagenet.png}
-    \caption[ImageNet como base de pré-treinamento]{ImageNet, grande base de dados composta por 14.197.122 imagens e 21.841
+    \caption[\textit{ImageNet} como base de pré-treinamento]{\textit{ImageNet}, grande base de dados composta por 14.197.122 imagens e 21.841
     \textit{synsets} indexados. Cada \textit{synset} corresponde a um conceito
     semântico definido, ao qual são associadas imagens anotadas
-    e controladas por qualidade. Essa estrutura tornou o ImageNet uma referência
+    e controladas por qualidade. Essa estrutura tornou o \textit{ImageNet} uma referência
     para treinamento, avaliação e pré-treinamento de modelos de reconhecimento.}
     \label{fig:imagenet-conceito}
 \end{figure}
@@ -894,7 +894,7 @@ médicos \cite{roberts2017crossvalidation,dawood2026confounding}.
 
 A reprodutibilidade do fluxo também depende da preservação dos artefatos que
 conectam dados, decisões e resultados. Manifestos, assinaturas de arquivos,
-configurações, relatórios, \textit{checkpoints}, métricas e logs permitem
+configurações, relatórios, \textit{checkpoints}, métricas e \textit{logs} permitem
 reconstruir o caminho entre a WSI original, os \textit{patches} extraídos, os
 modelos treinados e a inferência final. Sem esses registros, a métrica reportada
 torna-se difícil de auditar, pois não é possível determinar com precisão quais
