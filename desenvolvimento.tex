@@ -46,13 +46,18 @@ registrada como parte da linhagem experimental, e não absorvida como detalhe in
 \end{figure}
 
 A \Tabela{tab:estagios_pipeline} resume os estágios metodológicos implementados
-e suas principais saídas. A tabela complementa a visão gráfica ao explicitar a
-função de cada fase no controle da proveniência dos dados e na construção da
-receita final de inferência.
+e suas principais saídas. Embora represente o mesmo processo descrito na
+\Figura{fig:fluxo-atual}, a tabela opera em outro nível de detalhe: a figura
+apresenta a organização global do método, enquanto a tabela explicita as fases
+locais de implementação, cada uma correspondente a um script \textit{Python}
+independente. Assim, as duas representações são complementares, e não
+necessariamente coincidentes em sua divisão interna.
 
 \begin{table}[!htb]
 \centering
-\caption{Resumo dos estágios metodológicos implementados.}
+\caption{Resumo dos estágios metodológicos implementados em nível de fase. Cada
+fase corresponde a um \textit{script} \textit{Python} isolado, com entradas, saídas e
+artefatos próprios.}
 \label{tab:estagios_pipeline}
 \begin{tabular}{p{1.6cm}p{5.0cm}p{6.8cm}}
 \toprule
@@ -191,7 +196,7 @@ um \textit{patch} histológico e sua máscara binária correspondente.
     \centering
     \includegraphics[width=0.55\textwidth]{figuras/image_plus_mask.png}
     \caption[Exemplo de \textit{patch} e máscara]{Exemplo qualitativo de
-    pareamento entre \textit{patch} histológico e máscara binária.}
+    pareamento entre \textit{patch} histológico e máscara binária. Imagem retirada da base de dados DIAGSET.}
     \label{fig:patch-mask}
 \end{figure}
 
@@ -317,13 +322,12 @@ exemplos qualitativos de amostras aprovadas e rejeitadas.
     \end{subfigure}
 
     \caption[Exemplos de amostras aprovadas e rejeitadas na etapa de curadoria]{
-    Exemplos qualitativos da revisão de amostras cancerosas. A primeira linha
-    representa amostras aprovadas, nas quais a região anotada como positiva
-    apresenta conteúdo tecidual compatível com a tarefa supervisionada. A segunda
-    linha representa amostras rejeitadas, nas quais a região positiva apresenta
-    contaminação por fundo, vidro ou baixo conteúdo histológico. A figura ilustra
-    o critério de curadoria usado para ajustar a regra automática de limpeza por
-    grafos.
+    Exemplos qualitativos das Fases 3.1--3.3, nas quais amostras cancerosas são
+    selecionadas para revisão e usadas para ajustar a limpeza automática por
+    grafos. A primeira linha mostra amostras aprovadas, com conteúdo tecidual
+    compatível com a tarefa supervisionada; a segunda mostra amostras rejeitadas,
+    com contaminação por fundo, vidro ou baixo conteúdo histológico. Imagens
+    retiradas da base de dados DIAGSET.
     }
     \label{fig:limpeza-grafos-exemplos}
 \end{figure}
@@ -1600,7 +1604,7 @@ não substituiu a análise crítica do autor. Todas as decisões metodológicas,
 interpretações dos resultados, escolhas experimentais e conclusões apresentadas
 neste trabalho são de responsabilidade exclusiva do autor.
 
-Na análise e revisão de código, foi utilizado o modelo GPT-5.5 Extra High da
+Na análise e revisão de código, foi utilizado o modelo GPT-5.5 \textit{Extra High} da
 OpenAI. Para apoio à escrita acadêmica em \LaTeX{}, revisão gramatical,
 reorganização de parágrafos e melhoria de fluidez textual, foi utilizado o
 ChatGPT, também da OpenAI. Para a geração de imagens conceituais incluídas na
