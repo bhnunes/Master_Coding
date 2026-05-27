@@ -2,7 +2,7 @@
 
 Este capítulo avalia a consistência do método proposto quando aplicado ao DIAGSET, considerando o encadeamento completo entre curadoria dos dados, treinamento, combinação dos modelos e inferência final. A análise das estratégias de normalização de cor é utilizada como eixo comparativo, mas não constitui o objetivo isolado da avaliação. O interesse principal está em verificar se o comportamento do fluxo se mantém coerente quando observado por diferentes perspectivas: desempenho agregado por pixel, desempenho em nível de paciente, capacidade discriminativa global e separação explícita entre casos com lesão e casos sem lesão visível.
 
-Os resultados mostram que não há uma estratégia universalmente superior em todos os critérios avaliados. Ruifrok apresentou o melhor Dice em nível de pixel, Macenko obteve a maior estimativa pontual de AUROC, enquanto a ausência de normalização alcançou os melhores resultados quando a avaliação foi agregada por paciente e quando os casos positivos foram analisados separadamente dos casos sem lesão. Essa diferença entre métricas reforça a importância de avaliar o método além de um único indicador médio, especialmente em segmentação médica, na qual imagens sem regiões positivas podem distorcer a interpretação do Dice se forem combinadas diretamente com imagens lesionadas.
+Os resultados mostram que não há uma estratégia universalmente superior em todos os critérios avaliados. A ausência de normalização apresentou os melhores Dice micro e macro, Ruifrok obteve a maior estimativa pontual de AUROC e o maior Dice entre pacientes positivos, enquanto Macenko alcançou o melhor \textit{AvAcc} no reconhecimento binário em nível de \textit{patch}. Essa diferença entre métricas reforça a importância de avaliar o método além de um único indicador médio, especialmente em segmentação médica, na qual imagens sem regiões positivas podem distorcer a interpretação do Dice se forem combinadas diretamente com imagens lesionadas.
 
 Todas as comparações foram conduzidas a partir dos artefatos finais do experimento, sem recálculo de métricas ou alteração dos intervalos de confiança. Os limiares, pesos do \textit{ensemble}, metadados de ingestão e registros de limpeza foram utilizados apenas como fontes de rastreabilidade metodológica. Desse modo, a análise preserva a cadeia experimental definida previamente, conectando ingestão, curadoria, treinamento, definição da receita final do \textit{ensemble} e avaliação no conjunto de teste.
 
@@ -483,31 +483,33 @@ UPERNET & 0.01 \\
 
 A inferência final foi realizada por meio de uma estratégia de \textit{ensemble} em dois fluxos. Em cada normalização, oito modelos foram combinados: quatro destinados à composição semântica da região de interesse e quatro voltados à segmentação espacial mais refinada. Essa organização buscou explorar características complementares das arquiteturas, combinando modelos mais sensíveis ao contexto global com modelos capazes de delimitar melhor as regiões previstas.
 
-A \Tabela{tab:results_diagset-ensemble-summary} resume a composição final do \textit{ensemble} para cada estratégia de normalização, incluindo o número de modelos combinados, a divisão entre fluxo semântico e fluxo espacial, o limiar da região de interesse e o limiar final de decisão. Os pesos individuais dos modelos são apresentados separadamente na \Figura{fig:results_diagset-ensemble-weights}, por oferecerem leitura mais clara em formato gráfico. No caso da normalização Vahadane, a execução utilizou uma aproximação operacional baseada em fonte fixa; portanto, seus resultados devem ser interpretados como a configuração efetivamente adotada nesta dissertação, e não como uma normalização recalculada individualmente para cada \textit{patch}.
+A \Tabela{tab:results_diagset-ensemble-summary} resume a composição final do \textit{ensemble} para cada estratégia de normalização, incluindo o número de modelos combinados, a divisão entre fluxo semântico e fluxo espacial, o limiar da região de interesse, o limiar final de decisão e os parâmetros de pós-processamento congelados na receita final. Os pesos individuais dos modelos são apresentados separadamente na \Figura{fig:results_diagset-ensemble-weights}, por oferecerem leitura mais clara em formato gráfico. No caso da normalização Vahadane, a execução utilizou uma aproximação operacional baseada em fonte fixa; portanto, seus resultados devem ser interpretados como a configuração efetivamente adotada nesta dissertação, e não como uma normalização recalculada individualmente para cada \textit{patch}.
 
 \begin{table}[!htb]
 \centering
 \caption{Composição final do \textit{ensemble} utilizada na inferência em DIAGSET.}
 \label{tab:results_diagset-ensemble-summary}
 \small
-\begin{tabular}{lrrrrr}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
 \toprule
-Normalização & Modelos & Semânticos & Espaciais & ROI & Limiar \\
+Normalização & Modelos & Semânticos & Espaciais & ROI & Limiar & Área mín. & Fração pac. & Patches pac. \\
 \midrule
-Sem Normalização & 8 & 4 & 4 & 0.1514 & 0.8500 \\
-Reinhard & 8 & 4 & 4 & 0.1512 & 0.9000 \\
-Ruifrok & 8 & 4 & 4 & 0.1511 & 0.6500 \\
-Macenko & 8 & 4 & 4 & 0.1513 & 0.9000 \\
-Vahadane & 8 & 4 & 4 & 0.1504 & 0.5500 \\
+Sem Normalização & 8 & 4 & 4 & 0.2719 & 0.5900 & 32768 & 0.0500 & 1 \\
+Reinhard & 8 & 4 & 4 & 0.2808 & 0.5000 & 32768 & 0.0500 & 1 \\
+Ruifrok & 8 & 4 & 4 & 0.2104 & 0.6000 & 0 & 0.0200 & 1 \\
+Macenko & 8 & 4 & 4 & 0.1748 & 0.5700 & 0 & 0.0200 & 5 \\
+Vahadane & 8 & 4 & 4 & 0.2268 & 0.5500 & 4096 & 0.0000 & 5 \\
 \bottomrule
 \end{tabular}
+}
 \end{table}
 
 \section{Métricas finais de inferência}\label{sec:res_diagset_inferencia}
 
 A avaliação final foi conduzida exclusivamente no conjunto de teste. Para interpretar os resultados, foram consideradas duas formas complementares de agregação. Nas métricas micro, todos os pixels são reunidos antes do cálculo, de modo que a estimativa final reflete o desempenho global da segmentação no volume total de pixels avaliados. Já nas métricas macro, o desempenho é calculado primeiro por paciente e, apenas depois, resumido entre os pacientes. Essa segunda abordagem reduz a influência de casos com maior número de \textit{patches} e permite uma leitura mais equilibrada da variabilidade individual. Neste experimento, as métricas macro foram acompanhadas por intervalos de confiança obtidos por \textit{bootstrap} em nível de paciente.
 
-A leitura geral dos resultados indica que o desempenho do método depende do critério de avaliação adotado. Ruifrok apresentou o maior Dice em nível de pixel, sugerindo melhor desempenho quando a segmentação é avaliada de forma agregada no conjunto completo de pixels. Macenko obteve a maior estimativa pontual de AUROC, indicando melhor capacidade de ranqueamento probabilístico no teste. Em contrapartida, a ausência de normalização apresentou o melhor Dice em nível de paciente e o melhor Dice quando a análise foi restrita aos pacientes positivos. Essa divergência mostra que a comparação entre estratégias de normalização não deve ser reduzida a um único indicador: cada métrica enfatiza um aspecto distinto do comportamento do método.
+A leitura geral dos resultados indica que o desempenho do método depende do critério de avaliação adotado. A ausência de normalização apresentou os maiores valores de Dice micro e macro, sugerindo melhor equilíbrio entre a segmentação agregada por pixel e a agregação por paciente. Ruifrok obteve a maior estimativa pontual de AUROC e o maior Dice quando a análise foi restrita aos pacientes positivos. Em contrapartida, Macenko apresentou o melhor \textit{AvAcc} na comparação binária em nível de \textit{patch}. Essa divergência mostra que a comparação entre estratégias de normalização não deve ser reduzida a um único indicador: cada métrica enfatiza um aspecto distinto do comportamento do método.
 
 A implementação atual da Fase 10 também registra uma camada complementar de
 reconhecimento em nível de \textit{patch}. Nessa saída, cada \textit{patch} recebe
@@ -520,14 +522,14 @@ paciente usadas nas tabelas numéricas abaixo.
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_micro_metrics.png}
+\includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_micro_metrics_updated.png}
 \caption[Metricas micro no conjunto de teste de DIAGSET]{Métricas micro no conjunto de teste de DIAGSET. Cada painel apresenta uma métrica calculada a partir da agregação global dos pixels; os pontos indicam as estimativas por estratégia de normalização e as barras verticais representam IC95\%. Os eixos verticais são ajustados individualmente ao intervalo dos IC95\% exibidos, mantendo as métricas limitadas entre 0 e 1.}
 \label{fig:results_diagset-micro-metrics}
 \end{figure}
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_macro_metrics.png}
+\includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_macro_metrics_updated.png}
 \caption[Metricas macro no conjunto de teste de DIAGSET]{Métricas macro no conjunto de teste de DIAGSET. Cada painel apresenta uma métrica resumida inicialmente por paciente e posteriormente agregada entre pacientes; as barras verticais representam IC95\%. Os eixos verticais são ajustados individualmente ao intervalo dos IC95\% exibidos, mantendo as métricas limitadas entre 0 e 1.}
 \label{fig:results_diagset-macro-metrics}
 \end{figure}
@@ -536,14 +538,14 @@ paciente usadas nas tabelas numéricas abaixo.
 \centering
 \begin{subfigure}[t]{0.48\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_rule6_dice_pos.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_rule6_dice_pos_updated.png}
 \caption{Dice em pacientes positivos}
 \label{fig:results_diagset-rule6-dice-pos}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.48\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_rule6_neg_clean.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_rule6_neg_clean_updated.png}
 \caption{Pacientes negativos sem predição positiva}
 \label{fig:results_diagset-rule6-neg-clean}
 \end{subfigure}
@@ -553,14 +555,14 @@ paciente usadas nas tabelas numéricas abaixo.
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[width=0.94\textwidth]{figuras/results_diagset_auc_thresholds.png}
+\includegraphics[width=0.94\textwidth]{figuras/results_diagset_auc_thresholds_updated.png}
 \caption{AUROC no conjunto de teste de DIAGSET. A figura apresenta a estimativa pontual por estratégia de normalização; os intervalos de confiança não foram reportados porque não estavam disponíveis nos artefatos finais.}
 \label{fig:results_diagset-auc-thresholds}
 \end{figure}
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[width=0.94\textwidth]{figuras/results_diagset_ensemble_weights.png}
+\includegraphics[width=0.94\textwidth]{figuras/results_diagset_ensemble_weights_updated.png}
 \caption{Pesos dos modelos na composição final dos \textit{ensembles} de DIAGSET. O mapa de calor mostra a contribuição relativa de cada arquitetura e de cada fluxo na inferência final.}
 \label{fig:results_diagset-ensemble-weights}
 \end{figure}
@@ -582,14 +584,14 @@ tabelas correspondentes.
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.8152 & 0.7310 & 0.8843 \\
-IoU & 0.6881 & 0.5760 & 0.7926 \\
-Sensibilidade & 0.7413 & 0.6133 & 0.8606 \\
-Especificidade & 0.9822 & 0.9686 & 0.9904 \\
-Precisão & 0.9055 & 0.8383 & 0.9528 \\
-Acurácia & 0.9372 & 0.8885 & 0.9700 \\
-FPR & 0.0178 & 0.0096 & 0.0314 \\
-FNR & 0.2587 & 0.1394 & 0.3867 \\
+Dice & 0.8415 & 0.7767 & 0.8987 \\
+IoU & 0.7263 & 0.6349 & 0.8160 \\
+Sensibilidade & 0.8244 & 0.7105 & 0.9259 \\
+Especificidade & 0.9689 & 0.9479 & 0.9841 \\
+Precisão & 0.8593 & 0.7698 & 0.9254 \\
+Acurácia & 0.9419 & 0.9025 & 0.9703 \\
+FPR & 0.0311 & 0.0159 & 0.0521 \\
+FNR & 0.1756 & 0.0741 & 0.2895 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -603,14 +605,14 @@ FNR & 0.2587 & 0.1394 & 0.3867 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.7560 & 0.6734 & 0.8321 \\
-IoU & 0.6078 & 0.5076 & 0.7125 \\
-Sensibilidade & 0.6503 & 0.5373 & 0.7721 \\
-Especificidade & 0.9839 & 0.9707 & 0.9917 \\
-Precisão & 0.9029 & 0.8309 & 0.9530 \\
-Acurácia & 0.9215 & 0.8669 & 0.9601 \\
-FPR & 0.0161 & 0.0083 & 0.0293 \\
-FNR & 0.3497 & 0.2279 & 0.4627 \\
+Dice & 0.8296 & 0.7773 & 0.8789 \\
+IoU & 0.7088 & 0.6358 & 0.7840 \\
+Sensibilidade & 0.8001 & 0.7135 & 0.8908 \\
+Especificidade & 0.9704 & 0.9497 & 0.9847 \\
+Precisão & 0.8613 & 0.7719 & 0.9273 \\
+Acurácia & 0.9385 & 0.9018 & 0.9661 \\
+FPR & 0.0296 & 0.0153 & 0.0503 \\
+FNR & 0.1999 & 0.1092 & 0.2865 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -625,14 +627,14 @@ FNR & 0.3497 & 0.2279 & 0.4627 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.8289 & 0.7796 & 0.8723 \\
-IoU & 0.7078 & 0.6388 & 0.7736 \\
-Sensibilidade & 0.8102 & 0.7333 & 0.8924 \\
-Especificidade & 0.9667 & 0.9514 & 0.9776 \\
-Precisão & 0.8484 & 0.7586 & 0.9109 \\
-Acurácia & 0.9374 & 0.9053 & 0.9611 \\
-FPR & 0.0333 & 0.0224 & 0.0486 \\
-FNR & 0.1898 & 0.1076 & 0.2667 \\
+Dice & 0.8295 & 0.7786 & 0.8710 \\
+IoU & 0.7086 & 0.6374 & 0.7715 \\
+Sensibilidade & 0.8340 & 0.7636 & 0.9087 \\
+Especificidade & 0.9593 & 0.9423 & 0.9720 \\
+Precisão & 0.8250 & 0.7258 & 0.8953 \\
+Acurácia & 0.9359 & 0.9070 & 0.9578 \\
+FPR & 0.0407 & 0.0280 & 0.0577 \\
+FNR & 0.1660 & 0.0913 & 0.2364 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -647,14 +649,14 @@ FNR & 0.1898 & 0.1076 & 0.2667 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.8128 & 0.7621 & 0.8619 \\
-IoU & 0.6846 & 0.6156 & 0.7573 \\
-Sensibilidade & 0.7484 & 0.6687 & 0.8337 \\
-Especificidade & 0.9786 & 0.9655 & 0.9872 \\
-Precisão & 0.8894 & 0.8141 & 0.9407 \\
-Acurácia & 0.9355 & 0.8965 & 0.9637 \\
-FPR & 0.0214 & 0.0128 & 0.0345 \\
-FNR & 0.2516 & 0.1663 & 0.3313 \\
+Dice & 0.8000 & 0.7198 & 0.8510 \\
+IoU & 0.6667 & 0.5622 & 0.7406 \\
+Sensibilidade & 0.8740 & 0.8260 & 0.9299 \\
+Especificidade & 0.9285 & 0.9046 & 0.9486 \\
+Precisão & 0.7376 & 0.6052 & 0.8349 \\
+Acurácia & 0.9183 & 0.8951 & 0.9391 \\
+FPR & 0.0715 & 0.0514 & 0.0954 \\
+FNR & 0.1260 & 0.0701 & 0.1740 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -668,14 +670,14 @@ FNR & 0.2516 & 0.1663 & 0.3313 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.7554 & 0.6699 & 0.8215 \\
-IoU & 0.6069 & 0.5037 & 0.6970 \\
-Sensibilidade & 0.8019 & 0.6862 & 0.9032 \\
-Especificidade & 0.9261 & 0.9040 & 0.9451 \\
-Precisão & 0.7139 & 0.5851 & 0.8105 \\
-Acurácia & 0.9029 & 0.8636 & 0.9316 \\
-FPR & 0.0739 & 0.0549 & 0.0960 \\
-FNR & 0.1981 & 0.0968 & 0.3138 \\
+Dice & 0.7862 & 0.7167 & 0.8433 \\
+IoU & 0.6477 & 0.5585 & 0.7290 \\
+Sensibilidade & 0.7880 & 0.6834 & 0.8838 \\
+Especificidade & 0.9502 & 0.9312 & 0.9647 \\
+Precisão & 0.7844 & 0.6734 & 0.8637 \\
+Acurácia & 0.9198 & 0.8809 & 0.9474 \\
+FPR & 0.0498 & 0.0353 & 0.0688 \\
+FNR & 0.2120 & 0.1162 & 0.3166 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -689,14 +691,14 @@ FNR & 0.1981 & 0.0968 & 0.3138 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.4744 & 0.3759 & 0.5726 \\
-IoU & 0.4318 & 0.3387 & 0.5256 \\
-Sensibilidade & 0.7892 & 0.7274 & 0.8445 \\
-Especificidade & 0.9545 & 0.9325 & 0.9740 \\
-Precisão & 0.4544 & 0.3475 & 0.5641 \\
-Acurácia & 0.9238 & 0.8944 & 0.9493 \\
-FPR & 0.0455 & 0.0260 & 0.0675 \\
-FNR & 0.2108 & 0.1555 & 0.2726 \\
+Dice & 0.7540 & 0.6710 & 0.8356 \\
+IoU & 0.7187 & 0.6346 & 0.8012 \\
+Sensibilidade & 0.8633 & 0.7961 & 0.9181 \\
+Especificidade & 0.9167 & 0.8834 & 0.9470 \\
+Precisão & 0.6171 & 0.4955 & 0.7376 \\
+Acurácia & 0.9231 & 0.8941 & 0.9484 \\
+FPR & 0.0833 & 0.0530 & 0.1166 \\
+FNR & 0.1367 & 0.0819 & 0.2039 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -711,14 +713,14 @@ FNR & 0.2108 & 0.1555 & 0.2726 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.4635 & 0.3695 & 0.5573 \\
-IoU & 0.4134 & 0.3247 & 0.5019 \\
-Sensibilidade & 0.7035 & 0.6364 & 0.7669 \\
-Especificidade & 0.9643 & 0.9457 & 0.9801 \\
-Precisão & 0.4702 & 0.3608 & 0.5801 \\
-Acurácia & 0.9011 & 0.8631 & 0.9338 \\
-FPR & 0.0357 & 0.0199 & 0.0543 \\
-FNR & 0.2965 & 0.2331 & 0.3636 \\
+Dice & 0.7363 & 0.6510 & 0.8192 \\
+IoU & 0.6987 & 0.6132 & 0.7824 \\
+Sensibilidade & 0.8114 & 0.7281 & 0.8783 \\
+Especificidade & 0.9240 & 0.8929 & 0.9521 \\
+Precisão & 0.6154 & 0.4912 & 0.7386 \\
+Acurácia & 0.9143 & 0.8831 & 0.9418 \\
+FPR & 0.0760 & 0.0479 & 0.1071 \\
+FNR & 0.1886 & 0.1217 & 0.2719 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -733,14 +735,14 @@ FNR & 0.2965 & 0.2331 & 0.3636 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.4105 & 0.3150 & 0.5086 \\
-IoU & 0.3679 & 0.2802 & 0.4598 \\
-Sensibilidade & 0.8488 & 0.8062 & 0.8887 \\
-Especificidade & 0.9333 & 0.9062 & 0.9568 \\
-Precisão & 0.4067 & 0.3072 & 0.5106 \\
-Acurácia & 0.9195 & 0.8928 & 0.9429 \\
-FPR & 0.0667 & 0.0432 & 0.0938 \\
-FNR & 0.1512 & 0.1113 & 0.1938 \\
+Dice & 0.5993 & 0.5038 & 0.6948 \\
+IoU & 0.5584 & 0.4667 & 0.6518 \\
+Sensibilidade & 0.8707 & 0.8321 & 0.9064 \\
+Especificidade & 0.9228 & 0.8932 & 0.9484 \\
+Precisão & 0.4941 & 0.3844 & 0.6078 \\
+Acurácia & 0.9188 & 0.8926 & 0.9421 \\
+FPR & 0.0772 & 0.0516 & 0.1068 \\
+FNR & 0.1293 & 0.0936 & 0.1679 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -754,14 +756,14 @@ FNR & 0.1512 & 0.1113 & 0.1938 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.4325 & 0.3381 & 0.5292 \\
-IoU & 0.3850 & 0.2984 & 0.4750 \\
-Sensibilidade & 0.7497 & 0.6826 & 0.8081 \\
-Especificidade & 0.9543 & 0.9334 & 0.9722 \\
-Precisão & 0.4324 & 0.3286 & 0.5398 \\
-Acurácia & 0.9120 & 0.8838 & 0.9370 \\
-FPR & 0.0457 & 0.0278 & 0.0666 \\
-FNR & 0.2503 & 0.1919 & 0.3174 \\
+Dice & 0.4894 & 0.3921 & 0.5878 \\
+IoU & 0.4499 & 0.3567 & 0.5452 \\
+Sensibilidade & 0.9024 & 0.8716 & 0.9294 \\
+Especificidade & 0.8894 & 0.8586 & 0.9173 \\
+Precisão & 0.4142 & 0.3134 & 0.5197 \\
+Acurácia & 0.9021 & 0.8772 & 0.9249 \\
+FPR & 0.1106 & 0.0827 & 0.1414 \\
+FNR & 0.0976 & 0.0706 & 0.1284 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -775,23 +777,41 @@ FNR & 0.2503 & 0.1919 & 0.3174 \\
 \toprule
 Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
 \midrule
-Dice & 0.4090 & 0.3154 & 0.5055 \\
-IoU & 0.3675 & 0.2808 & 0.4590 \\
-Sensibilidade & 0.8588 & 0.8114 & 0.9010 \\
-Especificidade & 0.8861 & 0.8541 & 0.9154 \\
-Precisão & 0.3794 & 0.2832 & 0.4816 \\
-Acurácia & 0.8866 & 0.8564 & 0.9140 \\
-FPR & 0.1139 & 0.0846 & 0.1459 \\
-FNR & 0.1412 & 0.0990 & 0.1886 \\
+Dice & 0.4405 & 0.3454 & 0.5378 \\
+IoU & 0.3971 & 0.3075 & 0.4894 \\
+Sensibilidade & 0.8334 & 0.7827 & 0.8801 \\
+Especificidade & 0.9137 & 0.8842 & 0.9403 \\
+Precisão & 0.4055 & 0.3051 & 0.5101 \\
+Acurácia & 0.9001 & 0.8708 & 0.9264 \\
+FPR & 0.0863 & 0.0597 & 0.1158 \\
+FNR & 0.1666 & 0.1199 & 0.2173 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-No nível micro, Ruifrok obteve o maior Dice, com estimativa de 0{,}8289 e IC95\% entre 0{,}7796 e 0{,}8723. A ausência de normalização e Macenko apresentaram os resultados seguintes. Essa ordenação, entretanto, não se manteve quando a análise foi realizada em nível de paciente. Nas métricas macro, a ausência de normalização alcançou o maior Dice, com estimativa de 0{,}4744 e IC95\% entre 0{,}3759 e 0{,}5726, seguida por Reinhard e Macenko. Essa mudança de ordenação sugere que o bom desempenho agregado por pixel não implica, necessariamente, desempenho mais uniforme entre pacientes.
+No nível micro, a ausência de normalização obteve o maior Dice, com estimativa de 0{,}8415 e IC95\% entre 0{,}7767 e 0{,}8987. Reinhard e Ruifrok apresentaram resultados muito próximos na sequência, com Dice de 0{,}8296 e 0{,}8295, respectivamente. Essa ordenação se manteve quando a análise foi realizada em nível de paciente: nas métricas macro, a ausência de normalização alcançou o maior Dice, com estimativa de 0{,}7540 e IC95\% entre 0{,}6710 e 0{,}8356, seguida por Reinhard. A diferença entre as leituras micro e macro permanece relevante, mas, nesta execução final, ambas favorecem a configuração sem normalização de cor.
 
-A AUROC foi reportada apenas como estimativa pontual, sem intervalos de confiança. Macenko apresentou o maior valor, com AUROC de 0{,}9603, seguido por Ruifrok, ausência de normalização e Reinhard. A diferença entre AUROC e Dice é relevante do ponto de vista metodológico: enquanto a AUROC avalia a capacidade de ranqueamento das probabilidades preditas ao longo de diferentes limiares, o Dice reflete o desempenho após a aplicação de uma decisão binária. Assim, as duas métricas respondem a perguntas complementares sobre o comportamento do método.
+A AUROC foi reportada apenas como estimativa pontual, sem intervalos de confiança. Ruifrok apresentou o maior valor, com AUROC de 0{,}9579, seguido por Macenko e pela ausência de normalização. A diferença entre AUROC e Dice é relevante do ponto de vista metodológico: enquanto a AUROC avalia a capacidade de ranqueamento das probabilidades preditas ao longo de diferentes limiares, o Dice reflete o desempenho após a aplicação de uma decisão binária. Assim, as duas métricas respondem a perguntas complementares sobre o comportamento do método.
 
-Também foi realizada uma avaliação separada entre pacientes com lesão anotada e pacientes sem lesão visível. Essa separação evita que o Dice seja interpretado de forma ambígua em casos negativos, nos quais não há região positiva de referência. Nos pacientes positivos, a ausência de normalização e Ruifrok apresentaram desempenho semelhante, ambos com Dice em torno de 0{,}80. Nos pacientes negativos, entretanto, a proporção de casos sem qualquer predição positiva permaneceu baixa em todas as estratégias, variando de 0{,}0488 em Ruifrok a 0{,}1951 em Reinhard. Esse resultado indica que, embora o método segmente adequadamente parte relevante das lesões, ainda há produção de falsos positivos em pacientes sem lesão anotada.
+\begin{table}[!htb]
+\centering
+\caption{AUROC pontual por estratégia de normalização no conjunto de teste de DIAGSET.}
+\label{tab:results_diagset-auc}
+\small
+\begin{tabular}{lr}
+\toprule
+Normalização & AUROC \\
+\midrule
+Sem normalização & 0.9508 \\
+Reinhard & 0.9445 \\
+Ruifrok & 0.9579 \\
+Macenko & 0.9534 \\
+Vahadane & 0.9389 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Também foi realizada uma avaliação separada entre pacientes com lesão anotada e pacientes sem lesão visível. Essa separação evita que o Dice seja interpretado de forma ambígua em casos negativos, nos quais não há região positiva de referência. Nos pacientes positivos, Ruifrok apresentou o maior Dice, com estimativa de 0{,}7985, seguido por Macenko e pela ausência de normalização. Nos pacientes negativos, a ausência de normalização e Reinhard apresentaram a maior proporção de casos sem qualquer predição positiva, ambas com 0{,}7317. Esse resultado indica que a configuração sem normalização reuniu bom desempenho agregado com melhor supressão de predições positivas em casos negativos, enquanto Ruifrok preservou maior desempenho entre os pacientes positivos.
 
 \begin{table}[!htb]
 \centering
@@ -803,73 +823,100 @@ Também foi realizada uma avaliação separada entre pacientes com lesão anotad
 \toprule
 Normalização & Dice em positivos & Negativos sem predição positiva & Pacientes pos. & Pacientes neg. \\
 \midrule
-Sem normalização & 0{,}8020 [0{,}7253, 0{,}8672] & 0{,}1707 [0{,}0625, 0{,}2955] & 38 & 41 \\
-Reinhard & 0{,}7531 [0{,}6741, 0{,}8219] & 0{,}1951 [0{,}0789, 0{,}3235] & 38 & 41 \\
-Ruifrok & 0{,}8008 [0{,}7252, 0{,}8672] & 0{,}0488 [0{,}0000, 0{,}1250] & 38 & 41 \\
-Macenko & 0{,}7675 [0{,}6849, 0{,}8375] & 0{,}1220 [0{,}0270, 0{,}2326] & 38 & 41 \\
-Vahadane & 0{,}7450 [0{,}6537, 0{,}8285] & 0{,}0976 [0{,}0227, 0{,}2000] & 38 & 41 \\
+Sem normalização & 0{,}7781 [0{,}6816, 0{,}8628] & 0{,}7317 [0{,}5909, 0{,}8649] & 38 & 41 \\
+Reinhard & 0{,}7413 [0{,}6385, 0{,}8327] & 0{,}7317 [0{,}5909, 0{,}8649] & 38 & 41 \\
+Ruifrok & 0{,}7985 [0{,}7189, 0{,}8688] & 0{,}4146 [0{,}2666, 0{,}5641] & 38 & 41 \\
+Macenko & 0{,}7806 [0{,}6930, 0{,}8585] & 0{,}2195 [0{,}1000, 0{,}3500] & 38 & 41 \\
+Vahadane & 0{,}7579 [0{,}6716, 0{,}8362] & 0{,}1463 [0{,}0476, 0{,}2632] & 38 & 41 \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
 
-As matrizes de confusão complementam essa interpretação ao explicitar o balanço entre verdadeiros negativos, falsos positivos, falsos negativos e verdadeiros positivos. A \Figura{fig:results_diagset-confusion-matrices} reúne os resultados das cinco estratégias de normalização, permitindo observar de forma visual a distribuição dos erros após a inferência final.
+A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta a camada complementar de reconhecimento binário em nível de \textit{patch}. A comparação principal segue a saída antes da supressão em nível de paciente, conforme definido no artefato final da Fase 10. Após a supressão congelada, os valores são apresentados apenas como leitura operacional adicional. Em todas as normalizações, o suporte foi de 387\,325 \textit{patches}, incluindo 72\,428 positivos e 314\,897 negativos.
+
+\begin{table}[!htb]
+\centering
+\caption{Reconhecimento binário em nível de \textit{patch} em DIAGSET antes e depois da supressão por paciente.}
+\label{tab:results_diagset-patch-recognition}
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llrrrrrrrr}
+\toprule
+Normalização & Comparação & Acurácia & \textit{AvAcc} & Sens. & Espec. & TP & FP & FN & TN \\
+\midrule
+Sem normalização & Pré-supressão & 0.9323 & 0.8923 & 0.8283 & 0.9562 & 59990 & 13779 & 12438 & 301118 \\
+Sem normalização & Pós-supressão & 0.9419 & 0.8970 & 0.8255 & 0.9686 & 59786 & 9878 & 12642 & 305019 \\
+Reinhard & Pré-supressão & 0.9296 & 0.8811 & 0.8036 & 0.9586 & 58200 & 13041 & 14228 & 301856 \\
+Reinhard & Pós-supressão & 0.9385 & 0.8854 & 0.8005 & 0.9702 & 57981 & 9387 & 14447 & 305510 \\
+Ruifrok & Pré-supressão & 0.9325 & 0.8997 & 0.8474 & 0.9520 & 61378 & 15105 & 11050 & 299792 \\
+Ruifrok & Pós-supressão & 0.9337 & 0.9005 & 0.8474 & 0.9536 & 61378 & 14626 & 11050 & 300271 \\
+Macenko & Pré-supressão & 0.9166 & 0.9009 & 0.8758 & 0.9260 & 63429 & 23314 & 8999 & 291583 \\
+Macenko & Pós-supressão & 0.9176 & 0.9015 & 0.8758 & 0.9272 & 63429 & 22919 & 8999 & 291978 \\
+Vahadane & Pré-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 57708 & 16939 & 14720 & 297958 \\
+Vahadane & Pós-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 57708 & 16932 & 14720 & 297965 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+As matrizes de confusão complementam essa interpretação ao explicitar o balanço entre verdadeiros negativos, falsos positivos, falsos negativos e verdadeiros positivos em nível de pixel, após a inferência final e a pós-filtragem congelada. A \Figura{fig:results_diagset-confusion-matrices} reúne os resultados das cinco estratégias de normalização, permitindo observar de forma visual a distribuição dos erros sem confundir esse artefato com a matriz binária em nível de \textit{patch} apresentada na Tabela~\ref{tab:results_diagset-patch-recognition}.
 
 \begin{figure}[!htb]
 \centering
 \begin{subfigure}[t]{0.47\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_not_normalized.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_not_normalized_updated.png}
 \caption{Sem normalização}
 \label{fig:results_diagset-confusion-not_normalized}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.47\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_reinhard.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_reinhard_updated.png}
 \caption{Reinhard}
 \label{fig:results_diagset-confusion-reinhard}
 \end{subfigure}
 \par\medskip
 \begin{subfigure}[t]{0.47\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_ruifrok.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_ruifrok_updated.png}
 \caption{Ruifrok}
 \label{fig:results_diagset-confusion-ruifrok}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.47\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_macenko.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_macenko_updated.png}
 \caption{Macenko}
 \label{fig:results_diagset-confusion-macenko}
 \end{subfigure}
 \par\medskip
 \begin{subfigure}[t]{0.47\textwidth}
 \centering
-\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_vahadane.png}
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_vahadane_updated.png}
 \caption{Vahadane}
 \label{fig:results_diagset-confusion-vahadane}
 \end{subfigure}
-\caption[Matrizes de confusão finais em DIAGSET]{Matrizes de confusão no conjunto de teste de DIAGSET para as cinco estratégias de normalização avaliadas.}
+\caption[Matrizes de confusão finais em DIAGSET]{Matrizes de confusão em nível de pixel no conjunto de teste de DIAGSET para as cinco estratégias de normalização avaliadas.}
 \label{fig:results_diagset-confusion-matrices}
 \end{figure}
 
-O padrão observado nas matrizes de confusão é coerente com a baixa proporção de pacientes negativos sem predição positiva. As estratégias preservam desempenho elevado nos pacientes com lesão, mas ainda geram falsos positivos suficientes para limitar a interpretação de um resultado negativo como evidência robusta de ausência de câncer. Portanto, Dice, AUROC, métricas macro e avaliação separada de casos positivos e negativos devem ser lidos em conjunto. Essa leitura integrada mostra que o método é promissor para localizar regiões tumorais, mas ainda exige controle adicional de falsos positivos para sustentar uma aplicação clínica mais conservadora.
+O padrão observado nas matrizes de confusão é coerente com a avaliação separada de pacientes positivos e negativos. A ausência de normalização e Reinhard apresentaram maior supressão de predições positivas em pacientes negativos, enquanto Ruifrok e Macenko preservaram maior sensibilidade nas leituras voltadas aos casos positivos ou aos \textit{patches}. Portanto, Dice, AUROC, métricas macro, avaliação separada de casos positivos e negativos e reconhecimento em nível de \textit{patch} devem ser lidos em conjunto. Essa leitura integrada mostra que o método é promissor para localizar regiões tumorais, mas ainda exige controle adicional de falsos positivos para sustentar uma aplicação clínica mais conservadora.
 
 \section{Discussão dos resultados}\label{sec:res_diagset_discussao}
 
-Os resultados obtidos em DIAGSET indicam que a normalização de cor não produziu ganho uniforme em todos os critérios avaliados. Em vez de uma estratégia claramente dominante, observou-se uma dependência entre o método de normalização, o nível de agregação da métrica (pixel ou paciente) e o tipo de erro analisado. Ruifrok apresentou o maior Dice em nível de pixel, com estimativa de 0{,}8289 e IC95\% entre 0{,}7796 e 0{,}8723, sugerindo melhor desempenho quando todos os pixels do conjunto de teste são agregados antes do cálculo da métrica. Macenko, por sua vez, obteve a maior AUROC pontual, com valor de 0{,}9603, indicando melhor capacidade de ranqueamento das probabilidades preditas no conjunto de teste. Já a ausência de normalização apresentou o maior Dice em nível de paciente, com estimativa de 0{,}4744 e IC95\% entre 0{,}3759 e 0{,}5726, além do maior Dice entre os pacientes positivos (com câncer), com valor de 0{,}8020 e IC95\% entre 0{,}7253 e 0{,}8672.
+Os resultados obtidos em DIAGSET indicam que a normalização de cor não produziu ganho uniforme em todos os critérios avaliados. Em vez de uma estratégia claramente dominante, observou-se uma dependência entre o método de normalização, o nível de agregação da métrica (pixel, paciente ou \textit{patch}) e o tipo de erro analisado. A ausência de normalização apresentou o maior Dice em nível de pixel, com estimativa de 0{,}8415 e IC95\% entre 0{,}7767 e 0{,}8987, e também o maior Dice em nível de paciente, com estimativa de 0{,}7540 e IC95\% entre 0{,}6710 e 0{,}8356. Ruifrok, por sua vez, obteve a maior AUROC pontual, com valor de 0{,}9579, e o maior Dice entre os pacientes positivos, com estimativa de 0{,}7985 e IC95\% entre 0{,}7189 e 0{,}8688. Macenko apresentou o maior \textit{AvAcc} no reconhecimento binário em nível de \textit{patch}, tanto antes quanto depois da supressão por paciente.
 
-Essa distribuição de resultados mostra que a escolha da melhor estratégia depende da pergunta experimental. Quando o interesse está na segmentação global do volume total de pixels, Ruifrok aparece como a alternativa mais favorável. Quando se avalia a ordenação probabilística antes da decisão binária, Macenko apresenta o melhor resultado pontual. Em contrapartida, quando cada paciente recebe peso mais equilibrado na análise, a ausência de normalização torna-se a estratégia mais vantajosa. Portanto, a comparação entre normalizações não deve ser reduzida a um único valor médio, pois Dice micro (em nível de pixel), Dice macro (em nível de paciente), AUROC e avaliação separada de pacientes positivos (com câncer) e negativos (sem câncer) descrevem dimensões distintas do comportamento do método.
+Essa distribuição de resultados mostra que a escolha da melhor estratégia depende da pergunta experimental. Quando o interesse está na segmentação global do volume total de pixels ou na agregação por paciente, a ausência de normalização aparece como a alternativa mais favorável nesta execução. Quando se avalia a ordenação probabilística antes da decisão binária, Ruifrok apresenta o melhor resultado pontual. Quando a comparação é reformulada como reconhecimento binário de \textit{patches} no formato usual de DIAGSET, Macenko obtém o maior \textit{AvAcc}. Portanto, a comparação entre normalizações não deve ser reduzida a um único valor médio, pois Dice micro, Dice macro, AUROC, avaliação separada de pacientes positivos e negativos e métricas em nível de \textit{patch} descrevem dimensões distintas do comportamento do método.
 
-A divergência entre métricas micro e macro é particularmente relevante. No nível micro, o desempenho é influenciado pelo volume total de pixels e, consequentemente, por pacientes ou lâminas com maior número de \textit{patches}. Nesse cenário, Ruifrok alcançou o melhor Dice e a maior sensibilidade entre as estratégias, mas também apresentou maior taxa de falsos positivos do que as estratégias sem normalização, Reinhard e Macenko. No nível macro, a análise por paciente revelou maior heterogeneidade: embora Ruifrok tenha mantido sensibilidade elevada, seu Dice por paciente foi inferior ao obtido sem normalização. Esse contraste sugere que um bom desempenho agregado por pixel não garante, necessariamente, comportamento mais uniforme entre pacientes.
+A divergência entre métricas micro e macro continua metodologicamente relevante. No nível micro, o desempenho é influenciado pelo volume total de pixels e, consequentemente, por pacientes ou lâminas com maior número de \textit{patches}. No nível macro, cada paciente contribui de maneira mais equilibrada para o resultado final. Nesta execução, a ausência de normalização liderou em ambos os níveis, mas a diferença entre estratégias mudou conforme a métrica considerada: Ruifrok preservou maior sensibilidade e maior AUROC, enquanto Macenko concentrou maior desempenho no reconhecimento binário em nível de \textit{patch}. Esse contraste reforça que bom desempenho agregado por pixel não deve ser usado isoladamente para inferir comportamento uniforme entre pacientes ou melhor classificação binária de \textit{patches}.
 
-A análise separada de pacientes com e sem lesão anotada reforça essa cautela. Entre os pacientes positivos, a ausência de normalização e Ruifrok apresentaram resultados muito próximos, ambos com Dice em torno de 0{,}80. Esse achado sugere que o método foi capaz de localizar regiões tumorais em parte relevante dos casos com lesão. Entretanto, a proporção de pacientes negativos sem qualquer predição positiva permaneceu baixa em todas as estratégias, variando de 0{,}0488 em Ruifrok a 0{,}1951 em Reinhard. Em termos práticos, isso significa que mesmo as configurações com bom desempenho em pacientes positivos ainda produziram falsos positivos em uma parcela considerável dos pacientes sem lesão anotada.
+A análise separada de pacientes com e sem lesão anotada reforça essa cautela. Entre os pacientes positivos, Ruifrok, Macenko e a ausência de normalização apresentaram Dice próximos, todos em torno de 0{,}78 a 0{,}80. Esse achado sugere que o método foi capaz de localizar regiões tumorais em parte relevante dos casos com lesão. Nos pacientes negativos, entretanto, a proporção de casos sem qualquer predição positiva variou amplamente: a ausência de normalização e Reinhard alcançaram 0{,}7317, enquanto Vahadane permaneceu em 0{,}1463. Em termos práticos, isso significa que as configurações com maior sensibilidade ou melhor \textit{AvAcc} em \textit{patches} não foram necessariamente as mais conservadoras para pacientes sem lesão anotada.
 
-Esse padrão é confirmado pelas matrizes de confusão. As estratégias avaliadas preservaram desempenho expressivo na identificação de regiões positivas, mas não alcançaram controle suficiente dos falsos positivos em pacientes negativos. Assim, os resultados não sustentam uma leitura clínica forte de teste negativo, nem autorizam interpretar a ausência de predição como evidência robusta de ausência de câncer. O método mostra potencial para apoiar a localização de regiões suspeitas, mas ainda exigiria mecanismos adicionais de supressão de falsos positivos, calibração em nível de paciente ou validação externa antes de qualquer extrapolação para uso clínico.
+Esse padrão é confirmado pelas matrizes de confusão em nível de pixel e pela tabela de reconhecimento em nível de \textit{patch}. As estratégias avaliadas preservaram desempenho expressivo na identificação de regiões positivas, mas exibiram compromissos diferentes entre sensibilidade, especificidade e supressão de pacientes negativos. Assim, os resultados não sustentam uma leitura clínica forte de teste negativo, nem autorizam interpretar a ausência de predição como evidência robusta de ausência de câncer. O método mostra potencial para apoiar a localização de regiões suspeitas, mas ainda exigiria mecanismos adicionais de supressão de falsos positivos, calibração em nível de paciente ou validação externa antes de qualquer extrapolação para uso clínico.
 
-A interpretação da normalização Vahadane requer uma ressalva específica. Nesta dissertação, os resultados associados a Vahadane correspondem à configuração operacional efetivamente adotada no experimento, baseada em fonte fixa, e não a uma normalização recalculada individualmente para cada \textit{patch}. Por essa razão, sua comparação com os demais métodos deve ser entendida dentro desse contrato experimental. Ainda assim, Vahadane apresentou comportamento informativo: manteve sensibilidade elevada em nível macro, mas exibiu maior taxa de falsos positivos e menor precisão, o que contribuiu para seu desempenho inferior em Dice macro e na proporção de pacientes negativos sem predição positiva.
+A interpretação da normalização Vahadane requer uma ressalva específica. Nesta dissertação, os resultados associados a Vahadane correspondem à configuração operacional efetivamente adotada no experimento, baseada em fonte fixa, e não a uma normalização recalculada individualmente para cada \textit{patch}. Por essa razão, sua comparação com os demais métodos deve ser entendida dentro desse contrato experimental. Ainda assim, Vahadane apresentou comportamento informativo: manteve sensibilidade macro intermediária, mas exibiu menor Dice macro, menor AUROC e a menor proporção de pacientes negativos sem predição positiva entre as estratégias avaliadas.
 
 Do ponto de vista metodológico, o principal resultado do experimento não é a identificação de uma normalização universalmente superior, mas a demonstração de que o fluxo proposto permite comparar estratégias sob condições controladas e rastreáveis. A curadoria foi aplicada antes da divisão por paciente, reduzindo o risco de que amostras positivas contaminadas por fundo ou por imprecisões de anotação influenciassem qualquer partição. Em seguida, a amostragem inteligente foi restrita ao conjunto de treino, com o objetivo de reduzir redundância e expor o modelo a imagens mais variadas, sem modificar validação ou teste. Essa separação preservou a independência das etapas de seleção e avaliação, reduzindo o risco de que a compactação do treino contaminasse a interpretação dos resultados finais.
 
