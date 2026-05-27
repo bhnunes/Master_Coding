@@ -38,6 +38,14 @@ because they still support the training-augmentation section.
 | DiagSet prostate histopathology dataset: Koziarski et al. (2024) | `koziarski2024diagset` | Cite for DiagSet provenance, prostate-cancer WSI/patch data, fully annotated scans, binary scan diagnoses, and patch-based cancer-detection framing. | Do not claim the repository reproduces the DiagSet model framework unless that experiment was run. |
 | HiESD early gastric cancer and precancerous lesions dataset: Wang et al. (2025) | `wang2025hiesd` | Cite for HiESD provenance, ESD specimen pathology slides, detailed region-level annotations, and early gastric cancer/precancerous lesion categories. | Preserve the repository's hardcoded HIESD label policy separately from the paper citation. |
 
+## Clinical Pathologist Context Papers
+
+| Study | Suggested key | Use in thesis/paper | Caveat |
+| --- | --- | --- | --- |
+| Raciti et al. (2020), pathologists reading prostate needle-biopsy WSIs with and without Paige Prostate Alpha | `raciti2020novel` | Cite for contextual WSI-level pathologist sensitivity/specificity in prostate-cancer detection. | Use only as an external scale reference; do not compare directly against patch-, pixel-, or patient-level pipeline metrics. |
+| Raciti et al. (2023), multi-reader clinical validation over prostate biopsy WSIs from many institutions | `raciti2023clinical` | Cite for contextual WSI-level unaided pathologist performance and clinical-validation framing. | Use only as an external scale reference; the task and unit of analysis differ from DIAGSET patch recognition and segmentation. |
+| Eloy et al. (2023), digital prostate-biopsy readings by four pathologists before and after AI assistance | `eloy2023artificial` | Cite for contextual slide/case-level pathologist sensitivity, specificity, and diagnostic accuracy. | Use only as an external scale reference; the reported phase-1 values are not direct evidence of model equivalence. |
+
 ## Pipeline Decision Papers
 
 | Pipeline decision | Suggested citations | How to use them |
@@ -689,6 +697,42 @@ Suggested code boundary: `10_inference_ensemble.py`,
   year = {2024},
   doi = {10.1038/s41598-024-52183-4},
   url = {https://doi.org/10.1038/s41598-024-52183-4}
+}
+
+@article{raciti2020novel,
+  title = {Novel artificial intelligence system increases the detection of prostate cancer in whole slide images of core needle biopsies},
+  author = {Raciti, Patricia and Sue, Jillian and Ceballos, Rodrigo and Godrich, Ran and Kunz, Jeremy D. and Kapur, Supriya and Reuter, Victor and Grady, Leo and Kanan, Christopher and Klimstra, David S. and Fuchs, Thomas J.},
+  journal = {Modern Pathology},
+  volume = {33},
+  number = {10},
+  pages = {2058--2066},
+  year = {2020},
+  doi = {10.1038/s41379-020-0551-y},
+  url = {https://doi.org/10.1038/s41379-020-0551-y}
+}
+
+@article{raciti2023clinical,
+  title = {Clinical validation of artificial intelligence--augmented pathology diagnosis demonstrates significant gains in diagnostic accuracy in prostate cancer detection},
+  author = {Raciti, Patricia and Sue, Jillian and Retamero, Juan A. and Ceballos, Rodrigo and Godrich, Ran and Kunz, Jeremy D. and Casson, Adam and Thiagarajan, Dilip and Ebrahimzadeh, Zahra and Viret, Julian and Lee, Donghun and Sch{\"u}ffler, Peter J. and DeMuth, George and Gulturk, Emre and Kanan, Christopher and Rothrock, Brandon and Reis-Filho, Jorge and Klimstra, David S. and Reuter, Victor and Fuchs, Thomas J.},
+  journal = {Archives of Pathology \& Laboratory Medicine},
+  volume = {147},
+  number = {10},
+  pages = {1178--1185},
+  year = {2023},
+  doi = {10.5858/ARPA.2022-0066-OA},
+  url = {https://doi.org/10.5858/ARPA.2022-0066-OA}
+}
+
+@article{eloy2023artificial,
+  title = {Artificial intelligence--assisted cancer diagnosis improves the efficiency of pathologists in prostatic biopsies},
+  author = {Eloy, Catarina and Marques, Ana and Pinto, Jo{\~a}o and Pinheiro, Jorge and Campelos, Sofia and Curado, M{\'o}nica and Vale, Jo{\~a}o and Pol{\'o}nia, Ant{\'o}nio},
+  journal = {Virchows Archiv},
+  volume = {482},
+  number = {3},
+  pages = {595--604},
+  year = {2023},
+  doi = {10.1007/s00428-023-03518-5},
+  url = {https://doi.org/10.1007/s00428-023-03518-5}
 }
 
 @article{wang2025hiesd,

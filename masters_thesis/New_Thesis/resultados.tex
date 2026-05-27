@@ -833,7 +833,7 @@ Vahadane & 0{,}7579 [0{,}6716, 0{,}8362] & 0{,}1463 [0{,}0476, 0{,}2632] & 38 & 
 }
 \end{table}
 
-A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta a camada complementar de reconhecimento binário em nível de \textit{patch}. A comparação principal segue a saída antes da supressão em nível de paciente, conforme definido no artefato final da Fase 10. Após a supressão congelada, os valores são apresentados apenas como leitura operacional adicional. Em todas as normalizações, o suporte foi de 387\,325 \textit{patches}, incluindo 72\,428 positivos e 314\,897 negativos.
+A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta a camada complementar de reconhecimento binário em nível de \textit{patch}. A comparação principal segue a saída antes da supressão em nível de paciente, conforme definido no artefato final da Fase 10. Após a supressão congelada, os valores são apresentados apenas como leitura operacional adicional. Em todas as normalizações, o suporte foi de 387\,325 \textit{patches}, incluindo 72\,428 positivos e 314\,897 negativos. Na tabela, TP, FP, FN e TN são reportados como percentuais desse suporte total.
 
 \begin{table}[!htb]
 \centering
@@ -843,22 +843,86 @@ A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta a camada compleme
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{llrrrrrrrr}
 \toprule
-Normalização & Comparação & Acurácia & \textit{AvAcc} & Sens. & Espec. & TP & FP & FN & TN \\
+Normalização & Comparação & Acurácia & \textit{AvAcc} & Sens. & Espec. & TP (\%) & FP (\%) & FN (\%) & TN (\%) \\
 \midrule
-Sem normalização & Pré-supressão & 0.9323 & 0.8923 & 0.8283 & 0.9562 & 59990 & 13779 & 12438 & 301118 \\
-Sem normalização & Pós-supressão & 0.9419 & 0.8970 & 0.8255 & 0.9686 & 59786 & 9878 & 12642 & 305019 \\
-Reinhard & Pré-supressão & 0.9296 & 0.8811 & 0.8036 & 0.9586 & 58200 & 13041 & 14228 & 301856 \\
-Reinhard & Pós-supressão & 0.9385 & 0.8854 & 0.8005 & 0.9702 & 57981 & 9387 & 14447 & 305510 \\
-Ruifrok & Pré-supressão & 0.9325 & 0.8997 & 0.8474 & 0.9520 & 61378 & 15105 & 11050 & 299792 \\
-Ruifrok & Pós-supressão & 0.9337 & 0.9005 & 0.8474 & 0.9536 & 61378 & 14626 & 11050 & 300271 \\
-Macenko & Pré-supressão & 0.9166 & 0.9009 & 0.8758 & 0.9260 & 63429 & 23314 & 8999 & 291583 \\
-Macenko & Pós-supressão & 0.9176 & 0.9015 & 0.8758 & 0.9272 & 63429 & 22919 & 8999 & 291978 \\
-Vahadane & Pré-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 57708 & 16939 & 14720 & 297958 \\
-Vahadane & Pós-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 57708 & 16932 & 14720 & 297965 \\
+Sem normalização & Pré-supressão & 0.9323 & 0.8923 & 0.8283 & 0.9562 & 15{,}49\% & 3{,}56\% & 3{,}21\% & 77{,}74\% \\
+Sem normalização & Pós-supressão & 0.9419 & 0.8970 & 0.8255 & 0.9686 & 15{,}44\% & 2{,}55\% & 3{,}26\% & 78{,}75\% \\
+Reinhard & Pré-supressão & 0.9296 & 0.8811 & 0.8036 & 0.9586 & 15{,}03\% & 3{,}37\% & 3{,}67\% & 77{,}93\% \\
+Reinhard & Pós-supressão & 0.9385 & 0.8854 & 0.8005 & 0.9702 & 14{,}97\% & 2{,}42\% & 3{,}73\% & 78{,}88\% \\
+Ruifrok & Pré-supressão & 0.9325 & 0.8997 & 0.8474 & 0.9520 & 15{,}85\% & 3{,}90\% & 2{,}85\% & 77{,}40\% \\
+Ruifrok & Pós-supressão & 0.9337 & 0.9005 & 0.8474 & 0.9536 & 15{,}85\% & 3{,}78\% & 2{,}85\% & 77{,}52\% \\
+Macenko & Pré-supressão & 0.9166 & 0.9009 & 0.8758 & 0.9260 & 16{,}38\% & 6{,}02\% & 2{,}32\% & 75{,}28\% \\
+Macenko & Pós-supressão & 0.9176 & 0.9015 & 0.8758 & 0.9272 & 16{,}38\% & 5{,}92\% & 2{,}32\% & 75{,}38\% \\
+Vahadane & Pré-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 14{,}90\% & 4{,}37\% & 3{,}80\% & 76{,}93\% \\
+Vahadane & Pós-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 14{,}90\% & 4{,}37\% & 3{,}80\% & 76{,}93\% \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
+
+Para contextualizar esses valores em relação ao artigo original do DIAGSET,
+a Tabela~\ref{tab:results_diagset-original-comparison} compara a saída primária
+em nível de \textit{patch} desta dissertação, antes da supressão por paciente,
+com o cenário binário S1 reportado por Koziarski et al.~\cite{koziarski2024diagset}.
+Essa comparação deve ser interpretada como referência externa, e não como
+reprodução estrita do experimento original, pois o artigo do DIAGSET utiliza seu
+próprio protocolo de extração, escalas de magnificação e \textit{ensemble} de
+classificadores, enquanto esta dissertação avalia um fluxo de segmentação com
+particionamento, curadoria e pós-processamento próprios. A coluna ``Dif.'' indica
+a diferença em pontos percentuais em relação ao valor original.
+
+\begin{table}[!htb]
+\centering
+\caption{Comparação entre os resultados em nível de \textit{patch} desta dissertação e o cenário binário S1 do artigo original do DIAGSET.}
+\label{tab:results_diagset-original-comparison}
+\scriptsize
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\caption{\textit{AvAcc}}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Resultado & Valor & Dif. \\
+\midrule
+DIAGSET original S1 & 0.9470 & 0.00 p.p. \\
+Sem normalização & 0.8923 & -5.47 p.p. \\
+Reinhard & 0.8811 & -6.59 p.p. \\
+Ruifrok & 0.8997 & -4.73 p.p. \\
+Macenko & 0.9009 & -4.61 p.p. \\
+Vahadane & 0.8715 & -7.55 p.p. \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\caption{Acurácia}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Resultado & Valor & Dif. \\
+\midrule
+DIAGSET original S1 & 0.9458 & 0.00 p.p. \\
+Sem normalização & 0.9323 & -1.35 p.p. \\
+Reinhard & 0.9296 & -1.62 p.p. \\
+Ruifrok & 0.9325 & -1.33 p.p. \\
+Macenko & 0.9166 & -2.92 p.p. \\
+Vahadane & 0.9183 & -2.75 p.p. \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\end{table}
+
+A diferença em acurácia foi relativamente pequena nas melhores configurações:
+Ruifrok e a ausência de normalização ficaram cerca de 1{,}3 ponto percentual
+abaixo do valor original do DIAGSET. A distância foi maior em \textit{AvAcc};
+mesmo a melhor configuração desta dissertação, Macenko, permaneceu 4{,}61 pontos
+percentuais abaixo do S1 original. Esse comportamento sugere que a acurácia
+agregada em \textit{patches} aproxima o desempenho do artigo de referência, mas
+o equilíbrio entre sensibilidade e especificidade ainda é inferior ao obtido pelo
+\textit{ensemble} dedicado do DIAGSET. Ao mesmo tempo, a comparação deve ser lida
+à luz das diferenças metodológicas: o objetivo desta dissertação não foi repetir
+o classificador multiescala original, mas avaliar um fluxo reprodutível de
+segmentação e inferência congelada sobre o conjunto de teste produzido no
+próprio pipeline.
 
 As matrizes de confusão complementam essa interpretação ao explicitar o balanço entre verdadeiros negativos, falsos positivos, falsos negativos e verdadeiros positivos em nível de pixel, após a inferência final e a pós-filtragem congelada. A \Figura{fig:results_diagset-confusion-matrices} reúne os resultados das cinco estratégias de normalização, permitindo observar de forma visual a distribuição dos erros sem confundir esse artefato com a matriz binária em nível de \textit{patch} apresentada na Tabela~\ref{tab:results_diagset-patch-recognition}.
 
@@ -903,6 +967,60 @@ As matrizes de confusão complementam essa interpretação ao explicitar o balan
 \end{figure}
 
 O padrão observado nas matrizes de confusão é coerente com a avaliação separada de pacientes positivos e negativos. A ausência de normalização e Reinhard apresentaram maior supressão de predições positivas em pacientes negativos, enquanto Ruifrok e Macenko preservaram maior sensibilidade nas leituras voltadas aos casos positivos ou aos \textit{patches}. Portanto, Dice, AUROC, métricas macro, avaliação separada de casos positivos e negativos e reconhecimento em nível de \textit{patch} devem ser lidos em conjunto. Essa leitura integrada mostra que o método é promissor para localizar regiões tumorais, mas ainda exige controle adicional de falsos positivos para sustentar uma aplicação clínica mais conservadora.
+
+Uma última referência contextual é a comparação indireta com leituras de
+patologistas em estudos de câncer de próstata. Raciti et al.~\cite{raciti2020novel}
+avaliaram patologistas em WSIs de biópsias prostáticas por agulha com e sem apoio
+do sistema Paige Prostate Alpha; Raciti et al.~\cite{raciti2023clinical}
+reportaram uma validação clínica multileitor em 610 WSIs de 218 instituições; e
+Eloy et al.~\cite{eloy2023artificial} avaliaram quatro patologistas em lâminas
+digitais de biópsias prostáticas antes e depois do apoio por IA. A
+Tabela~\ref{tab:results_diagset-pathologist-context} usa as leituras sem IA
+desses trabalhos apenas como escala externa. A comparação não é direta: nesta
+dissertação, os valores de sensibilidade, especificidade e \textit{AvAcc} são
+calculados em nível de \textit{patch} antes da supressão por paciente, enquanto
+os estudos clínicos avaliam decisões em nível de WSI, biópsia ou caso
+diagnóstico. Como \textit{AvAcc} não é necessariamente reportada nesses estudos,
+a tabela usa a aproximação
+\(\textit{AvAcc} \approx (\mathrm{sensibilidade}+\mathrm{especificidade})/2\)
+para os valores de patologistas.
+
+\begin{table}[!htb]
+\centering
+\caption{Comparação contextual entre o reconhecimento em nível de \textit{patch} desta dissertação e leituras de patologistas em estudos de próstata.}
+\label{tab:results_diagset-pathologist-context}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllrrr}
+\toprule
+Fonte & Unidade & Leitura & Sens. & Espec. & \textit{AvAcc}/aprox. \\
+\midrule
+Esta dissertação -- sem normalização & \textit{patch} & Pré-supressão & 0.8283 & 0.9562 & 0.8923 \\
+Esta dissertação -- Reinhard & \textit{patch} & Pré-supressão & 0.8036 & 0.9586 & 0.8811 \\
+Esta dissertação -- Ruifrok & \textit{patch} & Pré-supressão & 0.8474 & 0.9520 & 0.8997 \\
+Esta dissertação -- Macenko & \textit{patch} & Pré-supressão & 0.8758 & 0.9260 & 0.9009 \\
+Esta dissertação -- Vahadane & \textit{patch} & Pré-supressão & 0.7968 & 0.9462 & 0.8715 \\
+Raciti et al.~\cite{raciti2020novel} & WSI & Patologistas sem IA & 0.7380 & 0.9660 & 0.8520 \\
+Raciti et al.~\cite{raciti2023clinical} & WSI & Patologistas sem IA & 0.8870 & 0.9730 & 0.9300 \\
+Eloy et al.~\cite{eloy2023artificial} & Lâmina/caso & Patologistas sem IA, fase 1 & 0.9680 & 0.9390 & 0.9535 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+Essa leitura contextual sugere que os melhores resultados em \textit{patches}
+desta dissertação estão na mesma ordem de grandeza dos valores reportados para
+patologistas em tarefas diagnósticas digitais, mas ainda abaixo dos estudos
+clínicos mais fortes quando a sensibilidade e a especificidade são combinadas em
+uma acurácia balanceada aproximada. O melhor \textit{AvAcc} do fluxo proposto
+foi obtido com Macenko, com 0{,}9009, acima da referência sem IA de Raciti et
+al.~\cite{raciti2020novel} e abaixo dos valores de Raciti et
+al.~\cite{raciti2023clinical} e Eloy et al.~\cite{eloy2023artificial}. Esse
+resultado é encorajador como referência de escala, mas não demonstra
+equivalência com a leitura humana: o patologista avalia a lâmina ou o caso com
+contexto morfológico amplo, enquanto o experimento desta dissertação mede
+segmentação, reconhecimento local de \textit{patches} e agregações por paciente
+derivadas do pipeline.
 
 \section{Discussão dos resultados}\label{sec:res_diagset_discussao}
 
