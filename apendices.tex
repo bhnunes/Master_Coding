@@ -1,12 +1,12 @@
 \chapter{Configurações metodológicas do experimento}\label{ap:configs_reportar}
 
 Este apêndice documenta a superfície de configuração necessária para reproduzir
-o experimento a partir dos scripts de Fase 1 a Fase 10. A tabela foi derivada do
+o experimento a partir dos \textit{scripts} de Fase 1 a Fase 10. A tabela foi derivada do
 arquivo \texttt{.env\_example} e inclui apenas variáveis cujo valor altera a
 execução metodológica, a seleção de amostras, a estratégia de treinamento, a
 otimização do \textit{ensemble}, a inferência ou as garantias de integridade do
 fluxo. Variáveis usadas apenas para apontar caminhos locais, nomes de arquivos
-de saída, diretórios temporários, logs, credenciais, e-mails, tokens,
+de saída, diretórios temporários, \textit{logs}, credenciais, e-mails, \textit{tokens},
 identificadores administrativos ou repositórios de rastreamento foram omitidas
 porque devem ser ajustadas por ambiente e não mudam, por si só, a interpretação
 científica dos resultados.
@@ -44,7 +44,7 @@ Variável & Valor utilizado & Descrição curta \\
 
 \multicolumn{3}{l}{\textbf{Configuração compartilhada}}\\
 \envcfg{RUNTIME_NORMALIZATION_METHOD} & \envcfg{NOT_NORMALIZED} & Define a normalização de cor aplicada em tempo de execução nas Fases 7--10. \\
-\envcfg{RUNTIME_VAHADANE_BACKEND} & \envcfg{fixed_source} & Seleciona o backend usado caso \envcfg{RUNTIME_NORMALIZATION_METHOD=VAHADANE}; o valor reportado usa a matriz de referência fixa. \\
+\envcfg{RUNTIME_VAHADANE_BACKEND} & \envcfg{fixed_source} & Seleciona o \textit{backend} usado caso \envcfg{RUNTIME_NORMALIZATION_METHOD=VAHADANE}; o valor reportado usa a matriz de referência fixa. \\
 
 \multicolumn{3}{l}{\textbf{Fase 1: detecção de artefatos}}\\
 \envcfg{ARTIFACT_DEVICE} & \envcfg{cuda} & Executa a inferência dos modelos de artefato em GPU CUDA. \\
@@ -52,21 +52,21 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{ARTIFACT_MPP_MODEL} & \envcfg{1.5} & Seleciona o modelo de controle de qualidade treinado para a magnificação definida em micrômetros por pixel. \\
 \envcfg{ARTIFACT_OVERLAY_FACTOR} & \envcfg{10} & Controla a redução usada nas imagens de pré-visualização dos mapas de artefato. \\
 
-\multicolumn{3}{l}{\textbf{Fase 2: extração de patches e manifesto mestre}}\\
+\multicolumn{3}{l}{\textbf{Fase 2: extração de \textit{patches} e manifesto mestre}}\\
 \envcfg{TAG} & \envcfg{DIAGSET} & Ativa a política específica de leitura e mapeamento de cores das anotações do conjunto DIAGSET. \\
-\envcfg{STAGE2_COPY_WSI_TO_LOCAL_CACHE} & \envcfg{True} & Copia cada WSI para cache local antes da extração, reduzindo dependência de armazenamento lento. \\
-\envcfg{WINDOW_SIZE} & \envcfg{224} & Define o tamanho, em pixels, dos patches extraídos. \\
+\envcfg{STAGE2_COPY_WSI_TO_LOCAL_CACHE} & \envcfg{True} & Copia cada WSI para \textit{cache} local antes da extração, reduzindo dependência de armazenamento lento. \\
+\envcfg{WINDOW_SIZE} & \envcfg{224} & Define o tamanho, em pixels, dos \textit{patches} extraídos. \\
 \envcfg{STRIDE} & \envcfg{112} & Define o deslocamento, em pixels, entre janelas consecutivas de extração. \\
-\envcfg{TARGET_LEVEL} & \envcfg{0} & Usa o nível de maior resolução da pirâmide WSI para leitura dos patches. \\
-\envcfg{TISSUE_PERCENTAGE} & \envcfg{0.3} & Exige pelo menos 30\% de tecido para aceitar um patch. \\
+\envcfg{TARGET_LEVEL} & \envcfg{0} & Usa o nível de maior resolução da pirâmide WSI para leitura dos \textit{patches}. \\
+\envcfg{TISSUE_PERCENTAGE} & \envcfg{0.3} & Exige pelo menos 30\% de tecido para aceitar um \textit{patch}. \\
 \envcfg{MATCH_PERCENTAGE} & \envcfg{1.0} & Exige correspondência completa com a região anotada para atribuição da classe supervisionada. \\
 \envcfg{LOADCASES} & \envcfg{False} & Mantém desativado o modo legado de carregamento de casos. \\
 \envcfg{NUM_WORKERS} & \envcfg{3} & Define o paralelismo de extração usado na Fase 2. \\
-\envcfg{OPENSLIDE_CACHE_BYTES} & \envcfg{0} & Mantém desativado o cache explícito do OpenSlide. \\
+\envcfg{OPENSLIDE_CACHE_BYTES} & \envcfg{0} & Mantém desativado o \textit{cache} explícito do OpenSlide. \\
 \envcfg{STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES} & \envcfg{0} & Mantém desativado o pré-carregamento de áreas de varredura. \\
 \envcfg{STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS} & \envcfg{True} & Suprime mensagens nativas ruidosas de TIFF/OpenSlide durante a extração. \\
-\envcfg{STAGE2_HDF5_COMPRESSION} & \envcfg{none} & Grava shards HDF5 sem compressão para priorizar velocidade de escrita e leitura. \\
-\envcfg{USE_ADVANCED_ARTIFACT_FILTERING} & \envcfg{True} & Ativa o cálculo de cobertura por artefato para cada patch salvo. \\
+\envcfg{STAGE2_HDF5_COMPRESSION} & \envcfg{none} & Grava \textit{shards} HDF5 sem compressão para priorizar velocidade de escrita e leitura. \\
+\envcfg{USE_ADVANCED_ARTIFACT_FILTERING} & \envcfg{True} & Ativa o cálculo de cobertura por artefato para cada \textit{patch} salvo. \\
 \envcfg{ACTIVATE_SANITY_CHECK_GEOJSON} & \envcfg{True} & Valida a disponibilidade e consistência dos GeoJSONs de artefato durante a extração. \\
 
 \multicolumn{3}{l}{\textbf{Fase 3.1: amostragem para revisão manual}}\\
@@ -74,7 +74,7 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{OPTIMIZATION_SAMPLING_MARGIN_OF_ERROR} & \envcfg{0.05} & Define a margem de erro usada no cálculo estatístico da amostra. \\
 \envcfg{OPTIMIZATION_SAMPLING_PROPORTION} & \envcfg{0.5} & Usa a proporção conservadora para estimar o tamanho amostral. \\
 \envcfg{OPTIMIZATION_SAMPLING_PILOT_SAMPLE_SIZE} & \envcfg{100} & Define o tamanho da amostra piloto revisada antes do conjunto principal. \\
-\envcfg{OPTIMIZATION_SAMPLING_MASTER_POOL_FRACTION} & \envcfg{0.10} & Seleciona 10\% do conjunto candidato para compor o pool mestre de revisão. \\
+\envcfg{OPTIMIZATION_SAMPLING_MASTER_POOL_FRACTION} & \envcfg{0.10} & Seleciona 10\% do conjunto candidato para compor o \textit{pool} mestre de revisão. \\
 \envcfg{OPTIMIZATION_SAMPLING_OVERLAY_COLOR_B} & \envcfg{0} & Define o canal azul da máscara de sobreposição exportada para revisão. \\
 \envcfg{OPTIMIZATION_SAMPLING_OVERLAY_COLOR_G} & \envcfg{0} & Define o canal verde da máscara de sobreposição exportada para revisão. \\
 \envcfg{OPTIMIZATION_SAMPLING_OVERLAY_COLOR_R} & \envcfg{255} & Define o canal vermelho da máscara de sobreposição exportada para revisão. \\
@@ -112,7 +112,7 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{CROSSFOLD_ENTROPY_THUMBNAIL} & \envcfg{128} & Define o tamanho do \textit{thumbnail} usado no cálculo de entropia. \\
 \envcfg{CROSSFOLD_HDF5_COMPRESSION} & \envcfg{none} & Grava os artefatos HDF5 da divisão sem compressão. \\
 \envcfg{CROSSFOLD_COPY_BATCH_SIZE} & \envcfg{1024} & Define o número de linhas copiadas por lote ao construir os sidecars da divisão. \\
-\envcfg{CROSSFOLD_SAVE_ENTROPY_CACHE_CSV} & \envcfg{True} & Exporta os arquivos CSV de cache e mediana de entropia. \\
+\envcfg{CROSSFOLD_SAVE_ENTROPY_CACHE_CSV} & \envcfg{True} & Exporta os arquivos CSV de \textit{cache} e mediana de entropia. \\
 \envcfg{CROSSFOLD_CALC_CHECKSUMS} & \envcfg{False} & Mantém desativado o cálculo de SHA256 por linha nos manifestos baseados em caminhos. \\
 
 \multicolumn{3}{l}{\textbf{Fase 5: verificações científicas de sanidade}}\\
@@ -127,17 +127,17 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{SANITY_FAIL_ON_POSITIVE_NOT_CANCER_MASK} & \envcfg{True} & Falha a execução quando uma amostra negativa contém pixels positivos na máscara. \\
 
 \multicolumn{3}{l}{\textbf{Fase 6: amostragem inteligente}}\\
-\envcfg{SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES} & \envcfg{0} & Desativa o limite explícito de cache local reutilizável de shards de pacientes. \\
-\envcfg{SMART_SAMPLER_STAGE_INPUT_LOCALLY} & \envcfg{False} & Mantém desativado o staging local dos shards de entrada. \\
-\envcfg{SMART_SAMPLER_STAGE_OUTPUTS_LOCALLY} & \envcfg{False} & Mantém desativado o staging local dos artefatos de saída. \\
+\envcfg{SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES} & \envcfg{0} & Desativa o limite explícito de \textit{cache} local reutilizável de \textit{shards} de pacientes. \\
+\envcfg{SMART_SAMPLER_STAGE_INPUT_LOCALLY} & \envcfg{False} & Mantém desativado o \textit{staging} local dos \textit{shards} de entrada. \\
+\envcfg{SMART_SAMPLER_STAGE_OUTPUTS_LOCALLY} & \envcfg{False} & Mantém desativado o \textit{staging} local dos artefatos de saída. \\
 \envcfg{SMART_SAMPLER_CLEAN_LOCAL_WORK_DIR} & \envcfg{True} & Remove o diretório de trabalho local após a execução. \\
 \envcfg{SMART_SAMPLER_WRITE_SIDECARS} & \envcfg{True} & Exporta diagnósticos CSV/JSON da seleção. \\
 \envcfg{SMART_SAMPLER_OVERWRITE_OUTPUT} & \envcfg{False} & Impede sobrescrita automática de resultados anteriores da Fase 6. \\
 \envcfg{SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED} & \envcfg{True} & Constrói armazenamento compacto apenas com linhas de treino selecionadas. \\
 \envcfg{SMART_SAMPLER_COMPACT_HDF5_COMPRESSION} & \envcfg{none} & Grava o armazenamento compacto sem compressão HDF5. \\
-\envcfg{SMART_SAMPLER_MODEL_NAME} & \envcfg{owkin/phikon-v2} & Define o extrator de embeddings usado na seleção inteligente. \\
-\envcfg{SMART_SAMPLER_BATCH_SIZE} & \envcfg{128} & Define o tamanho de lote para extração de embeddings. \\
-\envcfg{SMART_SAMPLER_DEVICE} & \envcfg{cuda} & Executa a extração de embeddings em GPU CUDA. \\
+\envcfg{SMART_SAMPLER_MODEL_NAME} & \envcfg{owkin/phikon-v2} & Define o extrator de \textit{embeddings} usado na seleção inteligente. \\
+\envcfg{SMART_SAMPLER_BATCH_SIZE} & \envcfg{128} & Define o tamanho de lote para extração de \textit{embeddings}. \\
+\envcfg{SMART_SAMPLER_DEVICE} & \envcfg{cuda} & Executa a extração de \textit{embeddings} em GPU CUDA. \\
 \envcfg{SMART_SAMPLER_NUM_WORKERS} & \envcfg{2} & Define o paralelismo do carregamento de dados da Fase 6. \\
 \envcfg{SMART_SAMPLER_SEED} & \envcfg{42} & Fixa a semente da amostragem inteligente. \\
 \envcfg{SMART_SAMPLER_N_START} & \envcfg{512} & Define o tamanho inicial da busca adaptativa de estabilidade. \\
@@ -150,11 +150,11 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{SMART_SAMPLER_K_MIN} & \envcfg{20} & Define o número mínimo de grupos avaliados na seleção por paciente. \\
 \envcfg{SMART_SAMPLER_K_MAX} & \envcfg{80} & Define o número máximo de grupos avaliados na seleção por paciente. \\
 \envcfg{SMART_SAMPLER_ADAPTIVE_KEEP_ENABLED} & \envcfg{True} & Ativa a retenção adaptativa por paciente. \\
-\envcfg{SMART_SAMPLER_KEEP_MIN} & \envcfg{64} & Define o mínimo de patches mantidos por paciente quando a redução é aplicável. \\
-\envcfg{SMART_SAMPLER_KEEP_STEP} & \envcfg{64} & Define o incremento de patches testado na retenção adaptativa. \\
+\envcfg{SMART_SAMPLER_KEEP_MIN} & \envcfg{64} & Define o mínimo de \textit{patches} mantidos por paciente quando a redução é aplicável. \\
+\envcfg{SMART_SAMPLER_KEEP_STEP} & \envcfg{64} & Define o incremento de \textit{patches} testado na retenção adaptativa. \\
 \envcfg{SMART_SAMPLER_KEEP_IMPROVEMENT_THRESHOLD} & \envcfg{0.02} & Define o ganho mínimo exigido para continuar aumentando a retenção. \\
 \envcfg{SMART_SAMPLER_KEEP_PATIENCE} & \envcfg{2} & Define a paciência da parada por platô na retenção adaptativa. \\
-\envcfg{SMART_SAMPLER_M_MAX} & \envcfg{2000} & Define o teto de patches redutíveis retidos por paciente. \\
+\envcfg{SMART_SAMPLER_M_MAX} & \envcfg{2000} & Define o teto de \textit{patches} redutíveis retidos por paciente. \\
 \envcfg{SMART_SAMPLER_PROTECT_POSITIVE_LABELS} & \envcfg{True} & Protege amostras com rótulo positivo contra remoção pela redução adaptativa. \\
 \envcfg{SMART_SAMPLER_PROTECT_MASK_POSITIVE} & \envcfg{True} & Protege amostras com pixels positivos na máscara contra remoção pela redução adaptativa. \\
 \envcfgbreak{SMART_SAMPLER_POSITIVE_MASK}{FRACTION_THRESHOLD} & \envcfg{0.0} & Considera qualquer fração positiva de máscara como critério de proteção. \\
@@ -162,7 +162,7 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT} & \envcfg{4096} & Define o limite de candidatos enviado ao caminho GIST quando ele é ativado. \\
 
 \multicolumn{3}{l}{\textbf{Fase 7: triagem de taxa de aprendizado}}\\
-\envcfg{LR_FINDER_STAGE_INPUT_LOCALLY} & \envcfg{False} & Mantém desativado o staging local dos shards usados na triagem. \\
+\envcfg{LR_FINDER_STAGE_INPUT_LOCALLY} & \envcfg{False} & Mantém desativado o \textit{staging} local dos \textit{shards} usados na triagem. \\
 \envcfg{LR_FINDER_USE_COMPACT_TRAIN_SELECTED} & \envcfg{True} & Usa o armazenamento compacto de treino selecionado quando a amostragem inteligente está ativa. \\
 \envcfg{LR_FINDER_OVERWRITE_OUTPUT} & \envcfg{True} & Permite recriar os artefatos da triagem de taxa de aprendizado. \\
 \envcfg{LR_FINDER_SMART_SAMPLING} & \envcfg{True} & Restringe a triagem às linhas selecionadas pela Fase 6. \\
@@ -213,8 +213,8 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{TRAINING_SENSITIVITY_TARGET} & \envcfg{0.95} & Define a sensibilidade-alvo usada para análise de métricas. \\
 
 \multicolumn{3}{l}{\textbf{Fase 9: otimização do \textit{ensemble}}}\\
-\envcfg{ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES} & \envcfg{0} & Mantém sem limite explícito o cache local de shards na otimização do \textit{ensemble}. \\
-\envcfg{ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES} & \envcfg{8589934592} & Limita a 8 GiB a memória usada para cache de predições na otimização. \\
+\envcfg{ENSEMBLE_OPT_LOCAL_SHARD_CACHE_MAX_BYTES} & \envcfg{0} & Mantém sem limite explícito o \textit{cache} local de \textit{shards} na otimização do \textit{ensemble}. \\
+\envcfg{ENSEMBLE_OPT_OPTIMIZATION_CACHE_MAX_BYTES} & \envcfg{8589934592} & Limita a 8 GiB a memória usada para \textit{cache} de predições na otimização. \\
 \envcfg{ENSEMBLE_OPT_STAGE_INPUT_LOCALLY} & \envcfg{True} & Copia dados de entrada para armazenamento local durante a otimização. \\
 \envcfg{ENSEMBLE_OPT_OVERWRITE_OUTPUT} & \envcfg{True} & Permite recriar os artefatos da otimização do \textit{ensemble}. \\
 \envcfg{ENSEMBLE_OPT_SEED} & \envcfg{24} & Fixa a semente da otimização do \textit{ensemble}. \\
@@ -243,8 +243,8 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{ENSEMBLE_OPT_MIN_MACRO_PRECISION} & \envcfg{0.50} & Exige precisão macro mínima de 0,50. \\
 \envcfg{ENSEMBLE_OPT_MIN_MACRO_TPR} & \envcfg{0.80} & Exige taxa macro mínima de verdadeiros positivos de 0,80. \\
 \envcfgbreak{ENSEMBLE_OPT_MIN_COMPONENT}{AREA_PX_CANDIDATES} & \begin{tabular}[t]{@{}l@{}}\envcfg{0,64,128,256,512,1024}\\\envcfg{2048,4096,8192,16384,32768}\end{tabular} & Define os candidatos, em pixels, para área mínima de componente positivo. \\
-\envcfgbreakthree{ENSEMBLE_OPT_MIN_COMPONENT}{AREA_FRACTION_PATCH}{CANDIDATES} & \envcfg{0,0.001,0.0025,0.005,0.01} & Define candidatos relativos à fração da área do patch para filtrar componentes positivos. \\
-\envcfgbreak{ENSEMBLE_OPT_MIN_PATIENT}{POSITIVE_PATCHES_CANDIDATES} & \envcfg{1,2,3,5,8,13,21} & Define os candidatos para número mínimo de patches positivos por paciente. \\
+\envcfgbreakthree{ENSEMBLE_OPT_MIN_COMPONENT}{AREA_FRACTION_PATCH}{CANDIDATES} & \envcfg{0,0.001,0.0025,0.005,0.01} & Define candidatos relativos à fração da área do \textit{patch} para filtrar componentes positivos. \\
+\envcfgbreak{ENSEMBLE_OPT_MIN_PATIENT}{POSITIVE_PATCHES_CANDIDATES} & \envcfg{1,2,3,5,8,13,21} & Define os candidatos para número mínimo de \textit{patches} positivos por paciente. \\
 \envcfgbreakthree{ENSEMBLE_OPT_MIN_PATIENT}{POSITIVE_AREA_FRACTION}{CANDIDATES} & \begin{tabular}[t]{@{}l@{}}\envcfg{0,1e-6,5e-6,1e-5,5e-5,1e-4}\\\envcfg{5e-4,1e-3,0.0025,0.005,0.0075}\\\envcfg{0.01,0.015,0.02,0.03,0.04,0.05}\end{tabular} & Define os candidatos para fração mínima de área positiva por paciente. \\
 \envcfg{ENSEMBLE_OPT_NUM_TRIALS_SEMANTIC} & \envcfg{50} & Define o número de tentativas Optuna para o fluxo semântico. \\
 \envcfg{ENSEMBLE_OPT_NUM_TRIALS_SPATIAL} & \envcfg{50} & Define o número de tentativas Optuna para o fluxo espacial. \\
@@ -259,14 +259,14 @@ Variável & Valor utilizado & Descrição curta \\
 \envcfg{ENSEMBLE_INFER_VIS_NUM_SAMPLES} & \envcfg{10} & Define quantas amostras seriam exportadas caso a visualização fosse ativada. \\
 \envcfg{ENSEMBLE_INFER_EXPORT_CSV} & \envcfg{True} & Exporta os resultados tabulares da inferência em CSV. \\
 \envcfg{ENSEMBLE_INFER_EXPORT_LATEX} & \envcfg{True} & Exporta tabelas LaTeX de métricas e resultados. \\
-\envcfgbreak{ENSEMBLE_INFER_PATCH_POSITIVE}{AREA_FRACTION_THRESHOLD} & \envcfg{0.0} & Classifica um patch como positivo quando qualquer área positiva permanece após a filtragem de componentes. \\
+\envcfgbreak{ENSEMBLE_INFER_PATCH_POSITIVE}{AREA_FRACTION_THRESHOLD} & \envcfg{0.0} & Classifica um \textit{patch} como positivo quando qualquer área positiva permanece após a filtragem de componentes. \\
 
 \end{longtable}
 }
 \end{landscape}
 
 As configurações apresentadas neste apêndice não substituem os manifestos,
-checkpoints, receitas de \textit{ensemble}, relatórios de triagem e métricas
+\textit{checkpoints}, receitas de \textit{ensemble}, relatórios de triagem e métricas
 exportadas durante a execução. Elas registram, em forma auditável, os valores que
 condicionam a reprodução do fluxo experimental e permitem relacionar os
 resultados reportados às escolhas metodológicas efetivamente utilizadas.

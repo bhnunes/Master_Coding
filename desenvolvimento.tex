@@ -62,10 +62,10 @@ Fase & Finalidade & Saída principal \\
 2 & Ingestão e extração de \textit{patches} & HDF5 por lâmina, máscaras e manifesto mestre \\
 3.1--3.3 & Amostragem para revisão e limpeza por grafos & Pastas de revisão, parâmetros e decisões aceitas/rejeitadas \\
 4 & Particionamento e artefatos de normalização & Divisão por paciente e estados de normalização em tempo de execução \\
-5 & Verificação científica de sanidade & Relatório fail-closed sobre contratos e dados \\
+5 & Verificação científica de sanidade & Relatório \textit{fail-closed} sobre contratos e dados \\
 6 & Amostragem inteligente do treino & Estado de seleção e armazenamento compacto opcional \\
 7 & Busca de taxa de aprendizado e pesos de perda & Relatórios de triagem e histórico de perda \\
-8 & Treinamento supervisionado & Checkpoints e metadados de modelos individuais \\
+8 & Treinamento supervisionado & \textit{Checkpoints} e metadados de modelos individuais \\
 9 & Otimização de \textit{ensemble} em validação & Receita congelada de \textit{ensemble} \\
 10 & Inferência final em teste & Métricas, figuras e relatórios finais \\
 \bottomrule
@@ -90,9 +90,9 @@ aparentemente válido.
 
 A execução experimental foi distribuída entre um ambiente local, voltado às etapas intensivas em leitura e escrita de arquivos, e um ambiente em nuvem, reservado às etapas dependentes de \Sigla{\textit{ Graphics Processing Unit}}{GPU}. Essa divisão foi adotada para adequar o fluxo às restrições de armazenamento, memória e processamento disponíveis, evitando que tarefas com perfis computacionais distintos competissem pelos mesmos recursos.
 
-O ambiente local consistiu em um \textit{notebook} com processador Intel Core i5, 16 Gigabytes de RAM, \Sigla{\textit{Solid State Disc}}{SSD} interno de 500 Gigabytes e \Sigla{\textit{Hard Disk}}{HD} interno de 500 GB, complementado por um HD externo de 1 Terabyte e um SSD externo de 1 Terabyte. As WSIs completas foram mantidas no HD externo, priorizando capacidade de armazenamento. Em contrapartida, a geração e persistência dos \textit{patches} foram direcionadas ao SSD externo, cuja maior taxa de leitura e escrita reduziu gargalos de entrada e saída durante o processamento. Os códigos Python e os arquivos temporários de execução foram mantidos no SSD interno, enquanto o HD interno foi reservado principalmente para tarefas auxiliares de \textit{download} e upload de arquivos para o ambiente em nuvem.
+O ambiente local consistiu em um \textit{notebook} com processador Intel Core i5, 16 Gigabytes de RAM, \Sigla{\textit{Solid State Disc}}{SSD} interno de 500 Gigabytes e \Sigla{\textit{Hard Disk}}{HD} interno de 500 GB, complementado por um HD externo de 1 Terabyte e um SSD externo de 1 Terabyte. As WSIs completas foram mantidas no HD externo, priorizando capacidade de armazenamento. Em contrapartida, a geração e persistência dos \textit{patches} foram direcionadas ao SSD externo, cuja maior taxa de leitura e escrita reduziu gargalos de entrada e saída durante o processamento. Os códigos Python e os arquivos temporários de execução foram mantidos no SSD interno, enquanto o HD interno foi reservado principalmente para tarefas auxiliares de \textit{download} e \textit{upload} de arquivos para o ambiente em nuvem.
 
-Nesse ambiente local foram realizadas as etapas de geração de \textit{patches}, limpeza da base de câncer, criação dos conjuntos de treino, validação e teste, além das verificações de sanidade. Essas tarefas demandaram manipulação intensiva de arquivos e controle de consistência, mas não exigiram aceleração por GPU. Por essa razão, puderam ser executadas localmente, desde que a organização dos discos evitasse concentrar leitura das WSIs, escrita dos \textit{patches} e execução dos scripts no mesmo dispositivo físico.
+Nesse ambiente local foram realizadas as etapas de geração de \textit{patches}, limpeza da base de câncer, criação dos conjuntos de treino, validação e teste, além das verificações de sanidade. Essas tarefas demandaram manipulação intensiva de arquivos e controle de consistência, mas não exigiram aceleração por GPU. Por essa razão, puderam ser executadas localmente, desde que a organização dos discos evitasse concentrar leitura das WSIs, escrita dos \textit{patches} e execução dos \textit{scripts} no mesmo dispositivo físico.
 
 As etapas dependentes de aceleração por GPU foram executadas no Google Colab Pro. Esse conjunto incluiu análise de artefatos, amostragem inteligente do conjunto de treino, investigação de taxa de aprendizado, treinamento supervisionado, otimização do \textit{ensemble} e inferência final. Nas execuções reportadas, foi utilizada uma GPU NVIDIA L4, com 22{,}5 Gigabytes de memória de vídeo disponível no ambiente, aproximadamente 53 Gigabytes de memória \Sigla{\textit{Random Access Memory}}{RAM} do sistema e 235{,}7 Gigabytes de armazenamento temporário. A GPU NVIDIA L4 é uma aceleradora voltada a cargas de trabalho de IA, vídeo e computação visual, com 24 Gigabytes de memória em sua especificação nominal; a diferença entre o valor nominal e o valor visível decorre da forma como o ambiente virtualizado disponibiliza a memória ao usuário \cite{nvidia_l4}. 
 
@@ -116,13 +116,13 @@ pressupor que todas as lâminas estejam imediatamente disponíveis em formato
 intermediário, o fluxo foi organizado para processar arquivos de entrada de
 forma controlada, registrar o estado de execução e preservar a proveniência das
 operações realizadas. Essa decisão é relevante em patologia digital porque as
-lâminas podem apresentar dimensões de gigapixel, formatos distintos,
+lâminas podem apresentar dimensões de \textit{gigapixel}, formatos distintos,
 anotações heterogêneas e artefatos visuais capazes de afetar diretamente a
 qualidade dos \textit{patches} extraídos.
 
 A fonte de dados utilizada nesta dissertação é o DIAGSET, uma base pública de imagens histopatológicas voltada à detecção de câncer de próstata \cite{koziarski2024diagset}. A escolha dessa base permitiu avaliar o fluxo proposto em um domínio histopatológico específico, com formulação binária de câncer versus não câncer e com dados compatíveis com as etapas de ingestão, curadoria, particionamento por paciente, treinamento e inferência final.
 
-Embora o método tenha sido concebido de forma modular, sua validação experimental nesta dissertação permanece restrita ao DIAGSET. Assim, todos os resultados, métricas e interpretações quantitativas apresentados ao longo do trabalho devem ser entendidos dentro desse escopo. A existência de suporte computacional para outras bases ou domínios (por exemplo, na etapa de extração de patches) não implica validação empírica fora do conjunto efetivamente processado. Desse modo, a composição dos conjuntos de treino, validação e teste, bem como as conclusões experimentais, estão vinculadas exclusivamente aos manifestos, configurações e artefatos produzidos para o DIAGSET.
+Embora o método tenha sido concebido de forma modular, sua validação experimental nesta dissertação permanece restrita ao DIAGSET. Assim, todos os resultados, métricas e interpretações quantitativas apresentados ao longo do trabalho devem ser entendidos dentro desse escopo. A existência de suporte computacional para outras bases ou domínios (por exemplo, na etapa de extração de \textit{patches}) não implica validação empírica fora do conjunto efetivamente processado. Desse modo, a composição dos conjuntos de treino, validação e teste, bem como as conclusões experimentais, estão vinculadas exclusivamente aos manifestos, configurações e artefatos produzidos para o DIAGSET.
 
 A Fase 1 realiza o controle inicial de qualidade por detecção de tecido e
 artefatos, em alinhamento com abordagens recentes de controle de qualidade em
@@ -152,7 +152,7 @@ grade de janelas definida por tamanho e passo. Antes de ler os pixels da WSI, a
 janela é comparada com as geometrias anotadas, reduzindo operações de Entrada/Saída em
 regiões sem relação com a tarefa supervisionada. Esse padrão é coerente com
 fluxos de processamento de WSIs baseados em tecido, extração de \textit{patches}
-e controle de escala gigapixel
+e controle de escala \textit{gigapixel}
 \cite{munozaguirre2020pyhist,khened2021generalized,bandi2019resolution}.
 
 A ingestão foi projetada para converter diferentes combinações de lâminas e
@@ -431,7 +431,7 @@ registros aceitos em uma representação canônica para as etapas seguintes. Ess
 etapa de empacotamento não redimensiona imagens nem modifica máscaras; sua
 função é preservar os \textit{arrays} produzidos na extração e reunir os metadados
 necessários à rastreabilidade. Assim, saídas originalmente organizadas por
-lâmina são convertidas em uma estrutura downstream com identidade por linha,
+lâmina são convertidas em uma estrutura \textit{downstream} com identidade por linha,
 na qual cada amostra mantém associação explícita com imagem, máscara, rótulo,
 identificador de paciente, arquivo de origem e parâmetros de processamento.
 
@@ -512,7 +512,7 @@ técnicas em vez de padrões morfológicos relevantes
 normalização separadamente da divisão experimental, o fluxo permite comparar
 diferentes métodos sob o mesmo particionamento por paciente.
 
-A normalização de cor é aplicada apenas durante as etapas que consomem os dados já particionados, sem gerar previamente versões normalizadas de todos os pixels. Essa decisão reduz a redundância de armazenamento e preserva a flexibilidade experimental, pois permite comparar diferentes estratégias de normalização sem refazer a divisão dos pacientes. No caso do método Vahadane, adotou-se a aproximação baseada em uma matriz de referência fixa, principalmente por seu menor custo computacional e por sua adequação às restrições de hardware do experimento. A estimativa individual da normalização para cada \textit{patch} também permanece disponível no fluxo, mas não foi utilizada como configuração principal por demandar maior processamento.
+A normalização de cor é aplicada apenas durante as etapas que consomem os dados já particionados, sem gerar previamente versões normalizadas de todos os pixels. Essa decisão reduz a redundância de armazenamento e preserva a flexibilidade experimental, pois permite comparar diferentes estratégias de normalização sem refazer a divisão dos pacientes. No caso do método Vahadane, adotou-se a aproximação baseada em uma matriz de referência fixa, principalmente por seu menor custo computacional e por sua adequação às restrições de \textit{hardware} do experimento. A estimativa individual da normalização para cada \textit{patch} também permanece disponível no fluxo, mas não foi utilizada como configuração principal por demandar maior processamento.
 
 \section{Verificações de sanidade}\label{sec:met_sanidade}
 
@@ -762,7 +762,7 @@ O seletor avalia candidatos segundo:
 \end{equation}
 
 Esse objetivo busca reter exemplos que cubram variações visuais frequentes do
-paciente sem colapsar em regiões quase idênticas do espaço de embeddings. Na
+paciente sem colapsar em regiões quase idênticas do espaço de \textit{embeddings}. Na
 prática, o caminho \textit{GIST-style} combina cobertura e diversidade, aproximando a
 seleção de um problema de representação eficiente do treino.
 
@@ -903,7 +903,7 @@ aprovados. A seleção buscou atender a dois critérios principais. O primeiro f
 a variabilidade arquitetural, de modo a incluir modelos com mecanismos distintos
 de extração e agregação de características, favorecendo a composição de um
 \textit{ensemble} menos redundante. O segundo foi a compatibilidade com
-codificadores pré-treinados em ImageNet para entradas de $224 \times 224$
+codificadores pré-treinados em \textit{ImageNet} para entradas de $224 \times 224$
 pixels, dimensão adotada para os \textit{patches} neste trabalho. Essa
 compatibilidade favorece uma integração mais direta entre pré-treinamento,
 pré-processamento e formato de entrada utilizado no experimento. Ainda assim, o
@@ -918,7 +918,7 @@ Hiera
 fan2020manet,xie2021segformer,ranftl2021dpt,xiao2018upernet,liu2021swin,
 zhang2022resnest,tan2019efficientnet,hu2018senet,he2016resnet,
 dosovitskiy2021vit,ryali2023hiera}. Quando pesos pré-treinados ou normalização
-associada ao ImageNet são utilizados, essa decisão é registrada como parte da
+associada ao \textit{ImageNet} são utilizados, essa decisão é registrada como parte da
 configuração experimental, pois influencia a inicialização e o pré-processamento
 do modelo \cite{russakovsky2015imagenet}.
 
@@ -926,7 +926,7 @@ Durante o treinamento, as amostras podem receber aumento de dados online. Essa
 etapa aplica transformações geométricas (espelho horizontal, espelho vertical, rotação), perturbações cromáticas (Variação HED, Variação HSV), desfoque ou descarte de regiões, conforme a configuração da
 execução. O objetivo é expor o modelo a variações plausíveis do domínio
 histopatológico sem modificar o significado da máscara de referência. A
-biblioteca Albumentations é utilizada para compor essas transformações de forma
+biblioteca \textit{Albumentations} é utilizada para compor essas transformações de forma
 consistente entre imagem e máscara \cite{buslaev2020albumentations}. Essa
 estratégia é compatível com a literatura de aumento de dados em visão
 computacional e histopatologia, que busca reduzir dependência de variações
@@ -1026,7 +1026,7 @@ execuções.
 
 Para avaliação durante o treinamento, os logits produzidos pela rede são
 convertidos em probabilidades. Em formulações multiclasse, essa conversão é feita
-pela função softmax:
+pela função \textit{softmax}:
 
 \begin{equation}\label{eq:softmax}
     p_c = \mathrm{softmax}(\mathbf{z})_c =
@@ -1044,10 +1044,10 @@ um limiar transforma probabilidades em máscara binária:
     \end{cases}
 \end{equation}
 
-A seleção de checkpoints utiliza a AUPRC de validação como métrica principal.
+A seleção de \textit{checkpoints} utiliza a AUPRC de validação como métrica principal.
 Essa escolha tem duas motivações. Primeiro, a AUPRC é calculada a partir da curva
 precisão--revocação, integrando o desempenho do modelo ao longo de diferentes
-limiares de decisão; por isso, a seleção do checkpoint não fica condicionada a
+limiares de decisão; por isso, a seleção do \textit{checkpoint} não fica condicionada a
 um único limiar fixado previamente. Segundo, em cenários desbalanceados, nos
 quais a classe positiva pode representar uma pequena parcela dos pixels
 avaliados, a curva precisão--revocação tende a ser mais informativa do que a
@@ -1089,14 +1089,14 @@ limiar $t$, o MCC é dado por:
     \label{eq:mcc_validacao}
 \end{equation}
 
-A validação também orienta a parada antecipada e a seleção do melhor checkpoint,
+A validação também orienta a parada antecipada e a seleção do melhor \textit{checkpoint},
 evitando que o treinamento prossiga indefinidamente após sinais de perda de
-generalização \cite{prechelt1998automatic}. Os checkpoints preservados carregam
+generalização \cite{prechelt1998automatic}. Os \textit{checkpoints} preservados carregam
 metadados de arquitetura, hiperparâmetros, normalização, amostragem, uso de
 \texttt{TRAIN\_SELECTED}, OHEM, perda sensível a artefatos, otimizador e
-assinaturas de proveniência. AdamW e AdamW Schedule-Free são opções de
+assinaturas de proveniência. AdamW e AdamW \textit{Schedule-Free} são opções de
 otimização registradas pela fase
-\cite{loshchilov2019decoupled,defazio2024road}. Assim, cada checkpoint não é
+\cite{loshchilov2019decoupled,defazio2024road}. Assim, cada \textit{checkpoint} não é
 apenas um conjunto de pesos treinados, mas um artefato rastreável que conecta a
 configuração executada, os dados consumidos e as métricas observadas durante o
 treinamento.
@@ -1182,7 +1182,7 @@ transforma o registro de modelos treinados em uma biblioteca controlada de
 candidatos, sobre a qual a receita de \textit{ensemble} é construída.
 
 A validação é lida a partir do manifesto mestre, preservando a linhagem dos
-pacientes, dos shards HDF5 canônicos e da normalização em tempo de execução.
+pacientes, dos \textit{shards} HDF5 canônicos e da normalização em tempo de execução.
 Internamente, os pacientes de validação são separados em subconjuntos disjuntos
 de otimização, calibração e \textit{holdout} interno. Essa
 subdivisão é feita em nível de paciente e procura preservar casos positivos e
@@ -1235,13 +1235,13 @@ P_{\mathrm{spa}}(x) &=&
 \end{equation}
 
 Os pesos $w_m^{\mathrm{sem}}$ e $w_m^{\mathrm{spa}}$ são normalizados,
-não negativos e definidos separadamente em cada fluxo. Para tornar a otimização viável em validações volumosas, a Fase 9 materializa probabilidades em caches no disco rígido. Esse cache armazena predições
+não negativos e definidos separadamente em cada fluxo. Para tornar a otimização viável em validações volumosas, a Fase 9 materializa probabilidades em \textit{caches} no disco rígido. Esse \textit{cache} armazena predições
 com TTA, máscaras de referência e identificadores de paciente para a mesma
 divisão usada na otimização. As probabilidades são quantizadas em 16 bits e as
 máscaras em 8 bits, reduzindo consumo de RAM e disco. Durante o processo, a
-fase constrói primeiro o cache semântico, utiliza-o para definir a região de
+fase constrói primeiro o \textit{cache} semântico, utiliza-o para definir a região de
 interesse, descarta predições semânticas brutas quando deixam de ser necessárias
-e, em seguida, constrói o cache espacial. Esse mecanismo é operacional: ele
+e, em seguida, constrói o \textit{cache} espacial. Esse mecanismo é operacional: ele
 controla custo computacional e preserva proveniência, mas não constitui nova
 métrica nem nova etapa de seleção de modelos
 \cite{wilkinson2016fair,piccolo2016tools}.

@@ -162,7 +162,7 @@ Pacientes de treino & 236 \\
 Pacientes com redução & 215 \\
 Amostras positivas selecionadas & 37\,960 \\
 Amostras negativas selecionadas & 142\,421 \\
-Modelo de embeddings & \texttt{owkin/phikon-v2} \\
+Modelo de \textit{embeddings} & \texttt{owkin/phikon-v2} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -175,19 +175,19 @@ Após essa etapa, os conjuntos de treino, validação e teste foram definidos de
 \section{Treinamento e composição final do \textit{ensemble}}
 \label{sec:res_diagset_treinamento}
 
-Cada estratégia de normalização foi avaliada com as mesmas oito arquiteturas no treinamento final. Essa escolha permitiu comparar os métodos de normalização sob um protocolo controlado, sem alterar o conjunto de modelos considerados em cada cenário. As Tabelas \ref{tab:results_diagset-training-not_normalized} a \ref{tab:results_diagset-training-vahadane} apresentam os checkpoints selecionados com base no desempenho em validação, incluindo época, perda, AUPRC, AUROC e MCC.
+Cada estratégia de normalização foi avaliada com as mesmas oito arquiteturas no treinamento final. Essa escolha permitiu comparar os métodos de normalização sob um protocolo controlado, sem alterar o conjunto de modelos considerados em cada cenário. As Tabelas \ref{tab:results_diagset-training-not_normalized} a \ref{tab:results_diagset-training-vahadane} apresentam os \textit{checkpoints} selecionados com base no desempenho em validação, incluindo época, perda, AUPRC, AUROC e MCC.
 
-Esses resultados não devem ser interpretados como a avaliação final do método, mas como evidência do processo de seleção dos modelos que alimentaram a etapa posterior de combinação por \textit{ensemble}. Assim, as métricas de validação cumprem uma função metodológica: orientar a escolha dos checkpoints e documentar a consistência do treinamento em cada normalização. A comparação definitiva entre estratégias, por sua vez, é realizada apenas na inferência sobre o conjunto de teste.
+Esses resultados não devem ser interpretados como a avaliação final do método, mas como evidência do processo de seleção dos modelos que alimentaram a etapa posterior de combinação por \textit{ensemble}. Assim, as métricas de validação cumprem uma função metodológica: orientar a escolha dos \textit{checkpoints} e documentar a consistência do treinamento em cada normalização. A comparação definitiva entre estratégias, por sua vez, é realizada apenas na inferência sobre o conjunto de teste.
 
 \begin{table}[!htb]
 \centering
-\caption{Resultados de validação dos checkpoints sem normalização de cor em DIAGSET.}
+\caption{Resultados de validação dos \textit{checkpoints} sem normalização de cor em DIAGSET.}
 \label{tab:results_diagset-training-not_normalized}
 \scriptsize
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lp{4.8cm}rrrrr}
 \toprule
-Arquitetura & Encoder & Epoca & Perda & AUPRC & AUROC & MCC \\
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
 \midrule
 DEEPLABV3PLUS & \path{tu-resnest101e} & 9 & 0.1228 & 0.8980 & 0.9753 & 0.7899 \\
 DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 1 & 0.1287 & 0.8398 & 0.9587 & 0.7706 \\
@@ -205,13 +205,13 @@ UPERNET & \path{tu-hiera_large_224} & 1 & 0.1348 & 0.7989 & 0.9570 & 0.7777 \\
 
 \begin{table}[!htb]
 \centering
-\caption{Resultados de validação dos checkpoints com normalização Reinhard em DIAGSET.}
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Reinhard em DIAGSET.}
 \label{tab:results_diagset-training-reinhard}
 \scriptsize
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lp{4.8cm}rrrrr}
 \toprule
-Arquitetura & Encoder & Epoca & Perda & AUPRC & AUROC & MCC \\
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
 \midrule
 DEEPLABV3PLUS & \path{tu-resnest101e} & 4 & \textcolor{darkgreen}{\textbf{0.1030}} & 0.8621 & 0.9581 & 0.7555 \\
 DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 2 & 0.1113 & 0.8338 & 0.9593 & 0.7602 \\
@@ -228,13 +228,13 @@ UPERNET & \path{tu-hiera_large_224} & 2 & 0.2099 & 0.8740 & 0.9688 & 0.7680 \\
 
 \begin{table}[!htb]
 \centering
-\caption{Resultados de validação dos checkpoints com normalização Ruifrok em DIAGSET.}
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Ruifrok em DIAGSET.}
 \label{tab:results_diagset-training-ruifrok}
 \scriptsize
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lp{4.8cm}rrrrr}
 \toprule
-Arquitetura & Encoder & Epoca & Perda & AUPRC & AUROC & MCC \\
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
 \midrule
 DEEPLABV3PLUS & \path{tu-resnest101e} & 3 & 0.1189 & 0.8802 & 0.9696 & 0.7776 \\
 DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 2 & 0.1194 & 0.8269 & 0.9604 & 0.7672 \\
@@ -252,13 +252,13 @@ UPERNET & \path{tu-hiera_large_224} & 2 & \textcolor{darkgreen}{\textbf{0.1103}}
 
 \begin{table}[!htb]
 \centering
-\caption{Resultados de validação dos checkpoints com normalização Macenko em DIAGSET.}
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Macenko em DIAGSET.}
 \label{tab:results_diagset-training-macenko}
 \scriptsize
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lp{4.8cm}rrrrr}
 \toprule
-Arquitetura & Encoder & Epoca & Perda & AUPRC & AUROC & MCC \\
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
 \midrule
 DEEPLABV3PLUS & \path{tu-resnest101e} & 11 & 0.1146 & \textcolor{darkgreen}{\textbf{0.8795}} & \textcolor{darkgreen}{\textbf{0.9675}} & \textcolor{darkgreen}{\textbf{0.7758}} \\
 DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 8 & 0.1175 & 0.8346 & 0.9610 & 0.7641 \\
@@ -275,13 +275,13 @@ UPERNET & \path{tu-hiera_large_224} & 6 & \textcolor{darkgreen}{\textbf{0.1079}}
 
 \begin{table}[!htb]
 \centering
-\caption{Resultados de validação dos checkpoints com normalização Vahadane em DIAGSET.}
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Vahadane em DIAGSET.}
 \label{tab:results_diagset-training-vahadane}
 \scriptsize
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lp{4.8cm}rrrrr}
 \toprule
-Arquitetura & Encoder & Epoca & Perda & AUPRC & AUROC & MCC \\
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
 \midrule
 DEEPLABV3PLUS & \path{tu-resnest101e} & 2 & \textcolor{darkgreen}{\textbf{0.1229}} & 0.8171 & 0.9486 & 0.6936 \\
 DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 1 & 0.1318 & 0.8214 & 0.9541 & 0.7251 \\
@@ -493,7 +493,7 @@ A \Tabela{tab:results_diagset-ensemble-summary} resume a composição final do \
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lrrrrrrrr}
 \toprule
-Normalização & Modelos & Semânticos & Espaciais & ROI & Limiar & Área mín. & Fração pac. & Patches pac. \\
+Normalização & Modelos & Semânticos & Espaciais & ROI & Limiar & Área mín. & Fração pac. & \textit{Patches} pac. \\
 \midrule
 Sem Normalização & 8 & 4 & 4 & 0.2719 & 0.5900 & 32768 & 0.0500 & 1 \\
 Reinhard & 8 & 4 & 4 & 0.2808 & 0.5000 & 32768 & 0.0500 & 1 \\
@@ -1023,7 +1023,7 @@ resultado é encorajador como referência de escala, mas não demonstra
 equivalência com a leitura humana: o patologista avalia a lâmina ou o caso com
 contexto morfológico amplo, enquanto o experimento desta dissertação mede
 segmentação, reconhecimento local de \textit{patches} e agregações por paciente
-derivadas do pipeline.
+derivadas do \textit{pipeline}.
 
 \section{Discussão dos resultados}\label{sec:res_diagset_discussao}
 
@@ -1041,8 +1041,8 @@ A interpretação da normalização Vahadane requer uma ressalva específica. Ne
 
 Do ponto de vista metodológico, o principal resultado do experimento não é a identificação de uma normalização universalmente superior, mas a demonstração de que o fluxo proposto permite comparar estratégias sob condições controladas e rastreáveis. A curadoria foi aplicada antes da divisão por paciente, reduzindo o risco de que amostras positivas contaminadas por fundo ou por imprecisões de anotação influenciassem qualquer partição. Em seguida, a amostragem inteligente foi restrita ao conjunto de treino, com o objetivo de reduzir redundância e expor o modelo a imagens mais variadas, sem modificar validação ou teste. Essa separação preservou a independência das etapas de seleção e avaliação, reduzindo o risco de que a compactação do treino contaminasse a interpretação dos resultados finais.
 
-A etapa de treinamento também manteve um contrato experimental consistente. Todas as normalizações foram avaliadas com as mesmas oito arquiteturas, sob a mesma semente aleatória, com otimizador, decaimento de peso e função de perda mantidos constantes. As diferenças introduzidas por arquitetura, normalização e taxa de aprendizado puderam, assim, ser analisadas sem alterar deliberadamente a configuração de reprodutibilidade. Além disso, os checkpoints foram selecionados em validação e apenas depois combinados na inferência final por \textit{ensemble}, preservando a separação entre seleção de modelos e avaliação no teste.
+A etapa de treinamento também manteve um contrato experimental consistente. Todas as normalizações foram avaliadas com as mesmas oito arquiteturas, sob a mesma semente aleatória, com otimizador, decaimento de peso e função de perda mantidos constantes. As diferenças introduzidas por arquitetura, normalização e taxa de aprendizado puderam, assim, ser analisadas sem alterar deliberadamente a configuração de reprodutibilidade. Além disso, os \textit{checkpoints} foram selecionados em validação e apenas depois combinados na inferência final por \textit{ensemble}, preservando a separação entre seleção de modelos e avaliação no teste.
 
 Em conjunto, os achados de DIAGSET sustentam três conclusões principais. Primeiro, a normalização de cor modifica o comportamento do método, mas seu benefício depende da métrica adotada. Segundo, a avaliação por paciente revela limitações que podem ser atenuadas ou mascaradas por métricas agregadas em nível de pixel. Terceiro, o controle de falsos positivos em pacientes negativos permanece como o principal ponto de melhoria do fluxo atual. Portanto, os resultados validam a utilidade do protocolo para comparação reprodutível entre estratégias, mas não justificam afirmar superioridade geral de uma normalização para outros conjuntos de dados, outros domínios histopatológicos ou uso clínico externo.
 
-Por fim, a contribuição mais consistente desta etapa está na rastreabilidade do processo experimental. As decisões de ingestão, curadoria, particionamento por paciente, amostragem do treino, seleção de checkpoints, composição do \textit{ensemble}, definição dos limiares e cálculo das métricas finais permaneceram conectadas ao fluxo metodológico descrito anteriormente. Essa organização permite interpretar os resultados não apenas como valores isolados de desempenho, mas como consequência de uma cadeia experimental auditável.
+Por fim, a contribuição mais consistente desta etapa está na rastreabilidade do processo experimental. As decisões de ingestão, curadoria, particionamento por paciente, amostragem do treino, seleção de \textit{checkpoints}, composição do \textit{ensemble}, definição dos limiares e cálculo das métricas finais permaneceram conectadas ao fluxo metodológico descrito anteriormente. Essa organização permite interpretar os resultados não apenas como valores isolados de desempenho, mas como consequência de uma cadeia experimental auditável.
