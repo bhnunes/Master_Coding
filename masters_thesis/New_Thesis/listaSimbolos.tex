@@ -585,5 +585,31 @@ cada equação.\\
   parâmetros de filtragem por componentes conectados e critérios mínimos de
   evidência em nível de paciente.\\
 
+
+    $\hat{z}_i$, $\tau_{\mathrm{patch}}$ &
+  Rótulo binário previsto para o \textit{patch} $i$ e limiar mínimo de área
+  positiva usado para converter a máscara prevista em decisão em nível de
+  \textit{patch}.\\
+
+  $a(\hat{Y}_i)$ &
+  Fração da área do \textit{patch} $i$ classificada como positiva após
+  limiarização e filtragem da máscara prevista.\\
+
+  $\mathrm{AvAcc}$ &
+  Acurácia balanceada, calculada como a média entre sensibilidade e
+  especificidade em nível de \textit{patch}.\\
+
+  $\mathrm{Score}_{\mathrm{cal}}$ &
+  Escore de calibração usado na Fase 9 para escolher a configuração candidata,
+  combinando Dice em pacientes positivos e ausência de falsos positivos em
+  pacientes negativos.\\
+
+  $\mathcal{P}_+^{cal}$, $\mathcal{P}_-^{cal}$ &
+  Conjuntos de pacientes positivos e negativos no subconjunto de calibração.\\
+
+  $FP_j$ &
+  Número de falsos positivos acumulados no paciente negativo $j$ após a aplicação
+  da configuração candidata de inferência.\\
+
 \end{longtable}
 \endgroup

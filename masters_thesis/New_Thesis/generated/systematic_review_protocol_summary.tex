@@ -21,14 +21,26 @@ RQ4 & Quais estratégias são usadas para agregação de múltiplos modelos em h
 \caption{Critérios de elegibilidade aplicados na revisão.}
 \label{tab:revisao_sistematica_criterios}
 \scriptsize
-\begin{tabular}{>{\raggedright\arraybackslash}p{6.35cm}>{\raggedright\arraybackslash}p{6.35cm}}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{>{\raggedright\arraybackslash}p{6.35cm}
+                >{\raggedright\arraybackslash}p{6.35cm}}
 \toprule
 Inclusão & Exclusão \\
 \midrule
-Aplicação de aprendizagem profunda a histopatologia de lâmina inteira. & Estudos puramente clínicos ou centrados em doenças não neoplásicas. \\
-Foco explícito em detecção, segmentação ou classificação de câncer, neoplasias ou tumores. & Uso exclusivo de bases de amostras pré-extraídas que eliminam os desafios de processamento de WSI. \\
-Descrição de pelo menos um componente operacional do fluxo: controle de qualidade em lâmina, normalização de coloração, particionamento por paciente, serialização de dados ou agregação de modelos. & Particionamento por amostra ou por lâmina, ou normalização global antes da separação treino-validação-teste. \\
-Disponibilização de repositório público com a implementação do fluxo. & Trabalhos focados apenas em arquitetura neural, sem documentação do fluxo de extração, proveniência ou orquestração; ausência de código público verificável. \\
+\begin{enumerate}[leftmargin=*, nosep, label=\arabic*.]
+    \item Aplicação de aprendizagem profunda a WSI.
+    \item Foco explícito em detecção, segmentação ou classificação de câncer, neoplasias ou tumores.
+    \item Descrição de pelo menos um componente operacional do fluxo: controle de qualidade em lâmina, normalização de coloração, particionamento por paciente, serialização de dados ou agregação de modelos.
+    \item Disponibilização de repositório público com a implementação do fluxo.
+\end{enumerate}
+&
+\begin{enumerate}[leftmargin=*, nosep, label=\arabic*.]
+    \item Estudos puramente clínicos ou centrados em doenças não neoplásicas.
+    \item Uso exclusivo de bases de amostras pré-extraídas que eliminam os desafios de processamento de WSI.
+    \item Particionamento por amostra ou por lâmina, ou normalização global antes da separação treino-validação-teste.
+    \item Trabalhos focados apenas em arquitetura neural, sem documentação do fluxo de extração, proveniência ou orquestração; ausência de código público verificável.
+\end{enumerate}
+\\
 \bottomrule
 \end{tabular}
 \normalsize
