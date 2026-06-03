@@ -1,0 +1,1524 @@
+\chapter{Metodologia}\label{chp:desenvolvimento} Este capítulo descreve a metodologia desenvolvida para organizar, processar e avaliar dados histopatológicos digitais em uma tarefa de detecção e segmentação de câncer. A apresentação acompanha a sequência lógica do fluxo de trabalho, desde a ingestão das lâminas e anotações até a inferência final, mas prioriza as decisões científicas que sustentam cada etapa: definição dos contratos de dados, controle de qualidade, extração de amostras, particionamento por paciente, normalização, treinamento supervisionado, otimização de \textit{ensemble} e avaliação em teste. 
+
+Neste trabalho, a metodologia não se limita à descrição operacional de uma sequência de scripts. Ela constitui parte central da contribuição científica da dissertação, pois define como lâminas histopatológicas digitais são transformadas em dados auditáveis para treinamento, validação e teste de modelos de segmentação. Por essa razão, este capítulo apresenta o método em termos de decisões, critérios e contratos experimentais: quais entradas são aceitas, quais artefatos são produzidos, quais verificações controlam a qualidade dos dados, como se evita vazamento entre pacientes e como as escolhas de treinamento, otimização e inferência são separadas da avaliação final. Os resultados da aplicação desse método ao DIAGSET, incluindo estatísticas, métricas e análises quantitativas, são apresentados no Capítulo~\ref{chp:resultados}. 
+
+A ênfase recai sobre a rastreabilidade entre dados de origem, configurações, artefatos intermediários e resultados experimentais. Assim, cada etapa é descrita não apenas como uma operação computacional, mas como uma decisão metodológica que influencia a validade, a reprodutibilidade e a interpretação dos resultados. Quando uma escolha decorre de uma necessidade prática do fluxo implementado, ela é apresentada como decisão metodológica desta dissertação, e não como reprodução literal de um método publicado.
+
+\section{Visão geral do método}\label{sec:met_visao_geral}
+
+O fluxo metodológico desta dissertação foi estruturado como uma sequência de etapas com entradas, saídas e artefatos intermediários explicitamente definidos.
+A organização do processo busca tornar rastreável o caminho entre as WSIs originais, suas anotações, os \textit{patches} extraídos, os modelos treinados e as máscaras finais produzidas pela inferência. Essa rastreabilidade é essencial
+para que resultados de segmentação não sejam interpretados apenas como saídas de um modelo, mas como produto de uma cadeia experimental passível de inspeção, repetição e crítica.
+
+A \Figura{fig:fluxo-atual} apresenta a visão geral do fluxo. O processo inicia-se com a aquisição dos \textit{patches}, etapa que envolve análise de artefatos,
+registro em banco de dados, extração das regiões de interesse e persistência dos dados em formato \Sigla{\textit{Hierarchical Data Format version 5}}{HDF5}. Em seguida, o pré-processamento organiza a limpeza da base,
+a geração das divisões de treino, validação e teste, as verificações de sanidade, a amostragem inteligente do treino e a investigação da taxa de aprendizado. A etapa de treinamento ajusta os modelos de segmentação, enquanto o processamento \textit{on-the-fly} aplica transformações de aumento de dados, normalização, mineração de exemplos difíceis e amostragem ponderada.
+Por fim, a etapa de otimização define a formação do \textit{ensemble}, e a etapa de inferência aplica a receita final para produzir os resultados.
+
+Essa organização em etapas separadas tem função metodológica. Ela reduz a dependência de decisões manuais implícitas, explicita os pontos nos quais metadados são produzidos ou consumidos e evita que escolhas realizadas em uma fase sejam propagadas silenciosamente para fases posteriores. Assim, uma alteração na origem dos dados, nos filtros de qualidade, no particionamento, na normalização, na amostragem ou na receita de \textit{ensemble} deve ser
+registrada como parte da linhagem experimental, e não absorvida como detalhe invisível da implementação.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=\textwidth]{figuras/mestrado_v3.png}
+    \caption[Visão geral do fluxo metodológico]{
+    Visão geral do fluxo metodológico proposto para segmentação binária de
+    imagens histopatológicas. O processo é organizado em seis blocos principais:
+    aquisição de \textit{patches}, pré-processamento, treinamento,
+    processamento \textit{on-the-fly}, otimização e inferência. As setas indicam
+    a dependência entre etapas, enquanto os pontos de metadados representam
+    registros necessários para rastrear decisões, configurações e artefatos ao
+    longo do fluxo experimental.
+    }
+    \label{fig:fluxo-atual}
+\end{figure}
+
+A \Tabela{tab:estagios_pipeline} resume os estágios metodológicos implementados e suas principais saídas. Embora represente o mesmo processo descrito na \Figura{fig:fluxo-atual}, a tabela opera em outro nível de detalhe: a figura apresenta a organização global do método, enquanto a tabela explicita as fases locais de implementação, cada uma correspondente a um script \textit{Python} independente. Assim, as duas representações são complementares, e não necessariamente coincidentes em sua divisão interna. 
+
+Ao longo deste capítulo, o termo ``Fase'', seguido de numeração, refere-se sempre à divisão operacional apresentada na \Tabela{tab:estagios_pipeline}. Dessa forma, expressões como ``Fase 1'', ``Fase 2'' ou ``Fase 3'' indicam os estágios locais de implementação listados na tabela, e não os blocos visuais da \Figura{fig:fluxo-atual}. A figura deve ser interpretada como uma visão global do método, enquanto a tabela define a nomenclatura usada para descrever as etapas implementadas no restante da metodologia.
+
+\begin{table}[!htb]
+\centering
+\caption{Resumo dos estágios metodológicos implementados em nível de fase. Cada
+fase corresponde a um \textit{script} \textit{Python} isolado, com entradas, saídas e
+artefatos próprios.}
+\label{tab:estagios_pipeline}
+\begin{tabular}{p{1.6cm}p{5.0cm}p{6.8cm}}
+\toprule
+Fase & Finalidade & Saída principal \\
+\midrule
+1 & Detecção de artefatos em WSI &  \Sigla{\textit{Geo-Javascript Object Notation}}{GeoJSON} de artefatos e estado em Banco de Dados Relacional (SQLite) \\
+2 & Ingestão e extração de \textit{patches} & HDF5 por lâmina, máscaras e manifesto mestre \\
+3.1--3.3 & Amostragem para revisão e limpeza por grafos & Pastas de revisão, parâmetros e decisões aceitas/rejeitadas \\
+4 & Particionamento e artefatos de normalização & Divisão por paciente e estados de normalização em tempo de execução \\
+5 & Verificação científica de sanidade & Relatório \textit{fail-closed} sobre contratos e dados \\
+6 & Amostragem inteligente do treino & Estado de seleção e armazenamento compacto opcional \\
+7 & Busca de taxa de aprendizado e pesos de perda & Relatórios de triagem e histórico de perda \\
+8 & Treinamento supervisionado & \textit{Checkpoints} e metadados de modelos individuais \\
+9 & Otimização de \textit{ensemble} em validação & Receita congelada de \textit{ensemble} \\
+10 & Inferência final em teste & Métricas, figuras e relatórios finais \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A ênfase em metadados, configurações, artefatos intermediários e registros de
+execução está alinhada aos princípios FAIR, segundo os quais dados e metadados
+devem ser localizáveis, acessíveis, interoperáveis e reutilizáveis
+\cite{wilkinson2016fair}. Também se aproxima de recomendações recentes para
+fluxos computacionais reprodutíveis, nas quais o próprio fluxo é tratado como
+um objeto científico que deve ser descrito, executado e reutilizado de forma
+controlada \cite{piccolo2016tools}. Desse modo, o manifesto mestre, os arquivos
+de configuração, as assinaturas de conteúdo e os metadados dos modelos funcionam
+como contratos entre fases. Uma inconsistência de fonte, divisão, normalização,
+amostragem ou receita de inferência tende, portanto, a ser detectada como
+incompatibilidade experimental, em vez de se propagar como resultado
+aparentemente válido.
+
+
+\section{Ambiente computacional}\label{sec:met_ambiente_computacional}
+
+A execução experimental foi distribuída entre um ambiente local, voltado às etapas intensivas em leitura e escrita de arquivos, e um ambiente em nuvem, reservado às etapas dependentes de \Sigla{\textit{ Graphics Processing Unit}}{GPU}. Essa divisão foi adotada para adequar o fluxo às restrições de armazenamento, memória e processamento disponíveis, evitando que tarefas com perfis computacionais distintos competissem pelos mesmos recursos.
+
+O ambiente local consistiu em um \textit{notebook} com processador Intel Core i5, 16 Gigabytes de RAM, \Sigla{\textit{Solid State Disc}}{SSD} interno de 500 Gigabytes e \Sigla{\textit{Hard Disk}}{HD} interno de 500 GB, complementado por um HD externo de 1 Terabyte e um SSD externo de 1 Terabyte. As WSIs completas foram mantidas no HD externo, priorizando capacidade de armazenamento. Em contrapartida, a geração e persistência dos \textit{patches} foram direcionadas ao SSD externo, cuja maior taxa de leitura e escrita reduziu gargalos de entrada e saída durante o processamento. Os códigos Python e os arquivos temporários de execução foram mantidos no SSD interno, enquanto o HD interno foi reservado principalmente para tarefas auxiliares de \textit{download} e \textit{upload} de arquivos para o ambiente em nuvem.
+
+Nesse ambiente local foram realizadas as etapas de geração de \textit{patches}, limpeza da base de câncer, criação dos conjuntos de treino, validação e teste, além das verificações de sanidade. Essas tarefas demandaram manipulação intensiva de arquivos e controle de consistência, mas não exigiram aceleração por GPU. Por essa razão, puderam ser executadas localmente, desde que a organização dos discos evitasse concentrar leitura das WSIs, escrita dos \textit{patches} e execução dos \textit{scripts} no mesmo dispositivo físico.
+
+As etapas dependentes de aceleração por GPU foram executadas no Google Colab Pro. Esse conjunto incluiu análise de artefatos, amostragem inteligente do conjunto de treino, investigação de taxa de aprendizado, treinamento supervisionado, otimização do \textit{ensemble} e inferência final. Nas execuções reportadas, foi utilizada uma GPU NVIDIA L4, com 22{,}5 Gigabytes de memória de vídeo disponível no ambiente, aproximadamente 53 Gigabytes de memória \Sigla{\textit{Random Access Memory}}{RAM} do sistema e 235{,}7 Gigabytes de armazenamento temporário. A GPU NVIDIA L4 é uma aceleradora voltada a cargas de trabalho de IA, vídeo e computação visual, com 24 Gigabytes de memória em sua especificação nominal; a diferença entre o valor nominal e o valor visível decorre da forma como o ambiente virtualizado disponibiliza a memória ao usuário \cite{nvidia_l4}. 
+
+Sempre que possível, o processamento em nuvem foi distribuído em até três instâncias paralelas do Google Colab Pro, respeitando a disponibilidade do serviço e o custo computacional associado. Essa estratégia permitiu executar simultaneamente experimentos independentes, como treinamentos de arquiteturas distintas ou avaliações sob diferentes normalizações de cor.
+
+O ambiente executável também integra a metodologia, pois influencia diretamente
+a reprodução do experimento. As execuções utilizaram Python 3.12, dependências
+gerenciadas por \texttt{uv}, um gerenciador de ambiente e dependências para
+projetos Python, e variáveis de ambiente declaradas a partir de um arquivo de
+referência. Esses elementos documentam as condições sob as quais os dados foram
+processados, os modelos foram treinados e os resultados foram obtidos. As
+principais configurações metodológicas utilizadas no experimento são apresentadas
+no Apêndice \ref{ap:configs_reportar}.
+
+
+\section{Aquisição, ingestão e controle de qualidade}\label{sec:met_ingestao_qc}
+
+A primeira etapa metodológica trata a WSI como um objeto de dados volumoso,
+heterogêneo e sujeito a falhas de leitura, anotação e aquisição. Em vez de
+pressupor que todas as lâminas estejam imediatamente disponíveis em formato
+intermediário, o fluxo foi organizado para processar arquivos de entrada de
+forma controlada, registrar o estado de execução e preservar a proveniência das
+operações realizadas. Essa decisão é relevante em patologia digital porque as
+lâminas podem apresentar dimensões de \textit{gigapixel}, formatos distintos,
+anotações heterogêneas e artefatos visuais capazes de afetar diretamente a
+qualidade dos \textit{patches} extraídos.
+
+A fonte de dados desta dissertação é o DIAGSET, base pública de imagens histopatológicas voltada à detecção de câncer de próstata \cite{koziarski2024diagset}. Sua adoção permitiu avaliar o método proposto em um domínio histopatológico específico, com formulação binária de câncer versus não câncer e com dados compatíveis com as etapas de ingestão, curadoria, particionamento por paciente, treinamento supervisionado e inferência final. Embora o método tenha sido concebido de forma modular, a validação experimental realizada nesta dissertação restringe-se ao DIAGSET. Portanto, os resultados, métricas e interpretações quantitativas apresentados ao longo do trabalho devem ser compreendidos dentro desse escopo empírico. A existência de suporte computacional para outras bases ou domínios, por exemplo na etapa de extração de \textit{patches}, não constitui validação fora do conjunto efetivamente processado. Desse modo, a composição dos conjuntos de treino, validação e teste, bem como as conclusões experimentais, permanecem vinculadas exclusivamente aos manifestos, configurações e artefatos produzidos para o DIAGSET.
+
+A Fase 1 realiza o controle inicial de qualidade por detecção de tecido e
+artefatos, em alinhamento com abordagens recentes de controle de qualidade em
+WSIs, como o GrandQC \cite{weng2024grandqc}. No fluxo proposto, essa etapa não
+tem como finalidade descartar automaticamente todas as regiões artefatuais, mas
+registrar sua localização e cobertura para uso posterior no treinamento.
+
+Para evitar a extração permanente de todo o acervo para disco, cada lâmina
+suportada é processada temporariamente: o arquivo é disponibilizado para leitura,
+submetido à inferência de artefatos, convertido em polígonos GeoJSON e removido
+ao final do processamento. O estado da execução é registrado em banco de dados relacional (SQLite), o que
+permite retomar processamentos interrompidos sem duplicar saídas previamente
+geradas.
+
+A cobertura de artefatos estimada na Fase 1 é utilizada para ajustar a função de
+perda durante o treinamento, reduzindo a influência de amostras mais contaminadas
+no cálculo dos gradientes. Com isso, o modelo permanece exposto a exemplos
+compatíveis com condições reais de aquisição, mas regiões com dobras, bolhas,
+marcas de caneta, áreas fora de foco ou outros sinais técnicos passam a ter menor
+peso no aprendizado.
+
+A Fase 2 realiza a ingestão supervisionada. Nessa etapa, o fluxo localiza pares
+de lâmina e anotação, registra assinaturas dos arquivos de entrada, cria estados
+pendentes no banco de progresso e verifica se saídas pré-existentes permanecem
+compatíveis com as fontes atuais. Em seguida, o motor de extração percorre uma
+grade de janelas definida por tamanho e passo. Antes de ler os pixels da WSI, a
+janela é comparada com as geometrias anotadas, reduzindo operações de Entrada/Saída em
+regiões sem relação com a tarefa supervisionada. Esse padrão é coerente com
+fluxos de processamento de WSIs baseados em tecido, extração de \textit{patches}
+e controle de escala \textit{gigapixel}
+\cite{munozaguirre2020pyhist,khened2021generalized,bandi2019resolution}.
+
+A ingestão foi projetada para converter diferentes combinações de lâminas e
+anotações em uma representação binária comum. Para cada combinação,
+regras internas definem como cores, rótulos, polígonos e estruturas devem
+ser interpretados antes da geração dos \textit{patches}. Essa etapa é
+metodologicamente crítica, pois as categorias originais de cada base precisam
+ser convertidas de forma explícita para os rótulos de câncer e não câncer.
+
+No caso dos pares utilizados pelo DIAGSET, a regra de
+classe é definida pelo título da anotação. Anotações com
+título exatamente igual a \texttt{R1}, \texttt{R2}, \texttt{R3}, \texttt{R4} ou
+\texttt{R5} são interpretadas como câncer, pois correspondem aos graus 1 a 5 de
+\textit{Gleason} nas regiões demarcadas pelos patologistas. Anotações com título
+exatamente igual a \texttt{BG}, \texttt{T}, \texttt{N} ou \texttt{A} são
+interpretadas como não câncer, representando, respectivamente, fundo da lâmina,
+fundo tecidual, tecido normal ou saudável e artefato de aquisição \cite{koziarski2024diagset}. Títulos ausentes, diferentes desses valores ou polígonos malformados são ignorados.
+
+Após a interpretação das anotações, a atribuição do rótulo ao \textit{patch}
+depende de sua sobreposição com as regiões anotadas. A janela é mantida como câncer quando a área sobreposta a regiões positivas atinge o limiar
+mínimo definido e não há sobreposição com regiões não cancerosas. A
+classe não câncer é atribuída na condição inversa. Janelas com
+sobreposição insuficiente ou conflitante são descartadas. Esse
+critério é complementado por uma regra de integridade aplicada aos polígonos:
+regiões não cancerosas sobrepostas a áreas positivas são removidas, impedindo
+que a mesma área contribua para os dois rótulos.
+
+Além da consistência semântica, um \textit{patch} é aceito apenas quando contém
+tecido suficiente, estimado por método de Otsu e operações
+morfológicas, conforme discutido na \Secao{sec:preprocessamento_patologia}.
+Também deve obedecer a um contrato determinístico de nome, rótulo, coordenada e
+proveniência. A \Figura{fig:patch-mask} ilustra o produto elementar dessa etapa:
+um \textit{patch} histológico e sua máscara binária correspondente.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.55\textwidth]{figuras/image_plus_mask.png}
+    \caption[Exemplo de \textit{patch} e máscara]{Exemplo qualitativo de
+    pareamento entre \textit{patch} histológico e máscara binária. Imagem retirada da base de dados DIAGSET.}
+    \label{fig:patch-mask}
+\end{figure}
+
+As máscaras de câncer são persistidas como máscaras binárias, enquanto amostras
+não cancerosas recebem máscaras zeradas, preservando a mesma estrutura de dados
+para todas as classes. Cada elemento único no arquivo HDF5 é identificado pela imagem, máscara, classe, identificação de paciente e nome do arquivo. O uso de HDF5 é adequado ao armazenamento estruturado de
+matrizes grandes e metadados associados \cite{folk2011hdf5}. A estabilidade
+desse alinhamento constitui um contrato científico: se imagem, máscara, rótulo,
+identificador de paciente e nome de arquivo forem desalinhados, as fases de
+limpeza, treinamento e avaliação deixam de representar o problema supervisionado
+definido.
+
+A Fase 2 também trata anotações contraditórias como problema de integridade. Se
+regiões positivas e negativas se sobrepõem com área positiva, o alvo
+supervisionado torna-se ambíguo. Nesses casos, o fluxo remove os polígonos
+conflitantes durante a finalização das anotações, preservando regiões
+independentes da mesma lâmina quando possível. A literatura sobre rótulos
+ruidosos em segmentação médica motiva essa cautela geral \cite{yu2020noisy};
+contudo, a regra específica de resolução de conflitos é uma política local de
+integridade, definida para manter a coerência do contrato binário adotado.
+
+Por fim, o manifesto mestre é tratado como um contrato durável entre as fases,
+e não como um índice auxiliar. Assinaturas de entrada, linhagem de arquivos,
+estado de extração e referências às linhas HDF5 são persistidos para que etapas
+posteriores possam detectar incompatibilidades de forma explícita. Dessa forma,
+uma decisão tomada sobre dados antigos ou regenerados não deve ser aplicada
+silenciosamente a uma nova linhagem experimental. Esse desenho reforça a
+rastreabilidade do fluxo e está alinhado aos princípios FAIR para preservação de
+metadados e reutilização controlada de artefatos científicos
+\cite{wilkinson2016fair}.
+
+\section{Tratamento de ambiguidade e limpeza por grafos}
+\label{sec:met_limpeza_grafos}
+
+A qualidade das anotações supervisionadas é tão importante quanto a qualidade
+visual das lâminas. Após a extração inicial dos \textit{patches}, as
+Fases 3.1 a 3.3 tratam um problema específico observado em amostras cancerosas:
+a presença de regiões anotadas como positivas, mas visualmente contaminadas por
+fundo, vidro ou baixo conteúdo tecidual. Nesses casos, a máscara pode indicar
+câncer, mas parte relevante da região de interesse não contém tecido
+informativo. Se essas amostras forem usadas sem curadoria, o modelo pode
+aprender associações espúrias entre a classe positiva e padrões não biológicos.
+
+O tratamento adotado combina revisão humana, ajuste automático de parâmetros e
+aplicação reprodutível da regra consolidada. A Fase 3.1 seleciona um subconjunto
+de amostras cancerosas para revisão manual, preservando o pareamento entre
+imagem, máscara e proveniência. A Fase 3.2 utiliza as decisões revisadas para
+ajustar uma regra automática de contaminação por fundo. Por fim, a Fase 3.3
+aplica a regra ao conjunto canceroso completo, sem reescrever os arquivos HDF5
+gerados na etapa de ingestão. Assim, a decisão de curadoria é mantida como
+estado de manifesto, separada dos dados extraídos originalmente.
+
+A seleção para revisão humana é organizada a partir de grupos inferidos dos
+nomes das amostras, priorizando o identificador de paciente quando disponível. Após selecionar representantes por grupo, o número mínimo de itens a revisar é
+estimado pela fórmula de Cochran para proporções \cite{charan2013sample}:
+
+\begin{equation}
+    n_{\mathrm{req}} =
+    \left\lceil
+    \frac{z^2p(1-p)}{e^2}
+    \right\rceil ,
+    \label{eq:cochran}
+\end{equation}
+
+em que $z$ é o quantil normal associado ao nível de confiança, $p$ é a proporção
+assumida e $e$ é a margem de erro desejada. A implementação separa amostras de
+piloto e amostras do conjunto mestre de revisão em subconjuntos não sobrepostos,
+com semente fixa, para tornar a seleção reprodutível.
+
+A revisão humana atribui a cada amostra uma decisão APROVADO ou
+REJEITADO. Amostras aprovadas correspondem a regiões nas quais a máscara
+positiva é considerada compatível com conteúdo tecidual suficiente. Amostras
+rejeitadas correspondem a regiões em que a anotação positiva é considerada
+contaminada por fundo ou visualmente inadequada para treinamento supervisionado.
+A \Figura{fig:limpeza-grafos-exemplos} ilustra a lógica dessa etapa, com
+exemplos qualitativos de amostras aprovadas e rejeitadas.
+
+\begin{figure}[!htb]
+    \centering
+
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo aprovado 1.
+        \includegraphics[width=\linewidth]{figuras/Aprovado_1.png}
+        \caption{Aprovado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo aprovado 2.
+        \includegraphics[width=\linewidth]{figuras/Aprovado_2.png}
+        \caption{Aprovado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo aprovado 3.
+        \includegraphics[width=\linewidth]{figuras/Aprovado_3.png}
+        \caption{Aprovado}
+    \end{subfigure}
+
+    \vspace{0.8em}
+
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo rejeitado 1.
+        \includegraphics[width=\linewidth]{figuras/Rejeitado_1.png}
+        \caption{Rejeitado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo rejeitado 2.
+        \includegraphics[width=\linewidth]{figuras/Rejeitado_2.png}
+        \caption{Rejeitado}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.30\textwidth}
+        \centering
+        % Substituir pelo exemplo rejeitado 3.
+        \includegraphics[width=\linewidth]{figuras/Rejeitado_3.png}
+        \caption{Rejeitado}
+    \end{subfigure}
+
+    \caption[Exemplos de amostras aprovadas e rejeitadas na etapa de curadoria]{
+    Exemplos qualitativos das Fases 3.1--3.3, nas quais amostras cancerosas são
+    selecionadas para revisão e usadas para ajustar a limpeza automática por
+    grafos. A primeira linha mostra amostras aprovadas, com conteúdo tecidual
+    compatível com a tarefa supervisionada; a segunda mostra amostras rejeitadas,
+    com contaminação por fundo, vidro ou baixo conteúdo histológico. Imagens
+    retiradas da base de dados DIAGSET.
+    }
+    \label{fig:limpeza-grafos-exemplos}
+\end{figure}
+
+A Fase 3.2 utiliza as decisões \texttt{APROVADO} e \texttt{REJEITADO} para
+ajustar uma regra automática de contaminação. Primeiro, a região de interesse
+pode ser erodida para reduzir a influência de pixels de borda. Em seguida, a
+imagem é segmentada por uma formulação baseada em grafos, conforme o método de
+\textcite{felzenszwalb2004efficient}. Para cada segmento $S_j$, calcula-se a
+intensidade média:
+
+\begin{equation}
+    I_j =
+    \frac{1}{3}
+    \left(
+    \overline{R}_{S_j} + \overline{G}_{S_j} + \overline{B}_{S_j}
+    \right).
+    \label{eq:intensidade_segmento}
+\end{equation}
+
+Segmentos com $I_j>T_{\mathrm{bg}}$ são classificados como semelhantes a fundo,
+em que $T_{\mathrm{bg}}$ representa o limiar de intensidade adotado para essa
+decisão. A partir dessa classificação, calcula-se um escore de contaminação
+como a fração da região de interesse que pertence a segmentos classificados como
+fundo:
+
+\begin{equation}
+    c = \frac{\sum_x B(x)R(x)}{\sum_x R(x)} ,
+    \label{eq:contaminacao}
+\end{equation}
+
+em que $R(x)$ indica a região de interesse após a eventual erosão e $B(x)$
+indica se o segmento que contém o pixel $x$ foi classificado como fundo. O \textit{score}
+$c$ é interpretado como uma fração operacional de fundo dentro da anotação
+positiva. Ele não representa uma medida clínica, mas um critério de curadoria
+para reduzir a presença de amostras contaminadas no treinamento.
+
+Os parâmetros de segmentação e o limiar de rejeição são selecionados por
+otimização Bayesiana com validação agrupada
+\cite{snoek2012practical,roberts2017crossvalidation}. A otimização Bayesiana é
+uma estratégia de busca sequencial para problemas em que cada avaliação da função
+objetivo tem custo computacional relevante. Em vez de testar sistematicamente todas as combinações pré-definidas de
+parâmetros ou recorrer a sorteios independentes, o método utiliza o histórico das avaliações anteriores para construir um modelo probabilístico da
+função objetivo e propor novas configurações promissoras. Essa abordagem é
+adequada ao fluxo desta dissertação porque cada tentativa envolve aplicar uma
+regra de segmentação e rejeição sobre amostras revisadas, avaliar seu desempenho
+e preservar a validação agrupada para reduzir dependência entre exemplos
+correlacionados.
+
+Na implementação, a busca é realizada com Optuna, um arcabouço de otimização
+automática de hiperparâmetros projetado para aplicações de aprendizagem de
+máquina e espaços de busca definidos dinamicamente \cite{akiba2019optuna}. O
+amostrador \Sigla{\textit{Tree-structured Parzen Estimator}}{TPE} modela separadamente
+regiões do espaço associadas a melhores e piores resultados, usando essa
+informação para sugerir novas combinações de parâmetros
+\cite{bergstra2011algorithms}. Assim, a escolha dos parâmetros de limpeza por
+grafos combina eficiência computacional com rastreabilidade: cada tentativa é
+registrada, comparável e vinculada às decisões humanas usadas como referência.
+
+A classe REJEITADO é tratada como alvo de interesse, pois o objetivo é identificar
+amostras contaminadas sem rejeitar indevidamente amostras aprovadas. Para um
+limiar $\tau$, o F1 da classe rejeitada é definido como:
+
+\begin{equation}
+    F1_{\mathrm{rej}}(\tau) =
+    \frac{
+    2\,TP_{\mathrm{rej}}(\tau)
+    }{
+    2\,TP_{\mathrm{rej}}(\tau)
+    + FP_{\mathrm{rej}}(\tau)
+    + FN_{\mathrm{rej}}(\tau)
+    } .
+    \label{eq:f1_rejeitada}
+\end{equation}
+
+Esse critério resume o compromisso entre recuperar amostras contaminadas e
+preservar amostras visualmente adequadas \cite{sokolova2009performance}. A regra
+consolidada rejeita uma amostra quando seu escore de contaminação excede o
+limiar selecionado:
+
+\begin{equation}
+    \hat{y}=\mathrm{Rejeitada}
+    \quad \text{se, e somente se,} \quad
+    c>\tau .
+    \label{eq:regra_rejeicao}
+\end{equation}
+
+Valores exatamente iguais a $\tau$ permanecem aceitos pelo contrato atual. Essa
+condição é explicitada porque pequenas diferenças na desigualdade usada na regra
+podem alterar decisões em amostras localizadas na fronteira do critério.
+
+A Fase 3.3 aplica o parâmetro consolidado aos registros cancerosos aceitos pela
+extração inicial. Registros não cancerosos são preservados sem pontuação por
+grafo, pois o objetivo dessa etapa é reduzir contaminação em máscaras positivas.
+As decisões de curadoria são registradas no manifesto e em relatórios
+auxiliares, enquanto os HDF5 produzidos na Fase 2 permanecem como fonte canônica
+dos pixels. Essa separação entre dado extraído e decisão de curadoria preserva a
+linhagem original, o que facilita auditoria posterior.
+
+\section{Empacotamento, particionamento e normalização}
+\label{sec:met_particionamento_normalizacao}
+
+Após a extração inicial e a curadoria das amostras, o fluxo consolida os
+registros aceitos em uma representação canônica para as etapas seguintes. Essa
+etapa de empacotamento não redimensiona imagens nem modifica máscaras; sua
+função é preservar os \textit{arrays} produzidos na extração e reunir os metadados
+necessários à rastreabilidade. Assim, saídas originalmente organizadas por
+lâmina são convertidas em uma estrutura \textit{downstream} com identidade por linha,
+na qual cada amostra mantém associação explícita com imagem, máscara, rótulo,
+identificador de paciente, arquivo de origem e parâmetros de processamento.
+
+A Fase 4 define uma única divisão experimental em TREINO,
+VALIDAÇÃO e TESTE. A unidade de isolamento é o identificador
+de paciente persistido durante a ingestão. Todas as amostras associadas ao mesmo
+identificador permanecem no mesmo conjunto, reduzindo o risco de vazamento por
+correlação entre \textit{patches} derivados da mesma lâmina, caso ou paciente.
+Essa decisão é particularmente importante em patologia digital, pois diferentes
+recortes de uma mesma WSI podem compartilhar padrões visuais, técnicos e
+biológicos. A proteção é exata em relação ao identificador armazenado, mas
+depende da premissa operacional de que esse identificador represente
+adequadamente a unidade biológica de paciente
+\cite{roberts2017crossvalidation,dawood2026confounding}.
+
+Além de preservar o isolamento por paciente, a divisão busca manter distribuições
+compatíveis de classe entre treino, validação e teste. Para isso, a Fase 4 usa
+Optuna com amostragem TPE para explorar ordens de alocação de pacientes
+\cite{akiba2019optuna,bergstra2011algorithms}. Em termos abstratos, a função de
+custo penaliza desvios entre a razão de amostras cancerosas em cada conjunto e a
+razão global:
+
+\begin{equation}
+    J_{\mathrm{split}} =
+    \sum_{s \in \{\mathrm{TRAIN},\mathrm{VAL},\mathrm{TEST}\}}
+    \left| r_s - r_{\mathrm{global}} \right| ,
+    \label{eq:split_objective}
+\end{equation}
+
+em que $r_s$ é a fração de amostras cancerosas no conjunto $s$ e
+$r_{\mathrm{global}}$ é a fração correspondente no conjunto completo antes da
+divisãoe \textit{TRAIN}, \textit{VAL} e \textit{TEST} são os conjuntos de TREINO, VALIDAÇÃO e TESTE respectivamente . A equação resume a lógica científica da busca; a implementação também
+considera restrições de contagem e presença de classes, evitando divisões
+formalmente balanceadas, mas inviáveis para treinamento ou avaliação.
+
+A qualidade da divisão é registrada por estatísticas de verificação. Uma delas é
+o valor bruto de qui-quadrado, calculado a partir da diferença entre as contagens
+observadas em cada divisão e as contagens esperadas sob a razão global:
+
+\begin{equation}
+    \chi^2 =
+    \sum_i \frac{(O_i-E_i)^2}{E_i},
+    \label{eq:qui_quadrado}
+\end{equation}
+
+em que $O_i$ e $E_i$ representam, respectivamente, as contagens observadas e
+esperadas para a categoria $i$. Nesta dissertação, esse valor é usado como
+diagnóstico de equilíbrio entre conjuntos, e não como teste inferencial formal
+de hipótese. Essa distinção é importante porque a interpretação inferencial do
+qui-quadrado exige premissas estatísticas adicionais, enquanto, no fluxo
+proposto, sua função é descritiva e operacional \cite{pearson1900criterion}.
+
+A mesma fase seleciona os \textit{templates} usados para normalização de cor.
+Para evitar vazamento de informação, esses \textit{templates} são escolhidos
+exclusivamente a partir do conjunto de treino. Para cada candidato, calcula-se a
+entropia da imagem em escala de cinza:
+
+\begin{equation}
+    H(X)=-\sum_i p_i\log_2(p_i),
+    \label{eq:entropia}
+\end{equation}
+
+em que $p_i$ é a frequência relativa do nível de intensidade $i$. A entropia de
+Shannon quantifica a incerteza associada a uma distribuição de probabilidades e,
+nesse contexto, é usada como heurística para priorizar \textit{patches}
+visualmente informativos \cite{shannon1948mathematical}. Essa escolha não deve
+ser interpretada como evidência de que o \textit{template} seja biologicamente
+ótimo; ela apenas define um critério reprodutível para selecionar imagens de
+referência com maior diversidade de intensidades.
+
+Os estados de normalização de Reinhard, Ruifrok, Macenko e Vahadane são persistidos como artefatos de referência, contendo os parâmetros necessários para reaplicar cada transformação de forma controlada \cite{reinhard2001color,ruifrok2001quantification,macenko2009method,vahadane2016structure}. Essa etapa é motivada pela variabilidade de coloração, preparo histológico e aquisição em patologia digital, que pode induzir modelos a aprenderem diferenças técnicas em vez de padrões morfológicos relevantes \cite{tellez2019augmentation,duenweg2023scanner}. Ao registrar os estados de normalização separadamente da divisão experimental, o fluxo permite comparar diferentes métodos sob o mesmo particionamento por paciente, preservando a comparabilidade entre as estratégias avaliadas. A normalização de cor é aplicada apenas nas etapas que consomem os dados já particionados, sem materializar previamente versões normalizadas completas do conjunto de imagens. Essa decisão reduz a redundância de armazenamento e preserva a flexibilidade experimental, pois permite comparar diferentes estratégias de normalização sem refazer a divisão dos pacientes. No caso do método Vahadane, adotou-se a aproximação baseada em uma matriz de referência fixa, principalmente por seu menor custo computacional e por sua adequação às restrições de \textit{hardware} do experimento. A estimativa individual da normalização para cada \textit{patch} também permanece disponível no fluxo, mas não foi utilizada como configuração principal por demandar maior processamento.
+
+\section{Verificações de sanidade}\label{sec:met_sanidade}
+
+A Fase 5 atua como uma barreira de integridade científica entre a construção das
+divisões experimentais e as etapas que as consomem para treinamento, validação e
+teste. Seu objetivo não é corrigir automaticamente a base de dados, mas verificar
+se os artefatos produzidos até esse ponto são consistentes com os contratos
+definidos nas fases anteriores. Assim, problemas de proveniência, vazamento entre
+conjuntos, desalinhamento de linhas HDF5, inconsistência entre imagem e máscara
+ou contradições semânticas são identificados antes que possam se transformar em
+resultados quantitativos aparentemente válidos.
+
+Essa postura segue uma lógica \textit{fail-closed}: diante de uma violação
+crítica, a execução deve falhar explicitamente, em vez de prosseguir com dados de
+validade incerta.
+
+A entrada da Fase 5 é o diretório consolidado pela Fase 4. A rotina carrega os arquivos
+\texttt{manifest.csv}, \texttt{run\_config.json} e
+\texttt{split\_stats.csv}, separando o manifesto nas partições
+TREINO, VALIDAÇÃO e TESTE. O primeiro nível de
+verificação é global: são avaliados o esquema do manifesto, a presença de linhas
+duplicadas, a referência canônica aos HDF5s originais, a consistência entre nomes
+de arquivo e identificadores de paciente, as listas de pacientes registradas na
+configuração, as restrições da divisão, a paridade entre estatísticas
+recalculadas e estatísticas persistidas, as referências de origem e a linhagem
+das decisões de limpeza da Fase 3.3. Em conjunto, essas verificações testam se as
+tabelas que descrevem o experimento são compatíveis com os artefatos persistidos
+em disco.
+
+O segundo nível de verificação ocorre dentro de cada partição. Para
+TREINO, VALIDAÇÃO e TESTE, a Fase 5 confere a paridade
+entre manifesto e disco, a existência dos caminhos referenciados, os limites de
+linha nos HDF5s, a decodabilidade das imagens e máscaras, a compatibilidade de
+forma entre imagem e máscara, a presença dos valores binários esperados nas
+máscaras e a coerência entre rótulo e conteúdo anotado. Esses testes são
+necessários porque o HDF5 permite armazenar grandes matrizes e metadados de forma
+estruturada, mas não garante, por si só, que cada linha continue cientificamente
+alinhada ao rótulo, ao paciente, à máscara e ao arquivo de origem
+\cite{folk2011hdf5,yu2020noisy}.
+
+Além das falhas críticas, a Fase 5 torna visíveis propriedades estatísticas que
+não invalidam automaticamente o experimento, mas precisam ser conhecidas antes do
+treinamento. O relatório descreve a presença de classes por divisão, o balanço de
+classes em nível de \textit{patch}, o balanço em nível de paciente e a
+distribuição de \textit{patches} por paciente. Essas informações são relevantes
+porque a segmentação de câncer é naturalmente desbalanceada e porque pacientes
+com grande número de amostras podem influenciar desproporcionalmente a
+distribuição empírica do conjunto de treino \cite{he2009imbalanced}.
+
+A separação por paciente é tratada como contrato crítico. A presença de um mesmo
+\texttt{patient\_id} em mais de uma partição configura risco direto de vazamento
+entre treino, validação e teste, pois \textit{patches} provenientes da mesma
+unidade biológica podem compartilhar padrões visuais, técnicos e morfológicos.
+Por esse motivo, a Fase 5 rejeita divisões com interseção de pacientes entre
+partições, em conformidade com recomendações de validação agrupada e prevenção
+de dependência entre amostras em dados médicos
+\cite{roberts2017crossvalidation,dawood2026confounding}.
+
+O veredito final da fase é determinado pelo pior estado observado entre as
+checagens realizadas. Seja $\mathcal{C}$ o conjunto de verificações e
+$s(c)\in\{\mathrm{N/A},\mathrm{PASS},\mathrm{WARN},\mathrm{FAIL}\}$ o estado de
+cada verificação $c$. A decisão pode ser resumida por:
+
+\begin{equation}
+    V =
+    \begin{cases}
+        \texttt{CONJUNTOS\ APROVADOS}, & \text{se } \max_{c\in\mathcal{C}} s(c)
+        \neq \mathrm{FAIL},\\
+        \texttt{CONJUNTOS\ REJEITADOS}, & \text{caso contrário}.
+    \end{cases}
+    \label{eq:sanity_verdict}
+\end{equation}
+
+Falhas fatais ou
+qualquer veredito de rejeição encerram a execução com código de erro, impedindo
+que fases posteriores consumam divisões incompatíveis com os contratos
+experimentais.
+
+Por padrão, algumas verificações em disco são amostradas para reduzir custo
+computacional. Quando é necessário maior rigor operacional, as opções
+\texttt{SANITY\_FULL\_MASK\_SCAN} e \texttt{SANITY\_FULL\_SHAPE\_SCAN}
+permitem transformar as checagens de máscara e forma em varreduras completas.
+Essa distinção preserva a escalabilidade da etapa em execuções rotineiras, mas
+mantém disponível uma modalidade mais rigorosa para execuções finais,
+auditorias ou investigações de inconsistência.
+
+\section{Amostragem inteligente}\label{sec:met_amostragem_inteligente}
+
+A Fase 6 tem como objetivo reduzir a redundância do conjunto de treino sem
+alterar os conjuntos de validação e teste. Essa separação é metodologicamente
+importante: a amostragem inteligente atua apenas sobre exemplos disponíveis para
+treinamento, enquanto validação e teste permanecem preservados para seleção de
+modelos, calibração e avaliação final. A etapa consulta o
+manifesto mestre e constrói um índice por paciente usando
+somente linhas do conjunto de TREINO e
+aceitas na etapa de limpeza (fase 3). Dessa forma, a seleção permanece vinculada à
+linhagem produzida nas fases anteriores e não redefine a composição científica
+das partições experimentais.
+
+A saída principal dessa fase não é uma nova divisão dos dados, mas um estado de
+seleção do treino. Esse estado registra, para cada linha elegível, decisões cruciais da fase, além de artefatos
+laterais de resumo. Quando habilitado, também é produzido um armazenamento
+compacto com apenas as linhas selecionadas, destinado a tornar a leitura mais
+eficiente nas fases de busca de taxa de aprendizado e treinamento. Assim, a Fase
+6 reduz custo computacional e redundância visual, mas preserva a rastreabilidade
+entre exemplos selecionados, HDF5s canônicos e manifesto mestre.
+
+A motivação científica da Fase 6 é remover amostras visualmente redundantes sem
+descartar sinais positivos raros. Em histopatologia, muitos \textit{patches}
+extraídos do mesmo paciente podem conter conteúdo quase duplicado, especialmente
+quando janelas adjacentes capturam regiões morfologicamente semelhantes. Por
+outro lado, regiões positivas podem ser pouco frequentes e biologicamente
+relevantes. Para evitar que a redução do treino elimine exemplos potencialmente
+importantes, a implementação define inicialmente um conjunto protegido. Para cada
+paciente $p$, considere o conjunto de índices de treino aceitos
+$\mathcal{I}_p$, o rótulo binário $y_i$ e a fração de pixels positivos da máscara
+$\rho_i$. O conjunto protegido é definido por:
+
+\begin{equation}
+    \mathcal{P}_p =
+    \left\{
+        i \in \mathcal{I}_p :
+        y_i = 1
+        \ \lor\
+        \rho_i > \tau_{\mathrm{mask}}
+    \right\},
+    \label{eq:stage6_protected_set}
+\end{equation}
+
+em que $\tau_{\mathrm{mask}}$ é controlado pela variável de ambiente
+\texttt{SMART\_SAMPLER\_POSITIVE\_MASK\_FRACTION\_THRESHOLD}. Por padrão,
+amostras com rótulo positivo ou com qualquer fração positiva na máscara são
+mantidas antes da etapa de redução. A seleção de diversidade opera apenas sobre
+o subconjunto redutível
+$\mathcal{R}_p=\mathcal{I}_p\setminus\mathcal{P}_p$, o que preserva exemplos
+positivos em uma tarefa marcada por forte desbalanceamento de classes
+\cite{he2009imbalanced}.
+
+Para medir semelhança visual entre amostras redutíveis, cada \textit{patch} é
+convertido em um vetor de características. Na configuração padrão, essa etapa
+utiliza o modelo \texttt{owkin/phikon-v2}, um extrator visual baseado em
+\textit{Vision Transformer} treinado de forma auto-supervisionada em grande
+escala sobre imagens histopatológicas \cite{filiot2024phikonv2}. O uso desse
+modelo é metodologicamente adequado porque suas representações foram aprendidas
+a partir de padrões morfológicos do próprio domínio histológico, diferentemente
+de modelos genéricos pré-treinados apenas em imagens naturais. Assim, espera-se que seus \textit{embeddings}, definidos como representações vetoriais aprendidas que codificam atributos relevantes da imagem em um espaço numérico, sejam mais sensíveis a variações de arquitetura tecidual, textura, coloração e organização morfológica relevantes para patologia digital
+
+Formalmente, para uma imagem $x_i$, a etapa calcula um \textit{embedding}
+$z_i=f_\theta(x_i)\in\mathbb{R}^d$. Esses vetores não são interpretados como
+predições de câncer. Eles funcionam como descritores morfológicos usados para
+estimar proximidade visual entre regiões do mesmo paciente. O objetivo é
+identificar subconjuntos que preservem diversidade visual e, ao mesmo tempo,
+reduzam exemplos quase duplicados no treino.
+
+Antes de selecionar os exemplos finais, a Fase 6 estima quantos \textit{embeddings} são
+necessários para representar a heterogeneidade visual de cada paciente. A rotina
+começa com \texttt{SMART\_SAMPLER\_N\_START}; em cada passo, amostra dois
+subconjuntos de tamanho $n$, extrai \textit{embeddings}, aplica \textit{MiniBatchKMeans} e mede a
+concordância entre as duas partições. Se a estabilidade média atingir
+\texttt{SMART\_SAMPLER\_STABILITY\_THRESHOLD}, o tamanho atual é aceito. Caso
+contrário, $n$ cresce por \texttt{SMART\_SAMPLER\_GROWTH\_FACTOR} até alcançar
+\texttt{SMART\_SAMPLER\_N\_MAX}, o número total de linhas redutíveis ou
+\texttt{SMART\_SAMPLER\_MAX\_STEPS}. O uso de \textit{MiniBatchKMeans} torna a
+clusterização viável em subconjuntos maiores, reduzindo o custo em relação ao
+\textit{KMeans} tradicional \cite{sculley2010webscale}.
+
+A estabilidade é medida pelo índice de Rand ajustado
+(\Sigla{\textit{Adjusted Rand Index}}{ARI}), que compara duas partições $U$ e
+$V$ descontando a concordância esperada ao acaso \cite{hubert1985comparing}:
+
+\begin{equation}
+    \mathrm{ARI} =
+    \frac{
+    \sum_{ij}\binom{n_{ij}}{2}
+    -
+    \frac{\sum_i\binom{a_i}{2}\sum_j\binom{b_j}{2}}{\binom{n}{2}}
+    }{
+    \frac{1}{2}\left[
+    \sum_i\binom{a_i}{2}+\sum_j\binom{b_j}{2}
+    \right]
+    -
+    \frac{\sum_i\binom{a_i}{2}\sum_j\binom{b_j}{2}}{\binom{n}{2}}
+    } .
+    \label{eq:ari}
+\end{equation}
+
+Nesse contexto, $n_{ij}$ é o número de elementos atribuídos simultaneamente ao
+grupo $i$ em $U$ e ao grupo $j$ em $V$, enquanto $a_i$ e $b_j$ são os totais
+marginais. Um ARI elevado indica que subconjuntos independentes do mesmo
+paciente produzem estruturas de agrupamento semelhantes, sugerindo que a quantidade de \textit{embeddings} é suficiente para capturar a heterogeneidade visual
+local.
+
+No seletor padrão, o subconjunto redutível é agrupado e convertido em uma ordem
+balanceada por grupos. O número de grupos é definido por
+$k=\min(K_{\max},\max(K_{\min},\lfloor\sqrt{|\mathcal{R}_p|}\rfloor))$, com
+ajustes para pacientes com poucos exemplos. A quantidade alvo é limitada por
+\texttt{SMART\_SAMPLER\_M\_MAX} e cresce com a heterogeneidade estimada por
+$k$: quanto mais próximo $k$ está de $K_{\max}$, maior a fração do teto que pode
+ser retida. Quando \texttt{SMART\_SAMPLER\_ADAPTIVE\_KEEP\_ENABLED} está ativo,
+parte das linhas redutíveis é reservada como \textit{holdout} interno do
+paciente. A seleção então avalia a distância média de cada \textit{embedding} de
+avaliação ao exemplo selecionado mais próximo; novos exemplos são acrescentados
+até que a melhoria relativa dessa cobertura fique abaixo de
+\texttt{SMART\_SAMPLER\_KEEP\_IMPROVEMENT\_THRESHOLD} por
+\texttt{SMART\_SAMPLER\_KEEP\_PATIENCE} passos, ou até que o orçamento máximo
+seja atingido.
+
+Quando \texttt{SMART\_SAMPLER\_USE\_GIST=True}, o seletor balanceado é
+substituído por uma seleção \textbf{inspirada} em GIST
+(\Sigla{\textit{Greedy Independent Set Thresholding}}{GIST}). O GIST foi
+proposto para construir subconjuntos que combinem utilidade submodular e
+diversificação max-min \cite{fahrbach2025gist}. Na implementação desta
+dissertação, a utilidade submodular é representada por uma função de localização
+sobre os \textit{embeddings}:
+
+\begin{equation}
+    L(S) =
+    \sum_{i\in\mathcal{C}}
+    \max_{j\in S}
+    s_{ij},
+    \qquad
+    s_{ij}=1-\frac{\lVert z_i-z_j\rVert_2}{D},
+    \qquad
+    D=\max_{u,v\in\mathcal{C}}\lVert z_u-z_v\rVert_2 ,
+    \label{eq:gist_facility_location}
+\end{equation}
+
+em que $\mathcal{C}$ é o conjunto candidato e $S$ é o subconjunto selecionado.
+O termo $L(S)$ favorece cobertura: cada candidato contribui de acordo com a
+semelhança ao representante selecionado mais próximo. A diversificação é medida
+pela menor distância entre pares selecionados:
+
+\begin{equation}
+    \Delta(S)=
+    \begin{cases}
+        D, & |S|\le 1,\\
+        \min_{j\neq k,\ j,k\in S}\lVert z_j-z_k\rVert_2, & |S|>1.
+    \end{cases}
+    \label{eq:gist_diversity}
+\end{equation}
+
+O seletor avalia candidatos segundo:
+
+\begin{equation}
+    F(S)=L(S)+\Delta(S).
+    \label{eq:gist_objective}
+\end{equation}
+
+Esse objetivo busca reter exemplos que cubram variações visuais frequentes do
+paciente sem colapsar em regiões quase idênticas do espaço de \textit{embeddings}. Na
+prática, o caminho \textit{GIST-style} combina cobertura e diversidade, aproximando a
+seleção de um problema de representação eficiente do treino.
+
+A construção do subconjunto \textit{GIST-style} segue uma família de conjuntos candidatos
+por limiar. Primeiro, os candidatos são ordenados pela cobertura individual
+$\sum_i s_{ij}$. Em seguida, para diferentes limiares de distância
+$\tau_\ell=(1+\epsilon)^\ell\epsilon D/2$, com $\epsilon=0.1$, a rotina percorre
+essa ordem e inclui um candidato apenas se sua distância mínima aos já
+selecionados for ao menos $\tau_\ell$. Também são avaliados o conjunto guloso
+com limiar zero e o par diametral. O subconjunto final é aquele que maximiza
+$F(S)$ entre os conjuntos gerados por esses limiares, respeitando o orçamento de
+seleção.
+
+O termo \textit{GIST-style} é usado deliberadamente, e não como afirmação de reprodução
+integral do método original. A implementação recupera a intuição de GIST ao
+combinar limiares de conjunto independente, localização de facilidades e
+diversificação; porém, em conjuntos grandes, ela primeiro limita
+$|\mathcal{C}|$ por \texttt{SMART\_SAMPLER\_GIST\_CANDIDATE\_POOL\_LIMIT}. Essa
+limitação é realizada por \textit{MiniBatchKMeans}: a rotina define marcos por
+agrupamento, aloca cotas por cluster, seleciona pontos próximos ao centróide,
+pontos residuais distantes e uma fração aleatória. Como o universo de busca
+deixa de ser o conjunto redutível completo, as garantias teóricas associadas ao
+método publicado não devem ser reivindicadas para o modo de grandes conjuntos.
+
+Ao final, a Fase 6 grava \texttt{train\_filtered\_selection.csv},
+\texttt{patient\_filter\_stats.csv}, \texttt{filter\_run\_config.json} e
+\texttt{filter\_summary.json}. Em seguida, registra a execução no manifesto
+mestre e atualiza atomicamente as decisões. Quando o armazenamento compacto
+\texttt{TRAIN\_SELECTED} está habilitado, a etapa cria HDF5s contendo somente as
+linhas selecionadas do treino. Esse artefato reduz operações de Entrada/Saída em ambientes com restrição de
+disco, mas não altera validação ou teste, que permanecem vinculados aos HDF5s
+canônicos da Fase 2.
+
+\section{Triagem de taxa de aprendizado}\label{sec:met_lr_finder}
+
+A Fase 7 é uma etapa de triagem experimental, e não uma etapa de avaliação
+final. Seu objetivo é identificar configurações plausíveis para o treinamento
+supervisionado, restringindo a busca às combinações previamente aprovadas de
+arquitetura, codificador, função de perda e parâmetros de otimização. Os
+resultados obtidos nessa fase orientam a escolha de candidatos para a Fase 8,
+mas não devem ser interpretados como desempenho final dos modelos.
+
+A triagem combina dois procedimentos complementares. O primeiro é o teste de
+faixa de taxa de aprendizado, no qual a taxa é aumentada progressivamente
+durante uma execução curta para observar a resposta da função de perda. Essa
+estratégia é inspirada no \textit{learning rate range test}, proposto como forma
+prática de estimar limites razoáveis para a taxa de aprendizado antes do
+treinamento completo \cite{smith2017cyclical}. O segundo procedimento é a
+amostragem dos pesos da função de perda por \textit{Latin Hypercube Sampling}
+\cite{mckay1979comparison}. Essa escolha permite explorar combinações de pesos
+de forma mais distribuída do que uma amostragem aleatória simples, mantendo baixo
+custo computacional, o que é adequado para uma etapa de triagem.
+
+No teste de faixa, a taxa de aprendizado cresce de forma exponencial entre um
+valor inicial $\eta_0$ e um valor máximo $\eta_{\max}$. Para $T$ iterações, a
+taxa usada na iteração $t$ pode ser escrita como:
+
+\begin{equation}
+    \eta_t =
+    \eta_0
+    \left(
+    \frac{\eta_{\max}}{\eta_0}
+    \right)^{t/(T-1)} .
+    \label{eq:lr_exponencial}
+\end{equation}
+
+Durante essa varredura, a perda é registrada e suavizada ao longo da curva. Cada
+configuração é avaliada em três simulações independentes, conduzidas com
+diferentes sementes de aleatoriedade. Essa repetição busca reduzir a influência
+de flutuações ocasionais do processo de treinamento, evitando que uma taxa de
+aprendizado seja considerada adequada apenas por produzir uma curva favorável em
+uma única execução. O ranqueamento considera a mediana do menor valor de perda
+suavizada entre as repetições, após descartar regiões iniciais ou finais. Essa
+escolha reduz a sensibilidade a oscilações pontuais e evita selecionar taxas
+associadas apenas a variações instáveis da curva.
+
+Além da taxa de aprendizado, a Fase 7 explora pesos candidatos para a função de
+perda híbrida. Como essa função combina termos com papéis distintos, a escolha
+dos pesos influencia o equilíbrio entre penalização pixel a pixel e sobreposição
+espacial da máscara. Em vez de testar combinações arbitrárias ou recorrer a
+sorteios puramente aleatórios, a etapa utiliza \textit{Latin Hypercube Sampling}. Nesse
+método, o intervalo de cada parâmetro é dividido em estratos, e as amostras são
+construídas de modo a cobrir melhor o espaço multidimensional de busca. Assim, a
+triagem permanece simples e rápida, mas evita concentrar tentativas em regiões
+muito próximas do espaço de pesos.
+
+A \Figura{fig:lr-finder} ilustra o tipo de curva analisada nessa etapa. A região
+de interesse não é necessariamente o ponto de menor perda absoluta, mas a faixa
+em que a perda diminui de forma consistente antes de apresentar instabilidade,
+platô ou divergência. A decisão final combina essa leitura da curva com os
+relatórios consolidados da fase e com as restrições do registro de modelos
+aprovado.
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.58\textwidth]{figuras/LR_finder.png}
+    \caption[Curva de busca de taxa de aprendizado]{Exemplo de curva
+    usada na triagem de taxa de aprendizado. A curva mostra a evolução da função
+    de perda durante uma execução curta em que a taxa de aprendizado aumenta
+    progressivamente. A análise busca identificar faixas de queda estável da
+    perda e evitar regiões associadas a instabilidade ou divergência.}
+    \label{fig:lr-finder}
+\end{figure}
+
+O otimizador padrão da triagem é o AdamW, conforme discutido na
+\Secao{sec:otimizacao_loss}. A Fase 7 também calcula pesos de amostragem
+inversamente proporcionais à frequência das classes, de modo que uma amostra
+$i$ de classe $y_i$ seja sorteada com probabilidade:
+
+\begin{equation}
+    q_i =
+    \frac{w_{y_i}}{\sum_{\ell=1}^{N} w_{y_\ell}} .
+    \label{eq:weighted_sampler}
+\end{equation}
+
+Essa estratégia busca reduzir o impacto do desbalanceamento de classes durante
+as execuções de triagem, aumentando a chance de observar amostras da classe
+minoritária \cite{he2009imbalanced}. Ainda assim, trata-se de uma decisão
+operacional da implementação, e não de uma métrica de avaliação.
+
+Quando ocorre divergência durante uma varredura, apenas o teste ativo é encerrado, e o histórico parcial é preservado para análise posterior. Durante o teste, são simulados 3 cenários com diferentes \textit{seeds} aplicadas. Dessa forma, a Fase 7 mantém seu papel de triagem: explorar rapidamente configurações plausíveis, registrar instabilidades e encaminhar para treinamento apenas combinações compatíveis com convergência inicial.
+
+\section{Treinamento supervisionado}\label{sec:met_treinamento}
+
+A Fase 8 realiza o treinamento supervisionado dos modelos de segmentação. Cada
+execução treina uma única combinação de arquitetura, codificador, normalização,
+função de perda e hiperparâmetros, de modo que os resultados possam ser
+associados de forma inequívoca à configuração utilizada. As amostras de treino e
+validação são resolvidas a partir do manifesto mestre; quando disponível, o
+artefato \texttt{TRAIN\_SELECTED} (obtido na fase 6 de amostragem inteligente)  pode ser usado apenas para acelerar a leitura
+do conjunto de treino, sem alterar a composição da validação ou do teste. Antes
+do início da otimização, a etapa verifica se os identificadores de paciente de
+treino e validação são disjuntos, preservando o contrato de isolamento definido
+nas fases anteriores.
+
+O espaço de modelos é restrito a arquiteturas e codificadores previamente
+aprovados. A seleção buscou atender a dois critérios principais. O primeiro foi
+a variabilidade arquitetural, de modo a incluir modelos com mecanismos distintos
+de extração e agregação de características, favorecendo a composição de um
+\textit{ensemble} menos redundante. O segundo foi a compatibilidade com
+codificadores pré-treinados em \textit{ImageNet} para entradas de $224 \times 224$
+pixels, dimensão adotada para os \textit{patches} neste trabalho. Essa
+compatibilidade favorece uma integração mais direta entre pré-treinamento,
+pré-processamento e formato de entrada utilizado no experimento. Ainda assim, o
+fluxo não se limita a esse conjunto: novas arquiteturas e novos codificadores
+podem ser incorporados, desde que registrados na configuração experimental e
+submetidos às mesmas verificações metodológicas. O registro atual contempla
+arquiteturas de segmentação como U-Net, UNet++, DeepLabv3+, FPN, MA-Net,
+SegFormer, DPT e UPerNet, além de codificadores convolucionais e baseados em
+\textit{Transformers}, como Swin, ResNeSt, EfficientNet, SENet, ResNet, ViT e
+Hiera
+\cite{ronneberger2015unet,zhou2020unetpp,chen2018deeplabv3plus,lin2017fpn,
+fan2020manet,xie2021segformer,ranftl2021dpt,xiao2018upernet,liu2021swin,
+zhang2022resnest,tan2019efficientnet,hu2018senet,he2016resnet,
+dosovitskiy2021vit,ryali2023hiera}. Quando pesos pré-treinados ou normalização
+associada ao \textit{ImageNet} são utilizados, essa decisão é registrada como parte da
+configuração experimental, pois influencia a inicialização e o pré-processamento
+do modelo \cite{russakovsky2015imagenet}.
+
+Durante o treinamento, as amostras podem receber aumento de dados online. Essa
+etapa aplica transformações geométricas (espelho horizontal, espelho vertical, rotação), perturbações cromáticas (Variação HED, Variação HSV), desfoque ou descarte de regiões, conforme a configuração da
+execução. O objetivo é expor o modelo a variações plausíveis do domínio
+histopatológico sem modificar o significado da máscara de referência. A
+biblioteca \textit{Albumentations} é utilizada para compor essas transformações de forma
+consistente entre imagem e máscara \cite{buslaev2020albumentations}. Essa
+estratégia é compatível com a literatura de aumento de dados em visão
+computacional e histopatologia, que busca reduzir dependência de variações
+visuais não biológicas, como orientação, textura, ruído e coloração
+\cite{dossantos2023augmentation,tellez2019augmentation,shorten2019survey,
+zhong2020random}. A validação, por sua vez, não recebe aumentos estocásticos,
+mantendo a comparação entre épocas estável e reproduzível.
+
+A função de perda adotada combina penalização pixel a pixel e termos de
+sobreposição espacial. Essa escolha é adequada à segmentação biomédica, na qual
+a classe positiva pode ocupar pequena fração da imagem e, portanto, a perda deve
+considerar tanto erros locais quanto a qualidade global da máscara. No fluxo
+desta dissertação, a perda segue a formulação híbrida usada por
+\textcite{khened2021generalized}, combinando entropia cruzada binária para a
+classe positiva com termos Dice para fundo e primeiro plano:
+
+\begin{equation}
+    \mathcal{L} =
+    \alpha\,\mathcal{L}_{\mathrm{BCE},\mathrm{fg}}
+    + \beta\,\mathcal{L}_{\mathrm{Dice},\mathrm{bg}}
+    + \gamma\,\mathcal{L}_{\mathrm{Dice},\mathrm{fg}}.
+    \label{eq:perda_treinamento}
+\end{equation}
+
+Os pesos $\alpha$, $\beta$ e $\gamma$ controlam a contribuição relativa de cada
+termo e devem ser reportados para cada execução final. O termo de entropia
+cruzada binária avalia a discrepância entre a probabilidade prevista para a
+classe positiva e a máscara de referência em nível de pixel. Se
+$p_{\mathrm{fg},h,w}$ é a probabilidade prevista de primeiro plano e
+$g_{\mathrm{fg},h,w}$ é o alvo binário no pixel $(h,w)$, então:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{BCE},\mathrm{fg}} =
+    -\frac{1}{HW}
+    \sum_{h,w}
+    \left[
+    g_{\mathrm{fg},h,w}\log p_{\mathrm{fg},h,w}
+    +
+    (1-g_{\mathrm{fg},h,w})\log(1-p_{\mathrm{fg},h,w})
+    \right] .
+    \label{eq:bce_fg}
+\end{equation}
+
+Para cada classe $c \in \{\mathrm{bg},\mathrm{fg}\}$, o termo Dice mede a
+discordância de sobreposição entre a probabilidade prevista e a máscara de
+referência:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{Dice},c} =
+    1 -
+    \frac{
+    2\sum_{h,w}p_{c,h,w}g_{c,h,w}+\varepsilon
+    }{
+    \sum_{h,w}p_{c,h,w}^2+\sum_{h,w}g_{c,h,w}^2+\varepsilon
+    } .
+    \label{eq:dice_loss}
+\end{equation}
+
+Quando a perda sensível a artefatos é ativada, a contribuição da amostra é
+reduzida conforme a cobertura de artefato previamente registrada. Seja
+$a_{\max}$ o maior valor de cobertura de artefato observado para a amostra. A
+perda ajustada é:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{art}} =
+    (1-a_{\max})\mathcal{L},
+    \qquad
+    a_{\max}=\max_j a_j .
+    \label{eq:artifact_loss}
+\end{equation}
+
+Esse desconto é uma regra local do fluxo, motivada pela necessidade de reduzir o
+impacto de regiões visualmente contaminadas durante o treinamento. Ele não deve
+ser interpretado como método externo publicado, embora se relacione à motivação
+geral de controle de qualidade em WSIs \cite{weng2024grandqc}.
+
+A mineração de exemplos difícies (do inglês  \Sigla{\textit{Online Hard Example Mining}}{OHEM}) é disponibilizada como opção exclusiva do
+treinamento. A ideia geral é concentrar a atualização do modelo nos exemplos, ou
+pixels, que apresentam maior perda, em vez de atribuir o mesmo peso a regiões já
+facilmente classificadas. Essa estratégia foi proposta originalmente para
+selecionar exemplos difíceis durante o treinamento de detectores de objetos e é
+adaptada aqui ao cenário de segmentação pixel a pixel
+\cite{shrivastava2016ohem}. Quando habilitado, após a época configurada, a perda
+por pixel é ordenada e apenas os pixels mais difíceis são retidos. Se $r$ é a
+fração de retenção, $K_{\min}$ é o número mínimo de pixels e $N_{\mathrm{pix}}$
+é o total de pixels avaliados, o número de pixels retidos é:
+
+\begin{equation}
+    K =
+    \max\left(K_{\min}, \left\lceil rN_{\mathrm{pix}}\right\rceil\right).
+    \label{eq:ohem_k}
+\end{equation}
+
+A validação mantém OHEM desativado, garantindo que as métricas de validação sejam
+calculadas sobre todos os pixels avaliáveis e permaneçam comparáveis entre
+execuções.
+
+Para avaliação durante o treinamento, os logits produzidos pela rede são
+convertidos em probabilidades. Em formulações multiclasse, essa conversão é feita
+pela função \textit{softmax}:
+
+\begin{equation}\label{eq:softmax}
+    p_c = \mathrm{softmax}(\mathbf{z})_c =
+    \frac{e^{z_c}}{\sum_{k=1}^{C}e^{z_k}},
+\end{equation}
+
+em que $\mathbf{z}$ é o vetor de logits e $C$ é o número de classes. Em seguida,
+um limiar transforma probabilidades em máscara binária:
+
+\begin{equation}\label{eq:binarizacao-threshold}
+    \hat{g}_{j,i}(t)=
+    \begin{cases}
+        1, & \text{se } p_{j,i}\geq t,\\
+        0, & \text{se } p_{j,i}<t.
+    \end{cases}
+\end{equation}
+
+A seleção de \textit{checkpoints} utiliza a AUPRC de validação como métrica principal. Essa escolha tem duas motivações. Primeiro, a AUPRC é calculada a partir da curva precisão--revocação, integrando o desempenho do modelo ao longo de diferentes limiares de decisão; com isso, a seleção do \textit{checkpoint} não fica condicionada a um único limiar definido previamente. Segundo, em cenários desbalanceados, nos quais a classe positiva pode representar uma pequena parcela dos pixels avaliados, a curva precisão--revocação tende a ser mais informativa do que a curva ROC, pois explicita a relação entre recuperação da classe positiva e proporção de falsos positivos entre as predições positivas \cite{saito2015precision}. Para um limiar $t$, precisão e revocação são definidas por: \begin{equation} \begin{array}{rcl} \mathrm{Precision}(t) &=& \dfrac{TP_t}{TP_t+FP_t},\\[0.6em] \mathrm{Recall}(t) &=& \dfrac{TP_t}{TP_t+FN_t}, \end{array} \label{eq:precision_recall} \end{equation} e a AUPRC corresponde à área sob a curva precisão--revocação: \begin{equation} \mathrm{AUPRC} = \int_0^1 \mathrm{Precision}(r)\,dr . \label{eq:auprc} \end{equation} Na prática, essa integral é aproximada a partir dos pontos discretos acumulados pelo rastreador de métricas. AUROC e MCC são registrados como métricas auxiliares de validação \cite{fawcett2006roc,matthews1975comparison}. A AUROC resume a capacidade discriminativa ao longo de diferentes limiares, enquanto o MCC permite avaliar, para limiares específicos, a concordância entre predição binária e referência considerando simultaneamente verdadeiros positivos, verdadeiros negativos, falsos positivos e falsos negativos. Para cada limiar $t$, o MCC é dado por: \begin{equation} \mathrm{MCC}(t)= \frac{ TP_tTN_t-FP_tFN_t }{ \sqrt{ (TP_t+FP_t)(TP_t+FN_t)(TN_t+FP_t)(TN_t+FN_t)+\varepsilon } } . \label{eq:mcc_validacao} \end{equation} A validação também orienta a parada antecipada, interrompendo o treinamento quando não há melhora sustentada da métrica monitorada após o número de épocas definido como paciência \cite{prechelt1998automatic}. Dessa forma, evita-se prolongar o ajuste dos pesos sem ganho correspondente no conjunto de validação. Os \textit{checkpoints} preservados carregam metadados de arquitetura, hiperparâmetros, normalização, amostragem, uso de \texttt{TRAIN\_SELECTED}, OHEM, perda sensível a artefatos, otimizador e assinaturas de proveniência. AdamW e AdamW \textit{Schedule-Free} são opções de otimização registradas pela fase \cite{loshchilov2019decoupled,defazio2024road}. Assim, cada \textit{checkpoint} não representa apenas um conjunto de pesos treinados, mas um artefato rastreável que conecta a configuração executada, os dados consumidos e as métricas observadas durante o treinamento.
+
+\section{Otimização do \textit{ensemble}}\label{sec:met_otimizacao_ensemble}
+
+A Fase 9 transforma os modelos treinados na Fase 8 em uma receita única de
+\textit{ensemble}, utilizando exclusivamente pacientes do conjunto de validação.
+Nenhum peso das redes é reestimado nessa etapa, e nenhum paciente do conjunto de
+teste é consultado. O objetivo é definir, antes da avaliação final, como os
+modelos disponíveis serão combinados, quais pesos receberão, quais limiares serão
+adotados e como a inferência final será executada. Essa separação é essencial
+para preservar o papel do teste como estimativa independente de generalização.
+
+A motivação geral é compatível com a literatura de \textit{ensemble learning}, segundo a qual a combinação de modelos pode reduzir o erro quando os componentes apresentam erros parcialmente independentes \cite{dietterich2000ensemble}. Também se relaciona à seleção de modelos a partir de bibliotecas de candidatos, na qual diferentes modelos treinados são avaliados e combinados com base no desempenho observado em validação \cite{caruana2004ensemble}. Nesta dissertação, essa ideia é adaptada à segmentação histopatológica por meio de uma composição em dois fluxos operacionais: um fluxo semântico, usado para estimar uma região de interesse, e um fluxo espacial, usado para refinar a segmentação dentro dessa região. Os pesos dos modelos, os limiares e as restrições espaciais são otimizados por meio de otimização Bayesiana com Optuna/TPE \cite{akiba2019optuna,bergstra2011algorithms}. Essa divisão reflete uma hipótese metodológica sobre a natureza multiescala das WSIs. A presença de câncer pode depender tanto de padrões locais, como textura, bordas e transições glandulares, quanto de relações mais amplas entre regiões do tecido. Por isso, o fluxo semântico reúne arquiteturas baseadas em \textit{Transformers}, adotadas neste trabalho para explorar contexto e representações hierárquicas; o fluxo espacial reúne arquiteturas convolucionais, adotadas para favorecer reconstrução local e preservação de detalhes na máscara. No experimento, o fluxo semântico considera \texttt{SWIN}, \texttt{DPT}, \texttt{SEGFORMER} e \texttt{UPERNET}; o fluxo espacial considera \texttt{DEEPLABV3PLUS}, \texttt{UNET++}, \texttt{FPN} e \texttt{MANET}. Essa classificação é operacional e específica desta dissertação, não constituindo uma taxonomia geral das arquiteturas de segmentação.
+
+De forma conceitual, sejam $P_{\mathrm{sem}}(x)$ e $P_{\mathrm{spa}}(x)$ as
+probabilidades agregadas dos fluxos semântico e espacial no pixel $x$. O fluxo
+semântico produz uma máscara binária de região de interesse, representada por
+$R(x)$, e a probabilidade final é dada por:
+
+\begin{equation}\label{eq:two-stream-gated-ensemble}
+    P_{\mathrm{final}}(x)
+    =
+    P_{\mathrm{spa}}(x)R(x).
+\end{equation}
+
+Nessa formulação, $R(x)$ atua como restrição espacial: regiões fora da área
+considerada plausível pelo fluxo semântico são suprimidas, enquanto regiões
+dentro da região de interesse preservam a predição refinada pelo fluxo espacial.
+Em seguida, a probabilidade final é convertida em máscara binária por meio de um
+limiar de decisão:
+
+\begin{equation}\label{eq:ensemble-decision-threshold}
+    \hat{Y}(x)
+    =
+    \mathbb{I}\left(P_{\mathrm{final}}(x)>\tau_{\mathrm{dec}}\right),
+\end{equation}
+
+em que $\hat{Y}(x)$ é a predição binária final, $\mathbb{I}(\cdot)$ representa a
+função indicadora e $\tau_{\mathrm{dec}}$ é o limiar de decisão final. O limiar
+usado para definir a região de interesse semântica e o limiar usado para gerar a
+máscara final têm papéis distintos: o primeiro delimita onde o refinamento
+espacial deve atuar; o segundo define a decisão final de segmentação.
+
+Antes da otimização, a fase carrega os metadados produzidos durante o
+treinamento, incluindo arquitetura, codificador, caminho do \textit{checkpoint},
+métricas de validação e assinaturas de compatibilidade. Essas assinaturas
+registram a linhagem dos dados, a partição experimental, o método de
+normalização, a amostragem inteligente, a função de perda e outros elementos que
+definem o contrato da execução. Candidatos sem informações obrigatórias de
+proveniência ou com assinaturas incompatíveis são rejeitados antes da combinação,
+evitando que \textit{checkpoints} treinados sob linhagens diferentes sejam
+misturados silenciosamente.
+
+Quando há múltiplos candidatos válidos para uma mesma arquitetura, a Fase 9
+seleciona exatamente um modelo por arquitetura solicitada, ordenado por uma
+métrica configurável. Por padrão, essa seleção utiliza o melhor valor de AUPRC
+obtido no nível de pixel durante a validação do treinamento, coerente com o uso
+do AUPRC como métrica principal em cenários desbalanceados. Essa escolha
+transforma o registro de modelos treinados em uma biblioteca controlada de
+candidatos, sobre a qual a receita de \textit{ensemble} é construída.
+
+A validação é lida a partir do manifesto mestre, preservando a linhagem dos
+pacientes, dos \textit{shards} HDF5 canônicos e da normalização em tempo de execução.
+Internamente, os pacientes de validação são separados em subconjuntos disjuntos
+de otimização, calibração e \textit{holdout} interno. Essa
+subdivisão é feita em nível de paciente e procura preservar casos positivos e
+negativos em cada subconjunto. Assim, os pesos do \textit{ensemble}, o limiar
+final e os relatórios internos de desenvolvimento não são obtidos exatamente
+sobre os mesmos pacientes.
+
+A otimização da receita define os pesos dos modelos em cada fluxo, o limiar da
+região de interesse e o limiar de decisão final. O fluxo semântico é ajustado
+para recuperar a maior parte da área positiva sem produzir regiões de interesse
+triviais ou excessivamente permissivas. O fluxo espacial, por sua vez, privilegia
+o desempenho dentro da região de interesse, penalizando extravasamento de
+predição para fora dessa região e predições indevidas em pacientes negativos.
+Assim, a receita final não busca apenas maximizar uma métrica global, mas
+equilibrar detecção ampla, refinamento local e controle de falsos positivos.
+
+Após a otimização, a receita de inferência é congelada e registrada como
+artefato experimental. Esse registro inclui a estratégia de \textit{ensemble}, a
+atribuição dos modelos aos fluxos semântico e espacial, os pesos normalizados,
+os limiares escolhidos e as assinaturas de proveniência associadas aos modelos e
+dados. O conjunto de teste é utilizado apenas depois dessa etapa, para avaliar a
+receita já definida. Caso pesos, limiares ou seleção de modelos fossem ajustados
+após observar o teste, a avaliação deixaria de representar uma estimativa
+independente de generalização.
+
+Dessa forma, o \textit{ensemble} cumpre duas funções. A primeira é preditiva:
+combinar arquiteturas com vieses complementares para integrar contexto semântico
+e refinamento espacial. A segunda é metodológica: transformar a inferência final
+em uma receita explícita, otimizada apenas em validação, registrada de forma
+rastreável e aplicada ao teste sem ajustes posteriores.
+
+Sejam $\mathcal{M}_{\mathrm{sem}}$ e $\mathcal{M}_{\mathrm{spa}}$ os conjuntos de
+modelos dos fluxos semântico e espacial, respectivamente. Seja $P_m(x)$ a
+probabilidade de primeiro plano produzida pelo modelo $m$ no pixel $x$. Durante
+a inferência de validação, essa probabilidade é obtida por média de três vistas:
+imagem original, espelhamento horizontal e espelhamento vertical. Essa técnica, conhecida como \Sigla{\textit{Test-time augmentation}}{TTA}, busca reduzir a sensibilidade da predição a
+transformações simples da entrada \cite{moshkov2020test}. 
+
+As probabilidades
+agregadas dos dois fluxos são definidas por:
+
+\begin{equation}
+\begin{array}{rcl}
+P_{\mathrm{sem}}(x) &=&
+\sum_{m\in\mathcal{M}_{\mathrm{sem}}} w_m^{\mathrm{sem}}P_m(x),\\[0.6em]
+P_{\mathrm{spa}}(x) &=&
+\sum_{m\in\mathcal{M}_{\mathrm{spa}}} w_m^{\mathrm{spa}}P_m(x).
+\end{array}
+\label{eq:streams}
+\end{equation}
+
+Os pesos $w_m^{\mathrm{sem}}$ e $w_m^{\mathrm{spa}}$ são normalizados,
+não negativos e definidos separadamente em cada fluxo. Para tornar a otimização viável em validações volumosas, a Fase 9 materializa probabilidades em \textit{caches} no disco rígido. Esse \textit{cache} armazena predições
+com TTA, máscaras de referência e identificadores de paciente para a mesma
+divisão usada na otimização. As probabilidades são quantizadas em 16 bits e as
+máscaras em 8 bits, reduzindo consumo de RAM e disco. Durante o processo, a
+fase constrói primeiro o \textit{cache} semântico, utiliza-o para definir a região de
+interesse, descarta predições semânticas brutas quando deixam de ser necessárias
+e, em seguida, constrói o \textit{cache} espacial. Esse mecanismo é operacional: ele
+controla custo computacional e preserva proveniência, mas não constitui nova
+métrica nem nova etapa de seleção de modelos
+\cite{wilkinson2016fair,piccolo2016tools}.
+
+A região de interesse é formada a partir do fluxo semântico por redução de
+resolução, limiarização e retorno à grade original:
+
+\begin{equation}
+    R(x)=
+    \mathrm{Up}
+    \left(
+    \mathbf{1}_{[
+    \mathrm{Down}(P_{\mathrm{sem}};s)\ge\tau_{\mathrm{roi}}
+    ]}
+    \right)(x).
+    \label{eq:roi_gate}
+\end{equation}
+
+Nessa expressão, $s$ representa a escala de contexto, $\tau_{\mathrm{roi}}$
+corresponde ao limiar da região de interesse, $\mathrm{Down}(\cdot;s)$ indica a
+redução de resolução e $\mathrm{Up}(\cdot)$ representa o retorno à resolução
+original. A redução de resolução permite que o fluxo semântico opere em uma
+escala mais contextual, enquanto o retorno à grade original possibilita aplicar
+essa região de interesse sobre a predição espacial refinada. A motivação é aproximar computacionalmente uma estratégia comum na leitura
+histopatológica: alternar entre menor ampliação, para observar a organização
+global do tecido, e maior ampliação, para examinar detalhes morfológicos locais.
+
+A probabilidade final é obtida pela aplicação da região de interesse sobre a
+saída do fluxo espacial:
+
+\begin{equation}
+\begin{array}{rcl}
+P_{\mathrm{final}}(x) &=& P_{\mathrm{spa}}(x)R(x),\\[0.5em]
+\hat{Y}(x) &=& \mathbf{1}_{[P_{\mathrm{final}}(x)\ge\tau_{\mathrm{dec}}]}.
+\end{array}
+\label{eq:final_gated_prediction}
+\end{equation}
+
+A distinção entre $\tau_{\mathrm{roi}}$ e $\tau_{\mathrm{dec}}$ é central. O
+primeiro controla a região na qual o fluxo espacial poderá atuar; o segundo
+define a decisão binária final. Portanto, um limiar regula a abrangência da ROI,
+enquanto o outro regula a conversão da probabilidade final em máscara.
+
+A otimização do fluxo semântico favorece regiões de interesse que recuperem a
+maior parte das áreas positivas sem se tornarem vazias ou excessivamente
+permissivas. Para um paciente positivo $i$, a recuperação da região de interesse
+é definida por:
+
+\begin{equation}
+    \mathrm{Rec}_{\mathrm{ROI}}^{(i)} =
+    \frac{|R_i \cap Y_i|}{|Y_i|+\varepsilon}.
+    \label{eq:roi_recall}
+\end{equation}
+
+Nessa expressão, $Y_i$ é a máscara de referência do paciente, $R_i$ é a região
+de interesse proposta e $\varepsilon$ evita instabilidade numérica. O critério
+privilegia ROIs que cubram a região positiva, mas é acompanhado por regras de
+rejeição para evitar soluções triviais, como selecionar a imagem inteira ou uma
+área excessivamente ampla do tecido. Nesses casos, a recuperação da lesão pode
+ser alta, mas a ROI deixa de fornecer localização espacial útil e passa a
+incluir grande volume de tecido irrelevante. Portanto, a ROI deve preservar alta
+cobertura da região positiva sem perder sua função de restringir a análise
+espacial.
+
+O fluxo espacial é otimizado por uma função composta que avalia o desempenho
+dentro da ROI e penaliza predições fora dela. A função objetivo combina AUPRC
+média em pacientes positivos, vazamento de probabilidade fora da ROI e predições
+indevidas em pacientes negativos:
+
+\begin{equation}
+    J_{\mathrm{spa}} =
+    \frac{1}{|\mathcal{P}_+|}
+    \sum_{i\in\mathcal{P}_+}
+    \mathrm{AUPRC}\left(Y_i[R_i=1], P_{\mathrm{spa},i}[R_i=1]\right)
+    -
+    \lambda\frac{1}{|\mathcal{P}_+|}\sum_{i\in\mathcal{P}_+}S_i
+    -
+    \lambda\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-}F_j .
+    \label{eq:spatial_objective}
+\end{equation}
+
+Aqui, $\mathcal{P}_+$ e $\mathcal{P}_-$ representam os conjuntos de pacientes
+positivos e negativos usados na otimização; $S_i$ representa o vazamento médio de
+probabilidade fora da ROI em pacientes positivos; $F_j$ representa a massa
+falso-positiva em pacientes negativos; e $\lambda$ controla a penalização desses
+termos. A AUPRC é usada por ser mais informativa em cenários desbalanceados, nos
+quais regiões positivas podem ocupar pequena fração dos pixels
+\cite{saito2015precision}. A formulação busca, portanto, equilibrar recuperação
+da região tumoral, refinamento local e controle de falsos positivos.
+
+Após a seleção dos pesos dos fluxos e de $\tau_{\mathrm{roi}}$, a Fase 9 calibra
+a decisão final em pacientes de calibração disjuntos daqueles utilizados na
+otimização dos pesos. Essa calibração não se limita a uma varredura simples de
+limiar: em vez disso, realiza-se uma busca balanceada voltada a dois objetivos
+complementares: Preservar a qualidade da segmentação em pacientes positivos e
+reduzir predições indevidas em pacientes negativos.
+
+Cada configuração candidata define simultaneamente cinco parâmetros: o limiar de
+decisão $\tau_{\mathrm{dec}}$, a área mínima de componentes conectados em pixels,
+a área mínima de componentes como fração da área do \textit{patch}, o número
+mínimo de \textit{patches} positivos por paciente e a fração mínima da área do
+paciente prevista como positiva. Dessa forma, a calibração atua não apenas sobre
+a probabilidade final, mas também sobre o pós-processamento espacial e sobre a
+decisão agregada em nível de paciente.
+
+Antes do cálculo das métricas de cada candidato, a predição espacial é
+restringida pela ROI semântica e binarizada pelo limiar de decisão. Em seguida,
+os componentes conectados previstos em cada \textit{patch} são identificados, e
+componentes menores que o limiar efetivo são removidos. Esse limiar efetivo é
+definido como o maior valor entre a área absoluta configurada e a fração mínima
+da área do \textit{patch}. Depois dessa filtragem, as contagens de verdadeiros
+positivos, falsos positivos, falsos negativos e verdadeiros negativos são
+acumuladas por paciente.
+
+Além da filtragem por componentes, a calibração aplica critérios mínimos de
+evidência em nível de paciente. Se o número de \textit{patches} positivos
+previstos for inferior ao mínimo exigido, ou se a área positiva prevista for
+menor que a fração mínima configurada, o paciente é considerado negativo naquela
+configuração candidata. Essa regra reduz ativações espúrias do modelo, isto é,
+pequenas regiões isoladas que poderiam ser interpretadas erroneamente como
+câncer. Do ponto de vista histopatológico, essa restrição é plausível: uma região
+tumoral dificilmente se manifesta como um único pixel ou como poucos fragmentos
+desconectados sem extensão espacial mínima.
+
+Sejam $\mathcal{P}_+^{cal}$ e $\mathcal{P}_-^{cal}$ os conjuntos de pacientes
+positivos e negativos no subconjunto de calibração. Para cada configuração
+candidata, a métrica principal é definida por:
+
+\begin{equation}
+    \mathrm{Score}_{\mathrm{cal}} =
+    \frac{
+    \sum_{i\in\mathcal{P}_+^{cal}}\mathrm{Dice}_i
+    +
+    \sum_{j\in\mathcal{P}_-^{cal}}\mathbf{1}_{[FP_j=0]}
+    }{
+    |\mathcal{P}_+^{cal}| + |\mathcal{P}_-^{cal}|
+    }.
+    \label{eq:balanced_calibration_score}
+\end{equation}
+
+Nessa expressão, $\mathrm{Dice}_i$ representa o Dice do paciente positivo $i$,
+calculado após a aplicação da configuração candidata, e $FP_j$ representa o
+número de falsos positivos acumulados no paciente negativo $j$. Assim, pacientes
+positivos contribuem por meio da qualidade da segmentação, enquanto pacientes
+negativos contribuem apenas quando permanecem sem falsos positivos. A métrica
+favorece, portanto, configurações que mantêm boa sobreposição nas regiões
+tumorais sem permitir que esse desempenho oculte falhas no controle de
+predições positivas em pacientes sem lesão anotada.
+
+A escolha da configuração final também é condicionada por salvaguardas
+metodológicas. Essas salvaguardas não substituem a métrica principal, mas
+restringem o conjunto de candidatos aceitáveis. A calibração compara cada
+candidato com uma configuração-base menos filtrada e rejeita soluções nas quais o
+Dice ou a TPR dos pacientes positivos caiam além das tolerâncias definidas. Além
+disso, podem ser exigidos valores mínimos para Dice micro, precisão macro, TPR
+macro e proporção de pacientes negativos sem predição positiva. Quando nenhuma
+configuração satisfaz simultaneamente todos os critérios, a receita registra
+explicitamente o estado da calibração, distinguindo entre alvo atingido, alvo
+inviável e violações das salvaguardas.
+
+A saída da Fase 9 é uma receita \Sigla{\textit{Javascript Object Notation}}{JSON} assinada. Esse artefato registra a estratégia
+de \textit{ensemble}, os modelos selecionados, seus fluxos, pesos normalizados,
+limiares, parâmetros de pós-processamento, assinaturas de proveniência, hashes de
+\textit{checkpoints}, métricas de calibração e informações de \textit{holdout}.
+A receita representa a fronteira entre desenvolvimento e avaliação final: uma vez
+definida, ela deve ser aplicada ao conjunto de teste sem novos ajustes de pesos,
+limiares, pós-processamento ou seleção de modelos.
+
+\section{Inferência final}\label{sec:met_inferencia_final}
+
+A Fase 10 executa a avaliação final da receita de \textit{ensemble} definida na
+Fase 9. Essa etapa consome exclusivamente a receita congelada e o conjunto de
+teste; portanto, não seleciona novos modelos, não reajusta pesos, não calibra
+limiares e não altera a divisão de pacientes. Sua função é estimar o desempenho
+da configuração previamente definida em dados mantidos fora do ciclo de
+otimização. Essa separação preserva o papel do teste como avaliação independente
+e evita que decisões de modelagem sejam influenciadas pelos resultados finais.
+
+Antes da inferência, a fase verifica a integridade da receita. O código valida a
+assinatura do artefato, confere os hashes dos \textit{checkpoints} e confirma se
+a estratégia registrada corresponde à inferência em dois fluxos com restrição
+espacial por região de interesse. Em seguida, compara a
+linhagem esperada pela receita com a linhagem observada no manifesto de teste,
+incluindo hash do manifesto, identificador da partição gerada na Fase 4, método
+de normalização em tempo de execução, \textit{backend} de Vahadane quando
+aplicável e artefatos de normalização. Essas verificações impedem que uma
+receita otimizada sob uma linhagem experimental seja aplicada silenciosamente a
+dados, normalizações ou partições incompatíveis.
+
+Os pacientes de teste são lidos a partir do manifesto mestre e
+carregados dos HDF5 canônicos por paciente. Quando a cópia local dos arquivos é
+habilitada, ela é usada apenas para acelerar a leitura temporária dos
+\textit{shards}; a identidade dos registros avaliados continua definida pelo
+manifesto. Os modelos especificados na receita são instanciados com as mesmas
+arquiteturas e codificadores usados no treinamento, os \textit{checkpoints} são
+carregados de forma estrita e a inferência é executada em modo de avaliação.
+
+Para cada lote, a Fase 10 aplica a mesma estratégia de TTA utilizada na
+Fase 9, combinando predições da imagem original, do espelhamento horizontal e do
+espelhamento vertical. A probabilidade final é reconstruída pela receita de
+dois fluxos definida nas Equações~\ref{eq:streams}--\ref{eq:final_gated_prediction}.
+
+As métricas finais são calculadas a partir da comparação entre a máscara predita
+e a máscara de referência no conjunto de teste. Para contagens acumuladas de
+pixels, são reportadas métricas de sobreposição, classificação e discriminação
+binária:
+
+\begin{equation}
+\begin{array}{rclcrcl}
+    \mathrm{Dice} &=& \dfrac{2TP}{2TP+FP+FN},
+    &&
+    \mathrm{IoU} &=& \dfrac{TP}{TP+FP+FN},\\[0.8em]
+    \mathrm{Sensibilidade} &=& \dfrac{TP}{TP+FN},
+    &&
+    \mathrm{Especificidade} &=& \dfrac{TN}{TN+FP},\\[0.8em]
+    \mathrm{Precis\tilde{a}o} &=& \dfrac{TP}{TP+FP},
+    &&
+    \mathrm{Acur\acute{a}cia} &=& \dfrac{TP+TN}{TP+FP+FN+TN}.
+\end{array}
+\label{eq:metricas_finais}
+\end{equation}
+
+Dice e IoU descrevem a sobreposição espacial entre a predição e a referência,
+enquanto sensibilidade, especificidade, precisão e acurácia derivam da matriz de
+confusão em nível de pixel \cite{seghier2024dice,sokolova2009performance}. 
+
+
+Além da segmentação em nível de pixel, a Fase 10 também produz uma avaliação
+binária em nível de \textit{patch}, compatível com a avaliação reportada no
+DIAGSET. Nessa saída, a máscara predita, após limiarização e filtragem de
+componentes, é convertida em um rótulo binário de \textit{patch}, onde um \textit{patch} é considerado positivo quando qualquer área positiva permanece na máscara filtrada:
+
+\begin{equation}
+    \hat{z}_i =
+    \mathbf{1}_{[a(\hat{Y}_i) > \tau_{\mathrm{patch}}]},
+    \qquad \tau_{\mathrm{patch}}=0.
+    \label{eq:patch_level_prediction}
+\end{equation}
+
+Na Equação~\ref{eq:patch_level_prediction}, $a(\hat{Y}_i)$ representa a fração
+da área do \textit{patch} classificada como positiva após o pós-processamento.
+O rótulo verdadeiro é obtido do manifesto original.
+
+A partir das contagens $TP$, $FP$, $FN$ e $TN$ em nível de \textit{patch}, o
+relatório exporta acurácia, sensibilidade, especificidade e acurácia balanceada
+(\textit{Average Accuracy}, AvAcc):
+
+\begin{equation}
+    \mathrm{AvAcc} =
+    \frac{\mathrm{Sensibilidade}+\mathrm{Especificidade}}{2}.
+    \label{eq:patch_avacc}
+\end{equation}
+
+Essas métricas são calculadas antes e depois da supressão em nível de paciente.
+O primeiro cálculo avalia diretamente o reconhecimento binário de cada
+\textit{patch}; o segundo mostra como a regra de supressão altera esses
+resultados.
+
+O Coeficiente de Dice exige atenção especial em conjuntos que incluem pacientes
+ou imagens sem instâncias positivas. Nesses casos, uma máscara de referência
+vazia pode produzir situações ambíguas: se o modelo também não prediz pixels
+positivos, a concordância é perfeita do ponto de vista da ausência de lesão; se
+o modelo prediz algum pixel positivo, o erro corresponde a falso positivo em uma
+imagem normal. Seguindo recomendações recentes para relato transparente do Dice
+em segmentação de imagens, esta dissertação explicita o tratamento dado a
+máscaras sem regiões positivas e evita misturar, sem distinção, casos com lesão e
+casos sem lesão no mesmo resumo de Dice \cite{seghier2024dice}. Sempre que
+aplicável, os resultados devem distinguir métricas calculadas em pacientes com
+máscara positiva daquelas calculadas em pacientes negativos, nos quais a análise
+de falsos positivos e a taxa de casos negativos corretamente vazios são mais
+informativas do que a sobreposição com uma região inexistente.
+
+Além
+das métricas baseadas na máscara binária, o AUROC em nível de pixel é calculado
+a partir dos escores probabilísticos antes da limiarização. A análise ROC é
+apropriada para avaliar o comportamento discriminativo de classificadores ao
+longo de diferentes limiares, e sua estimativa por histogramas permite preservar
+essa avaliação probabilística sem manter todos os pixels de teste em memória
+principal \cite{fawcett2006roc}.
+
+As métricas podem ser agregadas em nível micro ou macro. Na agregação micro, as
+contagens de pixels são acumuladas antes do cálculo da métrica, produzindo uma
+estimativa dominada pelo volume total de pixels avaliados. Na agregação macro, a
+métrica é calculada separadamente por paciente e depois promediada, atribuindo
+peso semelhante a cada unidade biológica. Essa distinção é relevante em
+patologia digital porque pacientes com muitas regiões extraídas podem dominar
+métricas micro, enquanto métricas macro tornam mais visível a variabilidade
+entre pacientes.
+
+Para pacientes negativos, o relatório inclui ainda a taxa de casos sem
+falso-positivo, definida como:
+
+\begin{equation}
+    \mathrm{NCR} =
+    \frac{1}{|\mathcal{P}_-|}
+    \sum_{j\in\mathcal{P}_-}
+    \mathbf{1}_{[FP_j=0]} .
+    \label{eq:ncr}
+\end{equation}
+
+Nessa expressão, $\mathcal{P}_-$ representa o conjunto de pacientes negativos e
+$FP_j$ indica o número de falsos positivos no paciente $j$. Essa métrica resume,
+em nível de paciente, a frequência com que a receita final não produz qualquer
+predição positiva em casos sem câncer.
+
+Quando o conjunto de teste contém pelo menos 20 pacientes, os intervalos de
+confiança de 95\% são estimados por \textit{bootstrap} não paramétrico com
+10.000 reamostragens em nível de paciente. O \textit{bootstrap} estima a
+variabilidade empírica de uma estatística por reamostragem com reposição das
+unidades observadas, sendo uma técnica clássica para quantificar incerteza sem
+assumir uma forma paramétrica específica para a distribuição da métrica
+\cite{efron1979bootstrap}. Nesta dissertação, a reamostragem é feita no nível do
+paciente para respeitar a unidade de independência experimental.
+
+Esse procedimento é aplicado tanto às métricas macro quanto às métricas micro.
+No caso das métricas macro, cada reamostragem agrega novamente os valores
+calculados por paciente. No caso das métricas micro, os pacientes também são
+reamostrados como unidades independentes, mas as contagens de pixels são
+recalculadas de forma agregada dentro de cada amostra reamostrada. Assim, mesmo
+métricas calculadas em nível de pixel preservam a estrutura de dependência do
+experimento, evitando tratar pixels de um mesmo paciente como observações
+independentes.
+
+A AUROC em nível de pixel, por outro lado, é reportada apenas como estimativa
+pontual. A implementação atual armazena as informações necessárias ao cálculo da
+AUROC como histogramas globais de probabilidades e rótulos, sem preservar a
+associação de cada contribuição ao respectivo paciente. Por essa razão, não é
+possível aplicar diretamente o mesmo \textit{bootstrap} em nível de paciente para
+essa métrica. Um \textit{bootstrap} que reamostrasse pixels como unidades independentes violaria a estrutura hierárquica dos dados e tenderia a subestimar a incerteza. Uma estimativa cientificamente consistente de
+incerteza para AUROC exigiria preservar histogramas por paciente, ou as
+distribuições brutas de escores e rótulos por paciente, antes da reamostragem, o que por razões limitantes computacionais não é implementado.
+
+Portanto, os intervalos de confiança reportados descrevem a variabilidade
+observada no conjunto avaliado para métricas micro e macro compatíveis com
+reamostragem por paciente. Eles não substituem validação externa em bases
+independentes, nem devem ser extrapolados para métricas cujos insumos não
+preservam a unidade experimental necessária ao \textit{bootstrap}.
+
+Ao final da execução, a Fase 10 exporta métricas em JSON e \Sigla{\textit{Comma-Separated Value}}{CSV}, relatórios em
+\textit{Markdown} e \LaTeX{}, matriz de confusão normalizada por linha e visualizações de
+amostras para auditoria qualitativa. O artefato de execução preserva a
+rastreabilidade da receita, do manifesto, dos \textit{checkpoints}, das
+configurações de normalização e das variáveis de ambiente não sensíveis usadas
+na avaliação final. Dessa forma, a inferência final não é apenas a aplicação de
+um modelo ao teste, mas a execução auditável de uma receita previamente
+definida, congelada e vinculada aos artefatos que a originaram.
+
+\section{Uso de ferramentas de inteligência artificial generativa}
+\label{sec:met_uso_ia}
+
+Ferramentas de inteligência artificial generativa foram utilizadas como apoio ao
+desenvolvimento desta dissertação, especialmente em tarefas de revisão textual,
+organização estrutural, esclarecimento de conceitos, análise de código e
+geração de materiais visuais auxiliares. Seu uso teve caráter instrumental e
+não substituiu a análise crítica do autor. Todas as decisões metodológicas,
+interpretações dos resultados, escolhas experimentais e conclusões apresentadas
+neste trabalho são de responsabilidade exclusiva do autor.
+
+Na análise e revisão de código, foi utilizado o modelo GPT-5.5 \textit{Extra High} da
+OpenAI. Para apoio à escrita acadêmica em \LaTeX{}, revisão gramatical,
+reorganização de parágrafos e melhoria de fluidez textual, foi utilizado o
+ChatGPT, também da OpenAI. Para a geração de imagens conceituais incluídas na
+dissertação, foi utilizado o modelo Gemini, do Google. Na etapa de revisão de
+literatura, especificamente para auxiliar a geração inicial de resumos dos
+artigos recuperados, foi utilizado o modelo Gemma 4 31B, do Google.
+
+Os conteúdos produzidos ou sugeridos por essas ferramentas foram revisados antes
+de sua incorporação ao texto, ao código ou aos materiais gráficos. No caso da
+revisão de literatura, os resumos gerados automaticamente foram utilizados
+apenas como apoio preliminar de leitura, sem substituir a consulta aos artigos
+originais. De modo semelhante, sugestões de código, explicações conceituais e
+reescritas textuais foram aceitas somente após verificação de coerência com o
+método proposto, com os artefatos experimentais e com a literatura pertinente.
+
+Assim, o uso de inteligência artificial generativa neste trabalho deve ser
+entendido como recurso de apoio à produtividade científica, e não como fonte
+autônoma de evidência. Os resultados quantitativos, a definição do protocolo
+experimental, a interpretação das métricas, a discussão das limitações e as
+conclusões foram estabelecidos a partir dos dados processados, dos artefatos
+gerados pelo fluxo computacional e da avaliação crítica do autor.
