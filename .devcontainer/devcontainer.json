@@ -1,0 +1,39 @@
+{
+  "name": "Experiment Env",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "charliermarsh.ruff",
+        "ms-python.mypy-vscode"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.cwd": "/workspace",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.ruff": "always",
+          "source.organizeImports.ruff": "always"
+        }
+      }
+    }
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.opencode,target=/root/.opencode,type=bind",
+    "source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind,readonly",
+    "source=/mnt/c/OPT_PIPELINE,target=/mnt/host_c,type=bind",
+    "source=/mnt/d/OPT_PIPELINE,target=/mnt/host_d,type=bind",
+    "source=/mnt/f/OPT_PIPELINE,target=/mnt/host_f,type=bind",
+    "source=/mnt/e/OPT_PIPELINE,target=/mnt/host_e,type=bind"
+  ],
+  "postCreateCommand": "git config --global user.name 'Bruno Nunes' && git config --global user.email 'bruno.nunes.1987@gmail.com' && git config --global --add safe.directory /workspace && uv sync --python 3.12",
+  "remoteUser": "root"
+}

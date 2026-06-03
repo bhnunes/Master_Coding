@@ -1,0 +1,47 @@
+# .chktexrc - chktex configuration for the latex-document skill
+# Suppresses false positives common in generated LaTeX documents.
+#
+# Place this file alongside .tex files or in the skill root.
+# Usage: chktex -l /path/to/.chktexrc document.tex
+#
+# Severity levels: 0 = ignore, 1 = message, 2 = warning, 3 = error
+
+# ---- Suppress common false positives ----
+
+# Warning 1: Command terminated with space
+# Triggered by macros like \LaTeX followed by space -- normal usage.
+CmdSpaceStyle = ignore
+
+# Warning suppressions:
+# - 8: wrong dash length in dates or command-line flags
+# - 24: cross-reference spacing
+# - 32: package/custom environments
+# - 36: missing space before parentheses
+# - 38: punctuation around LaTeX quotes
+# - 44: noisy user regex matches
+CmdLine
+{
+    -n8 -n24 -n32 -n36 -n38 -n44
+}
+
+# ---- Recognized environments ----
+# Tell chktex about environments commonly used in our templates
+# so it doesn't flag them as unrecognized.
+VerbEnvir { lstlisting minted Verbatim }
+
+# ---- Recognized commands that take arguments ----
+# Prevents "wrong number of arguments" false positives for
+# custom commands defined in our templates.
+Silent
+{
+    \rowcolor \cellcolor \columncolor
+    \textcolor \colorbox \fcolorbox
+    \hyperref \hyperlink \hypertarget
+    \tikzset \pgfplotsset
+    \newacronym \gls \Gls \glspl
+    \sisetup \SI \si \num
+    \addbibresource \printbibliography
+    \tcbox \tcbset
+    \titleformat \titlespacing
+    \fancyhead \fancyfoot
+}

@@ -1,0 +1,98 @@
+{
+  "SWIN": {
+    "lr": 0.0003,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k"
+    ]
+  },
+  "DEEPLABV3PLUS": {
+    "lr": 0.0003,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "tu-resnest101e"
+    ]
+  },
+  "UNET++": {
+    "lr": 0.003,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "efficientnet-b7"
+    ]
+  },
+  "FPN": {
+    "lr": 0.0003,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "senet154"
+    ]
+  },
+  "SEGFORMER": {
+    "lr": 0.0003,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "mit_b5"
+    ]
+  },
+  "MANET": {
+    "lr": 0.001,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "resnet152"
+    ]
+  },
+  "DPT": {
+    "lr": 0.0001,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "tu-vit_large_patch16_224.augreg_in21k_ft_in1k"
+    ]
+  },
+  "UPERNET": {
+    "lr": 0.00003,
+    "wd": 0.0001,
+    "loss": {
+      "alpha_bce": 0.125,
+      "beta_dice_bg": 0.157,
+      "gamma_dice_fg": 0.173
+    },
+    "encoders": [
+      "tu-hiera_large_224"
+    ]
+  }
+}

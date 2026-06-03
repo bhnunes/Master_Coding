@@ -1,0 +1,79 @@
+\documentclass[journal,10pt]{IEEEtran}
+
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+
+\title{A Concise IEEEtran Article Template}
+
+\author{First~A.~Author,~\IEEEmembership{Member,~IEEE,}
+        Second~B.~Author,~\IEEEmembership{Senior~Member,~IEEE}
+\thanks{Manuscript received Month Day, Year; revised Month Day, Year.}
+\thanks{First A. Author and Second B. Author are with the Department of Example, Example University, City, Country (e-mail: author@example.edu).}}
+
+\markboth{IEEE Transactions on Example,~Vol.~1, No.~1, Month~2026}
+{Author \MakeLowercase{\textit{et al.}}: A Concise IEEEtran Article Template}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This template provides a compact IEEEtran starting point with the structural
+elements most journal articles need: an abstract, index terms, sections,
+equations, tables, figures, and numeric references.
+\end{abstract}
+
+\begin{IEEEkeywords}
+IEEEtran, journal article, two-column format, LaTeX template.
+\end{IEEEkeywords}
+
+\section{Introduction}
+\IEEEPARstart{T}{his} opening paragraph uses the IEEE drop-cap convention.
+Summarize the problem, the gap in prior work, and the main contribution.
+
+\section{Method}
+Describe the proposed method in reproducible terms. Use equations where they
+clarify the core computation:
+\begin{equation}
+  y = f_{\theta}(x) + \epsilon.
+\end{equation}
+
+\section{Results}
+Table~\ref{tab:results} shows a compact comparison using booktabs.
+
+\begin{table}[!t]
+\caption{Example Quantitative Results}
+\label{tab:results}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Method & Accuracy & F1 \\
+\midrule
+Baseline & 0.812 & 0.798 \\
+Proposed & 0.874 & 0.861 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!t]
+\centering
+\fbox{\rule{0pt}{1.1in}\rule{0.9\columnwidth}{0pt}}
+\caption{Replace this placeholder with a publication-ready figure.}
+\label{fig:placeholder}
+\end{figure}
+
+\section{Conclusion}
+Restate the main result, note limitations, and identify the next concrete
+research step.
+
+\begin{thebibliography}{1}
+
+\bibitem{ieeetran}
+M.~Shell, ``How to use the IEEEtran LaTeX class,'' \emph{Journal of LaTeX Class Files}, vol.~14, no.~8, pp.~1--8, 2015.
+
+\end{thebibliography}
+
+\end{document}

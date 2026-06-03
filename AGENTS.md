@@ -1,225 +1,267 @@
 # AGENTS.md
-
-This file gives coding agents repository-specific guidance for working safely and effectively in this codebase.
+Agent guide for coding agents working in this repository.
 
 ## Purpose
+- Repository type: Python research pipeline for pathology whole-slide-image processing.
+- Architecture: root stage scripts orchestrate work; domain logic lives under `helpers/<domain>/`.
+- Primary goal: preserve scientific correctness and reproducibility while making minimal, well-tested changes.
+- Priority order: correctness > reproducibility > maintainability > performance.
 
-- This repository is a Python research pipeline for pathology whole-slide-image processing.
-- Main responsibilities include patch extraction, dataset splitting, scientific sanity checks, and HDF5 packaging.
-- The repo is script-driven rather than package-driven.
-- There is no formal build system, test suite, or linter configuration checked into the repo.
-
-## Repository Layout
-
-- `2_database_manager.py`: top-level orchestration for ingestion, SQLite tracking, and per-case processing.
-- `3_1_imageReader_refactored.py`: per-slide worker CLI; selects the correct annotation handler and runs extraction.
-- `data_handlers.py`: annotation format adapters for `.svs/.xml`, `.ndpi/.ndpa`, and JSON-based formats.
-- `patch_engine.py`: main patch extraction engine; tissue checks, polygon masking, artifact filtering, image/mask writes.
-- `5_crossfold_v6.py`: patient-level dataset split creation plus optional stain normalization.
-- `6_sanity_checks_v3.py`: scientific integrity and dataset consistency checks.
-- `7_pack_splits_to_hdf5.py`: converts prepared split folders into `TRAIN.h5`, `VALIDATION.h5`, and `TEST.h5`.
-- `HELPERS/`: one-off utilities, legacy scripts, conversions, cleanup, and ad hoc support code.
-- `background_experiment/`: separate experiment workflow with its own requirements.
-
-## Rules Files
-
-- No repository-local Cursor rules were found in `.cursor/rules/`.
+## Rule Sources
+- This repository contains `/workspace/AGENTS.md`.
 - No `.cursorrules` file was found.
-- No Copilot instructions file was found at `.github/copilot-instructions.md`.
-- If such files are added later, follow them in addition to this document.
+- No `.cursor/rules/` directory was found.
+- No `.github/copilot-instructions.md` file was found.
 
-## Environment Setup
+## Environment
+- Python: `3.12`
+- Dependency manager: `uv`
+- Test runner: `pytest`
+- Linter and formatter: `ruff`
+- Type checker: `mypy`
+- Mypy mode: `strict = true`, `ignore_missing_imports = true`
+- Ruff line length: `100`
+- Tests live under `tests/`
 
-- Use Python 3.11+ if possible; this repo already contains `__pycache__` artifacts for Python 3.11.
-- Install main dependencies with:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-- Install background experiment dependencies separately when needed:
-
-```bash
-python -m pip install -r background_experiment/requirements.txt
-```
-
-- Several scripts require a populated `.env` file.
-- `.vscode/settings.json` enables `python.terminal.useEnvFile`, so local terminals may auto-load `.env`.
-- Important env vars used by the main pipeline include:
-  - `OPENSLIDE_PATH`
-  - `TAG`
-  - `SQLITE_DB_PATH`
-  - `PROJECTS_BASE_PATH`
-  - `IMAGE_READER_PATH`
-  - `PYTHON_PATH`
-  - `WINDOW_SIZE`
-  - `STRIDE`
-  - `MATCH_PERCENTAGE`
-  - `TISSUE_PERCENTAGE`
-  - `USE_ADVANCED_ARTIFACT_FILTERING`
-  - `ACTIVATE_SANITY_CHECK_GEOJSON`
-  - `GEOJSON_PATH`
-
-## Build / Run Commands
-
-- There is no package build step, `Makefile`, `tox`, or `pyproject.toml` workflow in this repo.
-- The real execution model is running standalone Python scripts.
-- Common commands:
-
-```bash
-python 2_database_manager.py
-python 5_crossfold_v6.py
-python 6_sanity_checks_v3.py
-python 7_pack_splits_to_hdf5.py
-```
-
-- The most focused executable entrypoint is the single-slide extractor:
-
-```bash
-python 3_1_imageReader_refactored.py \
-  --path_Image <slide_path> \
-  --annotation_path <annotation_path> \
-  --path_cancer_folder <out_cancer_dir> \
-  --path_not_cancer_folder <out_not_cancer_dir> \
-  --path_cancer_mask_folder <out_cancer_mask_dir> \
-  --path_not_cancer_mask_folder <out_not_cancer_mask_dir> \
-  --cancer_color <line_color_or_label> \
-  --not_cancer_color <line_color_or_label> \
-  --patient <patient_id>
-```
-
-- Optional artifact input for the worker script:
-
-```bash
-python 3_1_imageReader_refactored.py ... --path_artifacts_geojson <geojson_path>
-```
-
-## Lint / Format / Type Check Status
-
-- No repo-configured `black`, `ruff`, `flake8`, `pylint`, `isort`, or `mypy` setup was found.
-- Do not invent formatting or lint rules and apply them repo-wide unless asked.
-- Keep edits narrow and aligned with the style already used in the file you are touching.
-- Safe ad hoc syntax checks agents may run:
-
-```bash
-python -m py_compile 2_database_manager.py 3_1_imageReader_refactored.py patch_engine.py data_handlers.py
-python -m compileall .
-```
-
-- Treat these as optional verification helpers, not as an official test suite.
+## Setup Commands
+- Install runtime dependencies: `uv sync --python 3.12`
+- Install runtime and dev dependencies: `uv sync --python 3.12 --group dev`
 
 ## Test Commands
+- Run full test suite: `uv run pytest`
+- Run coverage for helper modules: `uv run pytest --cov=helpers --cov-report=term-missing`
+- Run one test file: `uv run pytest tests/test_artifact_pipeline.py`
+- Run one test by node id: `uv run pytest tests/test_artifact_pipeline.py::test_pipeline_processes_all_pending_records_and_continues_after_failure`
+- Run one test class: `uv run pytest tests/test_training_config.py::TestTrainingConfig`
+- Run tests matching an expression: `uv run pytest -k "artifact and not slow"`
+- Stop on first failure: `uv run pytest -x`
+- Show verbose failures with locals: `uv run pytest -x -vv --showlocals`
 
-- There is no in-repo unit test framework.
-- No `pytest`, `unittest`, or dedicated test directories were found.
-- For this repo, “testing” usually means running the relevant script against a real sample or prepared dataset.
+## Lint, Format, and Type Commands
+- Lint entire repo: `uv run ruff check .`
+- Lint touched files only: `uv run ruff check path/to/file.py tests/test_file.py`
+- Format entire repo: `uv run ruff format .`
+- Format touched files only: `uv run ruff format path/to/file.py tests/test_file.py`
+- Type-check entire repo: `uv run mypy .`
+- Type-check touched scope: `uv run mypy path/to/file.py tests/test_file.py`
 
-### Closest Equivalent to Running a Single Test
+## Phase Entrypoints
+- Phase 1: `1_artifact_detection.py`
+- Phase 2: `2_database_manager.py`
+- Phase 3.1: `3_1_optimization_sampling.py`
+- Phase 3.2: `3_2_tune_graph_method.py`
+- Phase 3.3: `3_3_cleaner_script.py`
+- Phase 4: `4_crossfold.py`
+- Phase 5: `5_sanity_checks.py`
+- Phase 6: `6_smart_sampler.py`
+- Phase 7: `7_lr_finder.py`
+- Phase 8: `8_training_ensemble.py`
+- Phase 9: `9_optimizer_ensemble.py`
+- Phase 10: `10_inference_ensemble.py`
+- Run a phase script with `uv`, for example: `uv run --python 3.12 python 4_crossfold.py`
 
-- Best single-target verification: run `3_1_imageReader_refactored.py` on one image/annotation pair.
-- Best dataset-level verification: run `6_sanity_checks_v3.py` on one prepared dataset directory.
-- Note that `6_sanity_checks_v3.py` is configured in its `if __name__ == "__main__":` block rather than a true CLI.
-- `5_crossfold_v6.py` and `7_pack_splits_to_hdf5.py` are also configured primarily by editing the `__main__` configuration block.
+## Repository Shape
+- Keep root scripts orchestration-focused.
+- Put reusable domain logic in `helpers/<domain>/`.
+- Reuse shared helpers such as `helpers/runtime_platform.py` and `helpers/logging_utils.py`.
+- Keep tests in `tests/`.
+- Treat `logs/`, `databases/`, generated HDF5 outputs, manifests, checkpoints, and Aim repos as generated artifacts unless the task says otherwise.
 
-## Configuration Conventions
+## Working Norms
+- Inspect the relevant stage script and helper package before changing behavior.
+- Prefer the smallest correct change over broad rewrites.
+- Reuse existing helpers before creating new modules.
+- Preserve existing pipeline contracts unless the task explicitly changes them.
+- For Phase 2 `.svs/.xml` work, verify whether `TAG=HIESD` is active before changing color or XML parsing behavior.
+- Every behavior change needs tests.
+- For bug fixes, add or update a regression test.
+- Run targeted tests for touched code before finishing.
+- If you change shared infrastructure or scientific logic, run a broader relevant slice of the suite.
 
-- Preserve the existing configuration style of the file you edit.
-- Operational scripts often read from `.env`.
-- Analysis and packaging scripts often use hardcoded config constants inside `__main__`.
-- Do not refactor a script from config-by-edit to argparse unless the user asks.
-- Normalize filesystem paths where the script already does so.
-- Be careful with Windows-specific paths such as `D:\...` and `C:\...`.
+## Imports
+- Prefer `from __future__ import annotations` in Python modules, matching existing code.
+- Use explicit imports only; never use wildcard imports.
+- Order imports as standard library, third-party, then local packages.
+- Use package-safe imports from `helpers...`; do not use sibling-relative shortcuts.
+- Remove unused imports.
 
-## Import Conventions
+## Formatting
+- Follow Ruff formatting and the repository max line length of `100`.
+- Prefer small functions, guard clauses, and shallow nesting.
+- Avoid commented-out code and dead code.
+- Use ASCII unless the file already requires non-ASCII text.
+- Keep orchestrators thin and push nontrivial logic into helper modules when it improves reuse or clarity.
 
-- Prefer `stdlib` imports first, then third-party imports, then local imports.
-- Keep one import per line unless the file already uses grouped imports naturally.
-- Follow the import style already present in the file rather than reformatting unrelated imports.
-- Avoid introducing unused imports.
+## Types
+- Add type hints to public functions and nontrivial helpers.
+- Match repository conventions such as `Path`, `Mapping`, `Sequence`, `tuple[...]`, and `str | None`.
+- Prefer precise types over `Any`.
+- Use `@dataclass(frozen=True)` for validated configuration objects and immutable result containers when appropriate.
+- Keep touched code compatible with strict mypy.
 
-## Formatting Conventions
+## Naming
+- Use `snake_case` for functions, variables, and module-level helpers.
+- Use `PascalCase` for classes.
+- Use `ALL_CAPS` for constants and environment variable names.
+- Match repository vocabulary: `cancer`, `not_cancer`, `patient`, `split`, `manifest`, `artifact`, `annotation`.
+- Do not silently rename established contract names such as `TRAIN`, `VALIDATION`, `TEST`, `IMAGES`, `MASKS`, `REJECTED_IMAGES`, and `REJECTED_MASKS`.
 
-- Use `snake_case` for functions, local variables, and module-level helpers.
-- Use `CamelCase` for classes.
-- Use `UPPER_CASE` for constants, env var names, and top-level configuration constants.
-- Keep line lengths reasonable, but do not rewrap large files unless needed for your change.
-- Prefer explicit helper functions over dense inline logic in newer/refactored code.
-- Preserve versioned filenames such as `*_v2.py` and `*_v6.py` unless renaming is requested.
-
-## Type Hints and Data Structures
-
-- Newer scripts in this repo use type hints, `dataclass`, and structured configuration objects.
-- Older scripts often do not.
-- When editing modern files, prefer to continue the typed style.
-- When editing older scripts, add types only where they improve clarity and do not force broad churn.
-- Favor dictionaries with stable keys only when the surrounding code already relies on them.
-- Favor `dataclass` or small helpers for new structured config in refactored code.
-
-## Naming Conventions
-
-- Match existing domain terminology: `cancer`, `not_cancer`, `patient`, `split`, `manifest`, `artifact`, `annotation`.
-- Preserve output folder names exactly when they are part of the pipeline contract.
-- Do not silently rename `TRAIN`, `VALIDATION`, `TEST`, `CANCER`, `NOT_CANCER`, `CANCER_MASK`, or `NOT_CANCER_MASK`.
+## Docstrings and Comments
+- Add concise docstrings to public functions and public dataclasses.
+- Keep comments for non-obvious scientific assumptions, invariants, or control flow.
+- Do not add noisy comments that only restate the code.
 
 ## Error Handling
+- Fail fast on invalid configuration, bad inputs, or broken pipeline contracts.
+- Raise specific exceptions with useful context.
+- Validate environment variables early.
+- Prefer explicit validation over silent fallback behavior for scientific or data-integrity concerns.
+- Avoid broad `except Exception` unless you are at a true process boundary or you re-raise with actionable context.
+- Do not silently swallow scientific integrity errors.
 
-- Fail fast on invalid required configuration or missing critical files.
-- Use `ValueError` or `RuntimeError` for programming/configuration errors inside functions.
-- Use `sys.exit(...)` in top-level script entrypoints when the file already follows that style.
-- Use warnings or logged messages for partial-data problems when processing can safely continue.
-- Preserve machine-readable output contracts, especially the JSON result emitted by `3_1_imageReader_refactored.py`.
-- Do not swallow exceptions silently.
+## Logging
+- Prefer `logging` over `print` for nontrivial workflows.
+- Reuse `helpers/logging_utils.py` for logger setup and log-folder resolution.
+- Preserve user-facing logging patterns where an entrypoint already depends on them.
+- Write logs under `logs/` unless an existing stage contract dictates another path.
 
-## Logging and Output
+## Configuration
+- Most runtime configuration comes from environment variables and `.env`.
+- Update `.env_example` when adding or renaming environment variables.
+- Use `helpers.runtime_platform.resolve_env_path` and related helpers for path-like environment variables.
+- Preserve cross-platform behavior, especially Windows `OPENSLIDE_PATH` handling.
+- `master_manifest.sqlite` now stores source-file lineage relative to `SOURCE_FOLDER` and generated-artifact lineage relative to the manifest directory. Do not reintroduce machine-specific absolute persisted paths.
+- `TAG=HIESD` enables the HIESD-specific Phase 2 SVS/XML annotation path.
+- `TAG=Chile` enables the CHILE-specific Phase 2 SVS/XML annotation path.
+- Supported `.svs/.xml` datasets resolve label colors internally in code; unsupported tags should fail explicitly.
+- Phase 7 LR-finder auth now accepts either `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`; the entrypoint applies the detected token to both env vars before model creation.
+- Phase 7 LR-finder AMP now defaults to `fp32`; set `LR_FINDER_AMP_PRECISION` explicitly to override it.
+- Phase 2 native TIFF/OpenSlide warning suppression defaults to `STAGE2_SUPPRESS_NATIVE_TIFF_WARNINGS=True`; route suppression through `helpers/runtime_platform.suppress_native_stderr()` rather than Python warning filters.
+- Phase 2 performance-related env vars now include:
+  - `STAGE2_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
+  - `OPENSLIDE_CACHE_BYTES` with default `0`
+  - `STAGE2_PRELOAD_SCAN_AREA_MAX_BYTES` with default `0`
+- Current best-known Phase 2 runtime choice in `.env` is `STAGE2_HDF5_COMPRESSION=none`.
+- Phase 4 crossfold-related env vars now include:
+  - `CROSSFOLD_HDF5_COMPRESSION` with allowed values `gzip`, `lzf`, `none`
+  - `CROSSFOLD_COPY_BATCH_SIZE` with default `256`
+- Current best-known Phase 4 runtime choices in `.env` are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
+- Phase 6 smart-sampling now uses `SMART_SAMPLER_MASTER_MANIFEST_PATH` as its source contract and writes sidecars plus SQLite row-state updates; there is no active `TRAIN_shards` or `TRAIN_FILTERED_shards` runtime dependency.
+- Phase 6 can build compact selected-TRAIN HDF5 storage through `SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED=True`, publishing to `TRAIN_SELECTED_COMPACT_DIR` after building on fast scratch via `SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR`.
+- Phases 7 and 8 can read TRAIN rows from compact `TRAIN_SELECTED` storage when smart sampling is enabled and `LR_FINDER_USE_COMPACT_TRAIN_SELECTED` / `TRAINING_USE_COMPACT_TRAIN_SELECTED` are true; VALIDATION and TEST must remain canonical Phase 2 patient-shard reads.
+- Phases 7-10 now query `master_manifest.sqlite` once at startup and then load pixels from canonical Phase 2 patient shards except for the explicit compact TRAIN-only path above.
+- The normalization refactor contract now reserves one shared downstream env var, `RUNTIME_NORMALIZATION_METHOD`, for Phases 7-10. Stage 4 split assignment is normalization-agnostic; do not add new code that hard-couples per-patch split state to one active normalization choice.
+- `RUNTIME_VAHADANE_BACKEND=fixed_source` is the default fast VAHADANE backend for Phases 7-10 and is a fixed-matrix approximation, not canonical per-patch VAHADANE. Use `torch_staintools_exact` only when exact source fitting is scientifically required and report that distinction.
+- Each downstream entrypoint should emit one shared runtime-normalization startup line using `helpers/runtime_normalization.format_runtime_normalization_status(...)`.
+- The default training registry path is `training_model_registry_NOT_NORMALIZED.json`; method-specific registry files exist for `MACENKO`, `REINHARD`, `RUIFROK`, and `VAHADANE`.
+- No backward compatibility is required for the old normalization-specific Stage 4 persisted-state contract during this refactor unless the user explicitly asks for it.
 
-- Prefer `logging` for nontrivial workflows and long-running scripts.
-- Many scripts configure root logging with both file and console handlers; follow that pattern when extending those files.
-- Avoid excessive `print` in modern/refactored scripts unless the file already provides a terminal UX.
-- In `2_database_manager.py`, styled terminal output with ANSI sequences and emoji is already part of the current UX; preserve that style if editing nearby code.
+## Scientific and Data Integrity Rules
+- Preserve patient-level split isolation.
+- Preserve image and mask row alignment.
+- Preserve filename parity and filename-keyed provenance joins.
+- Preserve label semantics: cancer is positive (`1`), not-cancer is negative (`0`).
+- Do not change stain normalization, sampling semantics, artifact logic, or contamination logic without explicit intent.
+- When describing Stage 6 GIST behavior, call the large-pool path GIST-style or GIST-inspired if it uses landmark preselection before the facility-location selector; do not describe it as paper-exact GIST.
+- Treat `master_manifest.sqlite` corruption or failed SQLite integrity checks as a hard data-integrity failure, not a recoverable warning.
+- For HIESD XML annotations, preserve the hardcoded label policy: cancer colors map to positive, not-cancer colors map to negative, and rejected colors are skipped entirely.
+- In HDF5 workflows, keep canonical dataset names stable: `images`, `masks`, `labels`, `patient_ids`, `filenames`.
 
-## Data Integrity Rules
+## Phase Boundaries
+- Keep Phase 1 logic in `helpers/artifact/*`.
+- Keep extraction and image-reading details in `helpers/extraction/*`.
+- Keep Phase 2 dataset-specific XML parsing localized to `helpers/extraction/data_handlers.py` and the Phase 2 request flow.
+- Keep Phase 3.1 sampling logic in `helpers/optimization_sampling/*`.
+- Keep Phase 3.2 and 3.3 graph contamination logic shared in `helpers/graph/contamination.py` and related graph helpers.
+- Keep Phase 4 split and normalization logic in `helpers/crossfold/*`.
+- Keep Phase 5 integrity checks in `helpers/sanity/*`.
+- Keep patient-shard local cache behavior in `helpers/patient_shard_cache.py`.
+- Keep Phase 6 smart-sampling logic in `helpers/smart_sampling/*`.
+- Keep Phase 7 learning-rate finder logic in `helpers/lr_finder/*`.
+- Keep Phase 8 training logic in `helpers/training/*`.
+- Keep Phase 9 ensemble optimization logic in `helpers/ensemble_optimizer/*`.
+- Keep Phase 10 inference logic in `helpers/ensemble_inference/*`.
 
-- Preserve patient-level split isolation; avoid anything that can introduce leakage across `TRAIN`, `VALIDATION`, and `TEST`.
-- Preserve image/mask pairing by filename.
-- Preserve manifest schema and run metadata unless the user explicitly requests schema changes.
-- Preserve label semantics: cancer remains positive class, not-cancer remains negative class.
-- Do not change patch acceptance thresholds, stain normalization behavior, or artifact filtering semantics without clear intent.
+## Filesystem and Safety
+- Respect `.gitignore`.
+- Do not commit generated artifacts unless explicitly asked.
+- Treat `.env`, credentials files, databases, HDF5 outputs, manifests, logs, checkpoints, and Aim repos as sensitive or generated.
+- Do not delete datasets, logs, or outputs unless explicitly requested.
+- Never use destructive git commands such as `git reset --hard` or `git checkout --` unless explicitly requested.
+- The Elsevier LaTeX class used by `reports/main.tex` is available in `latex_template/cas-dc.cls`. When rebuilding `reports/main.pdf`, run from `reports/` with `TEXINPUTS=../latex_template//;` or otherwise make the template folder visible to TeX.
+- Mermaid diagrams can be authored as `.mermaid` sources under `MERMAID/` and rendered to SVG in the same folder.
+- Preferred Mermaid render flow: `npx -y @mermaid-js/mermaid-cli -i MERMAID/<name>.mermaid -o MERMAID/<name>.svg -p MERMAID/puppeteer-config.json`.
+- Treat `MERMAID/*.svg` and `reports/main.pdf` as generated artifacts unless the task explicitly says otherwise.
 
-## Filesystem and Artifact Safety
+## Validation Checklist
+- Relevant tests were added or updated.
+- Relevant targeted tests pass.
+- `uv run ruff check` passes for touched files.
+- `uv run ruff format` has been applied where needed.
+- `uv run mypy` passes for touched files.
+- No unrelated files were modified intentionally.
+- Pipeline contracts and scientific invariants remain intact.
 
-- This repo produces many large/generated outputs: PNG patches, logs, manifests, entropy caches, and HDF5 files.
-- Avoid committing generated data unless the user explicitly asks.
-- Treat `.env`, `database.db`, `DOWNLOAD_DRIVE/credentials.json`, `credentials.json`, and `token.json` as sensitive or local-state files.
-- Respect `.gitignore`, which already ignores `.env`, logs, PNGs, bytecode, and credential files.
-- Avoid deleting source folders or generated datasets unless the user explicitly requests destructive cleanup.
+## Phase 2 Performance Notes
+- Use `stage2_performance_findings.md` as the canonical handoff document for Phase 2 benchmarking and optimization work.
+- Use `uv run python scripts/benchmark_stage2_cases.py --case-ids 8,4,6,7,2,5,1` for the agreed benchmark set.
+- Benchmark outputs live under `analysis/stage2_benchmarks*/`.
+- The biggest confirmed Phase 2 wins so far were:
+  - batched HDF5 shard writes in `helpers/extraction/hdf5_storage.py`
+  - `STAGE2_HDF5_COMPRESSION=none`
+  - replacing hot PIL-to-NumPy `np.array(...)` conversions with `np.asarray(...)` in `helpers/extraction/patch_engine.py`
+- Current remaining extraction hotspot is `helpers/extraction/patch_engine.py`, especially `read_region()` inside `parallel_processing`.
+- Negative results already established:
+  - `OPENSLIDE_CACHE_BYTES=134217728` and `536870912` did not beat `0` after rebuilding with native OpenSlide `4.0.0`
+  - scan-area preload was much slower
+  - a streaming `source_signature` rewrite was slower and was reverted
+- Docker/OpenSlide status:
+  - The previous Ubuntu 22.04 package install exposed native OpenSlide `3.4.1`
+  - `Dockerfile` now builds native OpenSlide `4.0.0` from source and includes a build-time self-check that fails unless native OpenSlide is `>= 4.0.0` and `OpenSlideCache` can be instantiated
+  - The rebuilt container now reports native OpenSlide `4.0.0`, and `openslide.OpenSlideCache(...)` instantiates successfully
+  - Despite that, `OPENSLIDE_CACHE_BYTES=0` remains the best-known setting on the agreed benchmark slide set
 
-## Platform Assumptions
+## Phase 4 Performance Notes
+- Use `analysis/stage5_crossfold_performance_findings.md` as the canonical handoff document for Phase 4 performance analysis and optimization planning.
+- Current first-pass Phase 4 improvements are:
+  - cached source-HDF5 provenance reuse across the pipeline, split writer, and run-config generation
+  - batched HDF5-backed entropy reads in `helpers/crossfold/entropy.py`
+  - configurable Phase 4 split-output compression and batched copy writes in `helpers/crossfold/io.py`
+  - bulk metadata verification in `helpers/crossfold/io.py`
+  - lightweight log-based progress for entropy and split writing in `helpers/crossfold/entropy.py` and `helpers/crossfold/io.py`
+- First measured benchmark highlights on the real 10-patient Phase 4 dataset are:
+  - entropy dropped from `629.8s` to `8.45s` on a `1024`-row before/after benchmark slice
+  - full optimized entropy on all `7176` rows took `59.0s`
+  - full optimized Phase 4 runtime was `253.1s` with the objective enabled and `157.9s` with the objective disabled
+  - tuning the copy batch size to `1024` reduced full optimized runtime further to about `193.1s` with the objective enabled and `128.2s` with the objective disabled
+  - the verification rewrite reduced one measured verify pass from `22.53s` to `0.045s`
+  - `CROSSFOLD_HDF5_COMPRESSION=none` beat `gzip` strongly on the full write benchmark
+  - the later progress-logging pass showed no evidence of meaningful slowdown on one measured objective-off rerun (`99.3s`)
+- When optimizing Phase 4, benchmark entropy, provenance hashing, split search, and split writing separately before changing scientific validation behavior.
 
-- The repo strongly assumes Windows in many places.
-- `OPENSLIDE_PATH` and `os.add_dll_directory(...)` are used for OpenSlide setup.
-- Hardcoded Windows drive paths are common in `__main__` blocks.
-- If you are working from Linux or WSL, do not “fix” platform assumptions globally unless asked.
+## Phase 3 Performance Notes
+- Use `analysis/stage4_2_graph_tuning_performance_findings.md` as the canonical handoff document for Phase 3.2 tuning-performance work.
+- Use `analysis/stage4_3_graph_cleaning_performance_findings.md` as the canonical handoff document for Phase 3.3 cleaning-performance work.
+- Phase 3.2 no longer depends on OpenCV contrib graph segmentation; it now uses `skimage.segmentation.felzenszwalb` in `helpers/graph/contamination.py`.
+- The biggest confirmed Phase 3.2 win so far was removing duplicate fold-by-fold rescoring in grouped CV by scoring each reviewed record once per parameter set and reusing those scores across folds.
+- Phase 3.3 now requires `GRAPH_CLEANING_PARAMS_PATH` and loads graph parameters and `tau` only from the Phase 3.2 JSON artifact; there is no raw env-var fallback.
+- The biggest confirmed Phase 3.3 wins so far were:
+  - reusing HDF5 `source_signature` instead of hashing the full source file during candidate discovery when the attribute is present
+  - replacing row-at-a-time HDF5 image/mask reads with contiguous batched reads during cleaning
+- Current best-known Phase 3.3 behavior on the measured sample source HDF5 uses the default batched HDF5 fast path in `helpers/graph/cleaning_pipeline.py` with `_HDF5_SCORING_BATCH_SIZE = 512`.
+- Established Phase 3.3 finding: larger contiguous HDF5 batches produced better gains than a simple multiprocessing prototype on the measured 4-core sample machine, so the code currently favors larger batched reads over added parallel complexity.
 
-## Agent-Specific Guidance
+## Phase 7 Operational Notes
+- Phase 7 loads pretrained weights once per architecture/encoder pair, snapshots the initialized state to CPU, and reuses that state across all sampled loss configurations and repeats instead of re-fetching pretrained weights inside the nested screening loops.
+- Expected LR-range-test divergence now stops the current sweep early and preserves partial LR/loss history instead of treating a non-finite loss as a noisy hard failure.
+- CUDA OOM during an LR-range repeat retries at a smaller effective batch size and records the effective batch size in the LR-finder report.
+- Exact MACENKO/VAHADANE runtime normalization can use `LR_FINDER_STAIN_MATRIX_CACHE_PATH` for tiny per-patch stain-matrix cache entries.
+- Console UX for Phase 7 is intentionally compact for notebook environments such as Google Colab: one startup line, periodic snapshot progress lines, and one final summary. Detailed per-run traces stay in `logs/lr_finder.log`.
+- The final Phase 7 summary now reports valid records, completed trials, failed trials, and a per-architecture breakdown.
 
-- Prefer minimal, local edits over broad rewrites.
-- First understand whether a file is legacy, helper, or actively used in the main pipeline.
-- Do not introduce a new framework or project-wide tooling without an explicit request.
-- If adding a new command to documentation, make sure it is actually supported by the repository as-is.
-- When proposing validation, clearly distinguish between official repo workflows and ad hoc checks.
-- If you touch scientific logic, be conservative and preserve reproducibility.
-- If you touch split generation or sanity checks, assume correctness matters more than cleverness.
-
-## Git / Workspace Notes
-
-- In some environments, `git status` may fail with a dubious ownership warning.
-- Do not change global git configuration unless the user explicitly asks.
-- The worktree may contain local data files and generated artifacts; avoid treating them as safe to remove.
-
-## Quick Summary
-
-- This is a script-first research pipeline.
-- There is no formal lint/test harness in-repo.
-- The closest thing to a single test is running `3_1_imageReader_refactored.py` on one sample.
-- Preserve data contracts, patient isolation, and filesystem conventions.
-- Be careful with `.env`, Windows paths, OpenSlide setup, and large generated outputs.
+## Agent Heuristics
+- Prefer minimal local edits.
+- Prefer existing helpers and established patterns over reinvention.
+- If changing scientific logic, be conservative and explicit.
+- If performance work is requested, benchmark before and after when feasible.
+- If unsure where code belongs, prefer a thin stage script and a richer helper module.

@@ -1,0 +1,342 @@
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+
+import torch
+
+from helpers.logging_utils import resolve_log_folder
+from helpers.runtime_platform import resolve_env_path
+from helpers.training.compact_train_selected import normalize_hdf5_compression
+from helpers.training.device import require_cuda_device
+
+
+def _parse_bool(value: str | None, variable_name: str, default: bool) -> bool:
+    if value is None or value == "":
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"The '{variable_name}' environment variable must be a boolean value.")
+
+
+def _parse_positive_int(value: str | None, variable_name: str, default: int) -> int:
+    candidate = default if value is None or value == "" else int(value)
+    if candidate <= 0:
+        raise ValueError(f"The '{variable_name}' environment variable must be greater than zero.")
+    return candidate
+
+
+def _parse_non_negative_int(value: str | None, variable_name: str, default: int) -> int:
+    candidate = default if value is None or value == "" else int(value)
+    if candidate < 0:
+        raise ValueError(
+            f"The '{variable_name}' environment variable must be greater than or equal to zero."
+        )
+    return candidate
+
+
+def _parse_positive_float(value: str | None, variable_name: str, default: float) -> float:
+    candidate = default if value is None or value == "" else float(value)
+    if candidate <= 0:
+        raise ValueError(f"The '{variable_name}' environment variable must be greater than zero.")
+    return candidate
+
+
+def _parse_probability(value: str | None, variable_name: str, default: float) -> float:
+    candidate = default if value is None or value == "" else float(value)
+    if not 0.0 <= candidate <= 1.0:
+        raise ValueError(f"The '{variable_name}' environment variable must be between 0 and 1.")
+    return candidate
+
+
+def _required_path(value: str | None, variable_name: str) -> Path:
+    path = resolve_env_path(value, variable_name, required=True)
+    assert path is not None
+    return path
+
+
+def _resolve_output_dir(value: str | None, master_manifest_path: Path) -> Path:
+    manifest_root = master_manifest_path.parent
+    output_dir = (
+        manifest_root / "STAGE6_SMART_SAMPLER"
+        if value is None or value.strip() == ""
+        else resolve_env_path(value, "SMART_SAMPLER_OUTPUT_DIR", required=True)
+    )
+    assert output_dir is not None
+    try:
+        output_dir.expanduser().relative_to(manifest_root.expanduser())
+    except ValueError as error:
+        raise ValueError(
+            "SMART_SAMPLER_OUTPUT_DIR must be under the directory containing "
+            "SMART_SAMPLER_MASTER_MANIFEST_PATH. Leave SMART_SAMPLER_OUTPUT_DIR blank to use "
+            f"the default: {manifest_root / 'STAGE6_SMART_SAMPLER'}."
+        ) from error
+    return output_dir
+
+
+@dataclass(frozen=True)
+class SmartSamplerConfig:
+    master_manifest_path: Path
+    output_dir: Path
+    output_filename: str
+    local_work_dir: Path | None
+    stage_input_locally: bool
+    stage_outputs_locally: bool
+    clean_local_work_dir: bool
+    write_sidecars: bool
+    overwrite_output: bool
+    model_name: str
+    batch_size: int
+    device: str
+    n_start: int
+    n_max: int
+    growth_factor: float
+    stability_threshold: float
+    stability_repeats: int
+    max_steps: int
+    intersection_ratio_threshold: float
+    k_min: int
+    k_max: int
+    adaptive_keep_enabled: bool
+    keep_min: int
+    keep_step: int
+    keep_improvement_threshold: float
+    keep_patience: int
+    m_max: int
+    seed: int
+    num_workers: int
+    patient_shard_cache_dir: Path | None = None
+    patient_shard_cache_bytes: int = 0
+    use_gist: bool = False
+    gist_candidate_pool_limit: int = 4096
+    protect_positive_labels: bool = True
+    protect_mask_positive: bool = True
+    positive_mask_fraction_threshold: float = 0.0
+    build_compact_train_selected: bool = True
+    compact_train_selected_dir: Path = Path("temp/train_selected_compact")
+    compact_local_work_dir: Path = Path("temp/smart_sampling/compact_train_selected_build")
+    compact_hdf5_compression: str = "none"
+    log_folder: Path = Path("logs")
+    log_file_name: str = "smart_sampler.log"
+
+    @property
+    def log_path(self) -> Path:
+        return self.log_folder / self.log_file_name
+
+
+def load_smart_sampler_config(
+    env: Mapping[str, str] | os._Environ[str] | None = None,
+) -> SmartSamplerConfig:
+    values = env if env is not None else os.environ
+    use_gist_value = values.get("SMART_SAMPLER_USE_GIST")
+    if use_gist_value is None:
+        use_gist_value = values.get("USE_GIST_SCRIPT")
+    master_manifest_path = _required_path(
+        values.get("SMART_SAMPLER_MASTER_MANIFEST_PATH"),
+        "SMART_SAMPLER_MASTER_MANIFEST_PATH",
+    )
+    output_dir = _resolve_output_dir(
+        values.get("SMART_SAMPLER_OUTPUT_DIR"),
+        master_manifest_path,
+    )
+    local_work_dir = resolve_env_path(
+        values.get("SMART_SAMPLER_LOCAL_WORK_DIR"), "SMART_SAMPLER_LOCAL_WORK_DIR"
+    )
+    patient_shard_cache_dir = resolve_env_path(
+        values.get("SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR"),
+        "SMART_SAMPLER_LOCAL_SHARD_CACHE_DIR",
+    )
+    compact_train_selected_dir = resolve_env_path(
+        values.get("TRAIN_SELECTED_COMPACT_DIR")
+        if values.get("TRAIN_SELECTED_COMPACT_DIR") not in {None, ""}
+        else "./temp/train_selected_compact",
+        "TRAIN_SELECTED_COMPACT_DIR",
+        required=True,
+    )
+    assert compact_train_selected_dir is not None
+    compact_local_work_dir_default = (
+        local_work_dir / "compact_train_selected_build"
+        if local_work_dir is not None
+        else Path("./temp/smart_sampling/compact_train_selected_build")
+    )
+    compact_local_work_dir = resolve_env_path(
+        values.get("SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR")
+        if values.get("SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR") not in {None, ""}
+        else str(compact_local_work_dir_default),
+        "SMART_SAMPLER_COMPACT_LOCAL_WORK_DIR",
+        required=True,
+    )
+    assert compact_local_work_dir is not None
+    device = (values.get("SMART_SAMPLER_DEVICE") or "cuda").strip()
+    if torch.device(device).type != "cuda":
+        raise ValueError("SMART_SAMPLER_DEVICE must be a CUDA device for Stage 6.")
+    require_cuda_device()
+    growth_factor = _parse_positive_float(
+        values.get("SMART_SAMPLER_GROWTH_FACTOR"),
+        "SMART_SAMPLER_GROWTH_FACTOR",
+        2.0,
+    )
+    if growth_factor <= 1.0:
+        raise ValueError(
+            "The 'SMART_SAMPLER_GROWTH_FACTOR' environment variable must be greater than 1.0."
+        )
+
+    m_max = _parse_positive_int(values.get("SMART_SAMPLER_M_MAX"), "SMART_SAMPLER_M_MAX", 2000)
+    use_gist = _parse_bool(
+        use_gist_value,
+        "SMART_SAMPLER_USE_GIST",
+        False,
+    )
+    gist_candidate_pool_limit = _parse_positive_int(
+        values.get("SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT"),
+        "SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT",
+        4096,
+    )
+    if use_gist and gist_candidate_pool_limit < m_max:
+        raise ValueError(
+            "SMART_SAMPLER_GIST_CANDIDATE_POOL_LIMIT must be greater than or equal to "
+            "SMART_SAMPLER_M_MAX when SMART_SAMPLER_USE_GIST is enabled."
+        )
+
+    return SmartSamplerConfig(
+        master_manifest_path=master_manifest_path,
+        output_dir=output_dir,
+        output_filename=(
+            values.get("SMART_SAMPLER_OUTPUT_FILENAME") or "TRAIN_FILTERED_shards"
+        ).strip(),
+        local_work_dir=local_work_dir,
+        stage_input_locally=_parse_bool(
+            values.get("SMART_SAMPLER_STAGE_INPUT_LOCALLY"),
+            "SMART_SAMPLER_STAGE_INPUT_LOCALLY",
+            False,
+        ),
+        stage_outputs_locally=_parse_bool(
+            values.get("SMART_SAMPLER_STAGE_OUTPUTS_LOCALLY"),
+            "SMART_SAMPLER_STAGE_OUTPUTS_LOCALLY",
+            False,
+        ),
+        clean_local_work_dir=_parse_bool(
+            values.get("SMART_SAMPLER_CLEAN_LOCAL_WORK_DIR"),
+            "SMART_SAMPLER_CLEAN_LOCAL_WORK_DIR",
+            True,
+        ),
+        write_sidecars=_parse_bool(
+            values.get("SMART_SAMPLER_WRITE_SIDECARS"),
+            "SMART_SAMPLER_WRITE_SIDECARS",
+            True,
+        ),
+        overwrite_output=_parse_bool(
+            values.get("SMART_SAMPLER_OVERWRITE_OUTPUT"),
+            "SMART_SAMPLER_OVERWRITE_OUTPUT",
+            False,
+        ),
+        model_name=(values.get("SMART_SAMPLER_MODEL_NAME") or "owkin/phikon-v2").strip(),
+        batch_size=_parse_positive_int(
+            values.get("SMART_SAMPLER_BATCH_SIZE"),
+            "SMART_SAMPLER_BATCH_SIZE",
+            128,
+        ),
+        device=device,
+        n_start=_parse_positive_int(
+            values.get("SMART_SAMPLER_N_START"), "SMART_SAMPLER_N_START", 512
+        ),
+        n_max=_parse_positive_int(values.get("SMART_SAMPLER_N_MAX"), "SMART_SAMPLER_N_MAX", 15000),
+        growth_factor=growth_factor,
+        stability_threshold=_parse_probability(
+            values.get("SMART_SAMPLER_STABILITY_THRESHOLD"),
+            "SMART_SAMPLER_STABILITY_THRESHOLD",
+            0.85,
+        ),
+        stability_repeats=_parse_positive_int(
+            values.get("SMART_SAMPLER_STABILITY_REPEATS"),
+            "SMART_SAMPLER_STABILITY_REPEATS",
+            3,
+        ),
+        max_steps=_parse_positive_int(
+            values.get("SMART_SAMPLER_MAX_STEPS"),
+            "SMART_SAMPLER_MAX_STEPS",
+            7,
+        ),
+        intersection_ratio_threshold=_parse_probability(
+            values.get("SMART_SAMPLER_INTERSECTION_RATIO_THRESHOLD"),
+            "SMART_SAMPLER_INTERSECTION_RATIO_THRESHOLD",
+            0.2,
+        ),
+        k_min=_parse_positive_int(values.get("SMART_SAMPLER_K_MIN"), "SMART_SAMPLER_K_MIN", 20),
+        k_max=_parse_positive_int(values.get("SMART_SAMPLER_K_MAX"), "SMART_SAMPLER_K_MAX", 80),
+        adaptive_keep_enabled=_parse_bool(
+            values.get("SMART_SAMPLER_ADAPTIVE_KEEP_ENABLED"),
+            "SMART_SAMPLER_ADAPTIVE_KEEP_ENABLED",
+            True,
+        ),
+        keep_min=_parse_positive_int(
+            values.get("SMART_SAMPLER_KEEP_MIN"),
+            "SMART_SAMPLER_KEEP_MIN",
+            64,
+        ),
+        keep_step=_parse_positive_int(
+            values.get("SMART_SAMPLER_KEEP_STEP"),
+            "SMART_SAMPLER_KEEP_STEP",
+            64,
+        ),
+        keep_improvement_threshold=_parse_probability(
+            values.get("SMART_SAMPLER_KEEP_IMPROVEMENT_THRESHOLD"),
+            "SMART_SAMPLER_KEEP_IMPROVEMENT_THRESHOLD",
+            0.02,
+        ),
+        keep_patience=_parse_positive_int(
+            values.get("SMART_SAMPLER_KEEP_PATIENCE"),
+            "SMART_SAMPLER_KEEP_PATIENCE",
+            2,
+        ),
+        m_max=m_max,
+        seed=_parse_positive_int(values.get("SMART_SAMPLER_SEED"), "SMART_SAMPLER_SEED", 42),
+        num_workers=max(
+            0,
+            int(values.get("SMART_SAMPLER_NUM_WORKERS") or 2),
+        ),
+        patient_shard_cache_dir=patient_shard_cache_dir,
+        patient_shard_cache_bytes=_parse_non_negative_int(
+            values.get("SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES"),
+            "SMART_SAMPLER_LOCAL_SHARD_CACHE_BYTES",
+            0,
+        ),
+        use_gist=use_gist,
+        gist_candidate_pool_limit=gist_candidate_pool_limit,
+        protect_positive_labels=_parse_bool(
+            values.get("SMART_SAMPLER_PROTECT_POSITIVE_LABELS"),
+            "SMART_SAMPLER_PROTECT_POSITIVE_LABELS",
+            True,
+        ),
+        protect_mask_positive=_parse_bool(
+            values.get("SMART_SAMPLER_PROTECT_MASK_POSITIVE"),
+            "SMART_SAMPLER_PROTECT_MASK_POSITIVE",
+            True,
+        ),
+        positive_mask_fraction_threshold=_parse_probability(
+            values.get("SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD"),
+            "SMART_SAMPLER_POSITIVE_MASK_FRACTION_THRESHOLD",
+            0.0,
+        ),
+        build_compact_train_selected=_parse_bool(
+            values.get("SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED"),
+            "SMART_SAMPLER_BUILD_COMPACT_TRAIN_SELECTED",
+            True,
+        ),
+        compact_train_selected_dir=compact_train_selected_dir,
+        compact_local_work_dir=compact_local_work_dir,
+        compact_hdf5_compression=normalize_hdf5_compression(
+            values.get("SMART_SAMPLER_COMPACT_HDF5_COMPRESSION") or "none"
+        ),
+        log_folder=resolve_log_folder(
+            values,
+            system_name=None,
+            fallback_names=("SMART_SAMPLER_LOG_FOLDER",),
+        ),
+        log_file_name=(values.get("SMART_SAMPLER_LOG_FILE") or "smart_sampler.log").strip(),
+    )

@@ -1,0 +1,143 @@
+[project]
+name = "master-project"
+version = "0.1.0"
+description = "High-performance medical imaging experiments"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "torchaudio==2.10.0",
+    "numpy==1.26.4",
+    "pandas==2.2.2",
+    "scikit-learn==1.4.2",
+    "scikit-image==0.23.2",
+    "scikit-optimize==0.10.2",
+    "opencv-contrib-python==4.9.0.80",
+    "Pillow>=10.4.0",
+    "openslide-python",
+    "openslide-bin; sys_platform == 'darwin'",
+    "torch-staintools",
+    "shapely>=2.0.0",
+    "albumentations",
+    "segmentation-models-pytorch",
+    "h5py",
+    "tqdm==4.66.4",
+    "numba>=0.60.0",
+    "joblib>=1.4.0",
+    "matplotlib",
+    "python-dotenv==1.2.2",
+    "PyYAML",
+    "seaborn==0.13.2",
+    "torchmetrics==1.9.0",
+    "optuna==4.8.0",
+    "schedulefree==1.4.1",
+    "aim; sys_platform != 'win32'",
+    "psutil",
+    "pyarrow",
+    "orjson",
+    "transformers==5.5.0",
+    "xformers; sys_platform != 'darwin'",
+    "mermaid-py",
+    "setuptools<82",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff==0.15.5",
+    "mypy>=1.13.0",
+    "torchinfo",
+    "line-profiler>=4.1.0",
+    "scalene>=1.5.0",
+    "py-spy>=0.3.14",
+    "snakeviz>=2.2.0",
+    "pytest-cov==7.0.0",
+    "mutmut>=3.5.0",
+]
+
+# --- UV Magic: Fetching CUDA 12.6 specifically ---
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }
+torchvision = { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }
+torchaudio = { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }
+segmentation-models-pytorch = { git = "https://github.com/qubvel/segmentation_models.pytorch" }
+torch-staintools = { git = "https://github.com/CielAl/torch-staintools.git" }
+
+# --- Tool Configuration ---
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [
+    "scripts/aim_ui.py",
+    "scripts/app_ia_medica_v3.py",
+]
+
+[tool.ruff.lint]
+# Added "C90" (McCabe complexity) and "PLR" (Pylint Refactor checks)
+select = ["E", "F", "I", "UP", "B", "C90", "PLR"]
+
+
+[tool.ruff.lint.mccabe]
+# Flags functions with a cyclomatic complexity higher than this. 
+# 10 is a strict, healthy standard.
+max-complexity = 10 
+
+[tool.ruff.lint.pylint]
+# God-file and God-class prevention limits
+max-args = 7               # Too many arguments (PLR0913)
+max-branches = 12          # Too many branches (PLR0912)
+max-returns = 6            # Too many return statements (PLR0911)
+max-statements = 50        # Too many statements in a function (PLR0915)
+max-public-methods = 20    # Too many methods in a class (PLR0904)
+
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+exclude = "^scripts/(aim_ui|app_ia_medica_v3)\\.py$"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mutmut]
+paths_to_mutate = [
+    "helpers/artifact/config.py",
+    "helpers/artifact/logging.py",
+    "helpers/artifact/paths.py",
+    "helpers/artifact/repository.py",
+    "helpers/artifact/zip.py",
+    "helpers/extraction/artifact_lookup.py",
+    "helpers/extraction/data_handlers.py",
+    "helpers/logging_utils.py",
+    "helpers/optimization_sampling/logging.py",
+    "helpers/packaging/config.py",
+    "helpers/runtime_platform.py",
+    "helpers/sanity/config.py",
+    "helpers/sanity/reporting.py",
+]
+also_copy = ["helpers"]
+tests_dir = []
+mutate_only_covered_lines = true
+max_stack_depth = 8
+pytest_add_cli_args = ["-q", "--maxfail=1"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_artifact_config.py",
+    "tests/test_artifact_logging.py",
+    "tests/test_artifact_paths.py",
+    "tests/test_artifact_repository.py",
+    "tests/test_artifact_zip.py",
+    "tests/test_extraction_artifact_lookup.py",
+    "tests/test_extraction_data_handlers.py",
+    "tests/test_logging_utils.py",
+    "tests/test_optimization_sampling_logging.py",
+    "tests/test_packaging_config.py",
+    "tests/test_runtime_platform.py",
+    "tests/test_sanity_config.py",
+    "tests/test_sanity_reporting.py",
+]

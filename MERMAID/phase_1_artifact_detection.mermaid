@@ -1,0 +1,13 @@
+flowchart LR
+    wsi[Input<br/>Raw WSIs]
+    env[Input<br/>.env + artifact settings]
+    p1[Phase 1<br/>1_artifact_detection.py<br/>Detect artifacts on slides]
+    geojson[Output<br/>Artifact GeoJSON files]
+    sqlite[Output<br/>Artifact SQLite tracking]
+    no_manifest[[master_manifest.sqlite<br/>No interaction in Phase 1]]
+
+    wsi --> p1
+    env --> p1
+    p1 --> geojson
+    p1 --> sqlite
+    p1 -. no read / no write .-> no_manifest

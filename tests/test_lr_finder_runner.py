@@ -1,0 +1,653 @@
+# mypy: disable-error-code=no-untyped-call
+
+from __future__ import annotations
+
+import os
+from contextlib import nullcontext
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+
+import numpy as np
+import pytest
+import torch
+
+from helpers.lr_finder.config import BCEDiceSearchSpace, LRFinderConfig, ModelPlan
+from helpers.lr_finder.reporting import RunRecord
+from helpers.lr_finder.runner import (
+    LossConfigRunContext,
+    LRFinderRunConfig,
+    _run_single_loss_config,
+    _SnapshotProgressReporter,
+    clear_gpu,
+    configure_execution_mode,
+    plot_stability_curves,
+    run_lr_finder_once,
+    run_lr_finder_screening,
+)
+from helpers.lr_finder.search_space import BCEDiceParams
+from helpers.training.gpu import GPUDownscale, GPUNormalizer
+
+
+def _build_config(tmp_path: Path) -> LRFinderConfig:
+    return LRFinderConfig(
+        master_manifest_path=tmp_path / "master_manifest.sqlite",
+        output_dir=tmp_path / "reports",
+        local_data_dir=tmp_path / "local",
+        stage_input_locally=False,
+        overwrite_output=True,
+        smart_sampling=True,
+        execution_mode="PAPER",
+        amp_precision="fp16",
+        seed=24,
+        batch_size=2,
+        workers=0,
+        use_subset=False,
+        subset_ratio=1.0,
+        num_lhs_samples=2,
+        end_lr=0.1,
+        num_iter=5,
+        num_repeats=2,
+        optimizer_weight_decay=1e-4,
+        optimizer_start_lr=1e-8,
+        pdf_name="report.pdf",
+        hf_token=None,
+        search_space=BCEDiceSearchSpace(),
+        model_plans=[ModelPlan(architecture="FPN", encoder="resnet34")],
+    )
+
+
+def _run_config(**overrides: Any) -> LRFinderRunConfig:
+    payload = {
+        "model": cast(Any, SimpleNamespace()),
+        "optimizer": cast(Any, SimpleNamespace()),
+        "criterion": cast(Any, SimpleNamespace()),
+        "train_loader": [],
+        "device": cast(Any, "cpu"),
+        "end_lr": 0.1,
+        "num_iter": 5,
+        "architecture": "FPN",
+        "amp_precision": "fp16",
+        "gpu_normalizer": cast(GPUNormalizer, lambda x: x),
+        "gpu_downscale": cast(GPUDownscale, lambda x: x),
+    }
+    payload.update(overrides)
+    return LRFinderRunConfig(**payload)
+
+
+def _loss_context(
+    *,
+    data_bundle: Any,
+    model_plan: ModelPlan,
+    params: BCEDiceParams,
+    config_index: int,
+    device: object = "cpu",
+    initial_state_dict: dict[str, torch.Tensor] | None = None,
+) -> LossConfigRunContext:
+    return LossConfigRunContext(
+        device=cast(Any, device),
+        data_bundle=data_bundle,
+        model_plan=model_plan,
+        params=params,
+        config_index=config_index,
+        gpu_normalizer=cast(GPUNormalizer, lambda x: x),
+        gpu_downscale=cast(GPUDownscale, lambda x: x),
+        initial_state_dict=initial_state_dict or {},
+    )
+
+
+def test_configure_execution_mode_switches_determinism_flags() -> None:
+    configure_execution_mode("FAST_DEV")
+    assert cast(Any, __import__("torch")).backends.cudnn.benchmark is True
+    assert cast(Any, __import__("torch")).backends.cudnn.deterministic is False
+
+    configure_execution_mode("PAPER")
+    assert cast(Any, __import__("torch")).backends.cudnn.benchmark is False
+    assert cast(Any, __import__("torch")).backends.cudnn.deterministic is True
+
+
+def test_clear_gpu_calls_optional_ipc_collect(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    fake_cuda = SimpleNamespace(
+        is_available=lambda: True,
+        empty_cache=lambda: calls.append("empty_cache"),
+        ipc_collect=lambda: calls.append("ipc_collect"),
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.torch.cuda", fake_cuda)
+
+    clear_gpu()
+
+    assert calls == ["empty_cache", "ipc_collect"]
+
+
+def test_snapshot_progress_reporter_renders_compact_status_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = _SnapshotProgressReporter(total_trials=4)
+
+    reporter.advance(
+        2,
+        architecture="UNET++",
+        encoder="resnet34",
+        sample_index=1,
+        total_samples=2,
+        completed_trials=1,
+        failed_trials=1,
+    )
+    reporter.finish()
+
+    output = capsys.readouterr().out
+    assert "LR Finder [" in output
+    assert "2/4 (50.0%)" in output
+    assert "model=UNET++/resnet34" in output
+    assert "step=1/2" in output
+    assert "passed=1" in output
+    assert "failed=1" in output
+    assert "trials/s" in output
+
+
+def test_plot_stability_curves_replaces_colab_inline_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MPLBACKEND", "module://matplotlib_inline.backend_inline")
+    out_png = tmp_path / "curve.png"
+
+    plot_stability_curves(
+        [np.array([1e-6, 1e-5, 1e-4], dtype=np.float64)],
+        [np.array([0.9, 0.5, 0.7], dtype=np.float64)],
+        title="LR finder",
+        out_png=out_png,
+        skip_start=0,
+        skip_end=0,
+    )
+
+    assert os.environ["MPLBACKEND"] == "Agg"
+    assert out_png.is_file()
+
+
+def test_run_lr_finder_once_raises_when_range_test_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            del images
+            raise RuntimeError("range test failed")
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
+    )
+    model = FailingModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
+    images = torch.zeros((1, 3, 8, 8), dtype=torch.float32)
+    masks = torch.zeros((1, 8, 8), dtype=torch.long)
+
+    with pytest.raises(RuntimeError, match="range test failed"):
+        run_lr_finder_once(
+            _run_config(
+                model=model,
+                optimizer=optimizer,
+                criterion=torch.nn.CrossEntropyLoss(),
+                train_loader=[(images, masks)],
+                device=torch.device("cpu"),
+                num_iter=2,
+            )
+        )
+
+
+def test_run_lr_finder_once_runs_direct_exponential_range_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = torch.nn.Conv2d(3, 2, kernel_size=1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
+    )
+    monkeypatch.setenv("MPLBACKEND", "module://matplotlib_inline.backend_inline")
+    images = torch.zeros((1, 3, 8, 8), dtype=torch.float32)
+    masks = torch.zeros((1, 8, 8), dtype=torch.long)
+
+    history = run_lr_finder_once(
+        _run_config(
+            model=model,
+            optimizer=optimizer,
+            criterion=torch.nn.CrossEntropyLoss(),
+            train_loader=[(images, masks), (images, masks)],
+            device=torch.device("cpu"),
+            end_lr=1e-3,
+            num_iter=2,
+        )
+    )
+
+    assert os.environ["MPLBACKEND"] == "Agg"
+    assert history["lr"].tolist() == [1e-5, 1e-3]
+    assert history["loss"].size == len(history["lr"])
+
+
+def test_run_lr_finder_once_returns_partial_history_after_non_finite_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FiniteThenNanLoss(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def forward(self, outputs: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+            del masks
+            self.calls += 1
+            if self.calls == 1:
+                return outputs.mean()
+            return outputs.mean() * torch.tensor(float("nan"))
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
+    )
+    model = torch.nn.Conv2d(3, 2, kernel_size=1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
+    images = torch.zeros((1, 3, 8, 8), dtype=torch.float32)
+    masks = torch.zeros((1, 8, 8), dtype=torch.long)
+
+    history = run_lr_finder_once(
+        _run_config(
+            model=model,
+            optimizer=optimizer,
+            criterion=FiniteThenNanLoss(),
+            train_loader=[(images, masks), (images, masks)],
+            device=torch.device("cpu"),
+            end_lr=1e-3,
+            num_iter=2,
+        )
+    )
+
+    assert history["lr"].tolist() == [1e-5]
+    assert history["loss"].size == 1
+
+
+def test_run_lr_finder_once_squeezes_masks_and_returns_batch_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = torch.nn.Conv2d(3, 2, kernel_size=1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.setup_precision",
+        lambda architecture, amp_precision: (None, None, None),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.autocast_ctx",
+        lambda images, amp_dtype: nullcontext(),
+    )
+
+    images = torch.zeros((1, 3, 8, 8), dtype=torch.float32)
+    masks = torch.zeros((1, 1, 8, 8), dtype=torch.long)
+    history = run_lr_finder_once(
+        _run_config(
+            model=model,
+            optimizer=optimizer,
+            criterion=torch.nn.CrossEntropyLoss(),
+            train_loader=[(images, masks), (images, masks)],
+            device=torch.device("cpu"),
+            num_iter=2,
+        )
+    )
+
+    assert history["lr"].size == len(history["loss"])
+    assert np.isfinite(history["loss"]).all()
+
+
+def test_plot_stability_curves_writes_png(tmp_path: Path) -> None:
+    out_png = tmp_path / "plot.png"
+
+    plot_stability_curves(
+        [np.array([1e-5, 1e-4, 1e-3, 1e-2], dtype=np.float64)],
+        [np.array([5.0, 4.0, 3.0, 2.0], dtype=np.float64)],
+        title="Curve",
+        out_png=out_png,
+        skip_start=1,
+        skip_end=1,
+    )
+
+    assert out_png.is_file()
+
+
+def test_run_single_loss_config_returns_none_when_all_repeats_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _build_config(tmp_path)
+    model_plan = ModelPlan(architecture="FPN", encoder="resnet34")
+    params = BCEDiceParams(alpha=0.1, beta=0.2, gamma=0.3)
+    dataset = SimpleNamespace(close=lambda: None)
+    data_bundle = SimpleNamespace(dataset=dataset, sample_weights=np.array([1.0], dtype=np.float32))
+
+    monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.build_train_loader",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.create_model",
+        lambda architecture, encoder, validation=False: (_ for _ in ()).throw(
+            RuntimeError("model failed")
+        ),
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.clear_gpu", lambda: None)
+
+    record, completed, failed = _run_single_loss_config(
+        config,
+        _loss_context(
+            data_bundle=data_bundle,
+            model_plan=model_plan,
+            params=params,
+            config_index=1,
+        ),
+    )
+
+    assert record is None
+    assert completed == 0
+    assert failed == config.num_repeats
+
+
+def test_run_single_loss_config_treats_invalid_curve_stats_as_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _build_config(tmp_path)
+    model_plan = ModelPlan(architecture="FPN", encoder="resnet34")
+    params = BCEDiceParams(alpha=0.1, beta=0.2, gamma=0.3)
+    dataset = SimpleNamespace(close=lambda: None)
+    data_bundle = SimpleNamespace(dataset=dataset, sample_weights=np.array([1.0], dtype=np.float32))
+
+    monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.build_train_loader",
+        lambda *args, **kwargs: object(),
+    )
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.loaded_state_dict: dict[str, torch.Tensor] | None = None
+
+        def to(self, device: object) -> FakeModel:
+            del device
+            return self
+
+        def parameters(self) -> list[object]:
+            return []
+
+        def load_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
+            self.loaded_state_dict = state_dict
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.create_model",
+        lambda architecture, encoder, validation=False: FakeModel(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.torch.optim.AdamW",
+        lambda params, lr, weight_decay: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.BCEDiceHybridLossPaper",
+        lambda config: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.run_lr_finder_once",
+        lambda config: {
+            "lr": np.array([1e-5, 1e-4], dtype=np.float64),
+            "loss": np.array([np.nan, np.nan], dtype=np.float64),
+        },
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.clear_gpu", lambda: None)
+
+    record, completed, failed = _run_single_loss_config(
+        config,
+        _loss_context(
+            data_bundle=data_bundle,
+            model_plan=model_plan,
+            params=params,
+            config_index=1,
+            device=torch.device("cpu"),
+            initial_state_dict={"weight": torch.tensor([1.0])},
+        ),
+    )
+
+    assert record is None
+    assert completed == 0
+    assert failed == config.num_repeats
+
+
+def test_run_single_loss_config_retries_cuda_oom_with_smaller_batch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    initial_batch_size = 4
+    retry_batch_size = 2
+    config = replace(_build_config(tmp_path), batch_size=initial_batch_size, num_repeats=1)
+    model_plan = ModelPlan(architecture="UNET++", encoder="efficientnet-b7")
+    params = BCEDiceParams(alpha=0.1, beta=0.2, gamma=0.3)
+    dataset = SimpleNamespace(close=lambda: None)
+    data_bundle = SimpleNamespace(dataset=dataset, sample_weights=np.array([1.0], dtype=np.float32))
+    batch_sizes: list[int] = []
+    run_calls = {"value": 0}
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor([1.0]))
+
+        def forward(self, images: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(
+                (images.shape[0], 2, images.shape[-2], images.shape[-1]),
+                dtype=images.dtype,
+            )
+
+    def fake_build_loader(*_args: object, **kwargs: object) -> object:
+        batch_sizes.append(cast(int, kwargs["batch_size"]))
+        return object()
+
+    def fake_run_once(_config: LRFinderRunConfig) -> dict[str, Any]:
+        run_calls["value"] += 1
+        if run_calls["value"] == 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 98.00 MiB.")
+        return {
+            "lr": np.linspace(1e-8, 1e-1, 25, dtype=np.float64),
+            "loss": np.linspace(2.0, 0.5, 25, dtype=np.float64),
+        }
+
+    monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
+    monkeypatch.setattr("helpers.lr_finder.runner.build_train_loader", fake_build_loader)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.create_model",
+        lambda architecture, encoder, validation=False: FakeModel(),
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.BCEDiceHybridLossPaper",
+        lambda config: torch.nn.CrossEntropyLoss(),
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.run_lr_finder_once", fake_run_once)
+    monkeypatch.setattr("helpers.lr_finder.runner.clear_gpu", lambda: None)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.plot_stability_curves",
+        lambda *_args, **_kwargs: None,
+    )
+
+    record, completed, failed = _run_single_loss_config(
+        config,
+        _loss_context(
+            data_bundle=data_bundle,
+            model_plan=model_plan,
+            params=params,
+            config_index=1,
+            device=torch.device("cpu"),
+            initial_state_dict={"weight": torch.tensor([1.0])},
+        ),
+    )
+
+    assert record is not None
+    assert record.effective_batch_size == retry_batch_size
+    assert completed == 1
+    assert failed == 0
+    assert batch_sizes == [initial_batch_size, retry_batch_size]
+
+
+def test_run_lr_finder_screening_writes_summaries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = replace(_build_config(tmp_path), workers=2)
+    (config.output_dir / "FPN").mkdir(parents=True, exist_ok=True)
+    dataset = SimpleNamespace(closed=False)
+
+    def close_dataset() -> None:
+        dataset.closed = True
+
+    dataset.close = close_dataset
+    data_bundle = SimpleNamespace(dataset=dataset, sample_weights=np.array([1.0], dtype=np.float32))
+    samples = [
+        BCEDiceParams(alpha=0.1, beta=0.2, gamma=0.3),
+        BCEDiceParams(alpha=0.4, beta=0.5, gamma=0.6),
+    ]
+    call_count = {"value": 0}
+    preload_calls: list[tuple[str, str]] = []
+    normalizer_devices: list[torch.device | str] = []
+
+    class DummyProgress:
+        def __init__(self) -> None:
+            self.updated = 0
+            self.finished = False
+            self.calls: list[dict[str, object]] = []
+
+        def advance(
+            self,
+            value: int,
+            *,
+            architecture: str,
+            encoder: str,
+            sample_index: int,
+            total_samples: int,
+            completed_trials: int,
+            failed_trials: int,
+        ) -> None:
+            self.updated += value
+            self.calls.append(
+                {
+                    "architecture": architecture,
+                    "encoder": encoder,
+                    "sample_index": sample_index,
+                    "total_samples": total_samples,
+                    "completed_trials": completed_trials,
+                    "failed_trials": failed_trials,
+                }
+            )
+
+        def finish(self) -> None:
+            self.finished = True
+
+    progress = DummyProgress()
+
+    def fake_prepare_training_data(config: LRFinderConfig, *, normalizer_device: object) -> object:
+        del config
+        normalizer_devices.append(cast(torch.device | str, normalizer_device))
+        return data_bundle
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.prepare_training_data",
+        fake_prepare_training_data,
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.sample_bcedice_params", lambda n, search_space, seed: samples
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.configure_execution_mode", lambda mode: None)
+    monkeypatch.setattr("helpers.lr_finder.runner.seed_everything", lambda seed: None)
+    monkeypatch.setattr("helpers.lr_finder.runner.GPUNormalizer", lambda **kwargs: lambda x: x)
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner._SnapshotProgressReporter", lambda total_trials: progress
+    )
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner.GPUDownscale",
+        lambda p: SimpleNamespace(to=lambda device: lambda x: x),
+    )
+    monkeypatch.setattr("helpers.lr_finder.runner.require_cuda_device", lambda: "cuda")
+
+    def fake_capture_pretrained_model_state(
+        model_plan: ModelPlan, device: object
+    ) -> dict[str, torch.Tensor]:
+        del device
+        preload_calls.append((model_plan.architecture, model_plan.encoder))
+        return {"weight": torch.tensor([1.0])}
+
+    monkeypatch.setattr(
+        "helpers.lr_finder.runner._capture_pretrained_model_state",
+        fake_capture_pretrained_model_state,
+    )
+
+    def fake_run_single(*_args: object, **_kwargs: object) -> tuple[RunRecord | None, int, int]:
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return (
+                RunRecord(
+                    architecture="FPN",
+                    encoder="resnet34",
+                    alpha=0.1,
+                    beta=0.2,
+                    gamma=0.3,
+                    median_min_loss=0.4,
+                    plot_path=config.output_dir / "FPN" / "001.png",
+                    csv_path=config.output_dir / "FPN" / "SUMMARY_FPN_STABILITY.csv",
+                ),
+                1,
+                0,
+            )
+        return (None, 0, 1)
+
+    monkeypatch.setattr("helpers.lr_finder.runner._run_single_loss_config", fake_run_single)
+
+    outputs = run_lr_finder_screening(config)
+
+    assert outputs.completed_trials == 1
+    assert outputs.failed_trials == 1
+    assert outputs.architecture_trial_stats == {
+        "FPN": {"valid_records": 1, "completed_trials": 1, "failed_trials": 1}
+    }
+    assert outputs.summary_all_path.is_file()
+    assert outputs.lhs_samples_path.is_file()
+    assert outputs.architecture_summary_paths["FPN"].is_file()
+    assert dataset.closed is True
+    assert normalizer_devices == [torch.device("cpu")]
+    assert preload_calls == [("FPN", "resnet34")]
+    assert progress.updated == len(samples) * config.num_repeats
+    assert progress.finished is True
+    assert progress.calls == [
+        {
+            "architecture": "FPN",
+            "encoder": "resnet34",
+            "sample_index": 1,
+            "total_samples": 2,
+            "completed_trials": 1,
+            "failed_trials": 0,
+        },
+        {
+            "architecture": "FPN",
+            "encoder": "resnet34",
+            "sample_index": 2,
+            "total_samples": 2,
+            "completed_trials": 1,
+            "failed_trials": 1,
+        },
+    ]

@@ -1,0 +1,21 @@
+flowchart LR
+    manifest[(master_manifest.sqlite<br/>Canonical patch rows + row state)]
+    shards[Input<br/>Phase 2 HDF5 shards<br/>Read-only pixel backend]
+    p31[Phase 3.1<br/>3_1_optimization_sampling.py<br/>Sample cancer rows for review]
+    overlays[Output<br/>Pilot sample + master candidate pool overlays]
+    review[Human review<br/>APPROVED / REJECTED]
+    p32[Phase 3.2<br/>3_2_tune_graph_method.py<br/>Tune graph cleaning rule]
+    params[Output<br/>graph_cleaning_params.json<br/>including selected rule/tau]
+    p33[Phase 3.3<br/>3_3_cleaner_script.py<br/>Graph-clean cancer rows<br/>pass negatives through]
+    sidecars[Output<br/>accepted_manifest.csv + rejected_manifest.csv]
+
+    manifest -. read cancer candidate rows .-> p31
+    shards -. load pixels for overlays .-> p31
+    p31 --> overlays --> review --> p32
+    manifest -. resolve reviewed stems .-> p32
+    shards -. load reviewed pixels .-> p32
+    p32 --> params --> p33
+    manifest -. read canonical cancer rows .-> p33
+    shards -. read-only pixel loading .-> p33
+    p33 --> sidecars
+    p33 -. updates patch_stage_state<br/>with source-signature parity checks .-> manifest

@@ -1,0 +1,16 @@
+flowchart LR
+    manifest[(master_manifest.sqlite<br/>TRAIN rows + split state<br/>portable shard refs)]
+    shards[Input<br/>Canonical Phase 2 patient HDF5 shards]
+    embeddings[Feature extractor<br/>Phikon-v2 embeddings]
+    p6[Phase 6<br/>6_smart_sampler.py<br/>Protect positives + select diverse TRAIN rows]
+    gist[Optional selector<br/>GIST-style facility-location<br/>with landmark pool for large patients]
+    sidecars[Output<br/>Sampling sidecars / reports<br/>+ SQLite row state]
+    compact[Optional output<br/>Compact TRAIN_SELECTED HDF5<br/>index.sqlite + summary.json]
+
+    manifest -. read TRAIN candidate rows .-> p6
+    shards -. load candidate pixels .-> p6
+    embeddings --> p6
+    gist -. optional .-> p6
+    p6 --> sidecars
+    p6 --> compact
+    p6 -. records sampling run<br/>+ is_stage7_selected decisions .-> manifest

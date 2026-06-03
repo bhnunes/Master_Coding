@@ -1,0 +1,19 @@
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 28, "rankSpacing": 44}, "themeVariables": {"fontFamily": "Arial", "fontSize": "24px", "primaryTextColor": "#111827", "lineColor": "#4b5563"}}}%%
+flowchart TB
+    inputs["<b>Raw&nbsp;slide&nbsp;pairs</b><br/>WSIs&nbsp;+&nbsp;annotations"]
+    registry["<b>Curated&nbsp;patch&nbsp;registry</b><br/>clean&nbsp;HDF5&nbsp;shards&nbsp;+&nbsp;portable&nbsp;manifest"]
+    split["<b>Experiment&nbsp;state</b><br/>patient&nbsp;split&nbsp;+&nbsp;training&nbsp;stain&nbsp;state"]
+    development["<b>Model&nbsp;development</b><br/>TRAIN&nbsp;models&nbsp;+&nbsp;VAL&nbsp;recipe&nbsp;selection"]
+    test["<b>Frozen&nbsp;TEST&nbsp;inference</b><br/>TEST&nbsp;metrics&nbsp;+&nbsp;reports"]
+
+    inputs --> registry --> split --> development --> test
+
+    classDef source fill:#f8fafc,stroke:#475569,stroke-width:1.3px,color:#111827;
+    classDef state fill:#ecfeff,stroke:#0e7490,stroke-width:1.5px,color:#111827;
+    classDef train fill:#f0fdf4,stroke:#15803d,stroke-width:1.5px,color:#111827;
+    classDef eval fill:#fff7ed,stroke:#c2410c,stroke-width:1.5px,color:#111827;
+
+    class inputs,registry source;
+    class split state;
+    class development train;
+    class test eval;

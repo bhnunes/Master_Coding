@@ -1,0 +1,7 @@
+interface:
+  display_name: "LaTeX Document"
+  short_description: "Create, compile, and convert LaTeX/PDF docs"
+  default_prompt: "Use $latex-document-skill to create and compile a polished LaTeX report."
+
+policy:
+  allow_implicit_invocation: true

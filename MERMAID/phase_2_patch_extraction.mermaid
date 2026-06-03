@@ -1,0 +1,19 @@
+flowchart LR
+    wsi[Input<br/>Raw WSIs]
+    annotations[Input<br/>Annotations / XML<br/>HIESD / CHILE label policy]
+    env[Input<br/>Extraction .env settings]
+    artifact_meta[Optional input<br/>Artifact GeoJSON + SQLite tracking]
+    p2[Phase 2<br/>2_database_manager.py<br/>Extract canonical patches<br/>suppress native metadata noise<br/>validate manifest integrity]
+    shards[Output<br/>Canonical Phase 2 patient HDF5 shards<br/>images / masks / labels / patient_ids / filenames]
+    manifest[(master_manifest.sqlite<br/>Portable source/artifact refs<br/>canonical patch rows + stage state)]
+    shard_manifest[Output<br/>Stage 2 manifest.json<br/>+ HDF5 source_signature]
+    stage2_sidecars[Output<br/>Logs + extraction metadata]
+
+    wsi --> p2
+    annotations --> p2
+    env --> p2
+    artifact_meta -. optional .-> p2
+    p2 --> shards
+    p2 --> shard_manifest
+    p2 --> stage2_sidecars
+    p2 -. writes canonical rows<br/>pre/post integrity checked .-> manifest

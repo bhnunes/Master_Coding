@@ -1,0 +1,1049 @@
+\chapter{Resultados e discussão}\label{chp:resultados}
+
+Este capítulo avalia a consistência do método proposto quando aplicado ao DIAGSET, considerando o encadeamento completo entre curadoria dos dados, treinamento, combinação dos modelos e inferência final. A análise das estratégias de normalização de cor é utilizada como eixo comparativo, mas não constitui o objetivo isolado da avaliação. O interesse principal está em verificar se o comportamento do fluxo se mantém coerente quando observado por diferentes perspectivas: desempenho agregado por pixel, desempenho em nível de paciente, capacidade discriminativa global e separação explícita entre casos com lesão e casos sem lesão visível.
+
+Os resultados mostram que não há uma estratégia universalmente superior em todos os critérios avaliados. A ausência de normalização apresentou os melhores Dice micro e macro, Ruifrok obteve a maior estimativa pontual de AUROC e o maior Dice entre pacientes positivos, enquanto Macenko alcançou o melhor \textit{AvAcc} no reconhecimento binário em nível de \textit{patch}. Essa diferença entre métricas reforça a importância de avaliar o método além de um único indicador médio, especialmente em segmentação médica, na qual imagens sem regiões positivas podem distorcer a interpretação do Dice se forem combinadas diretamente com imagens lesionadas.
+
+Todas as comparações foram conduzidas a partir dos artefatos finais do experimento, sem recálculo de métricas ou alteração dos intervalos de confiança. Os limiares, pesos do \textit{ensemble}, metadados de ingestão e registros de limpeza foram utilizados apenas como fontes de rastreabilidade metodológica. Desse modo, a análise preserva a cadeia experimental definida previamente, conectando ingestão, curadoria, treinamento, definição da receita final do \textit{ensemble} e avaliação no conjunto de teste.
+
+\section{Ingestão, curadoria e conjunto analisado}
+\label{sec:res_diagset_conjunto}
+
+A avaliação experimental em DIAGSET começou pela etapa de ingestão, na qual as imagens e anotações foram registradas antes da geração dos \textit{patches}. Esse registro inicial permitiu verificar a consistência entre arquivos de imagem, anotações e representações intermediárias usadas nas fases seguintes. Conforme resumido na \Tabela{tab:results_diagset-stage2-ingestion}, foram identificadas 429 imagens no formato \texttt{.ndpi} e 429 anotações no formato \texttt{.ndpa}. Destas, 419 apresentaram pareamento válido com as anotações convertidas para GeoJSON, enquanto 10 foram classificadas como falha ou rejeição antes da extração final.
+
+\begin{table}[!htb]
+\centering
+\caption{Ingestão e extração inicial de DIAGSET antes da geração de \textit{patches}.}
+\label{tab:results_diagset-stage2-ingestion}
+\small
+\begin{tabular}{lr}
+\toprule
+Campo & Valor \\
+\midrule
+Imagens registradas & 429 \\
+Anotações registradas & 429 \\
+Formato das imagens & \texttt{.ndpi} \\
+Formato das anotações & \texttt{.ndpa} \\
+Casos pareados e validados em GeoJSON & 419 \\
+Imagens rejeitadas ou com falha & 10 \\
+Tamanho da janela & 224 \\
+Passo de extração & 112 \\
+Sobreposição mínima com anotação & 1{,}0 \\
+Conteúdo mínimo de tecido & 0{,}3 \\
+Tempo médio por imagem concluída & 1{,}22 min \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize A contagem de GeoJSON corresponde aos casos que passaram pela checagem de pareamento na etapa de ingestão, ou seja, arquivos GeoJSON que apresentavam uma imagem associada.}
+\end{table}
+
+Após a ingestão, realizou-se uma etapa de curadoria quantitativa antes do particionamento por paciente. Inicialmente, uma amostra piloto foi usada para inspecionar o comportamento da limpeza baseada em grafos. Em seguida, um conjunto mestre rotulado orientou a escolha dos parâmetros empregados na rejeição de \textit{patches} com contaminação por fundo. Como mostra a \Tabela{tab:results_diagset-stage3-sampling}, a revisão piloto incluiu 100 amostras, das quais 94 foram aprovadas; o conjunto mestre reuniu 385 amostras, com 367 aprovações.
+
+\begin{table}[!htb]
+\centering
+\caption{Amostras revisadas para calibração da limpeza em DIAGSET.}
+\label{tab:results_diagset-stage3-sampling}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Conjunto & Aprovadas & Rejeitadas & Total \\
+\midrule
+Amostra piloto & 94 & 6 & 100 \\
+Conjunto mestre & 367 & 18 & 385 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Com base nessa revisão, foram definidos os parâmetros da segmentação por grafos e o limiar de contaminação adotado na limpeza final. A configuração selecionada utilizou $\tau=0{,}19$ como critério de rejeição, com F1 validado de 0{,}6667 no conjunto rotulado. A \Tabela{tab:results_diagset-stage3-graph} apresenta os parâmetros utilizados nessa etapa.
+
+\begin{table}[!htb]
+\centering
+\caption{Parâmetros selecionados para limpeza baseada em grafos em DIAGSET.}
+\label{tab:results_diagset-stage3-graph}
+\small
+\begin{tabular}{lr}
+\toprule
+Parâmetro & Valor \\
+\midrule
+Intensidade de fundo & 167 \\
+$k$ & 140{,}0 \\
+Tamanho mínimo & 97 \\
+Erosão & 3 px \\
+Limiar de contaminação ($\tau$) & 0{,}19 \\
+F1 validado & 0{,}6667 \\
+Pares rotulados & 385 \\
+Pares de treino & 317 \\
+Pares de teste & 68 \\
+Estado aleatório & 42 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A aplicação desses critérios resultou na rejeição de 74\,047 \textit{patches} de câncer, todos associados a contaminação estimada acima do limiar definido. Os \textit{patches} não cancerosos não sofreram rejeição nessa etapa, pois a limpeza foi direcionada às amostras positivas com risco de conter fundo ou regiões incompatíveis com a anotação tumoral. Ao final da curadoria, 1\,186\,778 \textit{patches} permaneceram disponíveis para as etapas posteriores, conforme detalhado na \Tabela{tab:results_diagset-stage3-cleaning}.
+
+\begin{table}[!htb]
+\centering
+\caption{Decisões de curadoria aplicadas aos \textit{patches} de DIAGSET.}
+\label{tab:results_diagset-stage3-cleaning}
+\small
+\begin{tabular}{lrr}
+\toprule
+Grupo & Aceitos & Rejeitados \\
+\midrule
+Total & 1\,186\,778 & 74\,047 \\
+Câncer & 221\,774 & 74\,047 \\
+Não câncer & 965\,004 & 0 \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize As rejeições correspondem aos \textit{patches} cuja contaminação estimada excedeu o limiar $\tau=0{,}19$.}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\begin{subfigure}[t]{0.31\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/Rejected_DIAGSET_phase3_1.png}
+\caption{Amostra rejeitada 1}
+\label{fig:results_diagset-stage3-rejected-example-1}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.31\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/Rejected_DIAGSET_phase3_2.png}
+\caption{Amostra rejeitada 2}
+\label{fig:results_diagset-stage3-rejected-example-2}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.31\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/Rejected_DIAGSET_phase3_3.png}
+\caption{Amostra rejeitada 3}
+\label{fig:results_diagset-stage3-rejected-example-3}
+\end{subfigure}
+\caption[Exemplos de amostras rejeitadas na curadoria de DIAGSET]{Exemplos de amostras rejeitadas durante a etapa de curadoria de DIAGSET.}
+\label{fig:results_diagset-stage3-rejected-examples}
+\end{figure}
+
+Concluída a limpeza, DIAGSET foi particionado no nível do paciente, preservando a separação entre treino, validação e teste. Essa decisão é central para a validade experimental, pois impede que \textit{patches} de um mesmo indivíduo apareçam em mais de uma partição. Como apresentado na \Tabela{tab:results_diagset-conjunto}, o conjunto analisado incluiu 393 pacientes: 236 destinados ao treino, 78 à validação e 79 ao teste. A partição de teste reuniu 387\,325 \textit{patches}, distribuídos entre 38 pacientes positivos e 41 negativos, permitindo avaliar o desempenho tanto por pixel quanto por paciente.
+
+\begin{table}[!htb]
+\centering
+\caption{Particionamento por paciente e volume de \textit{patches} em DIAGSET.}
+\label{tab:results_diagset-conjunto}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+Partição & Pacientes & Pos. & Neg. & \textit{Patches} & \textit{Patches} pos. & \textit{Patches} neg. \\
+\midrule
+Treino & 236 & 115 & 121 & 660\,867 & 123\,479 & 537\,388 \\
+Validação & 78 & 43 & 35 & 138\,586 & 25\,867 & 112\,719 \\
+Teste & 79 & 38 & 41 & 387\,325 & 72\,428 & 314\,897 \\
+\midrule
+Total & 393 & 196 & 197 & 1\,186\,778 & 221\,774 & 965\,004 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A etapa de amostragem inteligente foi aplicada apenas ao conjunto de treino, com o objetivo de reduzir redundância e tornar o treinamento computacionalmente mais eficiente. Dos 660\,867 \textit{patches} originalmente disponíveis para treino, 180\,381 foram mantidos, o equivalente a 27{,}29\% das amostras. A validação e o teste permaneceram inalterados em relação às partições originais, evitando que a seleção compacta usada no treinamento interferisse na avaliação final do método.
+
+\begin{table}[!htb]
+\centering
+\caption{Resumo da amostragem inteligente aplicada ao treino de DIAGSET.}
+\label{tab:results_diagset-smart-sampling}
+\small
+\begin{tabular}{lr}
+\toprule
+Quantidade & Valor \\
+\midrule
+Amostras de treino antes da seleção & 660\,867 \\
+Amostras mantidas & 180\,381 \\
+Amostras rejeitadas & 480\,486 \\
+Fração mantida & 27{,}29\% \\
+Pacientes de treino & 236 \\
+Pacientes com redução & 215 \\
+Amostras positivas selecionadas & 37\,960 \\
+Amostras negativas selecionadas & 142\,421 \\
+Modelo de \textit{embeddings} & \texttt{owkin/phikon-v2} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Esse encadeamento de etapas definiu a base empírica utilizada nas análises finais. A curadoria foi aplicada antes da divisão por paciente e teve dois propósitos principais: incorporar inspeção humana ao processo e reduzir o risco de que amostras positivas carregassem contaminações decorrentes de imprecisões nas anotações originais. Em tarefas de segmentação histopatológica, esse controle é particularmente importante, pois pequenos desalinhamentos ou regiões de fundo incluídas em áreas anotadas como câncer podem induzir o modelo a aprender padrões incompatíveis com a morfologia tumoral.
+
+Após essa etapa, os conjuntos de treino, validação e teste foram definidos de forma independente. A amostragem inteligente foi aplicada exclusivamente ao conjunto de treino, com o objetivo de reduzir redundância entre imagens muito semelhantes. Essa decisão buscou expor o treinamento a amostras mais representativas e variadas de câncer e não câncer, evitando que múltiplos \textit{patches} quase duplicados aumentassem o custo computacional sem acrescentar informação relevante para a aprendizagem. Validação e teste, por sua vez, permaneceram intocados após o particionamento, preservando seu papel como conjuntos independentes para seleção e avaliação final do método.
+
+
+\section{Treinamento e composição final do \textit{ensemble}}
+\label{sec:res_diagset_treinamento}
+
+Cada estratégia de normalização foi avaliada com as mesmas oito arquiteturas no treinamento final. Essa escolha permitiu comparar os métodos de normalização sob um protocolo controlado, sem alterar o conjunto de modelos considerados em cada cenário. As Tabelas \ref{tab:results_diagset-training-not_normalized} a \ref{tab:results_diagset-training-vahadane} apresentam os \textit{checkpoints} selecionados com base no desempenho em validação, incluindo época, perda, AUPRC, AUROC e MCC.
+
+Esses resultados não devem ser interpretados como a avaliação final do método, mas como evidência do processo de seleção dos modelos que alimentaram a etapa posterior de combinação por \textit{ensemble}. Assim, as métricas de validação cumprem uma função metodológica: orientar a escolha dos \textit{checkpoints} e documentar a consistência do treinamento em cada normalização. A comparação definitiva entre estratégias, por sua vez, é realizada apenas na inferência sobre o conjunto de teste.
+
+\begin{table}[!htb]
+\centering
+\caption{Resultados de validação dos \textit{checkpoints} sem normalização de cor em DIAGSET.}
+\label{tab:results_diagset-training-not_normalized}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lp{4.8cm}rrrrr}
+\toprule
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
+\midrule
+DEEPLABV3PLUS & \path{tu-resnest101e} & 9 & 0.1228 & 0.8980 & 0.9753 & 0.7899 \\
+DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 1 & 0.1287 & 0.8398 & 0.9587 & 0.7706 \\
+FPN & \path{senet154} & 4 & \textcolor{darkgreen}{\textbf{0.1194}} & 0.8742 & 0.9688 & 0.7792 \\
+MANET & \path{resnet152} & 4 & 0.2045 & 0.8280 & 0.9603 & 0.7176 \\
+SEGFORMER & \path{mit_b5} & 1 & 0.1260 & 0.8320 & 0.9527 & 0.7971 \\
+SWIN & \path{tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k} & 3 & 0.2060 & \textcolor{darkgreen}{\textbf{0.8990}} & \textcolor{darkgreen}{\textbf{0.9755}} & \textcolor{darkgreen}{\textbf{0.8132}} \\
+UNET++ & \path{efficientnet-b7} & 1 & 0.2066 & 0.8818 & 0.9741 & 0.7985 \\
+UPERNET & \path{tu-hiera_large_224} & 1 & 0.1348 & 0.7989 & 0.9570 & 0.7777 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+
+\begin{table}[!htb]
+\centering
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Reinhard em DIAGSET.}
+\label{tab:results_diagset-training-reinhard}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lp{4.8cm}rrrrr}
+\toprule
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
+\midrule
+DEEPLABV3PLUS & \path{tu-resnest101e} & 4 & \textcolor{darkgreen}{\textbf{0.1030}} & 0.8621 & 0.9581 & 0.7555 \\
+DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 2 & 0.1113 & 0.8338 & 0.9593 & 0.7602 \\
+FPN & \path{senet154} & 2 & 0.1139 & 0.8649 & 0.9606 & 0.7668 \\
+MANET & \path{resnet152} & 9 & 0.2233 & 0.5553 & 0.8852 & 0.5567 \\
+SEGFORMER & \path{mit_b5} & 4 & 0.1088 & 0.8488 & 0.9607 & 0.7741 \\
+SWIN & \path{tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k} & 4 & 0.2058 & \textcolor{darkgreen}{\textbf{0.9011}} & \textcolor{darkgreen}{\textbf{0.9758}} & \textcolor{darkgreen}{\textbf{0.8071}} \\
+UNET++ & \path{efficientnet-b7} & 2 & 0.2024 & 0.8965 & 0.9753 & 0.7967 \\
+UPERNET & \path{tu-hiera_large_224} & 2 & 0.2099 & 0.8740 & 0.9688 & 0.7680 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Ruifrok em DIAGSET.}
+\label{tab:results_diagset-training-ruifrok}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lp{4.8cm}rrrrr}
+\toprule
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
+\midrule
+DEEPLABV3PLUS & \path{tu-resnest101e} & 3 & 0.1189 & 0.8802 & 0.9696 & 0.7776 \\
+DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 2 & 0.1194 & 0.8269 & 0.9604 & 0.7672 \\
+FPN & \path{senet154} & 2 & 0.1127 & 0.8698 & 0.9631 & 0.7583 \\
+MANET & \path{resnet152} & 5 & 0.2303 & 0.7282 & 0.9394 & 0.6501 \\
+SEGFORMER & \path{mit_b5} & 3 & 0.1084 & 0.8443 & 0.9621 & 0.7908 \\
+SWIN & \path{tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k} & 2 & 0.2049 & \textcolor{darkgreen}{\textbf{0.9115}} & \textcolor{darkgreen}{\textbf{0.9773}} & \textcolor{darkgreen}{\textbf{0.8084}} \\
+UNET++ & \path{efficientnet-b7} & 2 & 0.2045 & 0.8907 & 0.9721 & 0.7830 \\
+UPERNET & \path{tu-hiera_large_224} & 2 & \textcolor{darkgreen}{\textbf{0.1103}} & 0.8274 & 0.9576 & 0.7840 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+
+\begin{table}[!htb]
+\centering
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Macenko em DIAGSET.}
+\label{tab:results_diagset-training-macenko}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lp{4.8cm}rrrrr}
+\toprule
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
+\midrule
+DEEPLABV3PLUS & \path{tu-resnest101e} & 11 & 0.1146 & \textcolor{darkgreen}{\textbf{0.8795}} & \textcolor{darkgreen}{\textbf{0.9675}} & \textcolor{darkgreen}{\textbf{0.7758}} \\
+DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 8 & 0.1175 & 0.8346 & 0.9610 & 0.7641 \\
+FPN & \path{senet154} & 5 & 0.1211 & 0.8499 & 0.9621 & 0.7546 \\
+MANET & \path{resnet152} & 1 & 0.2231 & 0.6331 & 0.9044 & 0.5563 \\
+SEGFORMER & \path{mit_b5} & 6 & 0.1118 & 0.8754 & 0.9664 & 0.7678 \\
+SWIN & \path{tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k} & 9 & 0.2151 & 0.8531 & 0.9586 & 0.7186 \\
+UNET++ & \path{efficientnet-b7} & 1 & 0.2274 & 0.8481 & 0.9614 & 0.7362 \\
+UPERNET & \path{tu-hiera_large_224} & 6 & \textcolor{darkgreen}{\textbf{0.1079}} & 0.8310 & 0.9562 & 0.7706 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Resultados de validação dos \textit{checkpoints} com normalização Vahadane em DIAGSET.}
+\label{tab:results_diagset-training-vahadane}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lp{4.8cm}rrrrr}
+\toprule
+Arquitetura & \textit{Encoder} & Epoca & Perda & AUPRC & AUROC & MCC \\
+\midrule
+DEEPLABV3PLUS & \path{tu-resnest101e} & 2 & \textcolor{darkgreen}{\textbf{0.1229}} & 0.8171 & 0.9486 & 0.6936 \\
+DPT & \path{tu-vit_large_patch16_224.augreg_in21k_ft_in1k} & 1 & 0.1318 & 0.8214 & 0.9541 & 0.7251 \\
+FPN & \path{senet154} & 2 & 0.1233 & 0.8545 & 0.9568 & 0.7316 \\
+MANET & \path{resnet152} & 8 & 0.2311 & 0.5415 & 0.8773 & 0.4916 \\
+SEGFORMER & \path{mit_b5} & 1 & 0.2121 & \textcolor{darkgreen}{\textbf{0.8759}} & \textcolor{darkgreen}{\textbf{0.9661}} & \textcolor{darkgreen}{\textbf{0.7565}} \\
+SWIN & \path{tu-swin_large_patch4_window7_224.ms_in22k_ft_in1k} & 8 & 0.1286 & 0.8317 & 0.9493 & 0.7101 \\
+UNET++ & \path{efficientnet-b7} & 1 & 0.2043 & 0.8749 & 0.9656 & 0.7539 \\
+UPERNET & \path{tu-hiera_large_224} & 2 & 0.2076 & 0.8688 & 0.9632 & 0.7367 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+Os 40 treinamentos finais foram executados com a mesma semente aleatória, fixada em 24. Essa padronização reduziu fontes evitáveis de variação experimental e tornou mais direta a comparação entre arquiteturas e normalizações. Dessa forma, diferenças observadas nessa etapa refletem principalmente a interação entre arquitetura, pré-processamento cromático e taxa de aprendizado, e não mudanças deliberadas na configuração de reprodutibilidade.
+
+As taxas de aprendizado foram selecionadas a partir das curvas obtidas na etapa de busca. Em todos os treinamentos, manteve-se o mesmo otimizador (\texttt{AdamWScheduleFree}), o mesmo decaimento de peso (\(10^{-4}\)) e os mesmos pesos da função de perda (fixados em \(\alpha_{BCE}=0{,}125\), \(\beta_{DiceBG}=0{,}157\) e
+\(\gamma_{DiceFG}=0{,}173\)). Com isso, a taxa de aprendizado tornou-se o principal hiperparâmetro ajustado individualmente por arquitetura e normalização. As figuras correspondentes apresentam as regiões de queda estável da perda, enquanto as tabelas subsequentes registram os valores adotados no treinamento final, expressos em unidades de \(10^{-3}\).
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figuras/DIAGSET_NOT_NORMALIZED_LR.png}
+
+\caption[Curvas de busca de taxa de aprendizado para DIAGSET sem normalização]{
+Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
+DIAGSET sem normalização de cor. Cada subgráfico apresenta a evolução da função
+de perda em função de $\log_{10}$ da taxa de aprendizado para uma arquitetura
+avaliada, com três execuções independentes. As curvas foram utilizadas para
+identificar regiões de queda estável da perda e selecionar taxas de aprendizado
+candidatas para o treinamento final.
+}
+\label{fig:results_diagset-lr-curves-not-normalized}
+\end{figure}
+
+\begin{table}[!htb]
+\centering
+\caption{Taxas de aprendizado selecionadas para o treinamento final no DIAGSET sem normalização de cor.}
+\label{tab:results_diagset-learning-rates-not-normalized}
+\begin{tabular}{lr}
+\toprule
+Arquitetura & LR ($10^{-3}$) \\
+\midrule
+DEEPLABV3PLUS & 0.1 \\
+DPT & 0.1 \\
+FPN & 0.3 \\
+MANET & 1.0 \\
+SEGFORMER & 0.1 \\
+SWIN & 0.1 \\
+UNET++ & 1.0 \\
+UPERNET & 0.06 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figuras/DIAGSET_REINHARD_LR.png}
+\caption[Curvas de busca de taxa de aprendizado para DIAGSET com Reinhard]{
+Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
+DIAGSET com normalização de cor pelo método de Reinhard. Cada subgráfico deverá
+apresentar a evolução da função de perda em função de $\log_{10}$ da taxa de
+aprendizado para uma arquitetura avaliada, preferencialmente com múltiplas
+execuções independentes. As curvas são utilizadas para identificar regiões de
+queda estável da perda e selecionar taxas de aprendizado candidatas para o
+treinamento final.
+}
+\label{fig:results_diagset-lr-curves-reinhard}
+\end{figure}
+
+\begin{table}[!htb]
+\centering
+\caption{Taxas de aprendizado selecionadas para o treinamento final no DIAGSET com normalização Reinhard.}
+\label{tab:results_diagset-learning-rates-reinhard}
+\begin{tabular}{lr}
+\toprule
+Arquitetura & LR ($10^{-3}$) \\
+\midrule
+DEEPLABV3PLUS & 0.1 \\
+DPT & 0.06 \\
+FPN & 0.1 \\
+MANET & 1.0 \\
+SEGFORMER & 0.1 \\
+SWIN & 0.3 \\
+UNET++ & 1.0 \\
+UPERNET & 0.01 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figuras/DIAGSET_RUIFROK_LR.png}
+\caption[Curvas de busca de taxa de aprendizado para DIAGSET com Ruifrok]{
+Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
+DIAGSET com normalização de cor pelo método de Ruifrok. Cada subgráfico deverá
+apresentar a evolução da função de perda em função de $\log_{10}$ da taxa de
+aprendizado para uma arquitetura avaliada, preferencialmente com múltiplas
+execuções independentes. As curvas são utilizadas para identificar regiões de
+queda estável da perda e selecionar taxas de aprendizado candidatas para o
+treinamento final.
+}
+\label{fig:results_diagset-lr-curves-ruifrok}
+\end{figure}
+
+\begin{table}[!htb]
+\centering
+\caption{Taxas de aprendizado selecionadas para o treinamento final no DIAGSET com normalização Ruifrok.}
+\label{tab:results_diagset-learning-rates-ruifrok}
+\begin{tabular}{lr}
+\toprule
+Arquitetura & LR ($10^{-3}$) \\
+\midrule
+DEEPLABV3PLUS & 0.3 \\
+DPT & 0.1 \\
+FPN & 0.3 \\
+MANET & 1.0 \\
+SEGFORMER & 0.1 \\
+SWIN & 0.3 \\
+UNET++ & 1.0 \\
+UPERNET & 0.03 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{figure}[!htb]
+\centering
+
+\includegraphics[width=\textwidth]{figuras/DIAGSET_MACENKO_LR.png}
+
+\caption[Curvas de busca de taxa de aprendizado para DIAGSET com Macenko]{
+Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
+DIAGSET com normalização de cor pelo método de Macenko. Cada subgráfico deverá
+apresentar a evolução da função de perda em função de $\log_{10}$ da taxa de
+aprendizado para uma arquitetura avaliada, preferencialmente com múltiplas
+execuções independentes. As curvas são utilizadas para identificar regiões de
+queda estável da perda e selecionar taxas de aprendizado candidatas para o
+treinamento final.
+}
+\label{fig:results_diagset-lr-curves-macenko}
+\end{figure}
+
+\begin{table}[!htb]
+\centering
+\caption{Taxas de aprendizado selecionadas para o treinamento final no DIAGSET com normalização Macenko.}
+\label{tab:results_diagset-learning-rates-macenko}
+\begin{tabular}{lr}
+\toprule
+Arquitetura & LR ($10^{-3}$) \\
+\midrule
+DEEPLABV3PLUS & 0.1 \\
+DPT & 0.1 \\
+FPN & 0.1 \\
+MANET & 3.0 \\
+SEGFORMER & 0.1 \\
+SWIN & 1.0 \\
+UNET++ & 3.0 \\
+UPERNET & 0.03 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+
+\includegraphics[width=\textwidth]{figuras/DIAGSET_VAHADANE_LR.png}
+
+\caption[Curvas de busca de taxa de aprendizado para DIAGSET com Vahadane]{
+Curvas de busca de taxa de aprendizado para os modelos treinados no conjunto
+DIAGSET com normalização de cor pelo método de Vahadane. Cada subgráfico deverá
+apresentar a evolução da função de perda em função de $\log_{10}$ da taxa de
+aprendizado para uma arquitetura avaliada, preferencialmente com múltiplas
+execuções independentes. As curvas são utilizadas para identificar regiões de
+queda estável da perda e selecionar taxas de aprendizado candidatas para o
+treinamento final.
+}
+\label{fig:results_diagset-lr-curves-vahadane}
+\end{figure}
+
+\begin{table}[!htb]
+\centering
+\caption{Taxas de aprendizado selecionadas para o treinamento final no DIAGSET com normalização Vahadane.}
+\label{tab:results_diagset-learning-rates-vahadane}
+\begin{tabular}{lr}
+\toprule
+Arquitetura & LR ($10^{-3}$) \\
+\midrule
+DEEPLABV3PLUS & 0.3 \\
+DPT & 0.1 \\
+FPN & 0.1 \\
+MANET & 1.0 \\
+SEGFORMER & 0.1 \\
+SWIN & 1.0 \\
+UNET++ & 1.0 \\
+UPERNET & 0.01 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A inferência final foi realizada por meio de uma estratégia de \textit{ensemble} em dois fluxos. Em cada normalização, oito modelos foram combinados: quatro destinados à composição semântica da região de interesse e quatro voltados à segmentação espacial mais refinada. Essa organização buscou explorar características complementares das arquiteturas, combinando modelos mais sensíveis ao contexto global com modelos capazes de delimitar melhor as regiões previstas.
+
+A \Tabela{tab:results_diagset-ensemble-summary} resume a composição final do \textit{ensemble} para cada estratégia de normalização, incluindo o número de modelos combinados, a divisão entre fluxo semântico e fluxo espacial, o limiar da região de interesse, o limiar final de decisão e os parâmetros de pós-processamento congelados na receita final. Os pesos individuais dos modelos são apresentados separadamente na \Figura{fig:results_diagset-ensemble-weights}, por oferecerem leitura mais clara em formato gráfico. No caso da normalização Vahadane, a execução utilizou uma aproximação operacional baseada em fonte fixa; portanto, seus resultados devem ser interpretados como a configuração efetivamente adotada nesta dissertação, e não como uma normalização recalculada individualmente para cada \textit{patch}.
+
+\begin{table}[!htb]
+\centering
+\caption{Composição final do \textit{ensemble} utilizada na inferência em DIAGSET.}
+\label{tab:results_diagset-ensemble-summary}
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Normalização & Modelos & Semânticos & Espaciais & ROI & Limiar & Área mín. & Fração pac. & \textit{Patches} pac. \\
+\midrule
+Sem Normalização & 8 & 4 & 4 & 0.2719 & 0.5900 & 32768 & 0.0500 & 1 \\
+Reinhard & 8 & 4 & 4 & 0.2808 & 0.5000 & 32768 & 0.0500 & 1 \\
+Ruifrok & 8 & 4 & 4 & 0.2104 & 0.6000 & 0 & 0.0200 & 1 \\
+Macenko & 8 & 4 & 4 & 0.1748 & 0.5700 & 0 & 0.0200 & 5 \\
+Vahadane & 8 & 4 & 4 & 0.2268 & 0.5500 & 4096 & 0.0000 & 5 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+\section{Métricas finais de inferência}\label{sec:res_diagset_inferencia}
+
+A avaliação final foi conduzida exclusivamente no conjunto de teste. Para interpretar os resultados, foram consideradas duas formas complementares de agregação. Nas métricas micro, todos os pixels são reunidos antes do cálculo, de modo que a estimativa final reflete o desempenho global da segmentação no volume total de pixels avaliados. Já nas métricas macro, o desempenho é calculado primeiro por paciente e, apenas depois, resumido entre os pacientes. Essa segunda abordagem reduz a influência de casos com maior número de \textit{patches} e permite uma leitura mais equilibrada da variabilidade individual. Neste experimento, as métricas macro foram acompanhadas por intervalos de confiança obtidos por \textit{bootstrap} em nível de paciente.
+
+A leitura geral dos resultados indica que o desempenho do método depende do critério de avaliação adotado. A ausência de normalização apresentou os maiores valores de Dice micro e macro, sugerindo melhor equilíbrio entre a segmentação agregada por pixel e a agregação por paciente. Ruifrok obteve a maior estimativa pontual de AUROC e o maior Dice quando a análise foi restrita aos pacientes positivos. Em contrapartida, Macenko apresentou o melhor \textit{AvAcc} na comparação binária em nível de \textit{patch}. Essa divergência mostra que a comparação entre estratégias de normalização não deve ser reduzida a um único indicador: cada métrica enfatiza um aspecto distinto do comportamento do método.
+
+A Fase 10 também produz uma saída complementar de reconhecimento binário em nível de \textit{patch}, alinhada ao formato de avaliação reportado no DIAGSET. Nessa análise, cada \textit{patch} é classificado como câncer ou não câncer a partir da máscara de segmentação após filtragem, permitindo calcular acurácia, \textit{AvAcc}, sensibilidade e especificidade antes e depois da supressão em nível de paciente. Essa camada tem finalidade apenas comparativa e descritiva: ela aproxima a saída do fluxo ao protocolo de reconhecimento em \textit{patches} usado pelo DIAGSET, mas não substitui as métricas principais de segmentação e de avaliação por paciente já citadas.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_micro_metrics_updated.png}
+\caption[Metricas micro no conjunto de teste de DIAGSET]{Métricas micro no conjunto de teste de DIAGSET. Cada painel apresenta uma métrica calculada a partir da agregação global dos pixels; os pontos indicam as estimativas por estratégia de normalização e as barras verticais representam IC95\%. Os eixos verticais são ajustados individualmente ao intervalo dos IC95\% exibidos, mantendo as métricas limitadas entre 0 e 1.}
+\label{fig:results_diagset-micro-metrics}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.98\textwidth,height=0.86\textheight,keepaspectratio]{figuras/results_diagset_macro_metrics_updated.png}
+\caption[Metricas macro no conjunto de teste de DIAGSET]{Métricas macro no conjunto de teste de DIAGSET. Cada painel apresenta uma métrica resumida inicialmente por paciente e posteriormente agregada entre pacientes; as barras verticais representam IC95\%. Os eixos verticais são ajustados individualmente ao intervalo dos IC95\% exibidos, mantendo as métricas limitadas entre 0 e 1.}
+\label{fig:results_diagset-macro-metrics}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_rule6_dice_pos_updated.png}
+\caption{Dice em pacientes positivos}
+\label{fig:results_diagset-rule6-dice-pos}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_rule6_neg_clean_updated.png}
+\caption{Pacientes negativos sem predição positiva}
+\label{fig:results_diagset-rule6-neg-clean}
+\end{subfigure}
+\caption{Avaliação separada de pacientes com e sem lesão anotada no conjunto de teste de DIAGSET. O painel esquerdo apresenta o Dice calculado apenas nos pacientes positivos; o painel direito mostra a proporção de pacientes negativos nos quais o método não produziu predições positivas. As barras verticais indicam IC95\%. Os eixos verticais são ajustados individualmente para destacar a comparação entre normalizações dentro de cada métrica.}
+\label{fig:results_diagset-rule6-metrics}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.94\textwidth]{figuras/results_diagset_auc_thresholds_updated.png}
+\caption{AUROC no conjunto de teste de DIAGSET. A figura apresenta a estimativa pontual por estratégia de normalização.}
+\label{fig:results_diagset-auc-thresholds}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.94\textwidth]{figuras/results_diagset_ensemble_weights_updated.png}
+\caption{Pesos dos modelos na composição final dos \textit{ensembles} de DIAGSET. O mapa de calor mostra a contribuição relativa de cada arquitetura e de cada fluxo na inferência final.}
+\label{fig:results_diagset-ensemble-weights}
+\end{figure}
+
+
+No nível micro, a comparação visual foi separada por métrica para evitar um
+gráfico sobrecarregado. A \Figura{fig:results_diagset-micro-metrics} apresenta
+um painel para cada métrica, e as tabelas seguintes detalham os valores com seus
+intervalos de confiança para cada normalização. A mesma organização foi adotada
+para as métricas macro na \Figura{fig:results_diagset-macro-metrics} e nas
+tabelas correspondentes.
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais micro para DIAGSET sem normalização de cor.}
+\label{tab:results_diagset-micro-not_normalized}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.8415 & 0.7767 & 0.8987 \\
+IoU & 0.7263 & 0.6349 & 0.8160 \\
+Sensibilidade & 0.8244 & 0.7105 & 0.9259 \\
+Especificidade & 0.9689 & 0.9479 & 0.9841 \\
+Precisão & 0.8593 & 0.7698 & 0.9254 \\
+Acurácia & 0.9419 & 0.9025 & 0.9703 \\
+FPR & 0.0311 & 0.0159 & 0.0521 \\
+FNR & 0.1756 & 0.0741 & 0.2895 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais micro para DIAGSET com normalização Reinhard.}
+\label{tab:results_diagset-micro-reinhard}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.8296 & 0.7773 & 0.8789 \\
+IoU & 0.7088 & 0.6358 & 0.7840 \\
+Sensibilidade & 0.8001 & 0.7135 & 0.8908 \\
+Especificidade & 0.9704 & 0.9497 & 0.9847 \\
+Precisão & 0.8613 & 0.7719 & 0.9273 \\
+Acurácia & 0.9385 & 0.9018 & 0.9661 \\
+FPR & 0.0296 & 0.0153 & 0.0503 \\
+FNR & 0.1999 & 0.1092 & 0.2865 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais micro para DIAGSET com normalização Ruifrok.}
+\label{tab:results_diagset-micro-ruifrok}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.8295 & 0.7786 & 0.8710 \\
+IoU & 0.7086 & 0.6374 & 0.7715 \\
+Sensibilidade & 0.8340 & 0.7636 & 0.9087 \\
+Especificidade & 0.9593 & 0.9423 & 0.9720 \\
+Precisão & 0.8250 & 0.7258 & 0.8953 \\
+Acurácia & 0.9359 & 0.9070 & 0.9578 \\
+FPR & 0.0407 & 0.0280 & 0.0577 \\
+FNR & 0.1660 & 0.0913 & 0.2364 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais micro para DIAGSET com normalização Macenko.}
+\label{tab:results_diagset-micro-macenko}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.8000 & 0.7198 & 0.8510 \\
+IoU & 0.6667 & 0.5622 & 0.7406 \\
+Sensibilidade & 0.8740 & 0.8260 & 0.9299 \\
+Especificidade & 0.9285 & 0.9046 & 0.9486 \\
+Precisão & 0.7376 & 0.6052 & 0.8349 \\
+Acurácia & 0.9183 & 0.8951 & 0.9391 \\
+FPR & 0.0715 & 0.0514 & 0.0954 \\
+FNR & 0.1260 & 0.0701 & 0.1740 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais micro para DIAGSET com normalização Vahadane.}
+\label{tab:results_diagset-micro-vahadane}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.7862 & 0.7167 & 0.8433 \\
+IoU & 0.6477 & 0.5585 & 0.7290 \\
+Sensibilidade & 0.7880 & 0.6834 & 0.8838 \\
+Especificidade & 0.9502 & 0.9312 & 0.9647 \\
+Precisão & 0.7844 & 0.6734 & 0.8637 \\
+Acurácia & 0.9198 & 0.8809 & 0.9474 \\
+FPR & 0.0498 & 0.0353 & 0.0688 \\
+FNR & 0.2120 & 0.1162 & 0.3166 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais macro para DIAGSET sem normalização de cor.}
+\label{tab:results_diagset-macro-not_normalized}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.7540 & 0.6710 & 0.8356 \\
+IoU & 0.7187 & 0.6346 & 0.8012 \\
+Sensibilidade & 0.8633 & 0.7961 & 0.9181 \\
+Especificidade & 0.9167 & 0.8834 & 0.9470 \\
+Precisão & 0.6171 & 0.4955 & 0.7376 \\
+Acurácia & 0.9231 & 0.8941 & 0.9484 \\
+FPR & 0.0833 & 0.0530 & 0.1166 \\
+FNR & 0.1367 & 0.0819 & 0.2039 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais macro para DIAGSET com normalização Reinhard.}
+\label{tab:results_diagset-macro-reinhard}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.7363 & 0.6510 & 0.8192 \\
+IoU & 0.6987 & 0.6132 & 0.7824 \\
+Sensibilidade & 0.8114 & 0.7281 & 0.8783 \\
+Especificidade & 0.9240 & 0.8929 & 0.9521 \\
+Precisão & 0.6154 & 0.4912 & 0.7386 \\
+Acurácia & 0.9143 & 0.8831 & 0.9418 \\
+FPR & 0.0760 & 0.0479 & 0.1071 \\
+FNR & 0.1886 & 0.1217 & 0.2719 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais macro para DIAGSET com normalização Ruifrok.}
+\label{tab:results_diagset-macro-ruifrok}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.5993 & 0.5038 & 0.6948 \\
+IoU & 0.5584 & 0.4667 & 0.6518 \\
+Sensibilidade & 0.8707 & 0.8321 & 0.9064 \\
+Especificidade & 0.9228 & 0.8932 & 0.9484 \\
+Precisão & 0.4941 & 0.3844 & 0.6078 \\
+Acurácia & 0.9188 & 0.8926 & 0.9421 \\
+FPR & 0.0772 & 0.0516 & 0.1068 \\
+FNR & 0.1293 & 0.0936 & 0.1679 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais macro para DIAGSET com normalização Macenko.}
+\label{tab:results_diagset-macro-macenko}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.4894 & 0.3921 & 0.5878 \\
+IoU & 0.4499 & 0.3567 & 0.5452 \\
+Sensibilidade & 0.9024 & 0.8716 & 0.9294 \\
+Especificidade & 0.8894 & 0.8586 & 0.9173 \\
+Precisão & 0.4142 & 0.3134 & 0.5197 \\
+Acurácia & 0.9021 & 0.8772 & 0.9249 \\
+FPR & 0.1106 & 0.0827 & 0.1414 \\
+FNR & 0.0976 & 0.0706 & 0.1284 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[!htb]
+\centering
+\caption{Métricas finais macro para DIAGSET com normalização Vahadane.}
+\label{tab:results_diagset-macro-vahadane}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Métrica & Estimativa & IC95\% inferior & IC95\% superior \\
+\midrule
+Dice & 0.4405 & 0.3454 & 0.5378 \\
+IoU & 0.3971 & 0.3075 & 0.4894 \\
+Sensibilidade & 0.8334 & 0.7827 & 0.8801 \\
+Especificidade & 0.9137 & 0.8842 & 0.9403 \\
+Precisão & 0.4055 & 0.3051 & 0.5101 \\
+Acurácia & 0.9001 & 0.8708 & 0.9264 \\
+FPR & 0.0863 & 0.0597 & 0.1158 \\
+FNR & 0.1666 & 0.1199 & 0.2173 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No nível micro, a ausência de normalização obteve o maior Dice, com estimativa de 0{,}8415 e IC95\% entre 0{,}7767 e 0{,}8987. Reinhard e Ruifrok apresentaram resultados muito próximos na sequência, com Dice de 0{,}8296 e 0{,}8295, respectivamente. Essa ordenação se manteve quando a análise foi realizada em nível de paciente: nas métricas macro, a ausência de normalização alcançou o maior Dice, com estimativa de 0{,}7540 e IC95\% entre 0{,}6710 e 0{,}8356, seguida por Reinhard. A diferença entre as leituras micro e macro permanece relevante, mas, nesta execução final, ambas favorecem a configuração sem normalização de cor.
+
+A AUROC foi reportada apenas como estimativa pontual, sem intervalos de confiança. Ruifrok apresentou o maior valor, com AUROC de 0{,}9579, seguido por Macenko e pela ausência de normalização. A diferença entre AUROC e Dice é relevante do ponto de vista metodológico: enquanto a AUROC avalia a capacidade de ranqueamento das probabilidades preditas ao longo de diferentes limiares, o Dice reflete o desempenho após a aplicação de uma decisão binária. Assim, as duas métricas respondem a perguntas complementares sobre o comportamento do método.
+
+\begin{table}[!htb]
+\centering
+\caption{AUROC pontual por estratégia de normalização no conjunto de teste de DIAGSET.}
+\label{tab:results_diagset-auc}
+\small
+\begin{tabular}{lr}
+\toprule
+Normalização & AUROC \\
+\midrule
+Sem normalização & 0.9508 \\
+Reinhard & 0.9445 \\
+Ruifrok & 0.9579 \\
+Macenko & 0.9534 \\
+Vahadane & 0.9389 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A avaliação também distinguiu pacientes positivos, com lesão anotada, e pacientes
+negativos, sem lesão visível. Essa separação torna a interpretação mais clara,
+pois o Dice mede sobreposição com a região positiva de referência e pode ser
+pouco informativo quando essa região não existe. Entre os pacientes positivos,
+Ruifrok obteve o maior Dice (0{,}7985), seguido por Macenko e pela ausência de
+normalização. Entre os pacientes negativos, a ausência de normalização e Reinhard
+apresentaram a maior proporção de casos sem predição positiva (0{,}7317). Assim,
+a ausência de normalização combinou bom desempenho agregado com maior controle
+de falsos positivos em pacientes negativos, enquanto Ruifrok se destacou na
+segmentação dos pacientes positivos.
+
+\begin{table}[!htb]
+\centering
+\caption{Avaliação separada de pacientes positivos e negativos por estratégia de normalização em DIAGSET.}
+\label{tab:results_diagset-rule6}
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+Normalização & Dice em positivos & Negativos sem predição positiva & Pacientes pos. & Pacientes neg. \\
+\midrule
+Sem normalização & 0{,}7781 [0{,}6816, 0{,}8628] & 0{,}7317 [0{,}5909, 0{,}8649] & 38 & 41 \\
+Reinhard & 0{,}7413 [0{,}6385, 0{,}8327] & 0{,}7317 [0{,}5909, 0{,}8649] & 38 & 41 \\
+Ruifrok & 0{,}7985 [0{,}7189, 0{,}8688] & 0{,}4146 [0{,}2666, 0{,}5641] & 38 & 41 \\
+Macenko & 0{,}7806 [0{,}6930, 0{,}8585] & 0{,}2195 [0{,}1000, 0{,}3500] & 38 & 41 \\
+Vahadane & 0{,}7579 [0{,}6716, 0{,}8362] & 0{,}1463 [0{,}0476, 0{,}2632] & 38 & 41 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+A Tabela~\ref{tab:results_diagset-patch-recognition} apresenta uma análise
+complementar em nível de \textit{patch}, aproximando os resultados deste trabalho
+do formato de avaliação usado no DIAGSET. A comparação principal considera os
+valores antes da supressão em nível de paciente. Os valores após essa supressão
+são mostrados apenas como informação adicional, pois refletem uma etapa posterior
+de filtragem das predições. Em todas as estratégias de normalização, a avaliação
+foi realizada sobre 387\,325 \textit{patches}, dos quais 72\,428 eram positivos e
+314\,897 eram negativos.
+
+\begin{table}[!htb]
+\centering
+\caption{Reconhecimento binário em nível de \textit{patch} em DIAGSET antes e depois da supressão por paciente.}
+\label{tab:results_diagset-patch-recognition}
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llrrrr}
+\toprule
+Normalização & Comparação & Acurácia & \textit{AvAcc} & Sensibilidade & Especificidade \\
+\midrule
+Sem normalização & Pré-supressão & 0.9323 & 0.8923 & 0.8283 & 0.9562 \\
+Sem normalização & Pós-supressão & 0.9419 & 0.8970 & 0.8255 & 0.9686 \\
+Reinhard & Pré-supressão & 0.9296 & 0.8811 & 0.8036 & 0.9586 \\
+Reinhard & Pós-supressão & 0.9385 & 0.8854 & 0.8005 & 0.9702 \\
+Ruifrok & Pré-supressão & 0.9325 & 0.8997 & 0.8474 & 0.9520 \\
+Ruifrok & Pós-supressão & 0.9337 & 0.9005 & 0.8474 & 0.9536 \\
+Macenko & Pré-supressão & 0.9166 & 0.9009 & 0.8758 & 0.9260 \\
+Macenko & Pós-supressão & 0.9176 & 0.9015 & 0.8758 & 0.9272 \\
+Vahadane & Pré-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 \\
+Vahadane & Pós-supressão & 0.9183 & 0.8715 & 0.7968 & 0.9462 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+Para contextualizar esses valores em relação ao artigo original do DIAGSET,
+a Tabela~\ref{tab:results_diagset-original-comparison} compara a saída primária
+em nível de \textit{patch} desta dissertação, antes da supressão por paciente,
+com o cenário binário S1 reportado por Koziarski et al.~\cite{koziarski2024diagset}.
+Essa comparação deve ser interpretada como referência externa, e não como
+reprodução estrita do experimento original, pois o artigo do DIAGSET utiliza seu
+próprio protocolo de extração, escalas de magnificação e \textit{ensemble} de
+classificadores. A coluna ``Dif.'' indica a diferença em pontos percentuais (p.p) em relação ao valor original.
+
+\begin{table}[!htb]
+\centering
+\caption{Comparação entre os resultados em nível de \textit{patch} desta dissertação e o cenário binário S1 do artigo original do DIAGSET.}
+\label{tab:results_diagset-original-comparison}
+\scriptsize
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\caption{\textit{AvAcc}}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Resultado & Valor & Dif. \\
+\midrule
+DIAGSET original S1 & 0.9470 & 0.00 p.p. \\
+Sem normalização & 0.8923 & -5.47 p.p. \\
+Reinhard & 0.8811 & -6.59 p.p. \\
+Ruifrok & 0.8997 & -4.73 p.p. \\
+Macenko & 0.9009 & -4.61 p.p. \\
+Vahadane & 0.8715 & -7.55 p.p. \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.48\textwidth}
+\centering
+\caption{Acurácia}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Resultado & Valor & Dif. \\
+\midrule
+DIAGSET original S1 & 0.9458 & 0.00 p.p. \\
+Sem normalização & 0.9323 & -1.35 p.p. \\
+Reinhard & 0.9296 & -1.62 p.p. \\
+Ruifrok & 0.9325 & -1.33 p.p. \\
+Macenko & 0.9166 & -2.92 p.p. \\
+Vahadane & 0.9183 & -2.75 p.p. \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\end{table}
+
+A diferença em acurácia foi relativamente pequena nas melhores configurações:
+Ruifrok e a ausência de normalização ficaram cerca de 1{,}3 ponto percentual
+abaixo do valor original do DIAGSET. A distância foi maior em \textit{AvAcc};
+mesmo a melhor configuração desta dissertação, Macenko, permaneceu 4{,}61 pontos
+percentuais abaixo do S1 original. Esse comportamento sugere que a acurácia
+agregada em \textit{patches} aproxima o desempenho do artigo de referência, mas
+o equilíbrio entre sensibilidade e especificidade ainda é inferior ao obtido pelo
+\textit{ensemble} dedicado do DIAGSET.
+
+As matrizes de confusão complementam essa interpretação ao explicitar o balanço entre verdadeiros negativos, falsos positivos, falsos negativos e verdadeiros positivos em nível de pixel, após a inferência final e a pós-filtragem congelada. A \Figura{fig:results_diagset-confusion-matrices} reúne os resultados das cinco estratégias de normalização, permitindo observar de forma visual a distribuição dos erros.
+
+\begin{figure}[!htb]
+\centering
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_not_normalized_updated.png}
+\caption{Sem normalização}
+\label{fig:results_diagset-confusion-not_normalized}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_reinhard_updated.png}
+\caption{Reinhard}
+\label{fig:results_diagset-confusion-reinhard}
+\end{subfigure}
+\par\medskip
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_ruifrok_updated.png}
+\caption{Ruifrok}
+\label{fig:results_diagset-confusion-ruifrok}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_macenko_updated.png}
+\caption{Macenko}
+\label{fig:results_diagset-confusion-macenko}
+\end{subfigure}
+\par\medskip
+\begin{subfigure}[t]{0.47\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras/results_diagset_confusion_vahadane_updated.png}
+\caption{Vahadane}
+\label{fig:results_diagset-confusion-vahadane}
+\end{subfigure}
+\caption[Matrizes de confusão finais em DIAGSET]{Matrizes de confusão em nível de pixel no conjunto de teste de DIAGSET para as cinco estratégias de normalização avaliadas.}
+\label{fig:results_diagset-confusion-matrices}
+\end{figure}
+
+O padrão observado nas matrizes de confusão é coerente com a avaliação separada de pacientes positivos e negativos. A ausência de normalização e Reinhard apresentaram maior supressão de predições positivas em pacientes negativos, enquanto Ruifrok e Macenko preservaram maior sensibilidade nas leituras voltadas aos casos positivos ou aos \textit{patches}. Portanto, Dice, AUROC, métricas macro, avaliação separada de casos positivos e negativos e reconhecimento em nível de \textit{patch} devem ser lidos em conjunto. Essa leitura integrada mostra que o método é promissor para localizar regiões tumorais, mas ainda exige controle adicional de falsos positivos para sustentar uma aplicação clínica mais conservadora.
+
+Uma última referência contextual é a comparação indireta com leituras de
+patologistas em estudos de câncer de próstata. Raciti et al.~\cite{raciti2020novel}
+avaliaram patologistas em WSIs de biópsias prostáticas por agulha com e sem apoio
+do sistema Paige Prostate Alpha; Raciti et al.~\cite{raciti2023clinical}
+reportaram uma validação clínica multileitor em 610 WSIs de 218 instituições; e
+Eloy et al.~\cite{eloy2023artificial} avaliaram quatro patologistas em lâminas
+digitais de biópsias prostáticas antes e depois do apoio por IA. A
+Tabela~\ref{tab:results_diagset-pathologist-context} usa as leituras sem IA
+desses trabalhos apenas como escala externa. A comparação não é direta: nesta
+dissertação, os valores de sensibilidade, especificidade e \textit{AvAcc} são
+calculados em nível de \textit{patch} antes da supressão por paciente, enquanto
+os estudos clínicos avaliam decisões em nível de WSI, biópsia ou caso
+diagnóstico. Como \textit{AvAcc} não é necessariamente reportada nesses estudos,
+a tabela usa a aproximação
+\(\textit{AvAcc} \approx (\mathrm{sensibilidade}+\mathrm{especificidade})/2\)
+para os valores de patologistas.
+
+\begin{table}[!htb]
+\centering
+\caption{Comparação contextual entre o reconhecimento em nível de \textit{patch} desta dissertação e leituras de patologistas em estudos de próstata.}
+\label{tab:results_diagset-pathologist-context}
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllrrr}
+\toprule
+Fonte & Unidade & Leitura & Sens. & Espec. & \textit{AvAcc}/aprox. \\
+\midrule
+Esta dissertação -- sem normalização & \textit{patch} & Pré-supressão & 0.8283 & 0.9562 & 0.8923 \\
+Esta dissertação -- Reinhard & \textit{patch} & Pré-supressão & 0.8036 & 0.9586 & 0.8811 \\
+Esta dissertação -- Ruifrok & \textit{patch} & Pré-supressão & 0.8474 & 0.9520 & 0.8997 \\
+Esta dissertação -- Macenko & \textit{patch} & Pré-supressão & 0.8758 & 0.9260 & 0.9009 \\
+Esta dissertação -- Vahadane & \textit{patch} & Pré-supressão & 0.7968 & 0.9462 & 0.8715 \\
+Raciti et al.~\cite{raciti2020novel} & WSI & Patologistas sem IA & 0.7380 & 0.9660 & 0.8520 \\
+Raciti et al.~\cite{raciti2023clinical} & WSI & Patologistas sem IA & 0.8870 & 0.9730 & 0.9300 \\
+Eloy et al.~\cite{eloy2023artificial} & Lâmina/caso & Patologistas sem IA, fase 1 & 0.9680 & 0.9390 & 0.9535 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+Essa leitura contextual sugere que os melhores resultados em \textit{patches}
+desta dissertação estão na mesma ordem de grandeza dos valores reportados para
+patologistas em tarefas diagnósticas digitais, mas ainda abaixo dos estudos
+clínicos mais fortes quando a sensibilidade e a especificidade são combinadas em
+uma acurácia balanceada aproximada. O melhor \textit{AvAcc} do fluxo proposto
+foi obtido com Macenko, com 0{,}9009, acima da referência sem IA de Raciti et
+al.~\cite{raciti2020novel} e abaixo dos valores de Raciti et
+al.~\cite{raciti2023clinical} e Eloy et al.~\cite{eloy2023artificial}. Esse
+resultado é encorajador como referência de escala, mas não demonstra
+equivalência com a leitura humana: o patologista avalia a lâmina ou o caso com
+contexto morfológico amplo, enquanto o experimento desta dissertação mede
+segmentação, reconhecimento local de \textit{patches} e agregações por paciente.
+
+\section{Discussão dos resultados}\label{sec:res_diagset_discussao}
+
+Os resultados obtidos em DIAGSET indicam que a normalização de cor não produziu ganho uniforme em todos os critérios avaliados. Em vez de uma estratégia claramente dominante, observou-se uma dependência entre o método de normalização, o nível de agregação da métrica (pixel, paciente ou \textit{patch}) e o tipo de erro analisado. Essa comparação deve ser interpretada dentro do desenho experimental adotado: as normalizações foram avaliadas sob um protocolo comum de treinamento, seleção de \textit{checkpoints}, composição de \textit{ensemble} e inferência, sem otimização exaustiva e individualizada dos hiperparâmetros para cada estratégia. Portanto, os resultados descrevem o comportamento relativo das normalizações nas condições avaliadas, e não a superioridade intrínseca de uma delas em seu regime ótimo. 
+
+Nesse contexto, a ausência de normalização apresentou o maior Dice em nível de pixel, com estimativa de 0{,}8415 e IC95\% entre 0{,}7767 e 0{,}8987, e também o maior Dice em nível de paciente, com estimativa de 0{,}7540 e IC95\% entre 0{,}6710 e 0{,}8356. Ruifrok, por sua vez, obteve a maior AUROC pontual, com valor de 0{,}9579, e o maior Dice entre os pacientes positivos, com estimativa de 0{,}7985 e IC95\% entre 0{,}7189 e 0{,}8688. Macenko apresentou o maior \textit{AvAcc} no reconhecimento binário em nível de \textit{patch}, tanto antes quanto depois da supressão por paciente.
+
+Essa distribuição de resultados mostra que a escolha da melhor estratégia depende da pergunta experimental. Quando o interesse está na segmentação global do volume total de pixels ou na agregação por paciente, a ausência de normalização aparece como a alternativa mais favorável nesta execução. Quando se avalia a ordenação probabilística antes da decisão binária, Ruifrok apresenta o melhor resultado pontual. Quando a comparação é reformulada como reconhecimento binário de \textit{patches} no formato usual de DIAGSET, Macenko obtém o maior \textit{AvAcc}. Portanto, a comparação entre normalizações não deve ser reduzida a um único valor médio, pois Dice micro, Dice macro, AUROC, avaliação separada de pacientes positivos e negativos e métricas em nível de \textit{patch} descrevem dimensões distintas do comportamento do método.
+
+A divergência entre métricas micro e macro continua metodologicamente relevante. No nível micro, o desempenho é influenciado pelo volume total de pixels e, consequentemente, por pacientes ou lâminas com maior número de \textit{patches}. No nível macro, cada paciente contribui de maneira mais equilibrada para o resultado final. Nesta execução, a ausência de normalização liderou em ambos os níveis, mas a diferença entre estratégias mudou conforme a métrica considerada: Ruifrok preservou maior sensibilidade e maior AUROC, enquanto Macenko concentrou maior desempenho no reconhecimento binário em nível de \textit{patch}. Esse contraste reforça que bom desempenho agregado por pixel não deve ser usado isoladamente para inferir comportamento uniforme entre pacientes ou melhor classificação binária de \textit{patches}.
+
+A análise separada de pacientes com e sem lesão anotada reforça essa cautela. Entre os pacientes positivos, Ruifrok, Macenko e a ausência de normalização apresentaram Dice próximos, todos em torno de 0{,}78 a 0{,}80. Esse achado sugere que o método foi capaz de localizar regiões tumorais em parte relevante dos casos com lesão. Nos pacientes negativos, entretanto, a proporção de casos sem qualquer predição positiva variou amplamente: a ausência de normalização e Reinhard alcançaram 0{,}7317, enquanto Vahadane permaneceu em 0{,}1463. Em termos práticos, isso significa que as configurações com maior sensibilidade ou melhor \textit{AvAcc} em \textit{patches} não foram necessariamente as mais conservadoras para pacientes sem lesão anotada.
+
+Esse padrão é confirmado pelas matrizes de confusão em nível de pixel e pela tabela de reconhecimento em nível de \textit{patch}. As estratégias avaliadas preservaram desempenho expressivo na identificação de regiões positivas, mas exibiram compromissos diferentes entre sensibilidade, especificidade e supressão de pacientes negativos. Assim, os resultados não sustentam uma leitura clínica forte de teste negativo, nem autorizam interpretar a ausência de predição como evidência robusta de ausência de câncer. O método mostra potencial para apoiar a localização de regiões suspeitas, mas ainda exigiria mecanismos adicionais de supressão de falsos positivos, calibração em nível de paciente ou validação externa antes de qualquer extrapolação para uso clínico.
+
+A interpretação da normalização Vahadane requer uma ressalva específica. Nesta dissertação, os resultados associados a Vahadane correspondem à configuração operacional efetivamente adotada no experimento, baseada em fonte fixa, e não a uma normalização recalculada individualmente para cada \textit{patch}. Por essa razão, sua comparação com os demais métodos deve ser entendida dentro desse contrato experimental. Ainda assim, Vahadane apresentou comportamento informativo: manteve sensibilidade macro intermediária, mas exibiu menor Dice macro, menor AUROC e a menor proporção de pacientes negativos sem predição positiva entre as estratégias avaliadas.
+
+Do ponto de vista metodológico, o principal resultado do experimento não é a identificação de uma normalização universalmente superior, mas a demonstração de que o fluxo proposto permite comparar estratégias sob condições controladas e rastreáveis. A curadoria foi aplicada antes da divisão por paciente, reduzindo o risco de que amostras positivas contaminadas por fundo ou por imprecisões de anotação influenciassem qualquer partição. Em seguida, a amostragem inteligente foi restrita ao conjunto de treino, com o objetivo de reduzir redundância e expor o modelo a imagens mais variadas, sem modificar validação ou teste. Essa separação preservou a independência das etapas de seleção e avaliação, reduzindo o risco de que a compactação do treino contaminasse a interpretação dos resultados finais.
+
+Todas as normalizações foram avaliadas com as mesmas oito arquiteturas, sob a mesma semente aleatória, com otimizador, decaimento de peso e função de perda mantidos constantes. Essa decisão favorece a comparabilidade entre estratégias, mas também delimita o alcance da comparação: não se buscou ajustar um regime ótimo específico para cada normalização, e sim observar seu comportamento sob um contrato experimental comum. As diferenças introduzidas por arquitetura, normalização e taxa de aprendizado puderam, assim, ser analisadas sem alterar deliberadamente a configuração de reprodutibilidade. Além disso, os \textit{checkpoints} foram selecionados em validação e apenas depois combinados na inferência final por \textit{ensemble}, preservando a separação entre seleção de modelos e avaliação no teste.
+
+Em conjunto, os achados de DIAGSET sustentam três conclusões principais. Primeiro, a normalização de cor modifica o comportamento do método, mas seu benefício depende da métrica adotada e do protocolo experimental utilizado. Segundo, a avaliação por paciente revela limitações que podem ser atenuadas ou mascaradas por métricas agregadas em nível de pixel. Terceiro, o controle de falsos positivos em pacientes negativos permanece como o principal ponto de melhoria do fluxo atual. Portanto, os resultados validam a utilidade do protocolo para comparação reprodutível entre estratégias, mas não justificam afirmar superioridade geral de uma normalização, generalização para outros domínios histopatológicos ou uso clínico externo.
+
+Por fim, a contribuição mais consistente desta etapa está na rastreabilidade do processo experimental. As decisões de ingestão, curadoria, particionamento por paciente, amostragem do treino, seleção de \textit{checkpoints}, composição do \textit{ensemble}, definição dos limiares e cálculo das métricas finais permaneceram conectadas ao fluxo metodológico descrito anteriormente. Essa organização permite interpretar os resultados não apenas como valores isolados de desempenho, mas como consequência de uma cadeia experimental auditável.
