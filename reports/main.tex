@@ -29,19 +29,23 @@
 \author[1]{Bruno Henrique Nunes}
 \cormark[1]
 \ead{bruno.nunes.1987@gmail.com}
+\credit{Conceptualization, Data curation, Formal analysis, Methodology, Software, Validation, Visualization, Writing - original draft}
 
 \author[1]{Ana Estela Antunes da Silva}
 \ead{aeasilva@unicamp.br}
+\credit{Conceptualization, Project administration, Supervision, Writing - review and editing}
 
 \affiliation[1]{organization={School of Technology, University of Campinas (UNICAMP)},
+            addressline={Rua Paschoal Marmo, 1888 - Jd. Nova Italia},
             city={Limeira},
+            postcode={13484-332},
             state={Sao Paulo},
             country={Brazil}}
 
 \cortext[1]{Corresponding author}
 
 \begin{abstract}
-Whole-slide histopathology experiments are vulnerable to failures that occur before model fitting, including annotation ambiguity, contaminated patches, patient-level leakage, color variability, incompatible intermediate artifacts, and validation choices that leak into the test set. This work presents an automated, reproducibility-oriented workflow for cancer detection and segmentation in digital pathology and evaluates it on DIAGSET, a public prostate histopathology dataset. The workflow converts slide and annotation pairs into HDF5-backed patch datasets, performs manual-review-guided graph cleaning, generates patient-disjoint training, validation, and test splits, applies stain normalization at runtime from training-derived state, optionally reduces only the training split by embedding-based smart sampling, trains a fixed registry of segmentation models, optimizes a two-stream ensemble on validation patients, and evaluates the frozen recipe on held-out test patients. In the DIAGSET experiment, 419 valid image--annotation cases yielded 1,186,778 retained patches across 393 patients; the held-out test set contained 79 patients and 387,325 patches. No stain-normalization strategy was uniformly best across evaluation criteria. The non-normalized setting obtained the highest pixel-level micro Dice (0.8415; 95\% CI 0.7767--0.8987) and patient-level macro Dice (0.7540; 95\% CI 0.6710--0.8356), Ruifrok obtained the highest AUROC point estimate (0.9579) and positive-patient Dice (0.7985; 95\% CI 0.7189--0.8688), and Macenko obtained the highest DIAGSET-style patch balanced accuracy before patient suppression (AvAcc 0.9009). However, all settings still produced false positives in at least 11 of 41 negative test patients. The results support the workflow as an auditable experimental protocol, while showing that clinical interpretation remains limited by false-positive control and by evaluation on a single dataset.
+Whole-slide histopathology experiments can fail before model fitting through annotation ambiguity, contaminated patches, patient leakage, color variability, incompatible artifacts, and validation choices that leak into the test set. This work presents an automated, reproducibility-oriented workflow for cancer detection and segmentation in digital pathology and evaluates it on the DIAGSET prostate histopathology dataset. The workflow converts slide and annotation pairs into patch datasets, performs manual-review-guided graph cleaning, creates patient-disjoint training, validation, and test splits, applies stain normalization from training-derived state, reduces only the training split by embedding-based smart sampling, trains a fixed registry of segmentation models, optimizes a two-stream ensemble on validation patients, and evaluates the frozen recipe on held-out test patients. In the DIAGSET experiment, 419 valid image--annotation cases yielded 1,186,778 retained patches across 393 patients; the test set contained 79 patients and 387,325 patches. No strategy was uniformly best. The non-normalized setting obtained the highest pixel-level micro Dice (0.8415; 95\% confidence interval, 0.7767--0.8987) and patient-level macro Dice (0.7540; 0.6710--0.8356), Ruifrok obtained the highest area under the receiver operating characteristic curve estimate (0.9579) and positive-patient Dice (0.7985; 0.7189--0.8688), and Macenko obtained the highest patch balanced accuracy before patient suppression (0.9009). However, all settings produced false positives in at least 11 of 41 negative test patients. The results support an auditable experimental protocol, while showing that clinical interpretation remains limited by false-positive control and by evaluation on a single dataset.
 \end{abstract}
 
 \begin{highlights}
@@ -85,7 +89,7 @@ The workflow is organized as ten numbered stages connected by explicit files, da
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.95\textwidth,height=0.58\textheight,keepaspectratio]{figures/overall_method.png}
+\includegraphics[width=0.95\textwidth,height=0.58\textheight,keepaspectratio]{figures/overall_method_300dpi.png}
 \caption{Overall method used in the DIAGSET experiment. The workflow connects patch extraction, artifact analysis, HDF5-backed storage, cancer-patch cleaning, patient-level train/validation/test generation, sanity checking, train-only smart sampling, learning-rate selection, supervised training, runtime image augmentation and normalization, weighted sampling, validation-only ensemble formation, and frozen inference.}
 \label{fig:overall-method}
 \end{figure*}
@@ -177,7 +181,7 @@ These numbers are methodologically important because they define the evaluation 
 
 \subsection{Final Test Performance}
 
-Table~\ref{tab:final-results} summarizes the final held-out test results for the five normalization strategies. The table is intentionally compact: it reports the metrics needed to interpret the main segmentation and patient-level findings without listing every per-model checkpoint and auxiliary metric. Table~\ref{tab:patch-results} adds the DIAGSET-style patch-recognition summary for comparisons that require patch-level Accuracy or AvAcc rather than segmentation overlap.
+Table~\ref{tab:final-results} summarizes the final held-out test results for the five normalization strategies. The table is intentionally compact: it reports the metrics needed to interpret the main segmentation and patient-level findings without listing every per-model checkpoint and auxiliary metric. Figure~\ref{fig:metric-panels} visualizes the corresponding micro- and macro-averaged metric profiles, and Table~\ref{tab:patch-results} adds the DIAGSET-style patch-recognition summary for comparisons that require patch-level Accuracy or AvAcc rather than segmentation overlap.
 
 \begin{table*}[t]
 \caption{Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction.}
@@ -285,6 +289,28 @@ The study also has clear scope limits. DIAGSET is a single prostate histopatholo
 \section{Conclusion}
 
 This paper presented a reproducibility-oriented workflow for whole-slide cancer segmentation and evaluated it on DIAGSET. The main contribution is methodological: the workflow treats the full experimental chain as the object of study, from slide ingestion and patch curation through patient-level splitting, training, validation-only ensemble optimization, and frozen test inference. On DIAGSET, the workflow produced interpretable metric-specific findings rather than a single universally superior normalization strategy. No normalization led pixel-pooled and patient-averaged Dice, Ruifrok led AUROC and positive-patient Dice, and Macenko led DIAGSET-style patch AvAcc. At the same time, persistent false positives in negative patients limit clinical interpretation. Future work should evaluate the same artifact-preserving protocol on external datasets and develop stronger patient-level calibration and false-positive-control mechanisms.
+
+\printcredits
+
+\section*{Funding}
+
+This study was financed in part by the Coordenacao de Aperfeicoamento de Pessoal de Nivel Superior -- Brasil (CAPES) -- Finance Code 001. The funder had no role in study design, data collection, data analysis, interpretation, writing of the manuscript, or the decision to submit the article for publication.
+
+\section*{Declaration of Competing Interest}
+
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
+
+\section*{Ethics Approval and Consent to Participate}
+
+This study used DIAGSET, a public de-identified histopathology dataset cited in this article. No new human participants were recruited, no new biological specimens were collected, and the authors did not have access to directly identifying participant information. The analysis was secondary use of public data, participant privacy was preserved, and the work was not a clinical trial.
+
+\section*{Data and Code Availability}
+
+The DIAGSET data are publicly available through the dataset publication cited in this article. The workflow code is available at \url{https://github.com/bhnunes/Master_Coding}. Large generated artifacts, including HDF5 datasets, checkpoints, and inference outputs, are not included in the manuscript source package because of file size, but they can be regenerated from the repository configuration and documented pipeline stages.
+
+\section*{Declaration of Generative AI and AI-Assisted Technologies in the Manuscript Preparation Process}
+
+During preparation of this manuscript, the authors used OpenAI Codex/ChatGPT to assist with submission-compliance checking and editorial revision. After using this tool, the authors reviewed and edited the content as needed and take full responsibility for the content of the submitted manuscript.
 
 \bibliographystyle{cas-model2-names}
 \bibliography{references}

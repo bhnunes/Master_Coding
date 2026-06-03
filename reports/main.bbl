@@ -34,6 +34,7 @@
   \bibinfo{pages}{2546--2554}.
 \newblock \URLprefix
   \url{https://papers.nips.cc/paper/4443-algorithms-for-hyper-parameter-optimization}.
+  \bibinfo{note}{accessed 3 June 2026}.
 %Type = Article
 \bibitem[{Campanella et~al.(2025)Campanella, Chen, Singh
   et~al.}]{campanella2025clinical}
@@ -216,6 +217,7 @@
   supervision}.
 \newblock \bibinfo{journal}{Transactions on Machine Learning Research}
   \URLprefix \url{https://openreview.net/forum?id=a68SUt6zFt}.
+  \bibinfo{note}{accessed 3 June 2026}.
 %Type = Article
 \bibitem[{Piccolo and Frampton(2016)}]{piccolo2016tools}
 \bibinfo{author}{Piccolo, S.R.}, \bibinfo{author}{Frampton, M.B.},
