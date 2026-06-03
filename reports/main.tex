@@ -21,10 +21,10 @@
 \def\floatpagepagefraction{1}
 \def\textpagefraction{.001}
 
-\shorttitle{Automated Reproducible WSI Cancer Workflow}
+\shorttitle{DIAGSET Reproducible WSI Workflow}
 \shortauthors{B.H. Nunes and A.E.A. da Silva}
 
-\title[mode=title]{An Automated and Reproducible Workflow for Cancer Detection and Segmentation in Whole-Slide Histopathology}
+\title[mode=title]{A Reproducible Prostate Whole-Slide Histopathology Workflow: A DIAGSET Evaluation}
 
 \author[1]{Bruno Henrique Nunes}
 \cormark[1]
@@ -45,11 +45,11 @@
 \cortext[1]{Corresponding author}
 
 \begin{abstract}
-Whole-slide histopathology experiments can fail before model fitting through annotation ambiguity, contaminated patches, patient leakage, color variability, incompatible artifacts, and validation choices that leak into the test set. This work presents an automated, reproducibility-oriented workflow for cancer detection and segmentation in digital pathology and evaluates it on the DIAGSET prostate histopathology dataset. The workflow converts slide and annotation pairs into patch datasets, performs manual-review-guided graph cleaning, creates patient-disjoint training, validation, and test splits, applies stain normalization from training-derived state, reduces only the training split by embedding-based smart sampling, trains a fixed registry of segmentation models, optimizes a two-stream ensemble on validation patients, and evaluates the frozen recipe on held-out test patients. In the DIAGSET experiment, 419 valid image--annotation cases yielded 1,186,778 retained patches across 393 patients; the test set contained 79 patients and 387,325 patches. No strategy was uniformly best. The non-normalized setting obtained the highest pixel-level micro Dice (0.8415; 95\% confidence interval, 0.7767--0.8987) and patient-level macro Dice (0.7540; 0.6710--0.8356), Ruifrok obtained the highest area under the receiver operating characteristic curve estimate (0.9579) and positive-patient Dice (0.7985; 0.7189--0.8688), and Macenko obtained the highest patch balanced accuracy before patient suppression (0.9009). However, all settings produced false positives in at least 11 of 41 negative test patients. The results support an auditable experimental protocol, while showing that clinical interpretation remains limited by false-positive control and by evaluation on a single dataset.
+Whole-slide histopathology experiments can fail before model fitting through annotation ambiguity, contaminated patches, patient leakage, color variability, incompatible artifacts, and validation choices that leak into the test set. This work presents a reproducibility-oriented workflow for prostate cancer segmentation in digital pathology and evaluates it on the DIAGSET prostate histopathology dataset. The workflow converts slide and annotation pairs into patch datasets, performs manual-review-guided graph cleaning, creates patient-disjoint training, validation, and test splits, applies stain normalization from training-derived state, reduces only the training split by embedding-based smart sampling, trains a fixed registry of segmentation models, optimizes a two-stream ensemble on validation patients, and evaluates the frozen recipe on held-out test patients. In the DIAGSET experiment, 419 valid image--annotation cases yielded 1,186,778 retained patches across 393 patients; the test set contained 79 patients and 387,325 patches. The analysis is descriptive rather than a statistical superiority test among normalization methods. The non-normalized setting produced the largest point estimates for pixel-level micro Dice (0.8415; 95\% confidence interval, 0.7767--0.8987) and patient-level macro Dice (0.7540; 0.6710--0.8356), Ruifrok produced the largest area under the receiver operating characteristic curve point estimate (0.9579) and positive-patient Dice (0.7985; 0.7189--0.8688), and Macenko produced the largest patch balanced accuracy before patient suppression (0.9009). However, all settings produced false positives in at least 11 of 41 negative test patients. The results support an auditable single-dataset experimental protocol, while showing that clinical interpretation remains limited by false-positive control, validation-set optimization burden, and the absence of external validation.
 \end{abstract}
 
 \begin{highlights}
-\item End-to-end pathology workflow with auditable intermediate artifacts.
+\item End-to-end DIAGSET workflow with auditable intermediate artifacts.
 \item DIAGSET evaluation with patient-level splits and train-derived stain state.
 \item Metric-specific normalization findings across Dice, AUROC, and patch AvAcc.
 \item Negative-patient false positives remain the main limitation.
@@ -69,7 +69,7 @@ This paper reports a workflow designed to make those experimental decisions expl
 
 The empirical evaluation uses DIAGSET, a public prostate histopathology dataset with image and annotation material suitable for cancer versus non-cancer analysis \cite{koziarski2024diagset}. The main experimental question is not whether one color-normalization method is universally superior, but whether a complete, provenance-preserving workflow can compare normalization strategies under a fixed training, validation, and test protocol. Five runtime settings are evaluated: no color normalization, Reinhard, Ruifrok, Macenko, and Vahadane \cite{reinhard2001color,ruifrok2001quantification,macenko2009method,vahadane2016structure}.
 
-The results show that the preferred normalization depends on the evaluation lens. Pixel- and patient-level Dice favor the non-normalized setting, AUROC and positive-patient Dice favor Ruifrok, and DIAGSET-style patch AvAcc favors Macenko. This disagreement is not a nuisance result; it is the central interpretation. In segmentation tasks with both positive and negative patients, micro Dice, macro Dice, AUROC, patch-recognition metrics, and negative-patient false-positive control answer different scientific questions \cite{saito2015precision,fawcett2006roc,seghier2024dice}. The paper therefore emphasizes metric-specific interpretation and conservative scope rather than a single winning configuration.
+The descriptive results show that the largest point estimate depends on the evaluation lens. Pixel- and patient-level Dice were largest without normalization, AUROC and positive-patient Dice were largest with Ruifrok, and DIAGSET-style patch AvAcc was largest with Macenko. This disagreement is not treated as a nuisance result or as evidence of statistical superiority by one method; it is the central interpretation. In segmentation tasks with both positive and negative patients, micro Dice, macro Dice, AUROC, patch-recognition metrics, and negative-patient false-positive control answer different scientific questions \cite{saito2015precision,fawcett2006roc,seghier2024dice}. The paper therefore emphasizes metric-specific interpretation and conservative scope rather than a single winning configuration.
 
 \section{Related Work}
 
@@ -99,6 +99,8 @@ The workflow is organized as ten numbered stages connected by explicit files, da
 DIAGSET was used as the experimental dataset \cite{koziarski2024diagset}. The ingestion stage registered 429 \texttt{.ndpi} images and 429 \texttt{.ndpa} annotations, of which 419 were paired and validated through converted GeoJSON annotations. Ten images were rejected or failed before final extraction. Patches were extracted with a 224-pixel window, 112-pixel stride, annotation-overlap threshold of 1.0, and minimum tissue-content threshold of 0.3.
 
 Cancer-patch curation used a small manually reviewed pilot set and a larger labeled master set to tune a graph-based background-contamination rule. The pilot set contained 100 reviewed samples, with 94 approved and 6 rejected. The master set contained 385 samples, with 367 approved and 18 rejected. The selected graph-cleaning configuration used a background-intensity threshold of 167, Felzenszwalb scale parameter $k=140$, minimum segment size 97, a 3-pixel erosion radius, and contamination threshold $\tau=0.19$ \cite{felzenszwalb2004efficient}. Applying this rule rejected 74,047 cancer patches and retained 1,186,778 patches for downstream analysis. Non-cancer patches were not rejected by this graph-cleaning step because the rule was targeted at positive regions contaminated by background or annotation mismatch.
+
+This graph-cleaning step is treated as a pre-split annotation and background-curation operation, not as a downstream segmentation model selected from test performance. The current manuscript evidence records the reviewed sample counts and selected graph parameters, but the preserved result bundle does not provide a complete reviewed-stem-to-final-split audit. Consequently, the cleaning step is not claimed to have been tuned only on final training patients; it is reported as a pre-split curation choice and interpreted as a limitation of the no-rerun evidence package.
 
 \subsection{Patient-Level Splitting and Runtime Normalization}
 
@@ -146,11 +148,31 @@ The final binary decision was calibrated on validation patients with a balanced 
 |\mathcal{P}_+^{\mathrm{cal}}|+|\mathcal{P}_-^{\mathrm{cal}}|}.
 \label{eq:balanced-calibration-score}
 \end{equation}
-Candidate selection also enforced baseline-relative positive-patient Dice and true-positive-rate guardrails, minimum micro Dice, minimum macro precision, minimum macro true-positive rate, and a target negative-clean rate. When these targets were infeasible, the recipe recorded the calibration status rather than silently treating the selected operating point as satisfying all constraints. The frozen ROI thresholds were 0.2719, 0.2808, 0.2104, 0.1748, and 0.2268, and the final decision thresholds were 0.5900, 0.5000, 0.6000, 0.5700, and 0.5500 for no normalization, Reinhard, Ruifrok, Macenko, and Vahadane, respectively. These thresholds summarize only part of the frozen recipe; the recipe also stores the validation-selected component, patch-count, patient-area post-processing parameters, and negative false-positive area diagnostics.
+Candidate selection also enforced baseline-relative positive-patient Dice and true-positive-rate guardrails, minimum micro Dice, minimum macro precision, minimum macro true-positive rate, and a target negative-clean rate. When these targets were infeasible, the recipe recorded the calibration status rather than silently treating the selected operating point as satisfying all constraints. Table~\ref{tab:validation-burden} summarizes the validation optimization burden recorded in the frozen optimizer artifacts. The frozen ROI thresholds were 0.2719, 0.2808, 0.2104, 0.1748, and 0.2268, and the final decision thresholds were 0.5900, 0.5000, 0.6000, 0.5700, and 0.5500 for no normalization, Reinhard, Ruifrok, Macenko, and Vahadane, respectively. These thresholds summarize only part of the frozen recipe; the recipe also stores the validation-selected component, patch-count, patient-area post-processing parameters, and negative false-positive area diagnostics.
+
+\begin{table*}[t]
+\caption{Validation optimization burden recorded by the no-rerun optimizer artifacts. Each normalization used the same 78 validation patients; 25\% of them, corresponding to 20 patients, were used for final calibration. Semantic and spatial columns report the number of optimization trials for each stream. The calibration outcome translates the frozen optimizer status into reviewer-facing language; the exact machine-readable codes are preserved in the evidence index.}
+\label{tab:validation-burden}
+\centering
+\fontsize{7.4}{8.4}\selectfont
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{P{2.4cm}P{2.0cm}P{2.0cm}P{2.0cm}P{2.0cm}P{4.0cm}}
+\toprule
+Normalization & Validation patients & Calibration patients & Semantic trials & Spatial trials & Calibration outcome \\
+\midrule
+None & 78 & 20 & 50 & 50 & Required micro-Dice guardrail could not be satisfied \\
+Reinhard & 78 & 20 & 50 & 50 & Calibration target met \\
+Ruifrok & 78 & 20 & 50 & 50 & Calibration target met \\
+Macenko & 78 & 20 & 50 & 50 & Required micro-Dice guardrail could not be satisfied \\
+Vahadane & 78 & 20 & 50 & 50 & Calibration target could not be satisfied \\
+\bottomrule
+\end{tabular}}
+\end{table*}
 
 \subsection{Metrics and Uncertainty}
 
-Final evaluation was performed only on the frozen test split. Pixel-level counts were accumulated after the validation-selected thresholding, connected-component filtering, and frozen patient-level suppression rules. Micro metrics were computed by pooling pixel counts across test patients before evaluating the metric, whereas macro metrics were computed per patient and then averaged. The reported summary includes Dice, IoU, accuracy, sensitivity, specificity, precision, false-positive and false-negative rates, AUROC, and a separate positive/negative-patient decomposition. Positive-patient Dice was computed only among patients with annotated lesion pixels. Negative-clean rate, defined in Eq.~(\ref{eq:negative-clean-rate}), was the proportion of negative patients with no positive prediction,
+Final evaluation was performed only on the frozen test split. Pixel-level counts were accumulated after the validation-selected thresholding, connected-component filtering, and frozen patient-level suppression rules. By contrast, AUROC was computed from raw foreground probabilities before hard post-processing, so AUROC and post-processed Dice/NCR evaluate related but not identical prediction objects. Micro metrics were computed by pooling pixel counts across test patients before evaluating the metric, whereas macro metrics were computed per patient and then averaged. For macro Dice, a negative patient with neither annotated lesion pixels nor predicted positive pixels contributed Dice equal to 1, whereas a negative patient with any false-positive pixels contributed Dice equal to 0. The reported summary therefore separates positive-patient Dice from negative-clean rate to avoid hiding empty-mask behavior inside one macro overlap value. Positive-patient Dice was computed only among patients with annotated lesion pixels. Negative-clean rate, defined in Eq.~(\ref{eq:negative-clean-rate}), was the proportion of negative patients with no positive prediction,
 \begin{equation}
 \mathrm{NCR}=\frac{1}{|\mathcal{P}_-|}\sum_{j\in\mathcal{P}_-}\indicator{FP_j=0},
 \label{eq:negative-clean-rate}
@@ -181,7 +203,7 @@ These numbers are methodologically important because they define the evaluation 
 
 \subsection{Final Test Performance}
 
-Table~\ref{tab:final-results} summarizes the final held-out test results for the five normalization strategies. The table is intentionally compact: it reports the metrics needed to interpret the main segmentation and patient-level findings without listing every per-model checkpoint and auxiliary metric. Figure~\ref{fig:metric-panels} visualizes the corresponding micro- and macro-averaged metric profiles, and Table~\ref{tab:patch-results} adds the DIAGSET-style patch-recognition summary for comparisons that require patch-level Accuracy or AvAcc rather than segmentation overlap.
+Table~\ref{tab:final-results} summarizes the final held-out test results for the five normalization strategies. The table is intentionally compact: it reports the metrics needed to interpret the main segmentation and patient-level findings without listing every per-model checkpoint and auxiliary metric. Values should be read as point estimates with available patient-bootstrap intervals, not as formal pairwise superiority tests. Figure~\ref{fig:metric-panels} visualizes the corresponding micro- and macro-averaged metric profiles, and Table~\ref{tab:patch-results} adds the DIAGSET-style patch-recognition summary for comparisons that require patch-level Accuracy or AvAcc rather than segmentation overlap.
 
 \begin{table*}[t]
 \caption{Final DIAGSET test performance by runtime-normalization strategy. Dice intervals are 95\% patient-bootstrap confidence intervals. AUROC is reported as a point estimate because patient-indexed AUROC bootstrap artifacts were not available. NCR denotes negative-clean rate, the fraction of negative patients with no positive prediction.}
@@ -194,16 +216,16 @@ Table~\ref{tab:final-results} summarizes the final held-out test results for the
 \toprule
 Normalization & Micro Dice & Macro Dice & AUROC & Positive-patient Dice & NCR \\
 \midrule
-None & \textbf{0.8415 [0.7767, 0.8987]} & \textbf{0.7540 [0.6710, 0.8356]} & 0.9508 & 0.7781 [0.6816, 0.8628] & \textbf{0.7317 [0.5909, 0.8649]} \\
-Reinhard & 0.8296 [0.7773, 0.8789] & 0.7363 [0.6510, 0.8192] & 0.9445 & 0.7413 [0.6385, 0.8327] & \textbf{0.7317 [0.5909, 0.8649]} \\
-Ruifrok & 0.8295 [0.7786, 0.8710] & 0.5993 [0.5038, 0.6948] & \textbf{0.9579} & \textbf{0.7985 [0.7189, 0.8688]} & 0.4146 [0.2666, 0.5641] \\
+None & 0.8415 [0.7767, 0.8987] & 0.7540 [0.6710, 0.8356] & 0.9508 & 0.7781 [0.6816, 0.8628] & 0.7317 [0.5909, 0.8649] \\
+Reinhard & 0.8296 [0.7773, 0.8789] & 0.7363 [0.6510, 0.8192] & 0.9445 & 0.7413 [0.6385, 0.8327] & 0.7317 [0.5909, 0.8649] \\
+Ruifrok & 0.8295 [0.7786, 0.8710] & 0.5993 [0.5038, 0.6948] & 0.9579 & 0.7985 [0.7189, 0.8688] & 0.4146 [0.2666, 0.5641] \\
 Macenko & 0.8000 [0.7198, 0.8510] & 0.4894 [0.3921, 0.5878] & 0.9534 & 0.7806 [0.6930, 0.8585] & 0.2195 [0.1000, 0.3500] \\
 Vahadane & 0.7862 [0.7167, 0.8433] & 0.4405 [0.3454, 0.5378] & 0.9389 & 0.7579 [0.6716, 0.8362] & 0.1463 [0.0476, 0.2632] \\
 \bottomrule
 \end{tabular}}
 \end{table*}
 
-The leading method depends on the metric. The non-normalized condition obtained the highest micro Dice and macro Dice, indicating the strongest overlap both after pooling all test pixels and after averaging patient-level results. Ruifrok obtained the highest AUROC point estimate and the highest Dice among positive patients, indicating a stronger probability ranking and favorable behavior on lesion-bearing cases. Thus, the most favorable normalization changes when the question moves from global segmentation overlap to ranking quality or positive-patient localization.
+The largest point estimate depends on the metric. The non-normalized condition produced the largest micro Dice and macro Dice point estimates, describing the strongest observed overlap both after pooling all test pixels and after averaging patient-level results. Ruifrok produced the largest AUROC point estimate and the largest Dice among positive patients, describing stronger observed probability ranking and favorable behavior on lesion-bearing cases. Because several intervals overlap and AUROC lacks a patient-level interval in the available artifacts, these observations should be interpreted as metric-specific descriptive findings rather than proof that one normalization is statistically superior.
 
 \begin{figure*}[t]
 \centering
@@ -226,9 +248,9 @@ The patient-level decomposition exposes the main limitation and trade-off. Ruifr
 Normalization & Accuracy & AvAcc & Sensitivity & Specificity & Post-supp. AvAcc \\
 \midrule
 None & 0.9323 & 0.8923 & 0.8283 & 0.9562 & 0.8970 \\
-Reinhard & 0.9296 & 0.8811 & 0.8036 & \textbf{0.9586} & 0.8854 \\
-Ruifrok & \textbf{0.9325} & 0.8997 & 0.8474 & 0.9520 & 0.9005 \\
-Macenko & 0.9166 & \textbf{0.9009} & \textbf{0.8758} & 0.9260 & \textbf{0.9015} \\
+Reinhard & 0.9296 & 0.8811 & 0.8036 & 0.9586 & 0.8854 \\
+Ruifrok & 0.9325 & 0.8997 & 0.8474 & 0.9520 & 0.9005 \\
+Macenko & 0.9166 & 0.9009 & 0.8758 & 0.9260 & 0.9015 \\
 Vahadane & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 0.8715 \\
 \bottomrule
 \end{tabular}
@@ -236,7 +258,7 @@ Vahadane & 0.9183 & 0.8715 & 0.7968 & 0.9462 & 0.8715 \\
 
 \subsection{Contextual Comparisons}
 
-The patch-recognition results can first be placed beside the original DIAGSET binary S1 setting, but only as a protocol-aware reference. The DIAGSET paper used its own extraction protocol, magnification settings, and classifier ensemble, so Table~\ref{tab:diagset-original-context} should not be read as a strict reproduction of that experiment \cite{koziarski2024diagset}. Under this caveat, the best workflow patch Accuracy was 0.9325 with Ruifrok, 1.33 percentage points below the DIAGSET S1 Accuracy of 0.9458, while the best workflow AvAcc was 0.9009 with Macenko, 4.61 percentage points below the DIAGSET S1 AvAcc of 0.9470.
+The patch-recognition results can first be placed beside the original DIAGSET binary S1 setting, but only as a protocol-aware reference. The DIAGSET paper used its own extraction protocol, magnification settings, and classifier ensemble, so Table~\ref{tab:diagset-original-context} should not be read as a strict reproduction of that experiment \cite{koziarski2024diagset}. Under this caveat, the largest observed workflow patch Accuracy was 0.9325 with Ruifrok, 1.33 percentage points below the DIAGSET S1 Accuracy of 0.9458, while the largest observed workflow AvAcc was 0.9009 with Macenko, 4.61 percentage points below the DIAGSET S1 AvAcc of 0.9470.
 
 \begin{table*}[t]
 \caption{Contextual comparison between the workflow patch-recognition results and the original DIAGSET binary S1 setting. The comparison is not direct because the original paper used different extraction, magnification, and classifier choices.}
@@ -246,7 +268,7 @@ The patch-recognition results can first be placed beside the original DIAGSET bi
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{P{3.0cm}P{2.4cm}P{3.8cm}P{2.0cm}P{4.4cm}}
 \toprule
-Metric & DIAGSET S1 & Best workflow value & Gap & Interpretation \\
+Metric & DIAGSET S1 & Largest workflow value & Gap & Interpretation \\
 \midrule
 Accuracy & 0.9458 & 0.9325, Ruifrok & -1.33 p.p. & Close in aggregate patch accuracy under a different protocol \\
 AvAcc & 0.9470 & 0.9009, Macenko & -4.61 p.p. & Larger balance gap between sensitivity and specificity \\
@@ -254,41 +276,21 @@ AvAcc & 0.9470 & 0.9009, Macenko & -4.61 p.p. & Larger balance gap between sensi
 \end{tabular}
 \end{table*}
 
-Pathologist readings provide a different kind of external context and are therefore reported separately in Table~\ref{tab:pathologist-context}. For the pathologist studies, AvAcc is used as a balanced-accuracy scale and is approximated from sensitivity and specificity when it was not explicitly reported. These values are not human-versus-model benchmarks because the workflow row is patch-level recognition before patient-level suppression, whereas the cited studies evaluate WSI, biopsy, slide, or case-level diagnostic decisions \cite{raciti2020novel,raciti2023clinical,eloy2023artificial}. Even with that limitation, the comparison is useful as a scale reference: the workflow's best patch AvAcc is above the approximate no-AI pathologist AvAcc reported by Raciti et al. in 2020, but remains below the stronger clinical references from Raciti et al. in 2023 and Eloy et al. in 2023.
-
-\begin{table}[t]
-\caption{Contextual comparison with no-AI pathologist readings. The workflow row is patch-level and pre-suppression; pathologist rows are WSI, slide, biopsy, or case-level diagnostic readings.}
-\label{tab:pathologist-context}
-\centering
-\fontsize{7.2}{8.2}\selectfont
-\setlength{\tabcolsep}{2pt}
-\begin{tabular}{P{2.55cm}P{1.2cm}P{1.05cm}P{1.05cm}P{1.35cm}}
-\toprule
-Source & Unit & Sens. & Spec. & AvAcc \\
-\midrule
-Workflow\textsuperscript{**} & Patch & 0.8758 & 0.9260 & 0.9009 \\
-Raciti et al. 2020 \cite{raciti2020novel} & WSI & 0.7380 & 0.9660 & 0.8520\textsuperscript{*} \\
-Raciti et al. 2023 \cite{raciti2023clinical} & WSI & 0.8870 & 0.9730 & 0.9300\textsuperscript{*} \\
-Eloy et al. 2023 \cite{eloy2023artificial} & Slide/case & 0.9680 & 0.9390 & 0.9535\textsuperscript{*} \\
-\bottomrule
-\multicolumn{5}{P{7.6cm}}{\textsuperscript{*}AvAcc approximated from sensitivity and specificity when not explicitly reported.} \\
-\multicolumn{5}{P{7.6cm}}{\textsuperscript{**}Workflow row reports the Macenko setting, which obtained the best pre-suppression patch AvAcc.}
-\end{tabular}
-\end{table}
+Pathologist readings are not tabulated as numeric model comparators in this manuscript because the workflow row is patch-level recognition before patient-level suppression, whereas published prostate pathology studies evaluate WSI, biopsy, slide, or case-level diagnostic decisions \cite{raciti2020novel,raciti2023clinical,eloy2023artificial}. Those studies remain clinically relevant context, but the present DIAGSET experiment does not provide a commensurate human-versus-model benchmark.
 
 \section{Discussion}
 
-The DIAGSET experiment supports three paper-level conclusions. First, the proposed workflow can compare preprocessing and normalization choices under a traceable, patient-level protocol. The comparison is not a loose collection of model runs: curation, split assignment, smart sampling, checkpoint selection, ensemble composition, threshold calibration, and final inference are connected through explicit artifacts and compatibility checks.
+The DIAGSET experiment supports three paper-level conclusions within a single-dataset scope. First, the proposed workflow can compare preprocessing and normalization choices under a traceable, patient-level protocol. The comparison is not a loose collection of model runs: curation, split assignment, smart sampling, checkpoint selection, ensemble composition, threshold calibration, and final inference are connected through explicit artifacts and compatibility checks.
 
-Second, color normalization did not produce a uniform improvement. No normalization was best under pixel-pooled and patient-averaged Dice, Ruifrok was best under AUROC and positive-patient Dice, and Macenko was best under DIAGSET-style patch AvAcc. This pattern agrees with the broader caution that stain preprocessing choices can change model behavior without guaranteeing a single dominant strategy across all metrics \cite{tellez2019augmentation}. In this experiment, the choice of metric changes the apparent winner.
+Second, color normalization did not produce a uniform descriptive pattern. No normalization produced the largest point estimates for pixel-pooled and patient-averaged Dice, Ruifrok produced the largest AUROC point estimate and positive-patient Dice, and Macenko produced the largest DIAGSET-style patch AvAcc. This pattern agrees with the broader caution that stain preprocessing choices can change model behavior without guaranteeing a single dominant strategy across all metrics \cite{tellez2019augmentation}. In this experiment, the choice of metric changes which configuration appears most favorable, but the available artifacts do not support a formal claim of statistical superiority among normalization methods.
 
 Third, patient-level false positives remain the primary limitation. High Dice in positive patients is not sufficient for a clinically conservative interpretation if negative patients often receive some positive prediction. The current results therefore support methodological viability and reproducible comparison, but not standalone clinical deployment. Improving calibration, patient-level post-processing, and false-positive suppression should be prioritized before extending claims beyond this experimental setting.
 
-The study also has clear scope limits. DIAGSET is a single prostate histopathology dataset, and the workflow has not yet been validated here on other organs, scanner distributions, annotation protocols, or cancer types. The stored patient identifiers enforce split isolation within the repository contract, but they do not independently verify biological patient uniqueness outside the source metadata. Finally, the Vahadane condition corresponds to the fixed-source runtime approximation used in the experiment, not exact per-patch Vahadane fitting.
+The study also has clear scope limits. DIAGSET is a single prostate histopathology dataset, and the workflow has not yet been validated here on other organs, scanner distributions, annotation protocols, or cancer types. The stored patient identifiers enforce split isolation within the repository contract, but they do not independently verify biological patient uniqueness outside the source metadata. The validation set carried substantial optimization burden because checkpoints, ensemble composition, ROI thresholds, decision thresholds, and patient-level post-processing were selected before frozen test inference. In addition, the available no-rerun artifacts evaluate the integrated workflow and normalization settings, not independent causal contributions of graph cleaning, smart sampling, two-stream gating, or patient suppression. Finally, the Vahadane condition corresponds to the fixed-source runtime approximation used in the experiment, not exact per-patch Vahadane fitting.
 
 \section{Conclusion}
 
-This paper presented a reproducibility-oriented workflow for whole-slide cancer segmentation and evaluated it on DIAGSET. The main contribution is methodological: the workflow treats the full experimental chain as the object of study, from slide ingestion and patch curation through patient-level splitting, training, validation-only ensemble optimization, and frozen test inference. On DIAGSET, the workflow produced interpretable metric-specific findings rather than a single universally superior normalization strategy. No normalization led pixel-pooled and patient-averaged Dice, Ruifrok led AUROC and positive-patient Dice, and Macenko led DIAGSET-style patch AvAcc. At the same time, persistent false positives in negative patients limit clinical interpretation. Future work should evaluate the same artifact-preserving protocol on external datasets and develop stronger patient-level calibration and false-positive-control mechanisms.
+This paper presented a reproducibility-oriented workflow for whole-slide prostate cancer segmentation and evaluated it on DIAGSET. The main contribution is methodological: the workflow treats the full experimental chain as the object of study, from slide ingestion and patch curation through patient-level splitting, training, validation-only ensemble optimization, and frozen test inference. On DIAGSET, the workflow produced interpretable metric-specific findings rather than a single universally superior normalization strategy. No normalization produced the largest pixel-pooled and patient-averaged Dice point estimates, Ruifrok produced the largest AUROC point estimate and positive-patient Dice, and Macenko produced the largest DIAGSET-style patch AvAcc. At the same time, persistent false positives in negative patients limit clinical interpretation. Future work should evaluate the same artifact-preserving protocol on external datasets, add repeated-seed or paired-difference analyses when computationally feasible, and develop stronger patient-level calibration and false-positive-control mechanisms.
 
 \printcredits
 
@@ -306,7 +308,7 @@ This study used DIAGSET, a public de-identified histopathology dataset cited in 
 
 \section*{Data and Code Availability}
 
-The DIAGSET data are publicly available through the dataset publication cited in this article. The workflow code is available at \url{https://github.com/bhnunes/Master_Coding}. Large generated artifacts, including HDF5 datasets, checkpoints, and inference outputs, are not included in the manuscript source package because of file size, but they can be regenerated from the repository configuration and documented pipeline stages.
+The DIAGSET data are publicly available through the dataset publication cited in this article. The workflow code is available at \url{https://github.com/bhnunes/Master_Coding}. Large generated artifacts, including HDF5 datasets, checkpoints, and inference outputs, are not included in the manuscript source package because of file size. The manuscript source package includes a no-rerun evidence index that maps the reported tables to final metric JSON files, optimizer recipe/configuration files, model registry snapshots, and the repository commit used for this revision.
 
 \section*{Declaration of Generative AI and AI-Assisted Technologies in the Manuscript Preparation Process}
 
