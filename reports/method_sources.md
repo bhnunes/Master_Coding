@@ -62,7 +62,7 @@ files listed above.
 
 Paper-selected assets are copied or rendered into `reports/figures/`:
 
-- `pipeline_overview.png` from `MERMAID/pipeline_overview.mermaid`
+- `overall_method.png` from `reports/figures/overall_method.png`
 - `results_diagset_micro_metrics.png` from
   `masters_thesis/New_Thesis/figuras/results_diagset_micro_metrics_updated.png`
 - `results_diagset_macro_metrics.png` from
