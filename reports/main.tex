@@ -26,12 +26,12 @@
 
 \title[mode=title]{A Reproducible Prostate Whole-Slide Histopathology Workflow: A DIAGSET Evaluation}
 
-\author[1]{Bruno Henrique Nunes}
+\author[1]{Bruno Henrique Nunes}[orcid=0009-0007-3316-0608]
 \cormark[1]
 \ead{bruno.nunes.1987@gmail.com}
 \credit{Conceptualization, Data curation, Formal analysis, Methodology, Software, Validation, Visualization, Writing - original draft}
 
-\author[1]{Ana Estela Antunes da Silva}
+\author[1]{Ana Estela Antunes da Silva}[orcid=0000-0001-9886-3506]
 \ead{aeasilva@unicamp.br}
 \credit{Conceptualization, Project administration, Supervision, Writing - review and editing}
 
@@ -99,6 +99,17 @@ The workflow is organized as ten numbered stages connected by explicit files, da
 DIAGSET was used as the experimental dataset \cite{koziarski2024diagset}. The ingestion stage registered 429 \texttt{.ndpi} images and 429 \texttt{.ndpa} annotations, of which 419 were paired and validated through converted GeoJSON annotations. Ten images were rejected or failed before final extraction. Patches were extracted with a 224-pixel window, 112-pixel stride, annotation-overlap threshold of 1.0, and minimum tissue-content threshold of 0.3.
 
 Cancer-patch curation used a small manually reviewed pilot set and a larger labeled master set to tune a graph-based background-contamination rule. The pilot set contained 100 reviewed samples, with 94 approved and 6 rejected. The master set contained 385 samples, with 367 approved and 18 rejected. The selected graph-cleaning configuration used a background-intensity threshold of 167, Felzenszwalb scale parameter $k=140$, minimum segment size 97, a 3-pixel erosion radius, and contamination threshold $\tau=0.19$ \cite{felzenszwalb2004efficient}. Applying this rule rejected 74,047 cancer patches and retained 1,186,778 patches for downstream analysis. Non-cancer patches were not rejected by this graph-cleaning step because the rule was targeted at positive regions contaminated by background or annotation mismatch.
+
+Representative rejected cancer-labeled patches are shown in Figure~\ref{fig:rejected-cancer-patches}. These examples illustrate why the curation step was applied to positive patches before downstream modeling: without this filtering, near-background fields and tissue-boundary fragments could be treated as cancer training examples even though they contain little or ambiguous lesion evidence.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.30\textwidth]{figures/Rejected_1.png}\hfill
+\includegraphics[width=0.30\textwidth]{figures/Rejected_2.png}\hfill
+\includegraphics[width=0.30\textwidth]{figures/Rejected_3.png}
+\caption{Examples of cancer-labeled patches rejected by the curation process. The examples show near-background content and tissue-boundary fragments that would otherwise inject ambiguous or weakly informative positive samples into the training and validation pipeline.}
+\label{fig:rejected-cancer-patches}
+\end{figure*}
 
 This graph-cleaning step is treated as a pre-split annotation and background-curation operation, not as a downstream segmentation model selected from test performance. The current manuscript evidence records the reviewed sample counts and selected graph parameters, but the preserved result bundle does not provide a complete reviewed-stem-to-final-split audit. Consequently, the cleaning step is not claimed to have been tuned only on final training patients; it is reported as a pre-split curation choice and interpreted as a limitation of the no-rerun evidence package.
 
