@@ -1,0 +1,13 @@
+*.abs
+*.aux
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+!figures/
+!figures/*.png
