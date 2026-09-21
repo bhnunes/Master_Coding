@@ -1,0 +1,385 @@
+\begin{thebibliography}{32}
+\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\href}[2]{#2}
+\providecommand{\path}[1]{#1}
+\providecommand{\DOIprefix}{doi:}
+\providecommand{\ArXivprefix}{arXiv:}
+\providecommand{\URLprefix}{URL: }
+\providecommand{\Pubmedprefix}{pmid:}
+\providecommand{\doi}[1]{\href{http://dx.doi.org/#1}{\path{#1}}}
+\providecommand{\Pubmed}[1]{\href{pmid:#1}{\path{#1}}}
+\providecommand{\bibinfo}[2]{#2}
+\ifx\xfnm\relax \def\xfnm[#1]{\unskip,\space#1}\fi
+%Type = Inproceedings
+\bibitem[{Akiba et~al.(2019)Akiba, Sano, Yanase, Ohta and
+  Koyama}]{akiba2019optuna}
+\bibinfo{author}{Akiba, T.}, \bibinfo{author}{Sano, S.},
+  \bibinfo{author}{Yanase, T.}, \bibinfo{author}{Ohta, T.},
+  \bibinfo{author}{Koyama, M.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Optuna: A next-generation hyperparameter optimization
+  framework}, in: \bibinfo{booktitle}{Proceedings of the 25th ACM SIGKDD
+  International Conference on Knowledge Discovery \& Data Mining}, pp.
+  \bibinfo{pages}{2623--2631}.
+\newblock \URLprefix \url{https://doi.org/10.1145/3292500.3330701},
+  \DOIprefix\doi{10.1145/3292500.3330701}.
+%Type = Inproceedings
+\bibitem[{Bergstra et~al.(2011)Bergstra, Bardenet, Bengio and
+  K{\'e}gl}]{bergstra2011algorithms}
+\bibinfo{author}{Bergstra, J.S.}, \bibinfo{author}{Bardenet, R.},
+  \bibinfo{author}{Bengio, Y.}, \bibinfo{author}{K{\'e}gl, B.},
+  \bibinfo{year}{2011}.
+\newblock \bibinfo{title}{Algorithms for hyper-parameter optimization}, in:
+  \bibinfo{booktitle}{Advances in Neural Information Processing Systems}, pp.
+  \bibinfo{pages}{2546--2554}.
+\newblock \URLprefix
+  \url{https://papers.nips.cc/paper/4443-algorithms-for-hyper-parameter-optimization}.
+  \bibinfo{note}{accessed 3 June 2026}.
+%Type = Article
+\bibitem[{Campanella et~al.(2025)Campanella, Chen, Singh
+  et~al.}]{campanella2025clinical}
+\bibinfo{author}{Campanella, G.}, \bibinfo{author}{Chen, S.},
+  \bibinfo{author}{Singh, M.}, et~al., \bibinfo{year}{2025}.
+\newblock \bibinfo{title}{A clinical benchmark of public self-supervised
+  pathology foundation models}.
+\newblock \bibinfo{journal}{Nature Communications} \bibinfo{volume}{16},
+  \bibinfo{pages}{3640}.
+\newblock \URLprefix \url{https://doi.org/10.1038/s41467-025-58796-1},
+  \DOIprefix\doi{10.1038/s41467-025-58796-1}.
+%Type = Inproceedings
+\bibitem[{Caruana et~al.(2004)Caruana, Niculescu-Mizil, Crew and
+  Ksikes}]{caruana2004ensemble}
+\bibinfo{author}{Caruana, R.}, \bibinfo{author}{Niculescu-Mizil, A.},
+  \bibinfo{author}{Crew, G.}, \bibinfo{author}{Ksikes, A.},
+  \bibinfo{year}{2004}.
+\newblock \bibinfo{title}{Ensemble selection from libraries of models}, in:
+  \bibinfo{booktitle}{Proceedings of the Twenty-First International Conference
+  on Machine Learning}, \bibinfo{publisher}{Association for Computing
+  Machinery}. p.~\bibinfo{pages}{18}.
+\newblock \URLprefix \url{https://doi.org/10.1145/1015330.1015432},
+  \DOIprefix\doi{10.1145/1015330.1015432}.
+%Type = Article
+\bibitem[{Dawood et~al.(2026)Dawood, Branson, Tejpar, Rajpoot and
+  Minhas}]{dawood2026confounding}
+\bibinfo{author}{Dawood, M.}, \bibinfo{author}{Branson, K.},
+  \bibinfo{author}{Tejpar, S.}, \bibinfo{author}{Rajpoot, N.},
+  \bibinfo{author}{Minhas, F.u.A.A.}, \bibinfo{year}{2026}.
+\newblock \bibinfo{title}{Confounding factors and biases abound when predicting
+  molecular biomarkers from histological images}.
+\newblock \bibinfo{journal}{Nature Biomedical Engineering} \URLprefix
+  \url{https://doi.org/10.1038/s41551-026-01616-8},
+  \DOIprefix\doi{10.1038/s41551-026-01616-8}. \bibinfo{note}{advance online
+  publication}.
+%Type = Inproceedings
+\bibitem[{Dietterich(2000)}]{dietterich2000ensemble}
+\bibinfo{author}{Dietterich, T.G.}, \bibinfo{year}{2000}.
+\newblock \bibinfo{title}{Ensemble methods in machine learning}, in:
+  \bibinfo{booktitle}{Multiple Classifier Systems},
+  \bibinfo{publisher}{Springer}. pp. \bibinfo{pages}{1--15}.
+\newblock \URLprefix \url{https://doi.org/10.1007/3-540-45014-9_1},
+  \DOIprefix\doi{10.1007/3-540-45014-9_1}.
+%Type = Article
+\bibitem[{Efron(1979)}]{efron1979bootstrap}
+\bibinfo{author}{Efron, B.}, \bibinfo{year}{1979}.
+\newblock \bibinfo{title}{Bootstrap methods: Another look at the jackknife}.
+\newblock \bibinfo{journal}{The Annals of Statistics} \bibinfo{volume}{7},
+  \bibinfo{pages}{1--26}.
+\newblock \URLprefix \url{https://doi.org/10.1214/aos/1176344552},
+  \DOIprefix\doi{10.1214/aos/1176344552}.
+%Type = Article
+\bibitem[{Eloy et~al.(2023)Eloy, Marques, Pinto, Pinheiro, Campelos, Curado,
+  Vale and Pol{\'o}nia}]{eloy2023artificial}
+\bibinfo{author}{Eloy, C.}, \bibinfo{author}{Marques, A.},
+  \bibinfo{author}{Pinto, J.}, \bibinfo{author}{Pinheiro, J.},
+  \bibinfo{author}{Campelos, S.}, \bibinfo{author}{Curado, M.},
+  \bibinfo{author}{Vale, J.}, \bibinfo{author}{Pol{\'o}nia, A.},
+  \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Artificial intelligence--assisted cancer diagnosis
+  improves the efficiency of pathologists in prostatic biopsies}.
+\newblock \bibinfo{journal}{Virchows Archiv} \bibinfo{volume}{482},
+  \bibinfo{pages}{595--604}.
+\newblock \URLprefix \url{https://doi.org/10.1007/s00428-023-03518-5},
+  \DOIprefix\doi{10.1007/s00428-023-03518-5}.
+%Type = Article
+\bibitem[{Fawcett(2006)}]{fawcett2006roc}
+\bibinfo{author}{Fawcett, T.}, \bibinfo{year}{2006}.
+\newblock \bibinfo{title}{An introduction to {ROC} analysis}.
+\newblock \bibinfo{journal}{Pattern Recognition Letters} \bibinfo{volume}{27},
+  \bibinfo{pages}{861--874}.
+\newblock \URLprefix \url{https://doi.org/10.1016/j.patrec.2005.10.010},
+  \DOIprefix\doi{10.1016/j.patrec.2005.10.010}.
+%Type = Article
+\bibitem[{Felzenszwalb and Huttenlocher(2004)}]{felzenszwalb2004efficient}
+\bibinfo{author}{Felzenszwalb, P.F.}, \bibinfo{author}{Huttenlocher, D.P.},
+  \bibinfo{year}{2004}.
+\newblock \bibinfo{title}{Efficient graph-based image segmentation}.
+\newblock \bibinfo{journal}{International Journal of Computer Vision}
+  \bibinfo{volume}{59}, \bibinfo{pages}{167--181}.
+\newblock \URLprefix \url{https://doi.org/10.1023/B:VISI.0000022288.19776.77},
+  \DOIprefix\doi{10.1023/B:VISI.0000022288.19776.77}.
+%Type = Inproceedings
+\bibitem[{Folk et~al.(2011)Folk, Heber, Koziol, Pourmal and
+  Robinson}]{folk2011hdf5}
+\bibinfo{author}{Folk, M.}, \bibinfo{author}{Heber, G.},
+  \bibinfo{author}{Koziol, Q.}, \bibinfo{author}{Pourmal, E.},
+  \bibinfo{author}{Robinson, D.}, \bibinfo{year}{2011}.
+\newblock \bibinfo{title}{An overview of the {HDF5} technology suite and its
+  applications}, in: \bibinfo{booktitle}{Proceedings of the 2011 EDBT/ICDT
+  Workshop on Array Databases}, \bibinfo{publisher}{Association for Computing
+  Machinery}. pp. \bibinfo{pages}{36--47}.
+\newblock \URLprefix \url{https://doi.org/10.1145/1966895.1966900},
+  \DOIprefix\doi{10.1145/1966895.1966900}.
+%Type = Article
+\bibitem[{He and Garcia(2009)}]{he2009imbalanced}
+\bibinfo{author}{He, H.}, \bibinfo{author}{Garcia, E.A.}, \bibinfo{year}{2009}.
+\newblock \bibinfo{title}{Learning from imbalanced data}.
+\newblock \bibinfo{journal}{IEEE Transactions on Knowledge and Data
+  Engineering} \bibinfo{volume}{21}, \bibinfo{pages}{1263--1284}.
+\newblock \URLprefix \url{https://doi.org/10.1109/TKDE.2008.239},
+  \DOIprefix\doi{10.1109/TKDE.2008.239}.
+%Type = Article
+\bibitem[{Khened et~al.(2021)Khened, Kori, Rajkumar, Krishnamurthi and
+  Srinivasan}]{khened2021generalized}
+\bibinfo{author}{Khened, M.}, \bibinfo{author}{Kori, A.},
+  \bibinfo{author}{Rajkumar, H.}, \bibinfo{author}{Krishnamurthi, G.},
+  \bibinfo{author}{Srinivasan, B.}, \bibinfo{year}{2021}.
+\newblock \bibinfo{title}{A generalized deep learning framework for whole-slide
+  image segmentation and analysis}.
+\newblock \bibinfo{journal}{Scientific Reports} \bibinfo{volume}{11},
+  \bibinfo{pages}{11579}.
+\newblock \URLprefix \url{https://doi.org/10.1038/s41598-021-90444-8},
+  \DOIprefix\doi{10.1038/s41598-021-90444-8}.
+%Type = Article
+\bibitem[{Koziarski et~al.(2024)Koziarski, Cyganek
+  et~al.}]{koziarski2024diagset}
+\bibinfo{author}{Koziarski, M.}, \bibinfo{author}{Cyganek, B.}, et~al.,
+  \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{{DiagSet}: A dataset for prostate cancer
+  histopathological image classification}.
+\newblock \bibinfo{journal}{Scientific Reports} \bibinfo{volume}{14},
+  \bibinfo{pages}{2251}.
+\newblock \URLprefix \url{https://doi.org/10.1038/s41598-024-52183-4},
+  \DOIprefix\doi{10.1038/s41598-024-52183-4}.
+%Type = Inproceedings
+\bibitem[{Macenko et~al.(2009)Macenko, Niethammer, Marron, Borland, Woosley,
+  Guan, Schmitt and Thomas}]{macenko2009method}
+\bibinfo{author}{Macenko, M.}, \bibinfo{author}{Niethammer, M.},
+  \bibinfo{author}{Marron, J.S.}, \bibinfo{author}{Borland, D.},
+  \bibinfo{author}{Woosley, J.T.}, \bibinfo{author}{Guan, X.},
+  \bibinfo{author}{Schmitt, C.}, \bibinfo{author}{Thomas, N.E.},
+  \bibinfo{year}{2009}.
+\newblock \bibinfo{title}{A method for normalizing histology slides for
+  quantitative analysis}, in: \bibinfo{booktitle}{2009 IEEE International
+  Symposium on Biomedical Imaging: From Nano to Macro}, pp.
+  \bibinfo{pages}{1107--1110}.
+\newblock \URLprefix \url{https://doi.org/10.1109/ISBI.2009.5193250},
+  \DOIprefix\doi{10.1109/ISBI.2009.5193250}.
+%Type = Article
+\bibitem[{Matthews(1975)}]{matthews1975comparison}
+\bibinfo{author}{Matthews, B.W.}, \bibinfo{year}{1975}.
+\newblock \bibinfo{title}{Comparison of the predicted and observed secondary
+  structure of {T4} phage lysozyme}.
+\newblock \bibinfo{journal}{Biochimica et Biophysica Acta (BBA) - Protein
+  Structure} \bibinfo{volume}{405}, \bibinfo{pages}{442--451}.
+\newblock \URLprefix \url{https://doi.org/10.1016/0005-2795(75)90109-9},
+  \DOIprefix\doi{10.1016/0005-2795(75)90109-9}.
+%Type = Article
+\bibitem[{Moshkov et~al.(2020)Moshkov, Mathe, Kertesz-Farkas, Hollandi and
+  Horvath}]{moshkov2020test}
+\bibinfo{author}{Moshkov, N.}, \bibinfo{author}{Mathe, B.},
+  \bibinfo{author}{Kertesz-Farkas, A.}, \bibinfo{author}{Hollandi, R.},
+  \bibinfo{author}{Horvath, P.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Test-time augmentation for deep learning-based cell
+  segmentation on microscopy images}.
+\newblock \bibinfo{journal}{Scientific Reports} \bibinfo{volume}{10},
+  \bibinfo{pages}{5068}.
+\newblock \URLprefix \url{https://doi.org/10.1038/s41598-020-61808-3},
+  \DOIprefix\doi{10.1038/s41598-020-61808-3}.
+%Type = Article
+\bibitem[{Mu{\~n}oz-Aguirre et~al.(2020)Mu{\~n}oz-Aguirre, Ntasis, Rojas and
+  Guig{\'o}}]{munozaguirre2020pyhist}
+\bibinfo{author}{Mu{\~n}oz-Aguirre, M.}, \bibinfo{author}{Ntasis, V.F.},
+  \bibinfo{author}{Rojas, S.}, \bibinfo{author}{Guig{\'o}, R.},
+  \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{{PyHIST}: A histological image segmentation tool}.
+\newblock \bibinfo{journal}{PLOS Computational Biology} \bibinfo{volume}{16},
+  \bibinfo{pages}{e1008349}.
+\newblock \URLprefix \url{https://doi.org/10.1371/journal.pcbi.1008349},
+  \DOIprefix\doi{10.1371/journal.pcbi.1008349}.
+%Type = Article
+\bibitem[{Oquab et~al.(2024)Oquab, Darcet, Moutakanni, Vo, Szafraniec,
+  Khalidov, Fernandez et~al.}]{oquab2024dinov2}
+\bibinfo{author}{Oquab, M.}, \bibinfo{author}{Darcet, T.},
+  \bibinfo{author}{Moutakanni, T.}, \bibinfo{author}{Vo, H.V.},
+  \bibinfo{author}{Szafraniec, M.}, \bibinfo{author}{Khalidov, V.},
+  \bibinfo{author}{Fernandez, P.}, et~al., \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{{DINOv2}: Learning robust visual features without
+  supervision}.
+\newblock \bibinfo{journal}{Transactions on Machine Learning Research}
+  \URLprefix \url{https://openreview.net/forum?id=a68SUt6zFt}.
+  \bibinfo{note}{accessed 3 June 2026}.
+%Type = Article
+\bibitem[{Piccolo and Frampton(2016)}]{piccolo2016tools}
+\bibinfo{author}{Piccolo, S.R.}, \bibinfo{author}{Frampton, M.B.},
+  \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Tools and techniques for computational
+  reproducibility}.
+\newblock \bibinfo{journal}{GigaScience} \bibinfo{volume}{5},
+  \bibinfo{pages}{30}.
+\newblock \URLprefix \url{https://doi.org/10.1186/s13742-016-0135-4},
+  \DOIprefix\doi{10.1186/s13742-016-0135-4}.
+%Type = Article
+\bibitem[{Raciti et~al.(2020)Raciti, Sue, Ceballos, Godrich, Kunz, Kapur,
+  Reuter, Grady, Kanan, Klimstra and Fuchs}]{raciti2020novel}
+\bibinfo{author}{Raciti, P.}, \bibinfo{author}{Sue, J.},
+  \bibinfo{author}{Ceballos, R.}, \bibinfo{author}{Godrich, R.},
+  \bibinfo{author}{Kunz, J.D.}, \bibinfo{author}{Kapur, S.},
+  \bibinfo{author}{Reuter, V.}, \bibinfo{author}{Grady, L.},
+  \bibinfo{author}{Kanan, C.}, \bibinfo{author}{Klimstra, D.S.},
+  \bibinfo{author}{Fuchs, T.J.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Novel artificial intelligence system increases the
+  detection of prostate cancer in whole slide images of core needle biopsies}.
+\newblock \bibinfo{journal}{Modern Pathology} \bibinfo{volume}{33},
+  \bibinfo{pages}{2058--2066}.
+\newblock \URLprefix \url{https://doi.org/10.1038/s41379-020-0551-y},
+  \DOIprefix\doi{10.1038/s41379-020-0551-y}.
+%Type = Article
+\bibitem[{Raciti et~al.(2023)Raciti, Sue, Retamero, Ceballos, Godrich, Kunz,
+  Casson, Thiagarajan, Ebrahimzadeh, Viret, Lee, Sch{\"u}ffler, DeMuth,
+  Gulturk, Kanan, Rothrock, Reis-Filho, Klimstra, Reuter and
+  Fuchs}]{raciti2023clinical}
+\bibinfo{author}{Raciti, P.}, \bibinfo{author}{Sue, J.},
+  \bibinfo{author}{Retamero, J.A.}, \bibinfo{author}{Ceballos, R.},
+  \bibinfo{author}{Godrich, R.}, \bibinfo{author}{Kunz, J.D.},
+  \bibinfo{author}{Casson, A.}, \bibinfo{author}{Thiagarajan, D.},
+  \bibinfo{author}{Ebrahimzadeh, Z.}, \bibinfo{author}{Viret, J.},
+  \bibinfo{author}{Lee, D.}, \bibinfo{author}{Sch{\"u}ffler, P.J.},
+  \bibinfo{author}{DeMuth, G.}, \bibinfo{author}{Gulturk, E.},
+  \bibinfo{author}{Kanan, C.}, \bibinfo{author}{Rothrock, B.},
+  \bibinfo{author}{Reis-Filho, J.}, \bibinfo{author}{Klimstra, D.S.},
+  \bibinfo{author}{Reuter, V.}, \bibinfo{author}{Fuchs, T.J.},
+  \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Clinical validation of artificial
+  intelligence--augmented pathology diagnosis demonstrates significant gains in
+  diagnostic accuracy in prostate cancer detection}.
+\newblock \bibinfo{journal}{Archives of Pathology \& Laboratory Medicine}
+  \bibinfo{volume}{147}, \bibinfo{pages}{1178--1185}.
+\newblock \URLprefix \url{https://doi.org/10.5858/ARPA.2022-0066-OA},
+  \DOIprefix\doi{10.5858/ARPA.2022-0066-OA}.
+%Type = Article
+\bibitem[{Reinhard et~al.(2001)Reinhard, Ashikhmin, Gooch and
+  Shirley}]{reinhard2001color}
+\bibinfo{author}{Reinhard, E.}, \bibinfo{author}{Ashikhmin, M.},
+  \bibinfo{author}{Gooch, B.}, \bibinfo{author}{Shirley, P.},
+  \bibinfo{year}{2001}.
+\newblock \bibinfo{title}{Color transfer between images}.
+\newblock \bibinfo{journal}{IEEE Computer Graphics and Applications}
+  \bibinfo{volume}{21}, \bibinfo{pages}{34--41}.
+\newblock \URLprefix \url{https://doi.org/10.1109/38.946629},
+  \DOIprefix\doi{10.1109/38.946629}.
+%Type = Article
+\bibitem[{Roberts et~al.(2017)Roberts, Bahn, Ciuti, Boyce, Elith
+  et~al.}]{roberts2017crossvalidation}
+\bibinfo{author}{Roberts, D.R.}, \bibinfo{author}{Bahn, V.},
+  \bibinfo{author}{Ciuti, S.}, \bibinfo{author}{Boyce, M.S.},
+  \bibinfo{author}{Elith, J.}, et~al., \bibinfo{year}{2017}.
+\newblock \bibinfo{title}{Cross-validation strategies for data with temporal,
+  spatial, hierarchical, or phylogenetic structure}.
+\newblock \bibinfo{journal}{Ecography} \bibinfo{volume}{40},
+  \bibinfo{pages}{913--929}.
+\newblock \URLprefix \url{https://doi.org/10.1111/ecog.02881},
+  \DOIprefix\doi{10.1111/ecog.02881}.
+%Type = Article
+\bibitem[{Ruifrok and Johnston(2001)}]{ruifrok2001quantification}
+\bibinfo{author}{Ruifrok, A.C.}, \bibinfo{author}{Johnston, D.A.},
+  \bibinfo{year}{2001}.
+\newblock \bibinfo{title}{Quantification of histochemical staining by color
+  deconvolution}.
+\newblock \bibinfo{journal}{Analytical and Quantitative Cytology and Histology}
+  \bibinfo{volume}{23}, \bibinfo{pages}{291--299}.
+\newblock \URLprefix \url{https://pubmed.ncbi.nlm.nih.gov/11815294/}.
+%Type = Article
+\bibitem[{Saito and Rehmsmeier(2015)}]{saito2015precision}
+\bibinfo{author}{Saito, T.}, \bibinfo{author}{Rehmsmeier, M.},
+  \bibinfo{year}{2015}.
+\newblock \bibinfo{title}{The precision-recall plot is more informative than
+  the {ROC} plot when evaluating binary classifiers on imbalanced datasets}.
+\newblock \bibinfo{journal}{PLOS ONE} \bibinfo{volume}{10},
+  \bibinfo{pages}{e0118432}.
+\newblock \URLprefix \url{https://doi.org/10.1371/journal.pone.0118432},
+  \DOIprefix\doi{10.1371/journal.pone.0118432}.
+%Type = Article
+\bibitem[{Seghier(2024)}]{seghier2024dice}
+\bibinfo{author}{Seghier, M.L.}, \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{Image segmentation evaluation with the dice index:
+  Methodological issues}.
+\newblock \bibinfo{journal}{International Journal of Imaging Systems and
+  Technology} \bibinfo{volume}{34}, \bibinfo{pages}{e23203}.
+\newblock \URLprefix \url{https://doi.org/10.1002/ima.23203},
+  \DOIprefix\doi{10.1002/ima.23203}.
+%Type = Article
+\bibitem[{Sokolova and Lapalme(2009)}]{sokolova2009performance}
+\bibinfo{author}{Sokolova, M.}, \bibinfo{author}{Lapalme, G.},
+  \bibinfo{year}{2009}.
+\newblock \bibinfo{title}{A systematic analysis of performance measures for
+  classification tasks}.
+\newblock \bibinfo{journal}{Information Processing \& Management}
+  \bibinfo{volume}{45}, \bibinfo{pages}{427--437}.
+\newblock \URLprefix \url{https://doi.org/10.1016/j.ipm.2009.03.002},
+  \DOIprefix\doi{10.1016/j.ipm.2009.03.002}.
+%Type = Article
+\bibitem[{Tellez et~al.(2019)Tellez, Litjens, B{\'a}ndi, Bulten, Bokhorst,
+  Ciompi and van~der Laak}]{tellez2019augmentation}
+\bibinfo{author}{Tellez, D.}, \bibinfo{author}{Litjens, G.},
+  \bibinfo{author}{B{\'a}ndi, P.}, \bibinfo{author}{Bulten, W.},
+  \bibinfo{author}{Bokhorst, J.M.}, \bibinfo{author}{Ciompi, F.},
+  \bibinfo{author}{van~der Laak, J.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Quantifying the effects of data augmentation and
+  stain color normalization in convolutional neural networks for computational
+  pathology}.
+\newblock \bibinfo{journal}{Medical Image Analysis} \bibinfo{volume}{58},
+  \bibinfo{pages}{101544}.
+\newblock \URLprefix \url{https://doi.org/10.1016/j.media.2019.101544},
+  \DOIprefix\doi{10.1016/j.media.2019.101544}.
+%Type = Article
+\bibitem[{Vahadane et~al.(2016)Vahadane, Peng, Sethi, Albarqouni, Wang, Baust,
+  Steiger, Schlitter, Esposito and Navab}]{vahadane2016structure}
+\bibinfo{author}{Vahadane, A.}, \bibinfo{author}{Peng, T.},
+  \bibinfo{author}{Sethi, A.}, \bibinfo{author}{Albarqouni, S.},
+  \bibinfo{author}{Wang, L.}, \bibinfo{author}{Baust, M.},
+  \bibinfo{author}{Steiger, K.}, \bibinfo{author}{Schlitter, A.M.},
+  \bibinfo{author}{Esposito, I.}, \bibinfo{author}{Navab, N.},
+  \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Structure-preserving color normalization and sparse
+  stain separation for histological images}.
+\newblock \bibinfo{journal}{IEEE Transactions on Medical Imaging}
+  \bibinfo{volume}{35}, \bibinfo{pages}{1962--1971}.
+\newblock \URLprefix \url{https://doi.org/10.1109/TMI.2016.2529665},
+  \DOIprefix\doi{10.1109/TMI.2016.2529665}.
+%Type = Article
+\bibitem[{Weng et~al.(2024)Weng, Seper, Pryalukhin, Mairinger, Wickenhauser,
+  Bauer, Glamann et~al.}]{weng2024grandqc}
+\bibinfo{author}{Weng, Z.}, \bibinfo{author}{Seper, A.},
+  \bibinfo{author}{Pryalukhin, A.}, \bibinfo{author}{Mairinger, F.},
+  \bibinfo{author}{Wickenhauser, C.}, \bibinfo{author}{Bauer, M.},
+  \bibinfo{author}{Glamann, L.}, et~al., \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{{GrandQC}: A comprehensive solution to quality
+  control problem in digital pathology}.
+\newblock \bibinfo{journal}{Nature Communications} \bibinfo{volume}{15},
+  \bibinfo{pages}{10685}.
+\newblock \URLprefix \url{https://doi.org/10.1038/s41467-024-54769-y},
+  \DOIprefix\doi{10.1038/s41467-024-54769-y}.
+%Type = Article
+\bibitem[{Wilkinson et~al.(2016)Wilkinson, Dumontier, Aalbersberg, Appleton,
+  Axton et~al.}]{wilkinson2016fair}
+\bibinfo{author}{Wilkinson, M.D.}, \bibinfo{author}{Dumontier, M.},
+  \bibinfo{author}{Aalbersberg, I.J.}, \bibinfo{author}{Appleton, G.},
+  \bibinfo{author}{Axton, M.}, et~al., \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{The {FAIR} guiding principles for scientific data
+  management and stewardship}.
+\newblock \bibinfo{journal}{Scientific Data} \bibinfo{volume}{3},
+  \bibinfo{pages}{160018}.
+\newblock \URLprefix \url{https://doi.org/10.1038/sdata.2016.18},
+  \DOIprefix\doi{10.1038/sdata.2016.18}.
+
+\end{thebibliography}
