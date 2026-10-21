@@ -1,5 +1,9 @@
 # Reproducible Pathology ML Pipeline
 
+> **Archived research project — no longer maintained.**
+>
+> Status recorded on 21 October 2026. This archive preserves the completed master's research project. Setup instructions, technical descriptions, and validation records below document the archived implementation and its development history. Compatibility with current environments and successful new reproductions have not been verified as part of this archival update.
+
 `Master_Coding` contains the Python research pipeline I developed during my completed master's research in Artificial Intelligence at UNICAMP. The associated study evaluates binary prostate-cancer segmentation using the public DIAGSET database.
 
 My contribution connects whole-slide image preparation and quality control, patient-level data partitioning, CNN/Transformer model training, ensemble selection, and final evaluation. Configuration records, manifests, tests, and reporting modules support inspection and reproduction of the workflow. External datasets, pretrained models, and supporting libraries retain their original authorship.
@@ -8,7 +12,7 @@ My contribution connects whole-slide image preparation and quality control, pati
 
 - **Research evidence:** [study source](reports/main.tex), [claim/source map](reports/support/method_sources.md), and [historical evaluation evidence and limitations](reports/support/no_rerun_peer_review_evidence.md).
 - **Reproducibility artifacts:** [REDU deposit, DOI 10.25824/redu/EDPCF2](https://doi.org/10.25824/redu/EDPCF2), co-created with Ana Estela Antunes da Silva. The deposit contains generated research metadata and experimental artifacts; it does not redistribute the original DIAGSET images.
-- **Run and inspect:** [installation](#installation), [pipeline commands](#complete-pipeline-execution), [configuration template](.env_example), and [tests](#running-tests). Full experiments require separately acquired data, configured paths, pretrained assets, and suitable compute; the detailed commands below describe the research workflow.
+- **Historical setup and validation:** [installation](#installation), [pipeline commands](#complete-pipeline-execution), [configuration template](.env_example), and [tests](#running-tests). These instructions record the research workflow and its requirements for separately acquired data, configured paths, pretrained assets, and suitable compute; they are retained as historical reference.
 
 ### Architecture
 
