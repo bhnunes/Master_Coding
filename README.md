@@ -1,6 +1,30 @@
-# Master_Coding
+# Reproducible Pathology ML Pipeline
 
-A Python research pipeline for pathology whole-slide-image (WSI) processing. It provides a complete end-to-end workflow for extracting patches from medical images, preparing datasets, training deep learning models, and generating predictions for cancer detection in histopathology images.
+`Master_Coding` contains the Python research pipeline I developed during my completed master's research in Artificial Intelligence at UNICAMP. The associated study evaluates binary prostate-cancer segmentation using the public DIAGSET database.
+
+My contribution connects whole-slide image preparation and quality control, patient-level data partitioning, CNN/Transformer model training, ensemble selection, and final evaluation. Configuration records, manifests, tests, and reporting modules support inspection and reproduction of the workflow. External datasets, pretrained models, and supporting libraries retain their original authorship.
+
+### Start here
+
+- **Research evidence:** [study source](reports/main.tex), [claim/source map](reports/support/method_sources.md), and [historical evaluation evidence and limitations](reports/support/no_rerun_peer_review_evidence.md).
+- **Reproducibility artifacts:** [REDU deposit, DOI 10.25824/redu/EDPCF2](https://doi.org/10.25824/redu/EDPCF2), co-created with Ana Estela Antunes da Silva. The deposit contains generated research metadata and experimental artifacts; it does not redistribute the original DIAGSET images.
+- **Run and inspect:** [installation](#installation), [pipeline commands](#complete-pipeline-execution), [configuration template](.env_example), and [tests](#running-tests). Full experiments require separately acquired data, configured paths, pretrained assets, and suitable compute; the detailed commands below describe the research workflow.
+
+### Architecture
+
+<p align="center">
+  <img src="reports/figures/pipeline_overview.png" width="380" alt="Whole-slide images and annotations become a curated patch registry, patient-separated experiment state, trained models, and frozen test inference reports." />
+</p>
+
+### Evaluation context and limits
+
+The documented evaluation concerns DIAGSET, with separate training, validation, and test patients. Graph cleaning was performed as pre-split annotation/background curation; downstream stain-normalization state and smart sampling have their own training-only contracts. The [evidence index](reports/support/no_rerun_peer_review_evidence.md) records the historical experiment context and code revision. Current `main` may include later implementation changes, so its code should not be assumed to reproduce a historical result without the corresponding frozen configuration and artifacts.
+
+This is a research workflow. The documented study does not establish external-dataset validation, clinical deployment readiness, or the isolated contribution of each component. Its normalization comparisons are descriptive. Quantitative results and their definitions remain in the linked study evidence rather than being presented here as a new benchmark.
+
+### Repository and data boundaries
+
+This repository includes source code, documentation, figures, configuration files, bundled GrandQC/tissue-detection weights under `models/`, and a database artifact at `process_files/database/database.db`. Those bundled assets are distinct from the original DIAGSET whole-slide images and the complete experiment outputs. Data acquisition, third-party model terms, and artifact provenance must be checked separately when reproducing or reusing the work. See [License & Attribution](#license--attribution).
 
 ## Key Capabilities
 
@@ -430,9 +454,9 @@ Phase 7 runtime notes:
 - Console output is intentionally compact for Colab and other notebook environments: one startup line, periodic snapshot progress lines, and one final summary. Detailed trace logging stays in `logs/lr_finder.log`.
 - Set `RUNTIME_VAHADANE_BACKEND=torch_staintools_exact` only when the experiment requires exact per-patch VAHADANE source fitting; the default `fixed_source` backend is a faster fixed-matrix approximation and is recorded separately in provenance.
 
-For Phase 3 graph cleaning, the current tuning and cleaning benchmark notes live in `analysis/stage4_2_graph_tuning_performance_findings.md` and `analysis/stage4_3_graph_cleaning_performance_findings.md`.
+For Phase 3 graph cleaning, the public implementation lives in [`helpers/graph/`](helpers/graph/). The historical tuning and cleaning benchmark notes referenced in earlier documentation are not included in this repository snapshot; they are not a public reproduction artifact.
 
-For Phase 4 crossfold, the current optimization analysis and benchmark notes live in `analysis/stage5_crossfold_performance_findings.md`. The current best-known runtime settings on the measured 10-patient source dataset are `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`.
+For Phase 4 crossfold, the public implementation lives in [`helpers/crossfold/`](helpers/crossfold/). Historical local benchmarking informed the example settings `CROSSFOLD_HDF5_COMPRESSION=none` and `CROSSFOLD_COPY_BATCH_SIZE=1024`; the associated benchmark notes are not included in this repository snapshot. These settings are examples to validate on the target data and hardware, not a general performance guarantee.
 
 OpenSlide runtime rules:
 
@@ -589,7 +613,7 @@ uv run ruff format .
 uv run mypy .
 ```
 
-Recent targeted validation highlights:
+Historical validation notes (retained from earlier development; these counts are not a current CI result):
 
 - Phase 4/5/6 HDF5 migration suites passed (`49 passed` on targeted crossfold/sanity tests)
 - Additional cleanup-focused targeted tests passed (`72 passed` and `9 passed` on focused subsets)
@@ -633,4 +657,4 @@ Key dependencies (defined in `pyproject.toml`):
 
 ## License & Attribution
 
-This is a research pipeline developed for medical imaging research. Ensure compliance with your institution's ethics guidelines when processing patient data.
+This is a research pipeline developed for medical imaging research. No repository-level software license is currently specified. The bundled GrandQC and tissue-detection weights, source datasets, and dependencies have separate provenance and reuse terms; their inclusion does not transfer authorship or establish unrestricted redistribution rights. Review the original providers' terms and applicable institutional requirements before reuse. The REDU deposit has its own record and terms, separate from this code repository.

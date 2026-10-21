@@ -10,7 +10,7 @@ for this revision.
 
 | Peer-review concern | Existing evidence source | Manuscript action | Residual limitation |
 |---|---|---|---|
-| Claims may be too broad for one dataset. | `reports/main.tex`; `reports/method_sources.md`; DIAGSET result JSONs. | Title, abstract, discussion, and conclusion now frame the work as a DIAGSET prostate segmentation evaluation. | No external dataset validation is available. |
+| Claims may be too broad for one dataset. | `reports/main.tex`; `reports/support/method_sources.md`; DIAGSET result JSONs. | Title, abstract, discussion, and conclusion now frame the work as a DIAGSET prostate segmentation evaluation. | No external dataset validation is available. |
 | Graph-cleaning curation may be viewed as leakage-prone if tuned before final splitting. | `reports/main.tex`; `masters_thesis/New_Thesis/resultados.tex`; `helpers/graph/tuning_pipeline.py`. | Methods now treat graph cleaning as pre-split annotation/background curation and explicitly avoid claiming train-only tuning. | The DIAGSET result bundle does not preserve a complete reviewed-stem-to-final-split audit. |
 | Validation set may be overused. | `ENSEMBLE_TWO_STREAM_*.json`; `ensemble_optimizer_run_config.json`. | Methods now include a validation-burden table: 78 validation patients, 20 calibration patients, 50 semantic and 50 spatial trials per normalization, and frozen target statuses. | No nested validation or new held-out calibration split can be added without rerunning experiments. |
 | Metric interpretation could hide empty-mask behavior. | `ENSEMBLE_METRICS_*.json`; `helpers/ensemble_inference/metrics.py`; thesis results text. | Metrics section now distinguishes post-processed Dice/NCR from raw-probability AUROC and defines negative-patient Dice handling. | AUROC remains a point estimate because patient-indexed probability distributions were not preserved. |
@@ -77,7 +77,7 @@ reviewed-stem-to-final-split audit by assumption.
   - `training_model_registry_MACENKO.json`
   - `training_model_registry_VAHADANE.json`
 - Manuscript source: `reports/main.tex`
-- Claim/source map: `reports/method_sources.md`
+- Claim/source map: `reports/support/method_sources.md`
 - Thesis result source used for narrative and table cross-checks:
   `masters_thesis/New_Thesis/resultados.tex`
 
